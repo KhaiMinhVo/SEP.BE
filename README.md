@@ -9,6 +9,7 @@ Spring Boot 3.x REST API for the InfluencerMatch platform — connecting Brands 
 | Language | Java 21 |
 | Framework | Spring Boot 3.3.x |
 | Database | PostgreSQL 16 |
+| Migration | Flyway |
 | Security | Spring Security 6 + JWT |
 | API Docs | Swagger UI (SpringDoc OpenAPI 3) |
 | Build | Maven 3.x |
@@ -29,6 +30,7 @@ docker compose up -d
 # 2. Run the application
 mvn spring-boot:run
 ```
+*(Flyway will automatically run database migrations on startup)*
 
 - **Swagger UI** → http://localhost:8080/swagger-ui.html
 - **OpenAPI JSON** → http://localhost:8080/api-docs

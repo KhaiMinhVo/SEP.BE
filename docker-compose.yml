@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────
+#  InfluencerMatch – Local Development Services
+# ─────────────────────────────────────────────────────────────
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: influencermatch_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: influencermatch_dev
+      POSTGRES_USER: influencermatch_user
+      POSTGRES_PASSWORD: "12345"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U influencermatch_user -d influencermatch_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local

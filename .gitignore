@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────
+#  InfluencerMatch Backend – .gitignore
+# ─────────────────────────────────────────────────────────────
+
+# ── Build output ──────────────────────────────────────────────
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+
+# ── Maven wrapper ─────────────────────────────────────────────
+.mvn/wrapper/maven-wrapper.jar
+
+# ── IDE ───────────────────────────────────────────────────────
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+.classpath
+.project
+.settings/
+.factorypath
+
+# ── OS ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs ──────────────────────────────────────────────────────
+logs/
+*.log
+*.log.*
+
+# ── Spring Boot ───────────────────────────────────────────────
+spring-shell.log
+
+# ── Environment / Secrets ─────────────────────────────────────
+.env
+.env.*
+!.env.example
+secrets/
+application-prod.yml
+application-staging.yml
+
+# ── Docker local volumes ──────────────────────────────────────
+docker/volumes/
+
+# ── Test coverage ─────────────────────────────────────────────
+coverage/
+jacoco.exec

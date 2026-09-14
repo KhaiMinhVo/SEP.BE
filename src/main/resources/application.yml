@@ -1,0 +1,95 @@
+# ─────────────────────────────────────────────────────────────
+#  InfluencerMatch Backend – Application Configuration
+#  Environment: Development (default)
+# ─────────────────────────────────────────────────────────────
+
+server:
+  port: 8080
+  error:
+    include-message: never          # Never expose internal error messages to clients
+    include-binding-errors: never
+    include-stacktrace: never
+
+spring:
+  application:
+    name: influencermatch-backend
+
+  # ──────────────────────────────────────────
+  #  DataSource
+  # ──────────────────────────────────────────
+  datasource:
+    url: jdbc:postgresql://localhost:5432/influencermatch_dev
+    username: influencermatch_user
+    password: "12345"
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: InfluencerMatchHikariPool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 30000
+      connection-timeout: 20000
+      max-lifetime: 1800000
+
+  # ──────────────────────────────────────────
+  #  JPA / Hibernate
+  # ──────────────────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          time_zone: UTC
+        default_schema: public
+    open-in-view: false             # Disable OSIV to avoid lazy-loading pitfalls
+
+  # ──────────────────────────────────────────
+  #  Jackson
+  # ──────────────────────────────────────────
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+    time-zone: UTC
+
+# ──────────────────────────────────────────
+#  JWT Security
+# ──────────────────────────────────────────
+application:
+  security:
+    jwt:
+      # Replace with a 256-bit Base64-encoded secret in production via env var
+      secret-key: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+      expiration: 86400000         # 24 hours in milliseconds
+      refresh-token:
+        expiration: 604800000      # 7 days in milliseconds
+
+# ──────────────────────────────────────────
+#  SpringDoc / OpenAPI (Swagger UI)
+# ──────────────────────────────────────────
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+    tagsSorter: alpha
+    try-it-out-enabled: true
+  show-actuator: false
+
+# ──────────────────────────────────────────
+#  Logging
+# ──────────────────────────────────────────
+logging:
+  level:
+    root: INFO
+    com.influencermatch: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+  pattern:
+    console: "%clr(%d{yyyy-MM-dd HH:mm:ss}){faint} %clr(%5p) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n%wEx"

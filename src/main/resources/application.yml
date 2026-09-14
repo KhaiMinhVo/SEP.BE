@@ -11,6 +11,8 @@ server:
     include-stacktrace: never
 
 spring:
+  config:
+    import: optional:file:.env[.properties]
   application:
     name: influencermatch-backend
 
@@ -18,9 +20,9 @@ spring:
   #  DataSource
   # ──────────────────────────────────────────
   datasource:
-    url: jdbc:postgresql://localhost:5432/influencermatch_dev
-    username: influencermatch_user
-    password: "12345"
+    url: jdbc:postgresql://localhost:${DB_PORT:5432}/${DB_NAME:influencermatch_dev}
+    username: ${DB_USER:influencermatch_user}
+    password: ${DB_PASS:12345}
     driver-class-name: org.postgresql.Driver
     hikari:
       pool-name: InfluencerMatchHikariPool
@@ -64,7 +66,7 @@ application:
   security:
     jwt:
       # Replace with a 256-bit Base64-encoded secret in production via env var
-      secret-key: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+      secret-key: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
       expiration: 86400000         # 24 hours in milliseconds
       refresh-token:
         expiration: 604800000      # 7 days in milliseconds

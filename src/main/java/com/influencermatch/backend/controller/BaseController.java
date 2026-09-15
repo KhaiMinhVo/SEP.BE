@@ -72,7 +72,7 @@ public abstract class BaseController {
      * @return A {@link ResponseEntity} with an empty-data {@link ApiResponse}.
      */
     protected ResponseEntity<ApiResponse<Void>> ok(String message) {
-        return ResponseEntity.ok(ApiResponse.ok(message));
+        return ResponseEntity.ok(ApiResponse.empty());
     }
 
     /**

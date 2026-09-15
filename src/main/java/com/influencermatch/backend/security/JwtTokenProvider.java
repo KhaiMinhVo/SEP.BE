@@ -29,6 +29,7 @@ public class JwtTokenProvider {
     public static final String CLAIM_USER_ID = "userId";
     public static final String CLAIM_EMAIL   = "email";
     public static final String CLAIM_ROLE    = "role";
+    public static final String CLAIM_TYPE    = "type";
 
     @Value("${application.security.jwt.secret-key}")
     private String secretKey;
@@ -39,10 +40,12 @@ public class JwtTokenProvider {
     public String generateToken(User user) {
         long now = System.currentTimeMillis();
         return Jwts.builder()
-                .subject(user.getEmail())
+                .subject(user.getId().toString())
+                .id(java.util.UUID.randomUUID().toString())
                 .claim(CLAIM_USER_ID, user.getId().toString())
                 .claim(CLAIM_EMAIL, user.getEmail())
                 .claim(CLAIM_ROLE, user.getRole().name())
+                .claim(CLAIM_TYPE, "access")
                 .issuedAt(new Date(now))
                 .expiration(new Date(now + jwtExpirationMs))
                 .signWith(getSigningKey(), Jwts.SIG.HS256)
@@ -69,7 +72,7 @@ public class JwtTokenProvider {
     }
 
     public String extractUsername(String token) {
-        return extractClaim(token, Claims::getSubject);
+        return extractClaim(token, claims -> claims.get(CLAIM_EMAIL, String.class));
     }
 
     public String extractUserId(String token) {

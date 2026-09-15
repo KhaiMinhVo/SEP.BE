@@ -4,10 +4,13 @@ import com.influencermatch.backend.dto.auth.LoginRequest;
 import com.influencermatch.backend.dto.auth.LoginResponse;
 import com.influencermatch.backend.dto.auth.RegisterRequest;
 import com.influencermatch.backend.dto.auth.UserProfileResponse;
+import com.influencermatch.backend.dto.auth.RefreshTokenRequest;
 import com.influencermatch.backend.entity.Role;
 import com.influencermatch.backend.entity.User;
 import com.influencermatch.backend.entity.UserStatus;
 import com.influencermatch.backend.exception.BadRequestException;
+import com.influencermatch.backend.exception.BusinessException;
+import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.repository.UserRepository;
 import com.influencermatch.backend.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +31,7 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder       passwordEncoder;
     private final JwtTokenProvider      jwtTokenProvider;
     private final AuthenticationManager authenticationManager;
+    private final RefreshTokenService refreshTokenService;
 
     @Override
     @Transactional
@@ -35,7 +39,7 @@ public class AuthServiceImpl implements AuthService {
         String normalizedEmail = request.getEmail().trim().toLowerCase();
 
         if (userRepository.existsByEmail(normalizedEmail)) {
-            throw new BadRequestException("An account with email '" + normalizedEmail + "' already exists.");
+            throw new BusinessException(ErrorCode.EMAIL_ALREADY_EXISTS, "An account with this email already exists.");
         }
 
         User user = User.builder()
@@ -62,11 +66,13 @@ public class AuthServiceImpl implements AuthService {
 
         User user = (User) authentication.getPrincipal();
         String accessToken = jwtTokenProvider.generateToken(user);
+        String refreshToken = refreshTokenService.issue(user).raw();
 
         log.info("User logged in: email='{}', role='{}'", user.getEmail(), user.getRole());
 
         return LoginResponse.builder()
                 .accessToken(accessToken)
+                .refreshToken(refreshToken)
                 .tokenType("Bearer")
                 .expiresIn(jwtTokenProvider.extractExpiresInSeconds(accessToken))
                 .user(LoginResponse.UserProfile.builder()
@@ -78,6 +84,19 @@ public class AuthServiceImpl implements AuthService {
                         .build())
                 .build();
     }
+
+    @Override
+    @Transactional
+    public LoginResponse refresh(RefreshTokenRequest request) {
+        RefreshTokenService.Rotated rotated = refreshTokenService.rotate(request.refreshToken());
+        User user = rotated.user();
+        String accessToken = jwtTokenProvider.generateToken(user);
+        return LoginResponse.builder().accessToken(accessToken).refreshToken(rotated.refreshToken())
+                .tokenType("Bearer").expiresIn(jwtTokenProvider.extractExpiresInSeconds(accessToken))
+                .user(LoginResponse.UserProfile.builder().id(user.getId()).email(user.getEmail()).fullName(user.getFullName()).role(user.getRole().name()).status(user.getStatus().name()).build()).build();
+    }
+
+    @Override @Transactional public void logout(RefreshTokenRequest request) { refreshTokenService.revoke(request.refreshToken()); }
 
     @Override
     public UserProfileResponse getProfile(User currentUser) {

@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
  * }</pre>
  */
 @ResponseStatus(HttpStatus.FORBIDDEN)
-public class ForbiddenException extends RuntimeException {
+public class ForbiddenException extends BusinessException {
 
     /**
      * Creates a {@code ForbiddenException} with a descriptive message.
@@ -25,6 +25,6 @@ public class ForbiddenException extends RuntimeException {
      * @param message Human-readable explanation of the access restriction.
      */
     public ForbiddenException(String message) {
-        super(message);
+        super(ErrorCode.ACCESS_DENIED, message);
     }
 }

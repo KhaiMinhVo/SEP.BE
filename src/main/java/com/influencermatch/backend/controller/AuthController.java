@@ -5,6 +5,7 @@ import com.influencermatch.backend.dto.auth.LoginRequest;
 import com.influencermatch.backend.dto.auth.LoginResponse;
 import com.influencermatch.backend.dto.auth.RegisterRequest;
 import com.influencermatch.backend.dto.auth.UserProfileResponse;
+import com.influencermatch.backend.dto.auth.RefreshTokenRequest;
 import com.influencermatch.backend.entity.User;
 import com.influencermatch.backend.service.AuthService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import java.net.URI;
 
 @Slf4j
 @RestController
@@ -36,14 +38,27 @@ public class AuthController {
     public ResponseEntity<ApiResponse<Void>> register(@Valid @RequestBody RegisterRequest request) {
         authService.register(request);
         return ResponseEntity
-                .status(HttpStatus.CREATED)
-                .body(ApiResponse.ok("Account registered successfully. You may now log in."));
+                .created(URI.create("/api/v1/auth/me"))
+                .body(ApiResponse.empty());
     }
 
     @Operation(summary = "Log in and receive a JWT access token")
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(ApiResponse.ok("Login successful.", authService.login(request)));
+    }
+
+    @Operation(summary = "Rotate a refresh token and issue a new token pair")
+    @PostMapping("/refresh")
+    public ResponseEntity<ApiResponse<LoginResponse>> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(authService.refresh(request)));
+    }
+
+    @Operation(summary = "Revoke a refresh token", security = @SecurityRequirement(name = "BearerAuth"))
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@Valid @RequestBody RefreshTokenRequest request) {
+        authService.logout(request);
+        return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "Get the current authenticated user's profile", security = @SecurityRequirement(name = "BearerAuth"))

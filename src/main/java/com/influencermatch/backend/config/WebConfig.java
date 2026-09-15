@@ -3,6 +3,8 @@ package com.influencermatch.backend.config;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import org.springframework.beans.factory.annotation.Value;
+import java.util.Arrays;
 
 /**
  * MVC web configuration for the InfluencerMatch backend.
@@ -18,6 +20,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  */
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
+    @Value("${application.cors.allowed-origins}") private String allowedOrigins;
 
     /**
      * Configures global CORS mappings.
@@ -38,10 +41,10 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addMapping("/**")
                 // ⚠️  Replace with explicit origins in production:
                 // .allowedOrigins("https://app.influencermatch.com")
-                .allowedOriginPatterns("*")
+                .allowedOrigins(Arrays.stream(allowedOrigins.split(",")).map(String::trim).toArray(String[]::new))
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
-                .allowedHeaders("Authorization", "Content-Type", "Accept", "X-Requested-With")
-                .exposedHeaders("Authorization")
+                .allowedHeaders("Authorization", "Content-Type", "Accept", "X-Requested-With", "X-Correlation-ID")
+                .exposedHeaders("Authorization", "X-Correlation-ID")
                 .allowCredentials(true)
                 .maxAge(3600);
     }

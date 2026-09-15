@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -26,6 +27,10 @@ import java.util.List;
 @Entity
 @Table(name = "users")
 public class User extends BaseEntity implements UserDetails {
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     @Column(name = "email", nullable = false, unique = true, length = 255)
     private String email;

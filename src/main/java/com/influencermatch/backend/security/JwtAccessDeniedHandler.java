@@ -1,7 +1,8 @@
 package com.influencermatch.backend.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.influencermatch.backend.dto.ApiResponse;
+import org.springframework.http.ProblemDetail;
+import org.slf4j.MDC;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,8 @@ import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.net.URI;
+import java.time.Instant;
 
 /**
  * Custom {@link AccessDeniedHandler} that returns a structured JSON
@@ -39,10 +42,9 @@ public class JwtAccessDeniedHandler implements AccessDeniedHandler {
         log.warn("Access denied to '{}': {}", request.getRequestURI(), accessDeniedException.getMessage());
 
         response.setStatus(HttpStatus.FORBIDDEN.value());
-        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-
-        ApiResponse<Void> body = ApiResponse.error(
-                "Access denied. You do not have the required permissions to perform this action.");
+        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+        ProblemDetail body = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN,"Access denied. You do not have the required permissions to perform this action.");
+        body.setTitle("Access denied");body.setType(URI.create("https://api.influencermatch/errors/access-denied"));body.setInstance(URI.create(request.getRequestURI())); body.setProperty("code","ACCESS_DENIED"); body.setProperty("traceId",MDC.get("traceId"));body.setProperty("timestamp",Instant.now());
 
         objectMapper.writeValue(response.getOutputStream(), body);
     }

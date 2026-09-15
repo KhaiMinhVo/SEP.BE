@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
  * }</pre>
  */
 @ResponseStatus(HttpStatus.BAD_REQUEST)
-public class BadRequestException extends RuntimeException {
+public class BadRequestException extends BusinessException {
 
     /**
      * Creates a {@code BadRequestException} with a descriptive message
@@ -26,7 +26,7 @@ public class BadRequestException extends RuntimeException {
      * @param message Human-readable explanation of why the request is invalid.
      */
     public BadRequestException(String message) {
-        super(message);
+        super(ErrorCode.VALIDATION_ERROR, message);
     }
 
     /**
@@ -36,6 +36,6 @@ public class BadRequestException extends RuntimeException {
      * @param cause   The original exception that triggered this error.
      */
     public BadRequestException(String message, Throwable cause) {
-        super(message, cause);
+        super(ErrorCode.VALIDATION_ERROR, message, cause);
     }
 }

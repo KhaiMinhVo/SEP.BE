@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
  * }</pre>
  */
 @ResponseStatus(HttpStatus.NOT_FOUND)
-public class ResourceNotFoundException extends RuntimeException {
+public class ResourceNotFoundException extends BusinessException {
 
     /**
      * Creates a {@code ResourceNotFoundException} with a fully composed,
@@ -29,7 +29,7 @@ public class ResourceNotFoundException extends RuntimeException {
      * @param fieldValue   The value that was searched for.
      */
     public ResourceNotFoundException(String resourceName, String fieldName, Object fieldValue) {
-        super(String.format("%s not found with %s : '%s'", resourceName, fieldName, fieldValue));
+        super(ErrorCode.RESOURCE_NOT_FOUND, String.format("%s not found with %s : '%s'", resourceName, fieldName, fieldValue));
     }
 
     /**
@@ -38,6 +38,6 @@ public class ResourceNotFoundException extends RuntimeException {
      * @param message Custom error message.
      */
     public ResourceNotFoundException(String message) {
-        super(message);
+        super(ErrorCode.RESOURCE_NOT_FOUND, message);
     }
 }

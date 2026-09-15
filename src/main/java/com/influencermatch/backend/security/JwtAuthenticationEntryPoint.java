@@ -1,7 +1,8 @@
 package com.influencermatch.backend.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.influencermatch.backend.dto.ApiResponse;
+import org.springframework.http.ProblemDetail;
+import org.slf4j.MDC;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,8 @@ import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.net.URI;
+import java.time.Instant;
 
 /**
  * Custom {@link AuthenticationEntryPoint} that returns a structured JSON
@@ -41,10 +44,9 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
         log.warn("Unauthorized access attempt to '{}': {}", request.getRequestURI(), authException.getMessage());
 
         response.setStatus(HttpStatus.UNAUTHORIZED.value());
-        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-
-        ApiResponse<Void> body = ApiResponse.error(
-                "Authentication required. Please provide a valid Bearer token.");
+        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+        ProblemDetail body = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED,"Authentication required. Please provide a valid Bearer token.");
+        body.setTitle("Authentication required"); body.setType(URI.create("https://api.influencermatch/errors/unauthenticated"));body.setInstance(URI.create(request.getRequestURI())); body.setProperty("code","UNAUTHENTICATED"); body.setProperty("traceId",MDC.get("traceId"));body.setProperty("timestamp",Instant.now());
 
         objectMapper.writeValue(response.getOutputStream(), body);
     }

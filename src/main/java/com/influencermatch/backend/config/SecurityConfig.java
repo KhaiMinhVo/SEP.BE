@@ -34,7 +34,9 @@ public class SecurityConfig {
 
     // Patterns are relative to context-path /api/v1
     private static final String[] PUBLIC_ENDPOINTS = {
-            "/auth/**",
+            "/auth/register",
+            "/auth/login",
+            "/auth/refresh",
             "/actuator/health",
             "/v3/api-docs/**",
             "/api-docs/**",
@@ -56,6 +58,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                     .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
                     .requestMatchers("/admin/**").hasRole("ADMIN")
+                    .requestMatchers("/auth/me", "/auth/logout").authenticated()
                     .requestMatchers("/brands/**").hasAnyRole("ADMIN", "BRAND")
                     .anyRequest().authenticated())
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

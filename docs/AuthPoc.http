@@ -1,0 +1,64 @@
+@baseUrl = http://localhost:8080/api/v1
+@brandEmail = poc-brand@example.local
+@brandPassword = BrandPassword123!
+@adminEmail = {{$dotenv BOOTSTRAP_ADMIN_EMAIL}}
+@adminPassword = {{$dotenv BOOTSTRAP_ADMIN_PASSWORD}}
+
+### 1. Register (the role field is ignored; public accounts are always BRAND)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+X-Correlation-ID: auth-poc-register
+
+{"email":"{{brandEmail}}","password":"{{brandPassword}}","fullName":"PoC Brand","role":"ADMIN"}
+
+### 2. Login BRAND
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{"email":"{{brandEmail}}","password":"{{brandPassword}}"}
+> {%
+ client.global.set("brandAccessToken", response.body.data.accessToken);
+ client.global.set("brandRefreshToken", response.body.data.refreshToken);
+%}
+
+### 3. Read identity and role
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{brandAccessToken}}
+
+### 4. Expected: 403 ACCESS_DENIED for BRAND
+GET {{baseUrl}}/admin/users
+Authorization: Bearer {{brandAccessToken}}
+
+### 5. Login development ADMIN created by environment bootstrap
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{"email":"{{adminEmail}}","password":"{{adminPassword}}"}
+> {% client.global.set("adminAccessToken", response.body.data.accessToken); %}
+
+### 6. Expected: 200 for ADMIN
+GET {{baseUrl}}/admin/users?page=0&size=20
+Authorization: Bearer {{adminAccessToken}}
+
+### 7. Rotate BRAND refresh token
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{"refreshToken":"{{brandRefreshToken}}"}
+> {%
+ client.global.set("rotatedAccessToken", response.body.data.accessToken);
+ client.global.set("rotatedRefreshToken", response.body.data.refreshToken);
+%}
+
+### 8. Logout
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{rotatedAccessToken}}
+Content-Type: application/json
+
+{"refreshToken":"{{rotatedRefreshToken}}"}
+
+### 9. Expected: 401 for reuse of a revoked refresh token
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{"refreshToken":"{{rotatedRefreshToken}}"}

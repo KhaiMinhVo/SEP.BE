@@ -9,6 +9,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
 import com.influencermatch.backend.repository.UserRepository;
 import com.influencermatch.backend.entity.Role;
+import com.influencermatch.backend.entity.User;
+import com.influencermatch.backend.entity.UserStatus;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -40,6 +45,8 @@ class BackendApplicationTests {
 
     @Autowired MockMvc mvc;
     @Autowired UserRepository users;
+    @Autowired ObjectMapper objectMapper;
+    @Autowired PasswordEncoder passwordEncoder;
 
     @Test
     void contextLoads() {
@@ -75,4 +82,48 @@ class BackendApplicationTests {
                 .andExpect(jsonPath("$.fieldErrors.email").isArray())
                 .andExpect(jsonPath("$.fieldErrors.password").isArray());
     }
+
+    @Test
+    void completeRegisterLoginAndRoleFlow() throws Exception {
+        String brandEmail = "poc-brand@test.local";
+        mvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\",\"fullName\":\"PoC Brand\",\"role\":\"ADMIN\"}"))
+                .andExpect(status().isCreated());
+        assertThat(users.findByEmail(brandEmail)).get().extracting("role").isEqualTo(Role.BRAND);
+
+        JsonNode brandLogin = json(mvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        String brandAccess = brandLogin.at("/data/accessToken").asText();
+        String brandRefresh = brandLogin.at("/data/refreshToken").asText();
+
+        mvc.perform(get("/auth/me").header("Authorization", "Bearer " + brandAccess))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.role").value("BRAND"));
+        mvc.perform(get("/admin/users").header("Authorization", "Bearer " + brandAccess))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        String adminEmail = "poc-admin@test.local";
+        users.save(User.builder().email(adminEmail).password(passwordEncoder.encode("AdminPassword123!"))
+                .fullName("PoC Admin").role(Role.ADMIN).status(UserStatus.ACTIVE).build());
+        JsonNode adminLogin = json(mvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + adminEmail + "\",\"password\":\"AdminPassword123!\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        String adminAccess = adminLogin.at("/data/accessToken").asText();
+        mvc.perform(get("/admin/users").header("Authorization", "Bearer " + adminAccess))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.items").isArray());
+
+        JsonNode rotated = json(mvc.perform(post("/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + brandRefresh + "\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        String newAccess = rotated.at("/data/accessToken").asText();
+        String newRefresh = rotated.at("/data/refreshToken").asText();
+        mvc.perform(post("/auth/logout").header("Authorization", "Bearer " + newAccess)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"refreshToken\":\"" + newRefresh + "\"}"))
+                .andExpect(status().isNoContent());
+        mvc.perform(post("/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + newRefresh + "\"}"))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    private JsonNode json(String value) throws Exception { return objectMapper.readTree(value); }
 }

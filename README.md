@@ -1,64 +1,59 @@
 # InfluencerMatch Backend
 
-Spring Boot 3.x REST API for the InfluencerMatch platform — connecting Brands with Influencers.
+Spring Boot 3.3 / Java 21 REST API foundation for InfluencerMatch.
 
-## Tech Stack
+## Technology
 
-| | |
-|---|---|
-| Language | Java 21 |
-| Framework | Spring Boot 3.3.x |
-| Database | PostgreSQL 16 |
-| Migration | Flyway |
-| Security | Spring Security 6 + JWT |
-| API Docs | Swagger UI (SpringDoc OpenAPI 3) |
-| Build | Maven 3.x |
-| Container | Docker + Docker Compose |
+- Java 21, Maven, Spring Boot 3.3
+- Spring Web MVC, Validation, Security and Data JPA
+- PostgreSQL 16 and Flyway
+- JWT access tokens plus rotating opaque refresh tokens
+- RFC 9457 error responses and correlation IDs
 
-## Prerequisites
+## Auth PoC quick start
 
-- Docker Desktop
-- JDK 21+
-- Maven 3.8+
+Copy `.env.example` to `.env`, then configure a development ADMIN if required:
 
-## Quick Start
+```properties
+BOOTSTRAP_ADMIN_ENABLED=true
+BOOTSTRAP_ADMIN_EMAIL=poc-admin@example.local
+BOOTSTRAP_ADMIN_PASSWORD=replace-with-a-strong-dev-password
+BOOTSTRAP_ADMIN_FULL_NAME=PoC Administrator
+```
+
+The bootstrap is disabled by default and only exists in the `dev` profile. Never enable it in production.
 
 ```bash
-# 1. Start the database
 docker compose up -d
-
-# 2. Run the application
 mvn spring-boot:run
 ```
-*(Flyway will automatically run database migrations on startup)*
 
-- **Swagger UI** → http://localhost:8080/swagger-ui.html
-- **OpenAPI JSON** → http://localhost:8080/api-docs
-
-## Configuration
-
-All settings are in `src/main/resources/application.yml`.
-
-| Property | Value |
-|---|---|
-| Port | `8080` |
-| Database | `localhost:5432/influencermatch_dev` |
-| JWT expiry | `24h` |
-| Refresh token expiry | `7d` |
-
-
+- Swagger UI: http://localhost:8080/api/v1/swagger-ui.html
+- OpenAPI JSON: http://localhost:8080/api/v1/api-docs
+- Health: http://localhost:8080/api/v1/actuator/health
+- Executable PoC requests: `docs/AuthPoc.http`
 
 ## Roles
 
-| Role | Description |
-|---|---|
-| `ADMIN` | Full platform administration |
-| `BRAND` | Brand / SME campaign management |
+- `BRAND`: assigned to every public registration. Client-supplied role values are ignored.
+- `ADMIN`: created only by the development bootstrap or an out-of-band production process.
 
-## Docker
+There is no public endpoint for creating or promoting an ADMIN. `/admin/**` requires `ROLE_ADMIN`.
+
+## Auth endpoints
+
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/me`
+
+Access tokens expire after 15 minutes. Refresh tokens expire after 7 days, are stored only as SHA-256 hashes, and rotate on use.
+
+## Verification
 
 ```bash
-docker compose up -d        # Start services
-docker compose down         # Stop (keep data)
-docker compose down -v      # Stop and remove volumes (deletes data)
+mvn test
 ```
+
+Flyway applies the existing V1 schema followed by `V2__auth_security_foundation.sql`; Hibernate runs with `ddl-auto=validate` outside the dedicated test configuration.

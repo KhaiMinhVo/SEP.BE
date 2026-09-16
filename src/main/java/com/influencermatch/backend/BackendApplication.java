@@ -13,7 +13,7 @@ import org.springframework.scheduling.annotation.EnableAsync;
  */
 @SpringBootApplication
 @EnableJpaAuditing
-@EnableJpaRepositories(basePackages = "com.influencermatch.backend.repository")
+@EnableJpaRepositories(basePackages = "com.influencermatch.backend")
 @EnableAsync
 public class BackendApplication {
 

@@ -1,0 +1,1 @@
+package com.influencermatch.backend.collaboration; import org.springframework.data.jpa.repository.JpaRepository; import java.util.UUID; public interface CollaborationRepository extends JpaRepository<Collaboration,UUID>{}

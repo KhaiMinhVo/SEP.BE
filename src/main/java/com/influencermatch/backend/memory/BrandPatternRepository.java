@@ -1,0 +1,1 @@
+package com.influencermatch.backend.memory; import org.springframework.data.jpa.repository.JpaRepository; import java.util.UUID; public interface BrandPatternRepository extends JpaRepository<BrandPattern,UUID>{}

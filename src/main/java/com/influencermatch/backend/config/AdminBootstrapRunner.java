@@ -33,7 +33,7 @@ public class AdminBootstrapRunner implements ApplicationRunner {
         if (existing == null) {
             users.save(User.builder()
                     .email(email)
-                    .password(passwordEncoder.encode(properties.getPassword()))
+                    .passwordHash(passwordEncoder.encode(properties.getPassword()))
                     .fullName(properties.getFullName().trim())
                     .role(Role.ADMIN)
                     .status(UserStatus.ACTIVE)

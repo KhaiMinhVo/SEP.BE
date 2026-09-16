@@ -21,6 +21,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.time.LocalDateTime;
 
 @Slf4j
 @Service
@@ -44,7 +45,7 @@ public class AuthServiceImpl implements AuthService {
 
         User user = User.builder()
                 .email(normalizedEmail)
-                .password(passwordEncoder.encode(request.getPassword()))
+                .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .fullName(request.getFullName().trim())
                 .role(Role.BRAND)   // new users default to BRAND
                 .status(UserStatus.ACTIVE)
@@ -65,6 +66,8 @@ public class AuthServiceImpl implements AuthService {
         );
 
         User user = (User) authentication.getPrincipal();
+        user.setLastLoginAt(LocalDateTime.now());
+        userRepository.save(user);
         String accessToken = jwtTokenProvider.generateToken(user);
         String refreshToken = refreshTokenService.issue(user).raw();
 
@@ -81,6 +84,7 @@ public class AuthServiceImpl implements AuthService {
                         .fullName(user.getFullName())
                         .role(user.getRole().name())
                         .status(user.getStatus().name())
+                        .lastLoginAt(user.getLastLoginAt())
                         .build())
                 .build();
     }
@@ -93,7 +97,7 @@ public class AuthServiceImpl implements AuthService {
         String accessToken = jwtTokenProvider.generateToken(user);
         return LoginResponse.builder().accessToken(accessToken).refreshToken(rotated.refreshToken())
                 .tokenType("Bearer").expiresIn(jwtTokenProvider.extractExpiresInSeconds(accessToken))
-                .user(LoginResponse.UserProfile.builder().id(user.getId()).email(user.getEmail()).fullName(user.getFullName()).role(user.getRole().name()).status(user.getStatus().name()).build()).build();
+                .user(LoginResponse.UserProfile.builder().id(user.getId()).email(user.getEmail()).fullName(user.getFullName()).role(user.getRole().name()).status(user.getStatus().name()).lastLoginAt(user.getLastLoginAt()).build()).build();
     }
 
     @Override @Transactional public void logout(RefreshTokenRequest request) { refreshTokenService.revoke(request.refreshToken()); }
@@ -108,6 +112,7 @@ public class AuthServiceImpl implements AuthService {
                 .status(currentUser.getStatus().name())
                 .createdAt(currentUser.getCreatedAt())
                 .updatedAt(currentUser.getUpdatedAt())
+                .lastLoginAt(currentUser.getLastLoginAt())
                 .build();
     }
 }

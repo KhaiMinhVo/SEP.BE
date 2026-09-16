@@ -1,0 +1,1 @@
+package com.influencermatch.backend.creator; import org.springframework.data.jpa.repository.JpaRepository; public interface CreatorCategoryRepository extends JpaRepository<CreatorCategory,CreatorCategoryId>{}

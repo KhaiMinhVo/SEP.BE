@@ -2,10 +2,10 @@ package com.influencermatch.backend.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
-import jakarta.persistence.Version;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -17,6 +17,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 
 import java.util.Collection;
 import java.util.List;
+import java.time.LocalDateTime;
 
 /** Platform user — implements UserDetails so it can be used directly as a Spring Security principal. */
 @Getter
@@ -25,21 +26,18 @@ import java.util.List;
 @AllArgsConstructor
 @SuperBuilder
 @Entity
-@Table(name = "users")
+@Table(name = "user")
+@AttributeOverride(name = "id", column = @Column(name = "userId", updatable = false, nullable = false))
 public class User extends BaseEntity implements UserDetails {
-
-    @Version
-    @Column(name = "version", nullable = false)
-    private long version;
 
     @Column(name = "email", nullable = false, unique = true, length = 255)
     private String email;
 
     /** BCrypt-hashed password. Never store or log the raw value. */
-    @Column(name = "password", nullable = false)
-    private String password;
+    @Column(name = "passwordHash", nullable = false)
+    private String passwordHash;
 
-    @Column(name = "full_name", nullable = false, length = 150)
+    @Column(name = "fullName", nullable = false, length = 150)
     private String fullName;
 
     @Enumerated(EnumType.STRING)
@@ -49,6 +47,14 @@ public class User extends BaseEntity implements UserDetails {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 10)
     private UserStatus status;
+
+    @Column(name = "lastLoginAt")
+    private LocalDateTime lastLoginAt;
+
+    @Override
+    public String getPassword() {
+        return passwordHash;
+    }
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

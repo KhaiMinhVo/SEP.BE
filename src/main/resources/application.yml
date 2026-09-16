@@ -47,6 +47,8 @@ spring:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
+        physical_naming_strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+        globally_quoted_identifiers: true
         jdbc:
           time_zone: UTC
         default_schema: public

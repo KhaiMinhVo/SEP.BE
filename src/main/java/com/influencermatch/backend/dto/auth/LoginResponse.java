@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.UUID;
+import java.time.LocalDateTime;
 
 @Getter
 @Setter
@@ -38,5 +39,6 @@ public class LoginResponse {
         private String fullName;
         private String role;
         private String status;
+        private LocalDateTime lastLoginAt;
     }
 }

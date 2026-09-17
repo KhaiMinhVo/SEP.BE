@@ -19,7 +19,7 @@ class PostgresMigrationIntegrationTest {
              Statement statement = connection.createStatement()) {
             statement.executeUpdate("""
                     INSERT INTO users(id,email,password,full_name,role,status,version,created_at,updated_at)
-                    VALUES ('10000000-0000-0000-0000-000000000001','migration@test.local','hash','Migration User','BRAND','ACTIVE',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+                    VALUES ('10000000-0000-0000-0000-000000000001','migration@test.local','hash','Migration User','BRAND','INACTIVE',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
                     INSERT INTO brand_profiles(id,owner_user_id,business_name,status,version,industry,categories,target_markets,target_audience,preferred_platforms,created_at,updated_at)
                     VALUES ('20000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','Migration Brand','ACTIVE',0,'Beauty',ARRAY['Skincare'],ARRAY['Vietnam'],ARRAY['Gen Z'],ARRAY['TIKTOK'],CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
                     INSERT INTO campaigns(id,brand_profile_id,name,product_service,objective,target_audience,status,version,created_at,updated_at)
@@ -64,6 +64,12 @@ class PostgresMigrationIntegrationTest {
              ResultSet result = statement.executeQuery()) {
             result.next();
             assertThat(result.getInt(1)).isZero();
+        }
+        try (Connection connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             PreparedStatement statement = connection.prepareStatement("select \"status\" from \"user\" where \"userId\"='10000000-0000-0000-0000-000000000001'");
+             ResultSet result = statement.executeQuery()) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(1)).isEqualTo("DISABLED");
         }
     }
 }

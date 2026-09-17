@@ -1,5 +1,7 @@
 package com.influencermatch.backend.campaign;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.influencermatch.backend.brand.*;
 import com.influencermatch.backend.campaign.dto.*;
 import com.influencermatch.backend.dto.PageResponse;
@@ -16,7 +18,9 @@ import java.util.*;
 @RequiredArgsConstructor
 public class CampaignService {
     private final CampaignRepository campaigns;
+    private final CampaignContextM3Repository contexts;
     private final BrandService brandService;
+    private final ObjectMapper objectMapper;
 
     @Transactional
     public CampaignResponse create(UUID brandId, CampaignRequest request, Authentication authentication) {
@@ -57,9 +61,23 @@ public class CampaignService {
         Campaign campaign = requireCampaign(id);
         brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
         if (campaign.getStatus() != CampaignStatus.ARCHIVED) {
-            campaign.getStatus().requireEditable();
+            campaign.getStatus().requireTransitionTo(CampaignStatus.ARCHIVED);
             campaign.setStatus(CampaignStatus.ARCHIVED);
         }
+        return loadResponse(campaign);
+    }
+
+    @Transactional
+    public CampaignResponse changeStatus(UUID id, CampaignStatusRequest request, Authentication authentication) {
+        Campaign campaign = requireCampaign(id);
+        brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
+        CampaignStatus target = request.status();
+        campaign.getStatus().requireTransitionTo(target);
+        if (target == CampaignStatus.READY_FOR_DISCOVERY) {
+            validateReady(campaign);
+            createInitialContext(campaign);
+        }
+        campaign.setStatus(target);
         return loadResponse(campaign);
     }
 
@@ -70,6 +88,22 @@ public class CampaignService {
         if (r.startDate() != null && r.endDate() != null && r.endDate().isBefore(r.startDate())) invalid("endDate must not be before startDate");
         if (greater(r.followerMin(), r.followerMax())) invalid("followerMax must be greater than or equal to followerMin");
         if (greater(r.budgetMin(), r.budgetMax())) invalid("budgetMax must be greater than or equal to budgetMin");
+    }
+    private void validateReady(Campaign campaign) {
+        if (campaign.getPlatforms() == null || campaign.getPlatforms().isEmpty()) {
+            throw new ConflictException(ErrorCode.CAMPAIGN_CONTEXT_NOT_READY, "At least one platform is required before discovery");
+        }
+    }
+    private void createInitialContext(Campaign campaign) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("platforms", campaign.getPlatforms()); value.put("niches", campaign.getNiches());
+        value.put("locations", campaign.getLocations()); value.put("targetAudiences", campaign.getTargetAudiences());
+        value.put("objective", campaign.getObjective().name()); value.put("followerMin", campaign.getFollowerMin());
+        value.put("followerMax", campaign.getFollowerMax()); value.put("budgetMin", campaign.getBudgetMin());
+        value.put("budgetMax", campaign.getBudgetMax()); value.put("contentType", campaign.getContentType());
+        JsonNode contextData = objectMapper.valueToTree(value);
+        contexts.save(CampaignContextM3.builder().campaign(campaign).contextVersion(1)
+                .contextData(contextData).active(true).build());
     }
     private boolean greater(Long min, Long max) { return min != null && max != null && min > max; }
     private boolean greater(BigDecimal min, BigDecimal max) { return min != null && max != null && min.compareTo(max) > 0; }

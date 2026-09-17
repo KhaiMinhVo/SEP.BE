@@ -33,7 +33,7 @@ public class AuthController {
 
     private final AuthService authService;
 
-    @Operation(summary = "Register a new brand account")
+    @Operation(summary = "Register a new brand account", security = {})
     @PostMapping("/register")
     public ResponseEntity<ApiResponse<Void>> register(@Valid @RequestBody RegisterRequest request) {
         authService.register(request);
@@ -42,13 +42,13 @@ public class AuthController {
                 .body(ApiResponse.empty());
     }
 
-    @Operation(summary = "Log in and receive a JWT access token")
+    @Operation(summary = "Log in and receive a JWT access token", security = {})
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(ApiResponse.ok("Login successful.", authService.login(request)));
     }
 
-    @Operation(summary = "Rotate a refresh token and issue a new token pair")
+    @Operation(summary = "Rotate a refresh token and issue a new token pair", security = {})
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<LoginResponse>> refresh(@Valid @RequestBody RefreshTokenRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(authService.refresh(request)));

@@ -5,6 +5,6 @@ import lombok.RequiredArgsConstructor; import org.springframework.data.domain.*;
     private final UserRepository users; private final RefreshTokenService refreshTokens;
     @Transactional(readOnly=true) public Page<AdminUserResponse> list(Pageable pageable){return users.findAll(pageable).map(AdminUserResponse::from);}
     @Transactional(readOnly=true) public AdminUserResponse get(UUID id){return AdminUserResponse.from(find(id));}
-    @Transactional public AdminUserResponse changeStatus(UUID id,UpdateUserStatusRequest request){User user=find(id);user.setStatus(request.status());if(request.status()==UserStatus.INACTIVE)refreshTokens.revokeAll(user.getId());return AdminUserResponse.from(user);}
+    @Transactional public AdminUserResponse changeStatus(UUID id,UpdateUserStatusRequest request){User user=find(id);user.setStatus(request.status());if(request.status()!=UserStatus.ACTIVE)refreshTokens.revokeAll(user.getId());return AdminUserResponse.from(user);}
     private User find(UUID id){return users.findById(id).orElseThrow(()->new NotFoundException("User not found"));}
 }

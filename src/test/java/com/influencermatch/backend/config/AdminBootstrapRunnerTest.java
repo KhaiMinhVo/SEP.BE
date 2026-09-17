@@ -44,7 +44,7 @@ class AdminBootstrapRunnerTest {
 
     @Test void reactivatesExistingAdmin() {
         BootstrapAdminProperties p = properties(true, "admin@example.com", "StrongPassword123!");
-        User admin = User.builder().email("admin@example.com").role(Role.ADMIN).status(UserStatus.INACTIVE).build();
+        User admin = User.builder().email("admin@example.com").role(Role.ADMIN).status(UserStatus.DISABLED).build();
         when(users.findByEmail("admin@example.com")).thenReturn(Optional.of(admin));
         new AdminBootstrapRunner(p, users, encoder).run(new DefaultApplicationArguments());
         assertThat(admin.getStatus()).isEqualTo(UserStatus.ACTIVE);

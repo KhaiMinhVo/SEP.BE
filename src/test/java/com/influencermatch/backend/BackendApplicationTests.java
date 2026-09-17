@@ -11,6 +11,7 @@ import com.influencermatch.backend.repository.UserRepository;
 import com.influencermatch.backend.entity.Role;
 import com.influencermatch.backend.entity.User;
 import com.influencermatch.backend.entity.UserStatus;
+import com.influencermatch.backend.campaign.CampaignContextM3Repository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -47,6 +48,7 @@ class BackendApplicationTests {
     @Autowired UserRepository users;
     @Autowired ObjectMapper objectMapper;
     @Autowired PasswordEncoder passwordEncoder;
+    @Autowired CampaignContextM3Repository campaignContexts;
 
     @Test
     void contextLoads() {
@@ -133,6 +135,40 @@ class BackendApplicationTests {
     }
 
     @Test
+    void adminCanLockUnlockAndDisableAccount() throws Exception {
+        String brandEmail = "status-brand@test.local";
+        String brandAccess = registerAndLogin(brandEmail, "Status Brand");
+        User brand = users.findByEmail(brandEmail).orElseThrow();
+        String adminAccess = createAdminAndLogin("status-admin@test.local");
+
+        mvc.perform(patch("/admin/users/" + brand.getId() + "/status")
+                        .header("Authorization", "Bearer " + adminAccess).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"LOCKED\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("LOCKED"));
+        mvc.perform(get("/auth/me").header("Authorization", "Bearer " + brandAccess))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"));
+
+        mvc.perform(patch("/admin/users/" + brand.getId() + "/status")
+                        .header("Authorization", "Bearer " + adminAccess).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"ACTIVE\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
+                .andExpect(status().isOk());
+
+        mvc.perform(patch("/admin/users/" + brand.getId() + "/status")
+                        .header("Authorization", "Bearer " + adminAccess).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"DISABLED\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("DISABLED"));
+        mvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+    }
+
+    @Test
     void brandAndCampaignDraftFlowEnforcesOwnershipAndArchive() throws Exception {
         String ownerToken = registerAndLogin("flow-owner@test.local", "Flow Owner");
         String otherToken = registerAndLogin("flow-other@test.local", "Flow Other");
@@ -187,6 +223,39 @@ class BackendApplicationTests {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CAMPAIGN_NOT_EDITABLE"));
     }
 
+    @Test
+    void campaignWorkflowCreatesM3AndRejectsSkippedTransition() throws Exception {
+        String ownerToken = registerAndLogin("workflow-owner@test.local", "Workflow Owner");
+        String brandBody = """
+                {"businessName":"Workflow Brand","website":"https://example.com","preferredPlatforms":["TIKTOK"]}
+                """;
+        String brandId = json(mvc.perform(post("/brands").header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(brandBody))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString()).at("/data/id").asText();
+        String campaignBody = """
+                {"name":"Workflow Campaign","productService":"Serum","objective":"AWARENESS",
+                 "platforms":["TIKTOK"],"niches":["skincare"],"locations":["HCMC"]}
+                """;
+        String campaignId = json(mvc.perform(post("/brands/" + brandId + "/campaigns")
+                        .header("Authorization", "Bearer " + ownerToken).contentType(MediaType.APPLICATION_JSON).content(campaignBody))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString()).at("/data/id").asText();
+
+        mvc.perform(patch("/campaigns/" + campaignId + "/status").header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"ACTIVE\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("INVALID_CAMPAIGN_TRANSITION"));
+        mvc.perform(patch("/campaigns/" + campaignId + "/status").header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"READY_FOR_DISCOVERY\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("READY_FOR_DISCOVERY"));
+        assertThat(campaignContexts.findByCampaignIdOrderByContextVersionDesc(java.util.UUID.fromString(campaignId)))
+                .singleElement().satisfies(context -> { assertThat(context.getContextVersion()).isEqualTo(1); assertThat(context.isActive()).isTrue(); });
+        mvc.perform(patch("/campaigns/" + campaignId + "/status").header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"ACTIVE\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(patch("/campaigns/" + campaignId + "/status").header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"COMPLETED\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("COMPLETED"));
+    }
+
     private String registerAndLogin(String email, String fullName) throws Exception {
         mvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"email\":\"" + email + "\",\"password\":\"Password123!\",\"fullName\":\"" + fullName + "\"}"))
@@ -195,6 +264,14 @@ class BackendApplicationTests {
                 .content("{\"email\":\"" + email + "\",\"password\":\"Password123!\"}"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         return json(body).at("/data/accessToken").asText();
+    }
+
+    private String createAdminAndLogin(String email) throws Exception {
+        users.save(User.builder().email(email).passwordHash(passwordEncoder.encode("AdminPassword123!"))
+                .fullName("Test Admin").role(Role.ADMIN).status(UserStatus.ACTIVE).build());
+        return json(mvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + email + "\",\"password\":\"AdminPassword123!\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).at("/data/accessToken").asText();
     }
 
     private JsonNode json(String value) throws Exception { return objectMapper.readTree(value); }

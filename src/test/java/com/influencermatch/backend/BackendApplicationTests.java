@@ -7,11 +7,11 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
-import com.influencermatch.backend.repository.UserRepository;
-import com.influencermatch.backend.entity.Role;
-import com.influencermatch.backend.entity.User;
-import com.influencermatch.backend.entity.UserStatus;
-import com.influencermatch.backend.campaign.CampaignContextM3Repository;
+import com.influencermatch.backend.user.UserRepository;
+import com.influencermatch.backend.user.Role;
+import com.influencermatch.backend.user.User;
+import com.influencermatch.backend.user.UserStatus;
+import com.influencermatch.backend.campaign.CampaignContextRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -48,7 +48,7 @@ class BackendApplicationTests {
     @Autowired UserRepository users;
     @Autowired ObjectMapper objectMapper;
     @Autowired PasswordEncoder passwordEncoder;
-    @Autowired CampaignContextM3Repository campaignContexts;
+    @Autowired CampaignContextRepository campaignContexts;
 
     @Test
     void contextLoads() {
@@ -182,7 +182,7 @@ class BackendApplicationTests {
                         .header("X-Correlation-ID", "brand-flow-trace").contentType(MediaType.APPLICATION_JSON).content(brandBody))
                 .andExpect(status().isCreated()).andExpect(header().exists("Location"))
                 .andExpect(header().string("X-Correlation-ID", "brand-flow-trace"))
-                .andExpect(jsonPath("$.data.m4Version").value(1)).andReturn();
+                .andExpect(jsonPath("$.data.contextVersion").value(1)).andReturn();
         String brandId = json(brandResult.getResponse().getContentAsString()).at("/data/id").asText();
 
         mvc.perform(get("/brands/" + brandId).header("Authorization", "Bearer " + otherToken))
@@ -194,7 +194,7 @@ class BackendApplicationTests {
         String updatedBrand = brandBody.replace("Friendly", "Expert");
         mvc.perform(put("/brands/" + brandId).header("Authorization", "Bearer " + ownerToken)
                         .contentType(MediaType.APPLICATION_JSON).content(updatedBrand))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.m4Version").value(2));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.contextVersion").value(2));
 
         String campaignBody = """
                 {"name":"Summer Awareness","productService":"Daily Serum","objective":"AWARENESS",
@@ -276,3 +276,5 @@ class BackendApplicationTests {
 
     private JsonNode json(String value) throws Exception { return objectMapper.readTree(value); }
 }
+
+

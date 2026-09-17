@@ -1,7 +1,9 @@
 package com.influencermatch.backend.config;
 
-import com.influencermatch.backend.entity.*;
-import com.influencermatch.backend.repository.UserRepository;
+import com.influencermatch.backend.user.User;
+import com.influencermatch.backend.user.Role;
+import com.influencermatch.backend.user.UserStatus;
+import com.influencermatch.backend.user.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -71,3 +73,5 @@ class AdminBootstrapRunnerTest {
         return p;
     }
 }
+
+

@@ -18,3 +18,5 @@ public record BrandRequest(
         @Size(max = 3) List<Platform> preferredPlatforms,
         @Size(max = 1000) String description
 ) {}
+
+

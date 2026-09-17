@@ -11,7 +11,7 @@ import java.util.Arrays;
  *
  * <p>Responsibilities:
  * <ul>
- *   <li>Global CORS policy — restricts cross-origin requests to known front-end origins.</li>
+ *   <li>Global CORS policy restricts cross-origin requests to known front-end origins.</li>
  * </ul>
  *
  * <p><strong>Production note:</strong> Replace {@code allowedOriginPatterns("*")} with
@@ -39,7 +39,7 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
-                // ⚠️  Replace with explicit origins in production:
+                //  Replace with explicit origins in production:
                 // .allowedOrigins("https://app.influencermatch.com")
                 .allowedOrigins(Arrays.stream(allowedOrigins.split(",")).map(String::trim).toArray(String[]::new))
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
@@ -49,3 +49,5 @@ public class WebConfig implements WebMvcConfigurer {
                 .maxAge(3600);
     }
 }
+
+

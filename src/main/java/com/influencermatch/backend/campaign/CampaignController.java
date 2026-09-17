@@ -1,7 +1,7 @@
 package com.influencermatch.backend.campaign;
 
 import com.influencermatch.backend.campaign.dto.*;
-import com.influencermatch.backend.dto.*;
+import com.influencermatch.backend.common.dto.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -42,3 +42,5 @@ public class CampaignController {
     @Operation(summary = "Archive a draft campaign")
     @PatchMapping("/campaigns/{id}/archive") public ApiResponse<CampaignResponse> archive(@PathVariable UUID id, Authentication auth) { return ApiResponse.ok(service.archive(id, auth)); }
 }
+
+

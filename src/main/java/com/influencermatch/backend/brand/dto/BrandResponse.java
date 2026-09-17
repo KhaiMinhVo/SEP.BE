@@ -11,3 +11,5 @@ public record BrandResponse(
         List<Platform> preferredPlatforms, String description, int m4Version,
         LocalDateTime createdAt, LocalDateTime updatedAt
 ) {}
+
+

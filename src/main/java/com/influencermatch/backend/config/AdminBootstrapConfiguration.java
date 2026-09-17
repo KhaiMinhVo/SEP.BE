@@ -9,3 +9,5 @@ import org.springframework.context.annotation.Profile;
 @EnableConfigurationProperties(BootstrapAdminProperties.class)
 public class AdminBootstrapConfiguration {
 }
+
+

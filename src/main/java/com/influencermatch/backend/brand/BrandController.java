@@ -1,7 +1,7 @@
 package com.influencermatch.backend.brand;
 
 import com.influencermatch.backend.brand.dto.*;
-import com.influencermatch.backend.dto.*;
+import com.influencermatch.backend.common.dto.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -41,3 +41,5 @@ public class BrandController {
     @Operation(summary = "Update a brand profile")
     @PutMapping("/{id}") public ApiResponse<BrandResponse> update(@PathVariable UUID id, @Valid @RequestBody BrandRequest request, Authentication auth) { return ApiResponse.ok(service.update(id, request, auth)); }
 }
+
+

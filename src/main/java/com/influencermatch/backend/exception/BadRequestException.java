@@ -39,3 +39,5 @@ public class BadRequestException extends BusinessException {
         super(ErrorCode.VALIDATION_ERROR, message, cause);
     }
 }
+
+

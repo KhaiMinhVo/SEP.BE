@@ -1,1 +1,3 @@
-package com.influencermatch.backend.collaboration; import org.springframework.data.jpa.repository.JpaRepository; import java.util.UUID; public interface EvidenceAssetRepository extends JpaRepository<EvidenceAsset,UUID>{}
+package com.influencermatch.backend.collaboration;
+
+

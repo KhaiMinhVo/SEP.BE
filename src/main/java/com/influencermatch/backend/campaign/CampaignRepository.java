@@ -7,3 +7,5 @@ import java.util.UUID;
 public interface CampaignRepository extends JpaRepository<Campaign, UUID> {
     Page<Campaign> findByBrandProfileId(UUID brandProfileId, Pageable pageable);
 }
+
+

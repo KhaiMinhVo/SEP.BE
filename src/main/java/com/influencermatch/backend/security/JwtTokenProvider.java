@@ -1,6 +1,6 @@
 package com.influencermatch.backend.security;
 
-import com.influencermatch.backend.entity.User;
+import com.influencermatch.backend.user.User;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
@@ -114,3 +114,5 @@ public class JwtTokenProvider {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 }
+
+

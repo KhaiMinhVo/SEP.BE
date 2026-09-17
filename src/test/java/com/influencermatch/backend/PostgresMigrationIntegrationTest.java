@@ -36,7 +36,7 @@ class PostgresMigrationIntegrationTest {
             assertThat(result.getInt(1)).isEqualTo(29);
         }
         try (Connection connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-             PreparedStatement statement = connection.prepareStatement("select count(*) from information_schema.tables where table_schema='public' and table_name in ('user','refreshToken','brandProfile','brandContextM4','campaign','campaignContextM3')");
+             PreparedStatement statement = connection.prepareStatement("select count(*) from information_schema.tables where table_schema='public' and table_name in ('user','refreshToken','brandProfile','BrandContext','campaign','CampaignContext')");
              ResultSet result = statement.executeQuery()) {
             result.next();
             assertThat(result.getInt(1)).isEqualTo(6);
@@ -73,3 +73,5 @@ class PostgresMigrationIntegrationTest {
         }
     }
 }
+
+

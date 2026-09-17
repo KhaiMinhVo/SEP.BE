@@ -6,3 +6,5 @@ import jakarta.annotation.PostConstruct; import org.springframework.beans.factor
     @Value("${application.cors.allowed-origins:}") private String origins;
     @PostConstruct void validate(){if(secret.isBlank()||DEMO.equals(secret))throw new IllegalStateException("Production JWT secret must be supplied securely");if(origins.contains("*"))throw new IllegalStateException("Wildcard CORS origin is forbidden in production");}
 }
+
+

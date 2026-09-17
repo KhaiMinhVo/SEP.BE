@@ -19,3 +19,5 @@ class CampaignDomainTest {
         assertThatThrownBy(() -> CampaignStatus.COMPLETED.requireTransitionTo(CampaignStatus.ARCHIVED)).isInstanceOf(ConflictException.class);
     }
 }
+
+

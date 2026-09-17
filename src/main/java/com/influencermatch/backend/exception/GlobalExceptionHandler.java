@@ -17,3 +17,5 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
     @ExceptionHandler(Exception.class) ResponseEntity<ProblemDetail> unexpected(Exception ex,HttpServletRequest req){log.error("Unhandled error traceId={}",MDC.get("traceId"),ex);return response(ErrorCode.INTERNAL_ERROR,"An unexpected error occurred",req,Map.of());}
     private ResponseEntity<ProblemDetail> response(ErrorCode code,String detail,HttpServletRequest req,Map<String,List<String>> fields){ProblemDetail p=ProblemDetail.forStatusAndDetail(code.status(),detail);p.setTitle(code.title());p.setType(URI.create("https://api.influencermatch/errors/"+code.name().toLowerCase().replace('_','-')));p.setInstance(URI.create(req.getRequestURI()));p.setProperty("code",code.name());p.setProperty("traceId",MDC.get("traceId"));p.setProperty("timestamp",Instant.now());if(!fields.isEmpty())p.setProperty("fieldErrors",fields);return ResponseEntity.status(code.status()).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(p);}
 }
+
+

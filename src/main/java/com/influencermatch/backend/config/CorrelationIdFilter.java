@@ -11,3 +11,5 @@ public class CorrelationIdFilter implements Filter {
         MDC.put("traceId",traceId);res.setHeader(HEADER,traceId);try{chain.doFilter(request,response);}finally{MDC.remove("traceId");}
     }
 }
+
+

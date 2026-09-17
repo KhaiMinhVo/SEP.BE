@@ -20,3 +20,5 @@ public record CampaignRequest(
         @PositiveOrZero Long followerMin, @PositiveOrZero Long followerMax,
         @PositiveOrZero BigDecimal budgetMin, @PositiveOrZero BigDecimal budgetMax
 ) {}
+
+

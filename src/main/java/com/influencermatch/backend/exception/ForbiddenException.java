@@ -28,3 +28,5 @@ public class ForbiddenException extends BusinessException {
         super(ErrorCode.ACCESS_DENIED, message);
     }
 }
+
+

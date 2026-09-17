@@ -5,3 +5,5 @@ public class BusinessException extends RuntimeException {
     public BusinessException(ErrorCode code, String detail, Throwable cause) { super(detail,cause); this.code=code; }
     public ErrorCode code(){ return code; }
 }
+
+

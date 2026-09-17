@@ -1,7 +1,7 @@
-# ─────────────────────────────────────────────────────────────
-#  InfluencerMatch Backend – Application Configuration
+# --------------------------------------------------------------------------------------------------------------------------
+#  InfluencerMatch Backend --Application Configuration
 #  Environment: Development (default)
-# ─────────────────────────────────────────────────────────────
+# --------------------------------------------------------------------------------------------------------------------------
 
 server:
   port: 8080
@@ -20,9 +20,9 @@ spring:
   application:
     name: influencermatch-backend
 
-  # ──────────────────────────────────────────
+  # ------------------------------------------------------------------------------------
   #  DataSource
-  # ──────────────────────────────────────────
+  # ------------------------------------------------------------------------------------
   datasource:
     url: jdbc:postgresql://localhost:${DB_PORT:5432}/${DB_NAME:influencermatch_dev}
     username: ${DB_USER:influencermatch_user}
@@ -36,9 +36,9 @@ spring:
       connection-timeout: 20000
       max-lifetime: 1800000
 
-  # ──────────────────────────────────────────
+  # ------------------------------------------------------------------------------------
   #  JPA / Hibernate
-  # ──────────────────────────────────────────
+  # ------------------------------------------------------------------------------------
   jpa:
     hibernate:
       ddl-auto: validate
@@ -47,16 +47,15 @@ spring:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
-        physical_naming_strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
         globally_quoted_identifiers: true
         jdbc:
           time_zone: UTC
         default_schema: public
     open-in-view: false             # Disable OSIV to avoid lazy-loading pitfalls
 
-  # ──────────────────────────────────────────
+  # ------------------------------------------------------------------------------------
   #  Jackson
-  # ──────────────────────────────────────────
+  # ------------------------------------------------------------------------------------
   jackson:
     default-property-inclusion: non_null
     serialization:
@@ -65,9 +64,9 @@ spring:
       fail-on-unknown-properties: false
     time-zone: UTC
 
-# ──────────────────────────────────────────
+# ------------------------------------------------------------------------------------
 #  JWT Security
-# ──────────────────────────────────────────
+# ------------------------------------------------------------------------------------
 application:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
@@ -84,9 +83,9 @@ application:
       refresh-token:
         expiration: 604800000      # 7 days in milliseconds
 
-# ──────────────────────────────────────────
+# ------------------------------------------------------------------------------------
 #  SpringDoc / OpenAPI (Swagger UI)
-# ──────────────────────────────────────────
+# ------------------------------------------------------------------------------------
 springdoc:
   api-docs:
     path: /api-docs
@@ -97,9 +96,9 @@ springdoc:
     try-it-out-enabled: true
   show-actuator: false
 
-# ──────────────────────────────────────────
+# ------------------------------------------------------------------------------------
 #  Logging
-# ──────────────────────────────────────────
+# ------------------------------------------------------------------------------------
 logging:
   level:
     root: INFO
@@ -113,3 +112,4 @@ management:
         include: health,info
   pattern:
     console: "%clr(%d{yyyy-MM-dd HH:mm:ss}){faint} %clr(%5p) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n%wEx"
+

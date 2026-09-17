@@ -25,3 +25,5 @@ public enum ErrorCode {
     ErrorCode(HttpStatus status, String title) { this.status=status; this.title=title; }
     public HttpStatus status(){ return status; } public String title(){ return title; }
 }
+
+

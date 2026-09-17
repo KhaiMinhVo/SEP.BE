@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
  * <p>Maps to HTTP {@code 404 Not Found} via {@link ResponseStatus}.
  * The {@link com.influencermatch.backend.exception.GlobalExceptionHandler}
  * intercepts this exception and serialises it into the standard
- * {@link com.influencermatch.backend.dto.ApiResponse} envelope.
+ * {@link com.influencermatch.backend.common.dto.ApiResponse} envelope.
  *
  * <p>Usage example:
  * <pre>{@code
@@ -41,3 +41,5 @@ public class ResourceNotFoundException extends BusinessException {
         super(ErrorCode.RESOURCE_NOT_FOUND, message);
     }
 }
+
+

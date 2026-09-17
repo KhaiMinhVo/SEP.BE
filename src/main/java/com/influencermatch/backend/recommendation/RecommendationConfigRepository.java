@@ -1,1 +1,0 @@
-package com.influencermatch.backend.recommendation; import org.springframework.data.jpa.repository.JpaRepository; import java.util.UUID; public interface RecommendationConfigRepository extends JpaRepository<RecommendationConfig,UUID>{}

@@ -1,1 +1,3 @@
-package com.influencermatch.backend.collaboration; import org.springframework.data.jpa.repository.JpaRepository; import java.util.UUID; public interface CreatorReviewRepository extends JpaRepository<CreatorReview,UUID>{}
+package com.influencermatch.backend.collaboration;
+
+

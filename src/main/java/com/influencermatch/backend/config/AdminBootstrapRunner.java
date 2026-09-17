@@ -1,9 +1,9 @@
 package com.influencermatch.backend.config;
 
-import com.influencermatch.backend.entity.Role;
-import com.influencermatch.backend.entity.User;
-import com.influencermatch.backend.entity.UserStatus;
-import com.influencermatch.backend.repository.UserRepository;
+import com.influencermatch.backend.user.Role;
+import com.influencermatch.backend.user.User;
+import com.influencermatch.backend.user.UserStatus;
+import com.influencermatch.backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -51,3 +51,5 @@ public class AdminBootstrapRunner implements ApplicationRunner {
         }
     }
 }
+
+

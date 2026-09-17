@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.influencermatch.backend.brand.*;
 import com.influencermatch.backend.campaign.dto.*;
-import com.influencermatch.backend.dto.PageResponse;
+import com.influencermatch.backend.common.dto.PageResponse;
 import com.influencermatch.backend.exception.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -18,7 +18,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class CampaignService {
     private final CampaignRepository campaigns;
-    private final CampaignContextM3Repository contexts;
+    private final CampaignContextRepository contexts;
     private final BrandService brandService;
     private final ObjectMapper objectMapper;
 
@@ -102,7 +102,7 @@ public class CampaignService {
         value.put("followerMax", campaign.getFollowerMax()); value.put("budgetMin", campaign.getBudgetMin());
         value.put("budgetMax", campaign.getBudgetMax()); value.put("contentType", campaign.getContentType());
         JsonNode contextData = objectMapper.valueToTree(value);
-        contexts.save(CampaignContextM3.builder().campaign(campaign).contextVersion(1)
+        contexts.save(CampaignContext.builder().campaign(campaign).contextVersion(1)
                 .contextData(contextData).active(true).build());
     }
     private boolean greater(Long min, Long max) { return min != null && max != null && min > max; }
@@ -125,3 +125,5 @@ public class CampaignService {
     }
     private BusinessException notFound(String detail) { return new BusinessException(ErrorCode.CAMPAIGN_NOT_FOUND, detail); }
 }
+
+

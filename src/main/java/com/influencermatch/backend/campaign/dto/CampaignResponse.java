@@ -15,3 +15,5 @@ public record CampaignResponse(
         BigDecimal budgetMin, BigDecimal budgetMax,
         LocalDateTime createdAt, LocalDateTime updatedAt
 ) {}
+
+

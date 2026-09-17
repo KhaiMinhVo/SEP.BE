@@ -3,10 +3,11 @@ package com.influencermatch.backend.brand;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.influencermatch.backend.brand.dto.*;
-import com.influencermatch.backend.dto.PageResponse;
-import com.influencermatch.backend.entity.*;
+import com.influencermatch.backend.common.dto.PageResponse;
+import com.influencermatch.backend.user.User;
+import com.influencermatch.backend.user.Role;
 import com.influencermatch.backend.exception.*;
-import com.influencermatch.backend.repository.UserRepository;
+import com.influencermatch.backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.Authentication;
@@ -18,7 +19,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class BrandService {
     private final BrandProfileRepository profiles;
-    private final BrandContextM4Repository contexts;
+    private final BrandContextRepository contexts;
     private final UserRepository users;
     private final ObjectMapper objectMapper;
 
@@ -33,7 +34,7 @@ public class BrandService {
                 .user(owner).businessName(request.businessName().trim()).build();
         applyProfile(profile, request);
         profile = profiles.save(profile);
-        BrandContextM4 context = contexts.save(BrandContextM4.builder()
+        BrandContext context = contexts.save(BrandContext.builder()
                 .brandProfile(profile).contextVersion(1).profileContext(profileJson(profile))
                 .learnedPatterns(objectMapper.createArrayNode()).evidenceRefs(objectMapper.createArrayNode()).build());
         return response(profile, context);
@@ -68,7 +69,7 @@ public class BrandService {
         requireAccess(profile, actor(authentication));
         profile.setBusinessName(request.businessName().trim());
         applyProfile(profile, request);
-        BrandContextM4 context = requireContext(profileId);
+        BrandContext context = requireContext(profileId);
         context.updateProfileContext(profileJson(profile));
         return response(profile, context);
     }
@@ -93,7 +94,7 @@ public class BrandService {
     private BrandProfile requireProfile(UUID id) {
         return profiles.findById(id).orElseThrow(() -> notFound("Brand profile not found: " + id));
     }
-    private BrandContextM4 requireContext(UUID profileId) {
+    private BrandContext requireContext(UUID profileId) {
         return contexts.findByBrandProfileId(profileId).orElseThrow(() -> notFound("Brand context not found"));
     }
     private void requireAccess(BrandProfile profile, User actor) {
@@ -123,10 +124,12 @@ public class BrandService {
         return objectMapper.valueToTree(value);
     }
     private BrandResponse loadResponse(BrandProfile profile) { return response(profile, requireContext(profile.getId())); }
-    private BrandResponse response(BrandProfile p, BrandContextM4 c) {
+    private BrandResponse response(BrandProfile p, BrandContext c) {
         return new BrandResponse(p.getId(), p.getUser().getId(), p.getBusinessName(), p.getIndustry(), p.getProductCategories(),
                 p.getWebsite(), p.getLocation(), p.getTargetMarkets(), p.getTargetAudiences(), p.getBrandTone(),
                 p.getPreferredPlatforms().stream().map(Platform::valueOf).toList(), p.getDescription(), c.getContextVersion(), p.getCreatedAt(), p.getUpdatedAt());
     }
     private BusinessException notFound(String detail) { return new BusinessException(ErrorCode.BRAND_NOT_FOUND, detail); }
 }
+
+

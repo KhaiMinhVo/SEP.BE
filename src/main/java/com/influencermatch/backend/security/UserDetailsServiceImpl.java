@@ -1,6 +1,6 @@
 package com.influencermatch.backend.security;
 
-import com.influencermatch.backend.repository.UserRepository;
+import com.influencermatch.backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -24,3 +24,5 @@ public class UserDetailsServiceImpl implements UserDetailsService {
                 .orElseThrow(() -> new UsernameNotFoundException("No user found with email: " + email));
     }
 }
+
+

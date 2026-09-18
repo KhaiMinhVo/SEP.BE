@@ -1,6 +1,6 @@
 package com.influencermatch.backend.security;
 
-import com.influencermatch.backend.user.UserRepository;
+import com.influencermatch.backend.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.userdetails.UserDetails;

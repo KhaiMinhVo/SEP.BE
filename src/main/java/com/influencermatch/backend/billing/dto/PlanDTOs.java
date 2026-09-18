@@ -1,4 +1,10 @@
 package com.influencermatch.backend.billing.dto;
+import com.influencermatch.backend.billing.model.*;
+import com.influencermatch.backend.billing.repository.*;
+import com.influencermatch.backend.billing.service.*;
+import com.influencermatch.backend.billing.enums.*;
+import com.influencermatch.backend.billing.dto.*;
+import com.influencermatch.backend.billing.controller.*;
 
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -7,7 +13,7 @@ import lombok.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
-import com.influencermatch.backend.billing.PlanStatus;
+import com.influencermatch.backend.billing.enums.PlanStatus;
 
 public final class PlanDTOs {
 

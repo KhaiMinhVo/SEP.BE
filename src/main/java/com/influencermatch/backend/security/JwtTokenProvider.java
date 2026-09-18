@@ -1,6 +1,6 @@
 package com.influencermatch.backend.security;
 
-import com.influencermatch.backend.user.User;
+import com.influencermatch.backend.user.model.User;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;

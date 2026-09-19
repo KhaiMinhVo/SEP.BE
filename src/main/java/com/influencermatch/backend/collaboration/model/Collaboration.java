@@ -1,7 +1,6 @@
 package com.influencermatch.backend.collaboration.model;
-import com.influencermatch.backend.collaboration.model.*;
-import com.influencermatch.backend.collaboration.repository.*;
-import com.influencermatch.backend.collaboration.enums.*;
+import com.influencermatch.backend.collaboration.enums.CollaborationStatus;
+import com.influencermatch.backend.collaboration.enums.CollaborationPaymentStatus;
 import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.creator.model.Creator;
 import com.influencermatch.backend.relationship.model.BrandCreatorRelationship;

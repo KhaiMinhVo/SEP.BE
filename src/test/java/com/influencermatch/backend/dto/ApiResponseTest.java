@@ -1,8 +1,23 @@
 package com.influencermatch.backend.dto;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.influencermatch.backend.common.dto.ApiResponse;
-import org.junit.jupiter.api.Test; import org.slf4j.MDC; import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
+
 class ApiResponseTest {
- @Test void includesTraceIdFromMdc(){MDC.put("traceId","trace-123");try{ApiResponse<String> response=ApiResponse.ok("payload");assertThat(response.success()).isTrue();assertThat(response.data()).isEqualTo("payload");assertThat(response.meta().traceId()).isEqualTo("trace-123");assertThat(response.meta().timestamp()).isNotNull();}finally{MDC.clear();}}
+  @Test
+  void includesTraceIdFromMdc() {
+    MDC.put("traceId", "trace-123");
+    try {
+      ApiResponse<String> response = ApiResponse.ok("payload");
+      assertThat(response.success()).isTrue();
+      assertThat(response.data()).isEqualTo("payload");
+      assertThat(response.meta().traceId()).isEqualTo("trace-123");
+      assertThat(response.meta().timestamp()).isNotNull();
+    } finally {
+      MDC.clear();
+    }
+  }
 }
-
-

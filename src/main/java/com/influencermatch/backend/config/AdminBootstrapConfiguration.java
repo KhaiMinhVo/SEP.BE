@@ -7,7 +7,4 @@ import org.springframework.context.annotation.Profile;
 @Configuration
 @Profile("dev")
 @EnableConfigurationProperties(BootstrapAdminProperties.class)
-public class AdminBootstrapConfiguration {
-}
-
-
+public class AdminBootstrapConfiguration {}

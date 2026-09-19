@@ -1,10 +1,7 @@
 package com.influencermatch.backend.collaboration.model;
 import com.influencermatch.backend.collaboration.model.*;
 import com.influencermatch.backend.collaboration.repository.*;
-import com.influencermatch.backend.collaboration.service.*;
 import com.influencermatch.backend.collaboration.enums.*;
-import com.influencermatch.backend.collaboration.dto.*;
-import com.influencermatch.backend.collaboration.controller.*;
 import jakarta.persistence.*; import lombok.*; import java.math.BigDecimal; import java.time.LocalDateTime; import java.util.UUID;
 @Entity @Table(name = "campaign_outcome", uniqueConstraints=@UniqueConstraint(name="ux_outcome_collaboration",columnNames="collaboration_id"))
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder public class CampaignOutcome {

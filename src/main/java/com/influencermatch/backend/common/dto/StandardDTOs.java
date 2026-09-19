@@ -1,11 +1,5 @@
 package com.influencermatch.backend.common.dto;
-import com.influencermatch.backend.common.model.*;
-import com.influencermatch.backend.common.repository.*;
-import com.influencermatch.backend.common.service.*;
-import com.influencermatch.backend.common.enums.*;
 import com.influencermatch.backend.common.dto.*;
-import com.influencermatch.backend.common.controller.*;
-
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;

@@ -3,7 +3,6 @@ import com.influencermatch.backend.user.model.*;
 import com.influencermatch.backend.user.repository.*;
 import com.influencermatch.backend.user.service.*;
 import com.influencermatch.backend.user.enums.*;
-import com.influencermatch.backend.user.dto.*;
 import com.influencermatch.backend.user.controller.*;
 import com.influencermatch.backend.auth.service.RefreshTokenService;
 import com.influencermatch.backend.auth.dto.*; import com.influencermatch.backend.user.*; import com.influencermatch.backend.exception.NotFoundException; import com.influencermatch.backend.user.UserRepository;

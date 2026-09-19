@@ -1,10 +1,7 @@
 package com.influencermatch.backend.collaboration.model;
 import com.influencermatch.backend.collaboration.model.*;
 import com.influencermatch.backend.collaboration.repository.*;
-import com.influencermatch.backend.collaboration.service.*;
 import com.influencermatch.backend.collaboration.enums.*;
-import com.influencermatch.backend.collaboration.dto.*;
-import com.influencermatch.backend.collaboration.controller.*;
 import jakarta.persistence.*; import lombok.*; import java.time.LocalDateTime; import java.util.UUID;
 @Entity @Table(name = "evidence_asset") @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder public class EvidenceAsset {
  @Id @GeneratedValue(strategy=GenerationType.UUID) @Column private UUID id;

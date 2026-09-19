@@ -2,6 +2,7 @@ package com.influencermatch.backend.brand;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import com.influencermatch.backend.brand.model.BrandContext;
 import static org.assertj.core.api.Assertions.*;
 
 class BrandContextTest {

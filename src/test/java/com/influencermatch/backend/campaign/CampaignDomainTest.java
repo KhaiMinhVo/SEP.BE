@@ -2,6 +2,7 @@ package com.influencermatch.backend.campaign;
 
 import com.influencermatch.backend.exception.ConflictException;
 import org.junit.jupiter.api.Test;
+import com.influencermatch.backend.campaign.enums.CampaignStatus;
 import static org.assertj.core.api.Assertions.*;
 
 class CampaignDomainTest {

@@ -5,7 +5,7 @@ import com.influencermatch.backend.user.service.*;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.controller.*;
 import com.influencermatch.backend.auth.service.RefreshTokenService;
-import com.influencermatch.backend.auth.dto.*; import com.influencermatch.backend.user.*; import com.influencermatch.backend.exception.NotFoundException; import com.influencermatch.backend.user.UserRepository;
+import com.influencermatch.backend.auth.dto.*;  import com.influencermatch.backend.exception.NotFoundException; import com.influencermatch.backend.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor; import org.springframework.data.domain.*; import org.springframework.stereotype.Service; import org.springframework.transaction.annotation.Transactional; import java.time.LocalDateTime; import java.util.UUID;
 @Service @RequiredArgsConstructor public class AdminUserService {
     private final UserRepository users; private final RefreshTokenService refreshTokens;

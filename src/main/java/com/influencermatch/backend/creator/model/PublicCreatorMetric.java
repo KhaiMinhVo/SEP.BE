@@ -65,6 +65,9 @@ public class PublicCreatorMetric {
   @Column(name = "data_confidence", precision = 5, scale = 4)
   private BigDecimal dataConfidence;
 
+  @Column(name = "creator_type", length = 50)
+  private String creatorType;
+
   @Column(length = 500)
   private String contact;
 

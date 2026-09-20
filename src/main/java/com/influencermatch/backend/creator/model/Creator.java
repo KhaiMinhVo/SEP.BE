@@ -43,6 +43,12 @@ public class Creator {
   @Column(name = "profile_url", length = 1000)
   private String profileUrl;
 
+  @Column(name = "display_name", length = 255)
+  private String displayName;
+
+  @Column(name = "avatar_url", length = 1000)
+  private String avatarUrl;
+
   @CreationTimestamp
   @Column(name = "created_at", nullable = false, updatable = false)
   private LocalDateTime createdAt;

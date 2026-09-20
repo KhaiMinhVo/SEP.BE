@@ -8,6 +8,7 @@ import com.influencermatch.backend.creator.enums.*;
 import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.repository.*;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,6 +19,7 @@ public class CreatorIngestionService {
 
   private final CreatorRepository creatorRepository;
   private final PublicCreatorMetricRepository metricRepository;
+  private final PostRepository postRepository;
 
   @Transactional
   public CreatorIngestionResponse ingestCreatorData(CreatorIngestionRequest request) {
@@ -34,6 +36,12 @@ public class CreatorIngestionService {
 
     // Update creator core fields
     creator.setUserName(request.getUserName());
+    if (request.getDisplayName() != null) {
+      creator.setDisplayName(request.getDisplayName());
+    }
+    if (request.getAvatarUrl() != null) {
+      creator.setAvatarUrl(request.getAvatarUrl());
+    }
     if (request.getLocation() != null) {
       creator.setLocation(request.getLocation());
     }
@@ -67,6 +75,7 @@ public class CreatorIngestionService {
             .location(request.getLocation())
             .contentSummary(request.getContentSummary())
             .collectedAt(LocalDateTime.now())
+            .creatorType(request.getCreatorType())
             .freshnessStatus(status)
             .dataConfidence(request.getDataConfidence())
             .contact(request.getContact())
@@ -80,6 +89,24 @@ public class CreatorIngestionService {
     }
 
     metric = metricRepository.save(metric);
+
+    if (request.getRecentPosts() != null && !request.getRecentPosts().isEmpty()) {
+      postRepository.deleteByCreatorId(creator.getId());
+      for (PostDto dto : request.getRecentPosts()) {
+        Post post = Post.builder()
+            .creator(creator)
+            .platformPostId(dto.getPlatformPostId())
+            .postUrl(dto.getPostUrl())
+            .caption(dto.getCaption())
+            .views(dto.getViews())
+            .likes(dto.getLikes())
+            .comments(dto.getComments())
+            .shares(dto.getShares())
+            .postedAt(dto.getPostedAt())
+            .build();
+        postRepository.save(post);
+      }
+    }
 
     return CreatorIngestionResponse.builder()
         .creatorId(creator.getId())

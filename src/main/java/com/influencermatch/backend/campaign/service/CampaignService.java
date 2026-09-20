@@ -20,6 +20,10 @@ import com.influencermatch.backend.exception.repository.*;
 import com.influencermatch.backend.exception.service.*;
 import com.influencermatch.backend.exception.enums.*;
 import com.influencermatch.backend.exception.dto.*;
+import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
+import com.influencermatch.backend.creator.repository.PublicCreatorMetricSpecification;
+import com.influencermatch.backend.creator.dto.CreatorDiscoveryResponse;
+import org.springframework.data.jpa.domain.Specification;
 import com.influencermatch.backend.exception.controller.*;import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.Authentication;
@@ -35,6 +39,7 @@ public class CampaignService {
     private final CampaignContextRepository contexts;
     private final BrandService brandService;
     private final ObjectMapper objectMapper;
+    private final PublicCreatorMetricRepository metricRepository;
 
     @Transactional
     public CampaignResponse create(UUID brandId, CampaignRequest request, Authentication authentication) {
@@ -58,6 +63,32 @@ public class CampaignService {
         Campaign campaign = requireCampaign(id);
         brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
         return loadResponse(campaign);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<CreatorDiscoveryResponse> discoverCreators(UUID campaignId, Pageable pageable, Authentication authentication) {
+        Campaign campaign = requireCampaign(campaignId);
+        brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
+
+        Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> spec = Specification.where(PublicCreatorMetricSpecification.isFresh())
+            .and(PublicCreatorMetricSpecification.hasFollowersBetween(campaign.getFollowerMin(), campaign.getFollowerMax()))
+            .and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()))
+            .and(PublicCreatorMetricSpecification.hasNicheIn(campaign.getNiches()))
+            .and(PublicCreatorMetricSpecification.hasLocationIn(campaign.getLocations()));
+
+        return PageResponse.from(metricRepository.findAll(spec, pageable).map(metric -> 
+            CreatorDiscoveryResponse.builder()
+                .creatorId(metric.getCreator().getId())
+                .platform(metric.getCreator().getPlatform())
+                .userName(metric.getCreator().getUserName())
+                .profileUrl(metric.getCreator().getProfileUrl())
+                .followers(metric.getFollowers())
+                .engagementRate(metric.getEngagementRate())
+                .niche(metric.getNiche())
+                .location(metric.getLocation())
+                .contentSummary(metric.getContentSummary())
+                .build()
+        ));
     }
 
     @Transactional

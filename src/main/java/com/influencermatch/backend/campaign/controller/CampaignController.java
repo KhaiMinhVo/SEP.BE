@@ -20,6 +20,7 @@ import java.util.UUID;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import com.influencermatch.backend.creator.dto.CreatorDiscoveryResponse;
 
 @RestController
 @RequiredArgsConstructor
@@ -47,6 +48,9 @@ public class CampaignController {
     @PatchMapping("/campaigns/{id}/status") public ApiResponse<CampaignResponse> status(@PathVariable UUID id, @Valid @RequestBody CampaignStatusRequest request, Authentication auth) { return ApiResponse.ok(service.changeStatus(id, request, auth)); }
     @Operation(summary = "Archive a draft campaign")
     @PatchMapping("/campaigns/{id}/archive") public ApiResponse<CampaignResponse> archive(@PathVariable UUID id, Authentication auth) { return ApiResponse.ok(service.archive(id, auth)); }
+    @Operation(summary = "Discover creators for a campaign")
+    @GetMapping("/campaigns/{id}/discover")
+    public ApiResponse<PageResponse<CreatorDiscoveryResponse>> discover(@PathVariable UUID id, @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="20") int size, Authentication auth) {
+        return ApiResponse.ok(service.discoverCreators(id, PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)), auth));
+    }
 }
-
-

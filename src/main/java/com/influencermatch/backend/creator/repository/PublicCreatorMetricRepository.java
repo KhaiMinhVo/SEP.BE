@@ -7,10 +7,11 @@ import com.influencermatch.backend.creator.dto.*;
 import com.influencermatch.backend.creator.controller.*;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 
 import java.util.UUID;
 
 @Repository
-public interface PublicCreatorMetricRepository extends JpaRepository<PublicCreatorMetric, UUID> {
+public interface PublicCreatorMetricRepository extends JpaRepository<PublicCreatorMetric, UUID>, JpaSpecificationExecutor<PublicCreatorMetric> {
 }

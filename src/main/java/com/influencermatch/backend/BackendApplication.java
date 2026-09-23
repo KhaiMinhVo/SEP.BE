@@ -12,8 +12,6 @@ import org.springframework.scheduling.annotation.EnableAsync;
  * <p>Bootstraps the Spring context with JPA auditing and async task execution support.
  */
 @SpringBootApplication
-@EnableJpaAuditing
-@EnableJpaRepositories(basePackages = "com.influencermatch.backend")
 @EnableAsync
 public class BackendApplication {
 

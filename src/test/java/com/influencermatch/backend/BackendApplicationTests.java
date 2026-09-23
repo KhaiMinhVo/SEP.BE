@@ -261,7 +261,7 @@ class BackendApplicationTests {
             .andExpect(status().isCreated())
             .andExpect(header().exists("Location"))
             .andExpect(header().string("X-Correlation-ID", "brand-flow-trace"))
-            .andExpect(jsonPath("$.data.contextVersion").value(1))
+            .andExpect(jsonPath("$.data.m4Version").value(1))
             .andReturn();
     String brandId = json(brandResult.getResponse().getContentAsString()).at("/data/id").asText();
 
@@ -283,7 +283,7 @@ class BackendApplicationTests {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(updatedBrand))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.contextVersion").value(2));
+        .andExpect(jsonPath("$.data.m4Version").value(2));
 
     String campaignBody =
         """

@@ -24,7 +24,7 @@ spring:
   #  DataSource
   # ------------------------------------------------------------------------------------
   datasource:
-    url: jdbc:postgresql://localhost:${DB_PORT:5432}/${DB_NAME:influencermatch_dev}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:influencermatch_dev}
     username: ${DB_USER:influencermatch_user}
     password: ${DB_PASS:12345}
     driver-class-name: org.postgresql.Driver

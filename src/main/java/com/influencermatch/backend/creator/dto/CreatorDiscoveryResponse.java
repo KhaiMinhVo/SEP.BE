@@ -14,5 +14,9 @@ public record CreatorDiscoveryResponse(
     BigDecimal engagementRate,
     String niche,
     String location,
-    String contentSummary
+    String contentSummary,
+    String displayName,
+    String avatarUrl,
+    String creatorType,
+    java.util.List<PostDto> recentPosts
 ) {}

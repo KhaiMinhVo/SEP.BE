@@ -9,5 +9,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface PostRepository extends JpaRepository<Post, UUID> {
     List<Post> findByCreatorId(UUID creatorId);
+    List<Post> findByCreatorIdIn(java.util.Collection<UUID> creatorIds);
     void deleteByCreatorId(UUID creatorId);
 }

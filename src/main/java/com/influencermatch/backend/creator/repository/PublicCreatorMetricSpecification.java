@@ -46,4 +46,12 @@ public class PublicCreatorMetricSpecification {
             return root.get("location").in(locations);
         };
     }
+
+    public static Specification<PublicCreatorMetric> notInCreatorIds(java.util.Set<java.util.UUID> ids) {
+        return (root, query, cb) -> {
+            if (ids == null || ids.isEmpty()) return cb.conjunction();
+            Join<PublicCreatorMetric, Creator> creatorJoin = root.join("creator");
+            return creatorJoin.get("id").in(ids).not();
+        };
+    }
 }

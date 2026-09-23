@@ -1,1 +1,0 @@
-package com.influencermatch.backend.relationship; import org.springframework.data.jpa.repository.JpaRepository; import java.util.UUID; public interface ShortlistItemRepository extends JpaRepository<ShortlistItem,UUID>{}

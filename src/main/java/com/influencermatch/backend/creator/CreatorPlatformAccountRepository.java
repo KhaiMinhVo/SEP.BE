@@ -1,1 +1,0 @@
-package com.influencermatch.backend.creator; import org.springframework.data.jpa.repository.JpaRepository; import java.util.UUID; public interface CreatorPlatformAccountRepository extends JpaRepository<CreatorPlatformAccount,UUID>{}

@@ -1,19 +1,113 @@
 package com.influencermatch.backend.exception;
-import jakarta.servlet.http.HttpServletRequest; import jakarta.validation.ConstraintViolationException; import org.slf4j.*; import org.springframework.dao.OptimisticLockingFailureException; import org.springframework.http.*; import org.springframework.http.converter.HttpMessageNotReadableException; import org.springframework.security.authentication.*; import org.springframework.web.*; import org.springframework.web.bind.*; import org.springframework.web.bind.annotation.*; import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
-import java.net.URI; import java.time.Instant; import java.util.*;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolationException;
+import java.net.URI;
+import java.time.Instant;
+import java.util.*;
+import org.slf4j.*;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.http.*;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.authentication.*;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
-@RestControllerAdvice public class GlobalExceptionHandler {
-    private static final Logger log=LoggerFactory.getLogger(GlobalExceptionHandler.class);
-    @ExceptionHandler(BusinessException.class) ResponseEntity<ProblemDetail> business(BusinessException ex,HttpServletRequest req){return response(ex.code(),ex.getMessage(),req,Map.of());}
-    @ExceptionHandler(MethodArgumentNotValidException.class) ResponseEntity<ProblemDetail> fields(MethodArgumentNotValidException ex,HttpServletRequest req){Map<String,List<String>> errors=new LinkedHashMap<>();ex.getBindingResult().getFieldErrors().forEach(e->errors.computeIfAbsent(e.getField(),k->new ArrayList<>()).add(e.getDefaultMessage()));return response(ErrorCode.VALIDATION_ERROR,"Request validation failed",req,errors);}
-    @ExceptionHandler(HttpMessageNotReadableException.class) ResponseEntity<ProblemDetail> malformed(Exception ex,HttpServletRequest req){return response(ErrorCode.MALFORMED_REQUEST,"Request JSON is malformed or contains an unsupported value",req,Map.of());}
-    @ExceptionHandler({MethodArgumentTypeMismatchException.class,ConstraintViolationException.class,MissingServletRequestParameterException.class}) ResponseEntity<ProblemDetail> invalid(Exception ex,HttpServletRequest req){return response(ErrorCode.VALIDATION_ERROR,"Request parameter is invalid",req,Map.of());}
-    @ExceptionHandler(HttpRequestMethodNotSupportedException.class) ResponseEntity<ProblemDetail> method(Exception ex,HttpServletRequest req){return response(ErrorCode.METHOD_NOT_ALLOWED,"HTTP method is not supported",req,Map.of());}
-    @ExceptionHandler(HttpMediaTypeNotSupportedException.class) ResponseEntity<ProblemDetail> media(Exception ex,HttpServletRequest req){return response(ErrorCode.UNSUPPORTED_MEDIA_TYPE,"Content-Type is not supported",req,Map.of());}
-    @ExceptionHandler({BadCredentialsException.class,UsernameNotFoundException.class}) ResponseEntity<ProblemDetail> credentials(Exception ex,HttpServletRequest req){return response(ErrorCode.UNAUTHENTICATED,"Invalid email or password",req,Map.of());}
-    @ExceptionHandler(LockedException.class) ResponseEntity<ProblemDetail> locked(Exception ex,HttpServletRequest req){return response(ErrorCode.ACCOUNT_LOCKED,"Account is locked",req,Map.of());}
-    @ExceptionHandler(DisabledException.class) ResponseEntity<ProblemDetail> disabled(Exception ex,HttpServletRequest req){return response(ErrorCode.ACCOUNT_DISABLED,"Account is disabled",req,Map.of());}
-    @ExceptionHandler(OptimisticLockingFailureException.class) ResponseEntity<ProblemDetail> optimistic(Exception ex,HttpServletRequest req){return response(ErrorCode.OPTIMISTIC_CONFLICT,"Resource changed; reload and retry",req,Map.of());}
-    @ExceptionHandler(Exception.class) ResponseEntity<ProblemDetail> unexpected(Exception ex,HttpServletRequest req){log.error("Unhandled error traceId={}",MDC.get("traceId"),ex);return response(ErrorCode.INTERNAL_ERROR,"An unexpected error occurred",req,Map.of());}
-    private ResponseEntity<ProblemDetail> response(ErrorCode code,String detail,HttpServletRequest req,Map<String,List<String>> fields){ProblemDetail p=ProblemDetail.forStatusAndDetail(code.status(),detail);p.setTitle(code.title());p.setType(URI.create("https://api.influencermatch/errors/"+code.name().toLowerCase().replace('_','-')));p.setInstance(URI.create(req.getRequestURI()));p.setProperty("code",code.name());p.setProperty("traceId",MDC.get("traceId"));p.setProperty("timestamp",Instant.now());if(!fields.isEmpty())p.setProperty("fieldErrors",fields);return ResponseEntity.status(code.status()).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(p);}
+import org.springframework.web.*;
+import org.springframework.web.bind.*;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+  private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+  @ExceptionHandler(BusinessException.class)
+  ResponseEntity<ProblemDetail> business(BusinessException ex, HttpServletRequest req) {
+    return response(ex.code(), ex.getMessage(), req, Map.of());
+  }
+
+  @ExceptionHandler(MethodArgumentNotValidException.class)
+  ResponseEntity<ProblemDetail> fields(MethodArgumentNotValidException ex, HttpServletRequest req) {
+    Map<String, List<String>> errors = new LinkedHashMap<>();
+    ex.getBindingResult()
+        .getFieldErrors()
+        .forEach(
+            e ->
+                errors
+                    .computeIfAbsent(e.getField(), k -> new ArrayList<>())
+                    .add(e.getDefaultMessage()));
+    return response(ErrorCode.VALIDATION_ERROR, "Request validation failed", req, errors);
+  }
+
+  @ExceptionHandler(HttpMessageNotReadableException.class)
+  ResponseEntity<ProblemDetail> malformed(Exception ex, HttpServletRequest req) {
+    return response(
+        ErrorCode.MALFORMED_REQUEST,
+        "Request JSON is malformed or contains an unsupported value",
+        req,
+        Map.of());
+  }
+
+  @ExceptionHandler({
+    MethodArgumentTypeMismatchException.class,
+    ConstraintViolationException.class,
+    MissingServletRequestParameterException.class
+  })
+  ResponseEntity<ProblemDetail> invalid(Exception ex, HttpServletRequest req) {
+    return response(ErrorCode.VALIDATION_ERROR, "Request parameter is invalid", req, Map.of());
+  }
+
+  @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+  ResponseEntity<ProblemDetail> method(Exception ex, HttpServletRequest req) {
+    return response(ErrorCode.METHOD_NOT_ALLOWED, "HTTP method is not supported", req, Map.of());
+  }
+
+  @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+  ResponseEntity<ProblemDetail> media(Exception ex, HttpServletRequest req) {
+    return response(
+        ErrorCode.UNSUPPORTED_MEDIA_TYPE, "Content-Type is not supported", req, Map.of());
+  }
+
+  @ExceptionHandler({BadCredentialsException.class, UsernameNotFoundException.class})
+  ResponseEntity<ProblemDetail> credentials(Exception ex, HttpServletRequest req) {
+    return response(ErrorCode.UNAUTHENTICATED, "Invalid email or password", req, Map.of());
+  }
+
+  @ExceptionHandler(LockedException.class)
+  ResponseEntity<ProblemDetail> locked(Exception ex, HttpServletRequest req) {
+    return response(ErrorCode.ACCOUNT_LOCKED, "Account is locked", req, Map.of());
+  }
+
+  @ExceptionHandler(DisabledException.class)
+  ResponseEntity<ProblemDetail> disabled(Exception ex, HttpServletRequest req) {
+    return response(ErrorCode.ACCOUNT_DISABLED, "Account is disabled", req, Map.of());
+  }
+
+  @ExceptionHandler(OptimisticLockingFailureException.class)
+  ResponseEntity<ProblemDetail> optimistic(Exception ex, HttpServletRequest req) {
+    return response(
+        ErrorCode.OPTIMISTIC_CONFLICT, "Resource changed; reload and retry", req, Map.of());
+  }
+
+  @ExceptionHandler(Exception.class)
+  ResponseEntity<ProblemDetail> unexpected(Exception ex, HttpServletRequest req) {
+    log.error("Unhandled error traceId={}", MDC.get("traceId"), ex);
+    return response(ErrorCode.INTERNAL_ERROR, "An unexpected error occurred", req, Map.of());
+  }
+
+  private ResponseEntity<ProblemDetail> response(
+      ErrorCode code, String detail, HttpServletRequest req, Map<String, List<String>> fields) {
+    ProblemDetail p = ProblemDetail.forStatusAndDetail(code.status(), detail);
+    p.setTitle(code.title());
+    p.setType(
+        URI.create(
+            "https://api.influencermatch/errors/" + code.name().toLowerCase().replace('_', '-')));
+    p.setInstance(URI.create(req.getRequestURI()));
+    p.setProperty("code", code.name());
+    p.setProperty("traceId", MDC.get("traceId"));
+    p.setProperty("timestamp", Instant.now());
+    if (!fields.isEmpty()) p.setProperty("fieldErrors", fields);
+    return ResponseEntity.status(code.status())
+        .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+        .body(p);
+  }
 }

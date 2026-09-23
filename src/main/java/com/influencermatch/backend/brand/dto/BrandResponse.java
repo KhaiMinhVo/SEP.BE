@@ -1,13 +1,27 @@
 package com.influencermatch.backend.brand.dto;
 
-import com.influencermatch.backend.brand.Platform;
+import com.influencermatch.backend.brand.controller.*;
+import com.influencermatch.backend.brand.enums.*;
+import com.influencermatch.backend.brand.enums.Platform;
+import com.influencermatch.backend.brand.model.*;
+import com.influencermatch.backend.brand.repository.*;
+import com.influencermatch.backend.brand.service.*;
 import java.time.LocalDateTime;
 import java.util.*;
 
 public record BrandResponse(
-        UUID id, UUID userId, String businessName,
-        String industry, List<String> productCategories, String website, String location,
-        List<String> targetMarkets, List<String> targetAudiences, String brandTone,
-        List<Platform> preferredPlatforms, String description, int m4Version,
-        LocalDateTime createdAt, LocalDateTime updatedAt
-) {}
+    UUID id,
+    UUID userId,
+    String businessName,
+    String industry,
+    List<String> productCategories,
+    String website,
+    String location,
+    List<String> targetMarkets,
+    List<String> targetAudiences,
+    String brandTone,
+    List<Platform> preferredPlatforms,
+    String description,
+    int m4Version,
+    LocalDateTime createdAt,
+    LocalDateTime updatedAt) {}

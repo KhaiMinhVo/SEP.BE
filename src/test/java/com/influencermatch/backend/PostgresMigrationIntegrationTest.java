@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PostgresMigrationIntegrationTest {
     @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
-    @Test void migratesV5DataThroughMergedV6AndCamelCaseV7Schema() throws Exception {
+    @Test void migratesV5DataThroughCurrentV10Schema() throws Exception {
         Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
                 .target("5").load().migrate();
         try (Connection connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
@@ -33,7 +33,19 @@ class PostgresMigrationIntegrationTest {
              PreparedStatement statement = connection.prepareStatement("select count(*) from information_schema.tables where table_schema='public' and table_name <> 'flyway_schema_history'");
              ResultSet result = statement.executeQuery()) {
             result.next();
-            assertThat(result.getInt(1)).isEqualTo(29);
+            assertThat(result.getInt(1)).isEqualTo(31);
+        }
+        try (Connection connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             PreparedStatement statement = connection.prepareStatement("select count(*) from information_schema.tables where table_schema='public' and table_name in ('externalIdentity','authExchangeCode')");
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertThat(result.getInt(1)).isEqualTo(2);
+        }
+        try (Connection connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             PreparedStatement statement = connection.prepareStatement("select is_nullable from information_schema.columns where table_schema='public' and table_name='user' and column_name='passwordHash'");
+             ResultSet result = statement.executeQuery()) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(1)).isEqualTo("YES");
         }
         try (Connection connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
              PreparedStatement statement = connection.prepareStatement("select count(*) from information_schema.tables where table_schema='public' and table_name in ('user','refreshToken','brandProfile','brandContextM4','campaign','campaignContextM3')");

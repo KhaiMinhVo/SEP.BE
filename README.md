@@ -167,5 +167,17 @@ docker compose logs --tail 200 api
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/auth/google`
+- `POST /api/v1/auth/google/exchange`
+
+## Google OAuth2 login
+
+1. Create an OAuth 2.0 Web Client in Google Cloud Console.
+2. Add `http://localhost:8080/api/v1/login/oauth2/code/google` as an authorized redirect URI.
+3. Configure `GOOGLE_OAUTH_ENABLED=true`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_FRONTEND_CALLBACK_URL` in `.env`.
+4. Open `http://localhost:8080/api/v1/auth/google` in a browser.
+5. Exchange the one-time callback code through `POST /api/v1/auth/google/exchange` using `{ "code": "..." }`.
+
+Google login is available only to `BRAND`. A first login creates an active Brand user but does not create a Brand Profile. Access and refresh tokens behave the same as password login.
 
 Public registration luôn tạo role `BRAND`; `/admin/**` yêu cầu role `ADMIN`.

@@ -57,6 +57,19 @@ Content-Type: application/json
 
 {"refreshToken":"{{rotatedRefreshToken}}"}
 
+### 10. Start Google login (open this URL in a browser; requires GOOGLE_OAUTH_ENABLED=true)
+GET {{baseUrl}}/auth/google
+
+### 11. Exchange the one-time code received by the frontend callback
+POST {{baseUrl}}/auth/google/exchange
+Content-Type: application/json
+
+{"code":"{{googleExchangeCode}}"}
+> {%
+ client.global.set("googleAccessToken", response.body.data.accessToken);
+ client.global.set("googleRefreshToken", response.body.data.refreshToken);
+%}
+
 ### 9. Expected: 401 for reuse of a revoked refresh token
 POST {{baseUrl}}/auth/refresh
 Content-Type: application/json

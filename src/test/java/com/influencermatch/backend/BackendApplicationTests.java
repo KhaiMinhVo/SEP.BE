@@ -56,6 +56,21 @@ class BackendApplicationTests {
     }
 
     @Test
+    void googleLoginReportsUnavailableWhenNotConfigured() throws Exception {
+        mvc.perform(get("/auth/google"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("GOOGLE_OAUTH_DISABLED"));
+    }
+
+    @Test
+    void invalidGoogleExchangeCodeIsRejected() throws Exception {
+        mvc.perform(post("/auth/google/exchange").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"invalid-code\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_CODE_INVALID_OR_EXPIRED"));
+    }
+
+    @Test
     void unauthenticatedRequestUsesProblemDetailAndCorrelationId() throws Exception {
         mvc.perform(get("/auth/me").header("X-Correlation-ID", "mvc-trace"))
                 .andExpect(status().isUnauthorized())

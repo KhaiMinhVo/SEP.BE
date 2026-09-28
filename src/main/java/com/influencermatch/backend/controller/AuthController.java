@@ -6,8 +6,13 @@ import com.influencermatch.backend.dto.auth.LoginResponse;
 import com.influencermatch.backend.dto.auth.RegisterRequest;
 import com.influencermatch.backend.dto.auth.UserProfileResponse;
 import com.influencermatch.backend.dto.auth.RefreshTokenRequest;
+import com.influencermatch.backend.dto.auth.GoogleCodeExchangeRequest;
+import com.influencermatch.backend.config.GoogleOAuthProperties;
+import com.influencermatch.backend.exception.BusinessException;
+import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.entity.User;
 import com.influencermatch.backend.service.AuthService;
+import com.influencermatch.backend.service.GoogleAuthService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -32,6 +37,8 @@ import java.net.URI;
 public class AuthController {
 
     private final AuthService authService;
+    private final GoogleAuthService googleAuthService;
+    private final GoogleOAuthProperties googleOAuthProperties;
 
     @Operation(summary = "Register a new brand account", security = {})
     @PostMapping("/register")
@@ -46,6 +53,21 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(ApiResponse.ok("Login successful.", authService.login(request)));
+    }
+
+    @Operation(summary = "Start Google OAuth2 login", security = {})
+    @GetMapping("/google")
+    public ResponseEntity<Void> googleLogin() {
+        if (!googleOAuthProperties.isEnabled())
+            throw new BusinessException(ErrorCode.GOOGLE_OAUTH_DISABLED, "Google login is not configured");
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create("/api/v1/oauth2/authorization/google")).build();
+    }
+
+    @Operation(summary = "Exchange a one-time Google login code for JWT tokens", security = {})
+    @PostMapping("/google/exchange")
+    public ResponseEntity<ApiResponse<LoginResponse>> exchangeGoogleCode(@Valid @RequestBody GoogleCodeExchangeRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Google login successful.", googleAuthService.exchange(request.code())));
     }
 
     @Operation(summary = "Rotate a refresh token and issue a new token pair", security = {})

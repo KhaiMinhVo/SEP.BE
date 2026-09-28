@@ -68,6 +68,13 @@ spring:
 #  JWT Security
 # ------------------------------------------------------------------------------------
 application:
+  oauth2:
+    google:
+      enabled: ${GOOGLE_OAUTH_ENABLED:false}
+      client-id: ${GOOGLE_CLIENT_ID:}
+      client-secret: ${GOOGLE_CLIENT_SECRET:}
+      frontend-callback-url: ${GOOGLE_FRONTEND_CALLBACK_URL:http://localhost:5173/auth/google/callback}
+      exchange-code-ttl-seconds: 60
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
   bootstrap-admin:

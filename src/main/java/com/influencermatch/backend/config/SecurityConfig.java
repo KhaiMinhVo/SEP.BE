@@ -3,6 +3,8 @@ package com.influencermatch.backend.config;
 import com.influencermatch.backend.security.JwtAccessDeniedHandler;
 import com.influencermatch.backend.security.JwtAuthenticationEntryPoint;
 import com.influencermatch.backend.security.JwtAuthenticationFilter;
+import com.influencermatch.backend.security.GoogleOAuthSuccessHandler;
+import com.influencermatch.backend.security.GoogleOAuthFailureHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -31,12 +33,19 @@ public class SecurityConfig {
   private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
   private final JwtAccessDeniedHandler jwtAccessDeniedHandler;
   private final UserDetailsService userDetailsService;
+  private final GoogleOAuthProperties googleOAuthProperties;
+  private final GoogleOAuthSuccessHandler googleOAuthSuccessHandler;
+  private final GoogleOAuthFailureHandler googleOAuthFailureHandler;
 
   // Patterns are relative to context-path /api/v1
   private static final String[] PUBLIC_ENDPOINTS = {
     "/auth/register",
     "/auth/login",
     "/auth/refresh",
+    "/auth/google",
+    "/auth/google/exchange",
+    "/oauth2/**",
+    "/login/oauth2/**",
     "/actuator/health",
     "/v3/api-docs/**",
     "/api-docs/**",
@@ -55,7 +64,8 @@ public class SecurityConfig {
             ex ->
                 ex.authenticationEntryPoint(jwtAuthenticationEntryPoint)
                     .accessDeniedHandler(jwtAccessDeniedHandler))
-        .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        .sessionManagement(s -> s.sessionCreationPolicy(googleOAuthProperties.isEnabled()
+            ? SessionCreationPolicy.IF_REQUIRED : SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(
             auth ->
                 auth.requestMatchers(PUBLIC_ENDPOINTS)
@@ -70,6 +80,11 @@ public class SecurityConfig {
                     .authenticated())
         .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
+    if (googleOAuthProperties.isEnabled()) {
+      http.oauth2Login(oauth -> oauth
+          .successHandler(googleOAuthSuccessHandler)
+          .failureHandler(googleOAuthFailureHandler));
+    }
     return http.build();
   }
 

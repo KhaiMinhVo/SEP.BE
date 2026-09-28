@@ -37,7 +37,35 @@ class AuthControllerTest {
     private AuthService authService;
 
     @MockBean
+    private com.influencermatch.backend.auth.service.GoogleAuthService googleAuthService;
+
+    @MockBean
+    private com.influencermatch.backend.config.GoogleOAuthProperties googleOAuthProperties;
+
+    @MockBean
     private com.influencermatch.backend.security.JwtTokenProvider jwtTokenProvider;
+
+    @MockBean
+    private org.springframework.security.core.userdetails.UserDetailsService userDetailsService;
+
+    @Test
+    void googleLoginRedirectsWhenEnabled() throws Exception {
+        when(googleOAuthProperties.isEnabled()).thenReturn(true);
+        mockMvc.perform(get("/auth/google"))
+            .andExpect(status().isFound())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                .redirectedUrl("/api/v1/oauth2/authorization/google"));
+    }
+
+    @Test
+    void googleExchangeReturnsLoginEnvelope() throws Exception {
+        when(googleAuthService.exchange("one-time-code")).thenReturn(createMockLoginResponse());
+        mockMvc.perform(post("/auth/google/exchange").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"code\":\"one-time-code\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.data.accessToken").exists());
+    }
 
     @Test
     @DisplayName("POST /auth/register - Success returns 201 Created")

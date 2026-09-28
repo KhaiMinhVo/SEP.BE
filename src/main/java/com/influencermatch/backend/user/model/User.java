@@ -37,7 +37,7 @@ public class User extends BaseEntity implements UserDetails {
   private String email;
 
   /** BCrypt-hashed password. Never store or log the raw value. */
-  @Column(nullable = false)
+  @Column
   private String passwordHash;
 
   @Column(nullable = false, length = 150)

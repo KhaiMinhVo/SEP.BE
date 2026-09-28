@@ -3,6 +3,10 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  GOOGLE_OAUTH_DISABLED(HttpStatus.SERVICE_UNAVAILABLE, "Google login is not configured"),
+  GOOGLE_AUTHENTICATION_FAILED(HttpStatus.UNAUTHORIZED, "Google authentication failed"),
+  GOOGLE_EMAIL_NOT_VERIFIED(HttpStatus.UNAUTHORIZED, "Google email is not verified"),
+  AUTH_CODE_INVALID_OR_EXPIRED(HttpStatus.UNAUTHORIZED, "Authentication code is invalid or expired"),
   VALIDATION_ERROR(HttpStatus.BAD_REQUEST, "Validation failed"),
   MALFORMED_REQUEST(HttpStatus.BAD_REQUEST, "Malformed request"),
   EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "Email already exists"),

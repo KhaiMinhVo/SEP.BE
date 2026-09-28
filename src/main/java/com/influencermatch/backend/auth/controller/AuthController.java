@@ -10,6 +10,9 @@ import com.influencermatch.backend.auth.model.*;
 import com.influencermatch.backend.auth.repository.*;
 import com.influencermatch.backend.auth.service.*;
 import com.influencermatch.backend.auth.service.AuthService;
+import com.influencermatch.backend.config.GoogleOAuthProperties;
+import com.influencermatch.backend.exception.BusinessException;
+import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.common.dto.ApiResponse;
 import com.influencermatch.backend.user.model.User;
 import io.swagger.v3.oas.annotations.Operation;
@@ -35,6 +38,26 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
   private final AuthService authService;
+  private final GoogleAuthService googleAuthService;
+  private final GoogleOAuthProperties googleOAuthProperties;
+
+  @Operation(summary = "Start Google login for brand accounts", security = {})
+  @GetMapping("/google")
+  public ResponseEntity<Void> googleLogin() {
+    if (!googleOAuthProperties.isEnabled()) {
+      throw new BusinessException(ErrorCode.GOOGLE_OAUTH_DISABLED, "Google login is not configured");
+    }
+    return ResponseEntity.status(302)
+        .location(URI.create("/api/v1/oauth2/authorization/google")).build();
+  }
+
+  @Operation(summary = "Exchange a one-time Google login code for tokens", security = {})
+  @PostMapping("/google/exchange")
+  public ResponseEntity<ApiResponse<LoginResponse>> googleExchange(
+      @Valid @RequestBody GoogleCodeExchangeRequest request) {
+    return ResponseEntity.ok(ApiResponse.ok("Google login successful.",
+        googleAuthService.exchange(request.code())));
+  }
 
   @Operation(
       summary = "Register a new brand account",

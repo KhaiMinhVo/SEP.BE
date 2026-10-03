@@ -7,6 +7,7 @@ import com.influencermatch.backend.billing.repository.*;
 import com.influencermatch.backend.billing.service.*;
 
 public enum SubscriptionStatus {
+  PENDING,
   ACTIVE,
   EXPIRED,
   CANCELLED

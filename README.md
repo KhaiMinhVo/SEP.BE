@@ -49,13 +49,6 @@ Các địa chỉ sau phải truy cập được:
 - Auth demo: `docs/AuthPoc.http`
 - Full Flow 1 HTTP demo: `docs/Flow1.http`
 
-Postman:
-
-1. Import `docs/postman/InfluencerMatch-Flow1.postman_collection.json`.
-2. Import and select `docs/postman/InfluencerMatch-Local.postman_environment.json`.
-3. Set the ADMIN credentials to the same values configured in `.env`.
-4. Run requests in numeric order. Use a fresh database or a new `brandEmail` when rerunning the create flow.
-
 Kiểm tra health bằng PowerShell:
 
 ```powershell

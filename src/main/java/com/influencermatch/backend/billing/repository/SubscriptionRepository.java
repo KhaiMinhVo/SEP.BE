@@ -13,4 +13,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface SubscriptionRepository extends JpaRepository<Subscription, UUID> {
   List<Subscription> findByBrandProfileId(UUID brandProfileId);
+
+  boolean existsByBrandProfileIdAndStatusAndExpirationDateGreaterThanEqual(
+      UUID brandProfileId, SubscriptionStatus status, java.time.LocalDate today);
 }

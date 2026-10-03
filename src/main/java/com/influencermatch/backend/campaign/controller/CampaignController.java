@@ -6,6 +6,7 @@ import com.influencermatch.backend.campaign.model.*;
 import com.influencermatch.backend.campaign.repository.*;
 import com.influencermatch.backend.campaign.service.*;
 import com.influencermatch.backend.common.dto.*;
+import com.influencermatch.backend.creator.dto.CreatorDiscoveryResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -18,7 +19,6 @@ import org.springframework.http.*;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
-import com.influencermatch.backend.creator.dto.CreatorDiscoveryResponse;
 
 @RestController
 @RequiredArgsConstructor
@@ -29,6 +29,7 @@ public class CampaignController {
 
   @PostMapping("/brands/{brandId}/campaigns")
   @Operation(summary = "Create a draft campaign")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CREATE_CAMPAIGN')")
   public ResponseEntity<ApiResponse<CampaignResponse>> create(
       @PathVariable UUID brandId,
       @Valid @RequestBody CampaignRequest request,
@@ -44,6 +45,8 @@ public class CampaignController {
 
   @Operation(summary = "List campaigns owned by a brand profile")
   @GetMapping("/brands/{brandId}/campaigns")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_OWN_CAMPAIGN') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
   public ApiResponse<PageResponse<CampaignResponse>> list(
       @PathVariable UUID brandId,
       @RequestParam(defaultValue = "0") int page,
@@ -56,12 +59,15 @@ public class CampaignController {
 
   @Operation(summary = "Get campaign details")
   @GetMapping("/campaigns/{id}")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_OWN_CAMPAIGN') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
   public ApiResponse<CampaignResponse> get(@PathVariable UUID id, Authentication auth) {
     return ApiResponse.ok(service.get(id, auth));
   }
 
   @Operation(summary = "Update a draft campaign")
   @PutMapping("/campaigns/{id}")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
   public ApiResponse<CampaignResponse> update(
       @PathVariable UUID id, @Valid @RequestBody CampaignRequest request, Authentication auth) {
     return ApiResponse.ok(service.update(id, request, auth));
@@ -72,6 +78,8 @@ public class CampaignController {
       description =
           "Allowed: DRAFT -> READY_FOR_DISCOVERY -> ACTIVE -> COMPLETED; DRAFT -> ARCHIVED")
   @PatchMapping("/campaigns/{id}/status")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('CHANGE_CAMPAIGN_STATUS')")
   public ApiResponse<CampaignResponse> status(
       @PathVariable UUID id,
       @Valid @RequestBody CampaignStatusRequest request,
@@ -81,12 +89,15 @@ public class CampaignController {
 
   @Operation(summary = "Archive a draft campaign")
   @PatchMapping("/campaigns/{id}/archive")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('CHANGE_CAMPAIGN_STATUS')")
   public ApiResponse<CampaignResponse> archive(@PathVariable UUID id, Authentication auth) {
     return ApiResponse.ok(service.archive(id, auth));
   }
 
   @Operation(summary = "Discover creators for a campaign")
   @GetMapping("/campaigns/{id}/discover")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SEARCH_CREATOR')")
   public ApiResponse<PageResponse<CreatorDiscoveryResponse>> discover(
       @PathVariable UUID id,
       @RequestParam(defaultValue = "0") int page,

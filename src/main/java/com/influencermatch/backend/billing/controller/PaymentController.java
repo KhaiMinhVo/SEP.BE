@@ -11,7 +11,6 @@ import jakarta.validation.Valid;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -29,25 +28,40 @@ public class PaymentController {
   private final PaymentService paymentService;
   private final BrandProfileRepository brandProfileRepository;
 
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('MANAGE_OWN_SUBSCRIPTION')")
   @PostMapping("/subscribe")
   public ResponseEntity<ApiResponse<PaymentResponse>> subscribeToPlan(
       @Valid @RequestBody PaymentRequest request,
       Authentication authentication,
-      HttpServletRequest httpServletRequest) throws Exception {
+      HttpServletRequest httpServletRequest)
+      throws Exception {
 
-    BrandProfile brandProfile = brandProfileRepository.findByUserId(UUID.fromString(authentication.getName()))
-        .orElseThrow(() -> new RuntimeException("Brand Profile not found"));
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.MANAGE_OWN_SUBSCRIPTION);
+    BrandProfile brandProfile =
+        brandProfileRepository
+            .findByUserId(com.influencermatch.backend.security.Permissions.actor().getId())
+            .orElseThrow(
+                () ->
+                    new com.influencermatch.backend.exception.NotFoundException(
+                        "Brand Profile not found"));
 
-    String ipAddress = httpServletRequest.getHeader("X-FORWARDED-FOR");
+    String ipAddress = httpServletRequest.getRemoteAddr();
     if (ipAddress == null) {
       ipAddress = httpServletRequest.getRemoteAddr();
     }
 
-    String paymentUrl = paymentService.createPaymentUrl(request.getPlanId(), brandProfile, ipAddress);
+    String paymentUrl =
+        paymentService.createPaymentUrl(request.getPlanId(), brandProfile, ipAddress);
 
     return ResponseEntity.ok(ApiResponse.ok(new PaymentResponse(paymentUrl)));
   }
 
+  @io.swagger.v3.oas.annotations.Operation(
+      summary = "VNPay return",
+      description = "Public gateway callback; verified signature and transaction required",
+      security = {})
   @GetMapping("/vnpay/return")
   public ResponseEntity<String> vnpayReturn(HttpServletRequest request) {
     Map<String, String> fields = new HashMap<>();
@@ -60,14 +74,21 @@ public class PaymentController {
     }
 
     boolean success = paymentService.processVnPayReturn(fields);
-    
+
     if (success) {
+      if (!"00".equals(fields.get("vnp_ResponseCode"))
+          || !"00".equals(fields.get("vnp_TransactionStatus")))
+        return ResponseEntity.ok("Payment was not completed. You can return to the app.");
       return ResponseEntity.ok("Payment Success! You can close this tab and return to the app.");
     } else {
       return ResponseEntity.badRequest().body("Payment Failed or Invalid Signature!");
     }
   }
-  
+
+  @io.swagger.v3.oas.annotations.Operation(
+      summary = "VNPay IPN",
+      description = "Public gateway callback; verified signature and transaction required",
+      security = {})
   @GetMapping("/vnpay/ipn")
   public ResponseEntity<Map<String, String>> vnpayIpn(HttpServletRequest request) {
     Map<String, String> fields = new HashMap<>();

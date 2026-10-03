@@ -51,6 +51,15 @@ class BackendApplicationTests {
   @Autowired ObjectMapper objectMapper;
   @Autowired PasswordEncoder passwordEncoder;
   @Autowired CampaignContextRepository campaignContexts;
+  @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+  @org.junit.jupiter.api.BeforeEach
+  void prepareRoleGuard() {
+    jdbc.execute("CREATE TABLE IF NOT EXISTS rbac_guard (id INTEGER PRIMARY KEY)");
+    jdbc.update(
+        "INSERT INTO rbac_guard(id) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM rbac_guard WHERE"
+            + " id=1)");
+  }
 
   @Test
   void contextLoads() {

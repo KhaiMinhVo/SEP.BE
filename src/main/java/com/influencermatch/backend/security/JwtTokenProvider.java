@@ -45,6 +45,7 @@ public class JwtTokenProvider {
         .claim(CLAIM_EMAIL, user.getEmail())
         .claim(CLAIM_ROLE, user.getRole().name())
         .claim(CLAIM_TYPE, "access")
+        .claim("authVersion", user.getAuthVersion())
         .issuedAt(new Date(now))
         .expiration(new Date(now + jwtExpirationMs))
         .signWith(getSigningKey(), Jwts.SIG.HS256)
@@ -53,7 +54,17 @@ public class JwtTokenProvider {
 
   public boolean isTokenValid(String token, UserDetails userDetails) {
     final String username = extractUsername(token);
-    return username != null && username.equals(userDetails.getUsername()) && !isTokenExpired(token);
+    Claims claims = extractAllClaims(token);
+    if (!(userDetails instanceof User user)) return false;
+    Object rawVersion = claims.get("authVersion");
+    long version = rawVersion == null ? 0 : ((Number) rawVersion).longValue();
+    return username != null
+        && username.equals(user.getEmail())
+        && !isTokenExpired(token)
+        && "access".equals(claims.get(CLAIM_TYPE, String.class))
+        && user.getId().toString().equals(claims.get(CLAIM_USER_ID, String.class))
+        && user.getRole().name().equals(claims.get(CLAIM_ROLE, String.class))
+        && version == user.getAuthVersion();
   }
 
   public boolean validateToken(String token) {

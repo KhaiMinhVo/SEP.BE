@@ -41,6 +41,7 @@ public class LoginResponse {
     private String fullName;
     private String role;
     private String status;
+    private java.util.List<String> permissions;
     private LocalDateTime lastLoginAt;
   }
 }

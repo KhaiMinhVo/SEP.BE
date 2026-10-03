@@ -10,4 +10,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface PlanRepository extends JpaRepository<Plan, UUID> {}
+public interface PlanRepository extends JpaRepository<Plan, UUID> {
+  org.springframework.data.domain.Page<Plan> findByStatus(
+      PlanStatus status, org.springframework.data.domain.Pageable pageable);
+}

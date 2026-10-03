@@ -129,7 +129,7 @@ docker run --rm `
   mvn test
 ```
 
-Lưu ý: Testcontainers cần truy cập Docker daemon. Khi chạy Maven bên trong container mà không mount Docker socket, integration test PostgreSQL có thể bị skip. CI hoặc Maven chạy trực tiếp trên máy sẽ chạy đầy đủ test này.
+Lưu ý: Testcontainers cần Docker daemon đang chạy. Nếu không có Docker, các test PostgreSQL sẽ thất bại, không tự bỏ qua. Nên chạy Maven trực tiếp trên máy có Docker Desktop.
 
 ## Các lỗi local thường gặp
 
@@ -186,3 +186,55 @@ Use a separate development database when switching between those histories; do n
 The frontend callback must exchange the code once within 60 seconds and handle the returned login response.
 
 Public registration luôn tạo role `BRAND`; `/admin/**` yêu cầu role `ADMIN`.
+
+## RBAC và phạm vi triển khai
+
+Ba role cố định: `BRAND` (25 permission), `DATA_MANAGER` (12), `ADMIN` (22).
+Tổng cộng 43 permission, không wildcard; danh sách tính từ role trong database và trả qua
+`user.permissions` khi login/refresh/Google exchange, `permissions` khi gọi `/auth/me`.
+Bốn quyền chung cấp cho cả ba role; tám quyền vận hành dữ liệu dùng chung cho Manager và Admin.
+Nguồn ma trận: `security/Permission.java` và `security/RolePermissions.java`.
+
+Các API hiện có đã được bảo vệ:
+
+- Auth profile; Admin User (xem, đổi status, cấp role).
+- Brand Profile, Campaign và Creator Discovery: Brand chỉ thao tác dữ liệu của mình.
+- Admin đọc Brand/Campaign để hỗ trợ bằng `VIEW_BRAND_SUPPORT_DATA`, không tạo/sửa/archive thay Brand.
+- Plan: Brand đọc gói đang hoạt động; Admin quản lý bằng `MANAGE_PLAN`.
+- `/subscriptions`: Brand quản lý subscription của mình; không tự kích hoạt gói trả phí.
+- `/admin/subscriptions`: Admin quản lý subscription với audit, không cho Brand/Data Manager gọi.
+- `/billing/subscribe`: Brand tạo checkout VNPay từ tài khoản trong JWT; callback xác minh chữ ký,
+  merchant, số tiền và giao dịch trước khi thay đổi dữ liệu. Callback lặp được xử lý idempotent.
+- `/admin/audit-logs`: Admin đọc audit có phân trang và lọc actor/action/entity/thời gian.
+- `/creators/ingest`: chỉ service key, không chấp nhận JWT của bất kỳ role nào thay key.
+
+Đường dẫn chuẩn là `/api/v1/plans`, `/api/v1/subscriptions` (context-path đã chứa `/api/v1`).
+Alias đường dẫn billing cũ có prefix lặp vẫn được giữ để tương thích.
+
+### Cấp role và thu hồi token
+
+`PATCH /api/v1/admin/users/{id}/role` nhận `{ "role": "DATA_MANAGER", "reason": "..." }`,
+yêu cầu `ASSIGN_USER_ROLE`. `PATCH .../{id}/status` nhận `status` và `reason` tùy chọn.
+Brand đã có profile không thể chuyển sang role nội bộ; phải dùng tài khoản riêng.
+Không được khóa, disable hoặc hạ role Admin hoạt động cuối cùng, kể cả request đồng thời.
+
+Migration V4 thêm `auth_version`, constraint role và một bản ghi khóa chung `rbac_guard`.
+Mỗi thay đổi role/status thực sự tăng version, revoke refresh token và ghi audit trong cùng transaction.
+JWT kiểm tra role/status/version hiện tại từ database. JWT cũ thiếu claim coi là version 0;
+sau khi version tăng, mở khóa không làm token cũ hợp lệ lại. Thao tác không đổi giá trị không tăng version.
+OAuth session chỉ lưu handshake Google, không dùng làm đăng nhập cho API JWT.
+
+### Ingestion service key
+
+Đặt `CREATOR_INGESTION_API_KEY` trong environment backend và header `X-Service-Key` của crawler.
+Không cấu hình trả `503 INGESTION_NOT_CONFIGURED`; thiếu/sai key trả `401`.
+Key chỉ dùng cho ingestion, không cấp quyền API quản trị hay dữ liệu riêng.
+Docker Compose hiện truyền biến trong `.env` vào container API qua `env_file`.
+
+### Chưa triển khai trong đợt RBAC này
+
+Permission Notification, Recommendation, Shortlist/CRM, Collaboration/Outcome/Learning,
+Usage/Billing read và các tác vụ Data Manager mới chỉ được khai báo nếu chưa có API tương ứng.
+Không tạo workflow claim, dynamic role/permission hoặc quota engine mới. Không có entitlement/quota
+gate đầy đủ cho mọi API hiện tại; RBAC không thay thế các kiểm tra này khi chúng được triển khai.
+Không thể xem các permission đã khai báo là chức năng đã hoạt động.

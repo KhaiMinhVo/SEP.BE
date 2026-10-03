@@ -33,41 +33,73 @@ public class PaymentService {
   private final SubscriptionRepository subscriptionRepository;
   private final PaymentRepository paymentRepository;
   private final VnPayConfig vnPayConfig;
+  private final com.influencermatch.backend.brand.repository.BrandProfileRepository brands;
+  private final jakarta.persistence.EntityManager entityManager;
 
   @Transactional
-  public String createPaymentUrl(UUID planId, BrandProfile brand, String ipAddress) throws UnsupportedEncodingException {
-    Plan plan = planRepository.findById(planId)
-        .orElseThrow(() -> new ResourceNotFoundException("Plan not found"));
+  public String createPaymentUrl(UUID planId, BrandProfile brand, String ipAddress)
+      throws UnsupportedEncodingException {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.MANAGE_OWN_SUBSCRIPTION);
+    if (!brand
+        .getUser()
+        .getId()
+        .equals(com.influencermatch.backend.security.Permissions.actor().getId()))
+      throw new com.influencermatch.backend.exception.ForbiddenException(
+          "Payment belongs to another brand");
+    brands
+        .lockForBilling(brand.getId())
+        .orElseThrow(() -> new ResourceNotFoundException("Brand not found"));
+    if (subscriptionRepository.existsByBrandProfileIdAndStatusAndExpirationDateGreaterThanEqual(
+        brand.getId(), SubscriptionStatus.ACTIVE, LocalDate.now()))
+      throw new com.influencermatch.backend.exception.ConflictException(
+          com.influencermatch.backend.exception.ErrorCode.SUBSCRIPTION_CONFLICT,
+          "An active subscription already exists");
+    Plan plan =
+        planRepository
+            .findById(planId)
+            .orElseThrow(() -> new ResourceNotFoundException("Plan not found"));
 
-    Subscription subscription = Subscription.builder()
-        .brandProfile(brand)
-        .plan(plan)
-        .startDate(LocalDate.now())
-        .expirationDate(LocalDate.now().plusDays(plan.getDurationDays()))
-        .status(SubscriptionStatus.PENDING)
-        .usedCampaignQuota(0)
-        .usedRecommendationQuota(0)
-        .usedRefreshQuota(0)
-        .build();
+    if (plan.getStatus() != com.influencermatch.backend.billing.enums.PlanStatus.ACTIVE
+        || !"VND".equals(plan.getCurrency())
+        || plan.getPrice().signum() <= 0)
+      throw new com.influencermatch.backend.exception.ValidationException(
+          "Checkout requires an active paid VND plan");
+    if (vnPayConfig.getHashSecret() == null || vnPayConfig.getHashSecret().isBlank())
+      throw new com.influencermatch.backend.exception.BusinessException(
+          com.influencermatch.backend.exception.ErrorCode.INTERNAL_ERROR,
+          "Payment provider is not configured");
+    Subscription subscription =
+        Subscription.builder()
+            .brandProfile(brand)
+            .plan(plan)
+            .startDate(LocalDate.now())
+            .expirationDate(LocalDate.now().plusDays(plan.getDurationDays()))
+            .status(SubscriptionStatus.PENDING)
+            .usedCampaignQuota(0)
+            .usedRecommendationQuota(0)
+            .usedRefreshQuota(0)
+            .build();
     subscription = subscriptionRepository.save(subscription);
 
     String txnRef = UUID.randomUUID().toString().replace("-", "").substring(0, 15);
 
-    Payment payment = Payment.builder()
-        .brandProfile(brand)
-        .subscription(subscription)
-        .amount(plan.getPrice())
-        .currency("VND")
-        .paymentGateway("VNPAY")
-        .transactionCode(txnRef)
-        .status(PaymentStatus.PENDING)
-        .createdAt(LocalDateTime.now())
-        .build();
+    Payment payment =
+        Payment.builder()
+            .brandProfile(brand)
+            .subscription(subscription)
+            .amount(plan.getPrice())
+            .currency("VND")
+            .paymentGateway("VNPAY")
+            .transactionCode(txnRef)
+            .status(PaymentStatus.PENDING)
+            .createdAt(LocalDateTime.now())
+            .build();
     paymentRepository.save(payment);
 
     // Build VNPay params
-    long amount = plan.getPrice().longValue() * 100L;
-    
+    long amount = plan.getPrice().multiply(java.math.BigDecimal.valueOf(100)).longValueExact();
+
     Map<String, String> vnp_Params = new HashMap<>();
     vnp_Params.put("vnp_Version", "2.1.0");
     vnp_Params.put("vnp_Command", "pay");
@@ -86,69 +118,78 @@ public class PaymentService {
     vnp_Params.put("vnp_CreateDate", now.format(formatter));
     vnp_Params.put("vnp_ExpireDate", now.plusMinutes(15).format(formatter));
 
-    StringBuilder hashDataBuilder = new StringBuilder();
-    StringBuilder query = new StringBuilder();
-    vnp_Params.entrySet().stream()
-        .sorted(Map.Entry.comparingByKey())
-        .forEach(entry -> {
-          try {
-            String key = entry.getKey();
-            String value = entry.getValue();
-            if (value != null && value.length() > 0) {
-              hashDataBuilder.append(key).append('=').append(value).append('&');
-              query.append(URLEncoder.encode(key, StandardCharsets.US_ASCII.toString()))
-                  .append('=')
-                  .append(URLEncoder.encode(value, StandardCharsets.US_ASCII.toString()))
-                  .append('&');
-            }
-          } catch (Exception e) {
-            // ignore
-          }
-        });
-        
-    String hashString = hashDataBuilder.substring(0, hashDataBuilder.length() - 1);
-    String queryString = query.substring(0, query.length() - 1);
-    
-    String vnp_SecureHash = VnPayUtil.hmacSHA512(vnPayConfig.getHashSecret(), hashString);
+    String vnp_SecureHash = VnPayUtil.hashAllFields(vnp_Params, vnPayConfig.getHashSecret());
+    String queryString =
+        vnp_Params.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .map(
+                e ->
+                    URLEncoder.encode(e.getKey(), StandardCharsets.US_ASCII)
+                        + "="
+                        + URLEncoder.encode(e.getValue(), StandardCharsets.US_ASCII))
+            .collect(java.util.stream.Collectors.joining("&"));
     queryString += "&vnp_SecureHash=" + vnp_SecureHash;
-    
+
     return vnPayConfig.getPayUrl() + "?" + queryString;
   }
 
   @Transactional
   public boolean processVnPayReturn(Map<String, String> params) {
-    String vnp_SecureHash = params.get("vnp_SecureHash");
-    if (params.containsKey("vnp_SecureHashType")) {
-        params.remove("vnp_SecureHashType");
+    String signature = params.get("vnp_SecureHash");
+    if (signature == null
+        || signature.length() != 128
+        || vnPayConfig.getHashSecret() == null
+        || vnPayConfig.getHashSecret().isBlank()) return false;
+    Map<String, String> signed = new HashMap<>();
+    params.forEach(
+        (key, value) -> {
+          if (key.startsWith("vnp_")
+              && !key.equals("vnp_SecureHash")
+              && !key.equals("vnp_SecureHashType")) signed.put(key, value);
+        });
+    String expected = VnPayUtil.hashAllFields(signed, vnPayConfig.getHashSecret());
+    if (!java.security.MessageDigest.isEqual(
+        expected.getBytes(StandardCharsets.US_ASCII),
+        signature.toLowerCase(java.util.Locale.ROOT).getBytes(StandardCharsets.US_ASCII)))
+      return false;
+    if (!java.util.Objects.equals(vnPayConfig.getTmnCode(), params.get("vnp_TmnCode")))
+      return false;
+    Payment existing =
+        paymentRepository.findByTransactionCode(params.get("vnp_TxnRef")).orElse(null);
+    if (existing == null) return false;
+    // The same brand lock serializes free/admin activation and payment callbacks.
+    brands.lockForBilling(existing.getBrandProfile().getId()).orElseThrow();
+    Payment payment =
+        paymentRepository.findLockedByTransactionCode(params.get("vnp_TxnRef")).orElseThrow();
+    entityManager.refresh(payment);
+    long expectedAmount =
+        payment.getAmount().multiply(java.math.BigDecimal.valueOf(100)).longValueExact();
+    if (!Long.toString(expectedAmount).equals(params.get("vnp_Amount"))) return false;
+    boolean success =
+        "00".equals(params.get("vnp_ResponseCode"))
+            && "00".equals(params.get("vnp_TransactionStatus"));
+    if (payment.getStatus() == PaymentStatus.PAID) return success;
+    if (payment.getStatus() == PaymentStatus.FAILED) return !success;
+    if (payment.getStatus() != PaymentStatus.PENDING) return false;
+    Subscription sub = payment.getSubscription();
+    entityManager.refresh(sub);
+    if (sub.getStatus() != SubscriptionStatus.PENDING) return false;
+    if (success) {
+      if (subscriptionRepository.existsByBrandProfileIdAndStatusAndExpirationDateGreaterThanEqual(
+          payment.getBrandProfile().getId(), SubscriptionStatus.ACTIVE, LocalDate.now()))
+        return false;
+      payment.setStatus(PaymentStatus.PAID);
+      payment.setPaidAt(LocalDateTime.now());
+      sub.setStatus(SubscriptionStatus.ACTIVE);
+      sub.setStartDate(LocalDate.now());
+      sub.setExpirationDate(LocalDate.now().plusDays(sub.getPlan().getDurationDays()));
+    } else {
+      payment.setStatus(PaymentStatus.FAILED);
+      payment.setFailureReason(params.get("vnp_ResponseCode"));
+      sub.setStatus(SubscriptionStatus.CANCELLED);
     }
-    if (params.containsKey("vnp_SecureHash")) {
-        params.remove("vnp_SecureHash");
-    }
-    
-    String signValue = VnPayUtil.hashAllFields(params, vnPayConfig.getHashSecret());
-    if (signValue.equals(vnp_SecureHash)) {
-      String txnRef = params.get("vnp_TxnRef");
-      Payment payment = paymentRepository.findByTransactionCode(txnRef).orElse(null);
-      if (payment != null && payment.getStatus() == PaymentStatus.PENDING) {
-        if ("00".equals(params.get("vnp_ResponseCode"))) {
-          payment.setStatus(PaymentStatus.PAID);
-          payment.setPaidAt(LocalDateTime.now());
-          
-          Subscription sub = payment.getSubscription();
-          sub.setStatus(SubscriptionStatus.ACTIVE);
-          subscriptionRepository.save(sub);
-        } else {
-          payment.setStatus(PaymentStatus.FAILED);
-          payment.setFailureReason(params.get("vnp_ResponseCode"));
-          
-          Subscription sub = payment.getSubscription();
-          sub.setStatus(SubscriptionStatus.CANCELLED);
-          subscriptionRepository.save(sub);
-        }
-        paymentRepository.save(payment);
-        return true;
-      }
-    }
-    return false;
+    paymentRepository.save(payment);
+    subscriptionRepository.save(sub);
+    return true;
   }
 }

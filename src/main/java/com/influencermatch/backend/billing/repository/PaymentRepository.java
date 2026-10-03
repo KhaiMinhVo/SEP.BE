@@ -13,4 +13,10 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface PaymentRepository extends JpaRepository<Payment, UUID> {
   Optional<Payment> findByTransactionCode(String transactionCode);
+
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @org.springframework.data.jpa.repository.Query(
+      "select p from Payment p where p.transactionCode = :code")
+  java.util.Optional<Payment> findLockedByTransactionCode(
+      @org.springframework.data.repository.query.Param("code") String code);
 }

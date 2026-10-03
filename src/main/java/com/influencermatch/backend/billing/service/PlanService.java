@@ -22,9 +22,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class PlanService {
 
   private final PlanRepository planRepository;
+  private final com.influencermatch.backend.audit.service.AuditService audit;
 
   @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('MANAGE_PLAN')")
   public PlanDTOs.PlanResponse createPlan(PlanDTOs.PlanCreateRequest request) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.MANAGE_PLAN);
     Plan plan =
         Plan.builder()
             .planName(request.getPlanName())
@@ -40,25 +44,48 @@ public class PlanService {
             .build();
 
     Plan savedPlan = planRepository.save(plan);
+    audit.record(
+        "CREATE_PLAN", "Plan", savedPlan.getId(), null, toResponse(savedPlan), "Plan created");
     log.info("Created new plan: {}", savedPlan.getId());
     return toResponse(savedPlan);
   }
 
   @Transactional(readOnly = true)
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_PLAN') or hasAuthority('MANAGE_PLAN')")
   public Page<PlanDTOs.PlanResponse> getAllPlans(Pageable pageable) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.VIEW_PLAN,
+        com.influencermatch.backend.security.Permission.MANAGE_PLAN);
+    if (!com.influencermatch.backend.security.Permissions.has(
+        com.influencermatch.backend.security.Permission.MANAGE_PLAN))
+      return planRepository.findByStatus(PlanStatus.ACTIVE, pageable).map(this::toResponse);
     return planRepository.findAll(pageable).map(this::toResponse);
   }
 
   @Transactional(readOnly = true)
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_PLAN') or hasAuthority('MANAGE_PLAN')")
   public PlanDTOs.PlanResponse getPlanById(UUID id) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.VIEW_PLAN,
+        com.influencermatch.backend.security.Permission.MANAGE_PLAN);
     Plan plan = findPlanEntityById(id);
+    if (!com.influencermatch.backend.security.Permissions.has(
+            com.influencermatch.backend.security.Permission.MANAGE_PLAN)
+        && plan.getStatus() != PlanStatus.ACTIVE)
+      throw new ResourceNotFoundException("Plan", "id", id);
     return toResponse(plan);
   }
 
   @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('MANAGE_PLAN')")
   public PlanDTOs.PlanResponse updatePlan(UUID id, PlanDTOs.PlanUpdateRequest request) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.MANAGE_PLAN);
     Plan plan = findPlanEntityById(id);
 
+    var before = toResponse(plan);
     if (request.getPlanName() != null) plan.setPlanName(request.getPlanName());
     if (request.getPrice() != null) plan.setPrice(request.getPrice());
     if (request.getCurrency() != null) plan.setCurrency(request.getCurrency());
@@ -71,15 +98,21 @@ public class PlanService {
     if (request.getStatus() != null) plan.setStatus(request.getStatus());
 
     Plan updatedPlan = planRepository.save(plan);
+    audit.record("UPDATE_PLAN", "Plan", id, before, toResponse(updatedPlan), "Plan updated");
     log.info("Updated plan: {}", id);
     return toResponse(updatedPlan);
   }
 
   @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('MANAGE_PLAN')")
   public void deactivatePlan(UUID id) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.MANAGE_PLAN);
     Plan plan = findPlanEntityById(id);
+    var before = toResponse(plan);
     plan.setStatus(PlanStatus.INACTIVE);
     planRepository.save(plan);
+    audit.record("DEACTIVATE_PLAN", "Plan", id, before, toResponse(plan), "Plan deactivated");
     log.info("Deactivated plan: {}", id);
   }
 

@@ -24,6 +24,7 @@ public class UserProfileResponse {
   private String fullName;
   private String role;
   private String status;
+  private java.util.List<String> permissions;
   private LocalDateTime createdAt;
   private LocalDateTime updatedAt;
   private LocalDateTime lastLoginAt;

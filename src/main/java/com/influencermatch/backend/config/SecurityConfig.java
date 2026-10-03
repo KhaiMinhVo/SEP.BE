@@ -1,10 +1,10 @@
 package com.influencermatch.backend.config;
 
+import com.influencermatch.backend.security.GoogleOAuthFailureHandler;
+import com.influencermatch.backend.security.GoogleOAuthSuccessHandler;
 import com.influencermatch.backend.security.JwtAccessDeniedHandler;
 import com.influencermatch.backend.security.JwtAuthenticationEntryPoint;
 import com.influencermatch.backend.security.JwtAuthenticationFilter;
-import com.influencermatch.backend.security.GoogleOAuthSuccessHandler;
-import com.influencermatch.backend.security.GoogleOAuthFailureHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -52,20 +52,56 @@ public class SecurityConfig {
     "/swagger-ui/**",
     "/swagger-ui.html",
     "/webjars/**",
-    "/creators/ingest"
+    "/billing/vnpay/return",
+    "/billing/vnpay/ipn"
   };
 
   @Bean
+  @org.springframework.core.annotation.Order(1)
+  public SecurityFilterChain ingestionFilterChain(
+      HttpSecurity http,
+      @org.springframework.beans.factory.annotation.Value("${CREATOR_INGESTION_API_KEY:}")
+          String key,
+      com.fasterxml.jackson.databind.ObjectMapper mapper)
+      throws Exception {
+    http.securityMatcher("/creators/ingest")
+        .csrf(AbstractHttpConfigurer::disable)
+        .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        .securityContext(
+            c ->
+                c.securityContextRepository(
+                    new org.springframework.security.web.context.NullSecurityContextRepository()))
+        .authorizeHttpRequests(a -> a.anyRequest().hasAuthority("SERVICE_INGEST_CREATOR"))
+        .addFilterBefore(
+            new com.influencermatch.backend.security.CreatorServiceKeyFilter(key, mapper),
+            UsernamePasswordAuthenticationFilter.class);
+    return http.build();
+  }
+
+  @Bean
+  @org.springframework.core.annotation.Order(2)
   public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
     http.csrf(AbstractHttpConfigurer::disable)
         .formLogin(AbstractHttpConfigurer::disable)
         .httpBasic(AbstractHttpConfigurer::disable)
+        .securityContext(
+            c ->
+                c.securityContextRepository(
+                    new org.springframework.security.web.context.NullSecurityContextRepository()))
+        .requestCache(
+            c ->
+                c.requestCache(
+                    new org.springframework.security.web.savedrequest.NullRequestCache()))
         .exceptionHandling(
             ex ->
                 ex.authenticationEntryPoint(jwtAuthenticationEntryPoint)
                     .accessDeniedHandler(jwtAccessDeniedHandler))
-        .sessionManagement(s -> s.sessionCreationPolicy(googleOAuthProperties.isEnabled()
-            ? SessionCreationPolicy.IF_REQUIRED : SessionCreationPolicy.STATELESS))
+        .sessionManagement(
+            s ->
+                s.sessionCreationPolicy(
+                    googleOAuthProperties.isEnabled()
+                        ? SessionCreationPolicy.IF_REQUIRED
+                        : SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(
             auth ->
                 auth.requestMatchers(PUBLIC_ENDPOINTS)
@@ -74,16 +110,16 @@ public class SecurityConfig {
                     .hasRole("ADMIN")
                     .requestMatchers("/auth/me", "/auth/logout")
                     .authenticated()
-                    .requestMatchers("/brands/**")
-                    .hasAnyRole("ADMIN", "BRAND")
                     .anyRequest()
                     .authenticated())
         .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
     if (googleOAuthProperties.isEnabled()) {
-      http.oauth2Login(oauth -> oauth
-          .successHandler(googleOAuthSuccessHandler)
-          .failureHandler(googleOAuthFailureHandler));
+      http.oauth2Login(
+          oauth ->
+              oauth
+                  .successHandler(googleOAuthSuccessHandler)
+                  .failureHandler(googleOAuthFailureHandler));
     }
     return http.build();
   }

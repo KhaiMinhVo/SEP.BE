@@ -28,7 +28,11 @@ public class BrandService {
   private final ObjectMapper objectMapper;
 
   @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CREATE_BRAND_PROFILE')")
   public BrandResponse create(BrandRequest request, Authentication authentication) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.CREATE_BRAND_PROFILE);
+    users.lockRoleChanges();
     User actor = actor(authentication);
     User owner = resolveOwner(request.userId(), actor);
     if (profiles.existsByUserId(owner.getId())) {
@@ -52,7 +56,10 @@ public class BrandService {
   }
 
   @Transactional(readOnly = true)
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('VIEW_OWN_BRAND_DATA')")
   public BrandResponse me(Authentication authentication) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.VIEW_OWN_BRAND_DATA);
     BrandProfile profile =
         profiles
             .findByUserId(actor(authentication).getId())
@@ -61,7 +68,12 @@ public class BrandService {
   }
 
   @Transactional(readOnly = true)
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_OWN_BRAND_DATA') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
   public PageResponse<BrandResponse> list(Pageable pageable, Authentication authentication) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.VIEW_OWN_BRAND_DATA,
+        com.influencermatch.backend.security.Permission.VIEW_BRAND_SUPPORT_DATA);
     User actor = actor(authentication);
     if (actor.getRole() == Role.ADMIN)
       return PageResponse.from(profiles.findAll(pageable).map(this::loadResponse));
@@ -79,14 +91,22 @@ public class BrandService {
   }
 
   @Transactional(readOnly = true)
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_OWN_BRAND_DATA') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
   public BrandResponse get(UUID profileId, Authentication authentication) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.VIEW_OWN_BRAND_DATA,
+        com.influencermatch.backend.security.Permission.VIEW_BRAND_SUPPORT_DATA);
     BrandProfile profile = requireProfile(profileId);
     requireAccess(profile, actor(authentication));
     return loadResponse(profile);
   }
 
   @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_BRAND_PROFILE')")
   public BrandResponse update(UUID profileId, BrandRequest request, Authentication authentication) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.UPDATE_BRAND_PROFILE);
     BrandProfile profile = requireProfile(profileId);
     requireAccess(profile, actor(authentication));
     profile.setBusinessName(request.businessName().trim());
@@ -131,7 +151,10 @@ public class BrandService {
   }
 
   private void requireAccess(BrandProfile profile, User actor) {
-    if (actor.getRole() != Role.ADMIN && !profile.getUser().getId().equals(actor.getId()))
+    if (!(actor.getRole() == Role.ADMIN
+            && com.influencermatch.backend.security.RolePermissions.forRole(actor.getRole())
+                .contains(com.influencermatch.backend.security.Permission.VIEW_BRAND_SUPPORT_DATA))
+        && !(actor.getRole() == Role.BRAND && profile.getUser().getId().equals(actor.getId())))
       throw new ForbiddenException("You cannot access another user's brand profile");
   }
 

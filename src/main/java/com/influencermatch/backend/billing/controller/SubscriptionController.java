@@ -17,14 +17,14 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/v1/subscriptions")
+@RequestMapping({"/subscriptions", "/api/v1/subscriptions"})
 @RequiredArgsConstructor
 public class SubscriptionController extends BaseController {
 
   private final SubscriptionService subscriptionService;
 
   @PostMapping
-  @PreAuthorize("hasRole('BRAND') or hasRole('ADMIN')")
+  @PreAuthorize("hasAuthority('MANAGE_OWN_SUBSCRIPTION')")
   public ResponseEntity<ApiResponse<SubscriptionDTOs.SubscriptionResponse>> subscribe(
       @Valid @RequestBody SubscriptionDTOs.SubscriptionCreateRequest request) {
     SubscriptionDTOs.SubscriptionResponse response =
@@ -33,7 +33,7 @@ public class SubscriptionController extends BaseController {
   }
 
   @GetMapping("/brand/{brandId}")
-  @PreAuthorize("hasRole('BRAND') or hasRole('ADMIN')")
+  @PreAuthorize("hasAuthority('MANAGE_OWN_SUBSCRIPTION')")
   public ResponseEntity<ApiResponse<List<SubscriptionDTOs.SubscriptionResponse>>>
       getBrandSubscriptions(@PathVariable UUID brandId) {
     return ok(
@@ -42,7 +42,7 @@ public class SubscriptionController extends BaseController {
   }
 
   @DeleteMapping("/{id}")
-  @PreAuthorize("hasRole('BRAND') or hasRole('ADMIN')")
+  @PreAuthorize("hasAuthority('MANAGE_OWN_SUBSCRIPTION')")
   public ResponseEntity<ApiResponse<Void>> cancelSubscription(@PathVariable UUID id) {
     subscriptionService.cancelSubscription(id);
     return ok("Subscription cancelled successfully");

@@ -20,6 +20,13 @@ public class CreatorIngestionController {
   private final CreatorIngestionService ingestionService;
 
   @PostMapping("/ingest")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('SERVICE_INGEST_CREATOR')")
+  @io.swagger.v3.oas.annotations.Operation(
+      summary = "Ingest creator data",
+      description = "Service-only; requires X-Service-Key, not a user JWT",
+      security =
+          @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "CreatorServiceKey"))
   public ResponseEntity<ApiResponse<CreatorIngestionResponse>> ingestCreatorData(
       @RequestBody CreatorIngestionRequest request) {
     CreatorIngestionResponse response = ingestionService.ingestCreatorData(request);

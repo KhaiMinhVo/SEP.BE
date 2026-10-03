@@ -16,4 +16,11 @@ public interface UserRepository extends JpaRepository<User, UUID> {
   Optional<User> findByEmail(String email);
 
   boolean existsByEmail(String email);
+
+  long countByRoleAndStatus(Role role, com.influencermatch.backend.user.enums.UserStatus status);
+
+  @org.springframework.data.jpa.repository.Query(
+      value = "SELECT id FROM rbac_guard WHERE id=1 FOR UPDATE",
+      nativeQuery = true)
+  Integer lockRoleChanges();
 }

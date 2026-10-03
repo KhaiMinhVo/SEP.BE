@@ -29,6 +29,7 @@ public class BrandController {
 
   @PostMapping
   @Operation(summary = "Create a brand profile")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CREATE_BRAND_PROFILE')")
   public ResponseEntity<ApiResponse<BrandResponse>> create(
       @Valid @RequestBody BrandRequest request, Authentication auth) {
     BrandResponse result = service.create(request, auth);
@@ -42,12 +43,15 @@ public class BrandController {
 
   @Operation(summary = "Get the current brand profile")
   @GetMapping("/me")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('VIEW_OWN_BRAND_DATA')")
   public ApiResponse<BrandResponse> me(Authentication auth) {
     return ApiResponse.ok(service.me(auth));
   }
 
   @Operation(summary = "List accessible brand profiles")
   @GetMapping
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_OWN_BRAND_DATA') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
   public ApiResponse<PageResponse<BrandResponse>> list(
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size,
@@ -58,12 +62,15 @@ public class BrandController {
 
   @Operation(summary = "Get a brand profile")
   @GetMapping("/{id}")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_OWN_BRAND_DATA') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
   public ApiResponse<BrandResponse> get(@PathVariable UUID id, Authentication auth) {
     return ApiResponse.ok(service.get(id, auth));
   }
 
   @Operation(summary = "Update a brand profile")
   @PutMapping("/{id}")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_BRAND_PROFILE')")
   public ApiResponse<BrandResponse> update(
       @PathVariable UUID id, @Valid @RequestBody BrandRequest request, Authentication auth) {
     return ApiResponse.ok(service.update(id, request, auth));

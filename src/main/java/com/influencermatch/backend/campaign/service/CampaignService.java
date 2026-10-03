@@ -21,8 +21,8 @@ import com.influencermatch.backend.exception.*;
 import java.math.BigDecimal;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,8 +38,11 @@ public class CampaignService {
   private final com.influencermatch.backend.creator.repository.PostRepository postRepository;
 
   @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CREATE_CAMPAIGN')")
   public CampaignResponse create(
       UUID brandId, CampaignRequest request, Authentication authentication) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.CREATE_CAMPAIGN);
     BrandProfile brandProfile = brandService.requireAccessible(brandId, authentication);
     validate(request);
     Campaign campaign =
@@ -55,149 +58,185 @@ public class CampaignService {
   }
 
   @Transactional(readOnly = true)
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_OWN_CAMPAIGN') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
   public PageResponse<CampaignResponse> list(
       UUID brandId, Pageable pageable, Authentication authentication) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.VIEW_OWN_CAMPAIGN,
+        com.influencermatch.backend.security.Permission.VIEW_BRAND_SUPPORT_DATA);
     brandService.requireAccessible(brandId, authentication);
     return PageResponse.from(
         campaigns.findByBrandProfileId(brandId, pageable).map(this::loadResponse));
   }
 
   @Transactional(readOnly = true)
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_OWN_CAMPAIGN') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
   public CampaignResponse get(UUID id, Authentication authentication) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.VIEW_OWN_CAMPAIGN,
+        com.influencermatch.backend.security.Permission.VIEW_BRAND_SUPPORT_DATA);
     Campaign campaign = requireCampaign(id);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
     return loadResponse(campaign);
   }
 
   @Transactional(readOnly = true)
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SEARCH_CREATOR')")
   public PageResponse<CreatorDiscoveryResponse> discoverCreators(
       UUID campaignId, Pageable pageable, Authentication authentication) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.SEARCH_CREATOR);
     Campaign campaign = requireCampaign(campaignId);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
 
     int TARGET_CANDIDATES = 30;
-    List<com.influencermatch.backend.creator.model.PublicCreatorMetric> finalCandidates = new ArrayList<>();
+    List<com.influencermatch.backend.creator.model.PublicCreatorMetric> finalCandidates =
+        new ArrayList<>();
     Set<UUID> seenCreatorIds = new HashSet<>();
-    org.springframework.data.domain.PageRequest fetchPage = org.springframework.data.domain.PageRequest.of(0, TARGET_CANDIDATES, pageable.getSort());
+    org.springframework.data.domain.PageRequest fetchPage =
+        org.springframework.data.domain.PageRequest.of(0, TARGET_CANDIDATES, pageable.getSort());
 
     // 1. Exact Match
     Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> spec1 =
         Specification.where(PublicCreatorMetricSpecification.isFresh())
-            .and(PublicCreatorMetricSpecification.hasFollowersBetween(
-                campaign.getFollowerMin(), campaign.getFollowerMax()))
+            .and(
+                PublicCreatorMetricSpecification.hasFollowersBetween(
+                    campaign.getFollowerMin(), campaign.getFollowerMax()))
             .and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()))
             .and(PublicCreatorMetricSpecification.hasNicheIn(campaign.getNiches()))
             .and(PublicCreatorMetricSpecification.hasLocationIn(campaign.getLocations()));
 
-    List<com.influencermatch.backend.creator.model.PublicCreatorMetric> res1 = metricRepository.findAll(spec1, fetchPage).getContent();
+    List<com.influencermatch.backend.creator.model.PublicCreatorMetric> res1 =
+        metricRepository.findAll(spec1, fetchPage).getContent();
     for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : res1) {
-        if (seenCreatorIds.add(m.getCreator().getId())) {
-            finalCandidates.add(m);
-        }
+      if (seenCreatorIds.add(m.getCreator().getId())) {
+        finalCandidates.add(m);
+      }
     }
 
     // 2. Relax Location
     if (finalCandidates.size() < TARGET_CANDIDATES) {
-        Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> spec2 =
-            Specification.where(PublicCreatorMetricSpecification.isFresh())
-                .and(PublicCreatorMetricSpecification.hasFollowersBetween(
-                    campaign.getFollowerMin(), campaign.getFollowerMax()))
-                .and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()))
-                .and(PublicCreatorMetricSpecification.hasNicheIn(campaign.getNiches()))
-                .and(PublicCreatorMetricSpecification.notInCreatorIds(seenCreatorIds));
-        
-        List<com.influencermatch.backend.creator.model.PublicCreatorMetric> res2 = metricRepository.findAll(spec2, fetchPage).getContent();
-        for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : res2) {
-            if (finalCandidates.size() >= TARGET_CANDIDATES) break;
-            if (seenCreatorIds.add(m.getCreator().getId())) {
-                finalCandidates.add(m);
-            }
+      Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> spec2 =
+          Specification.where(PublicCreatorMetricSpecification.isFresh())
+              .and(
+                  PublicCreatorMetricSpecification.hasFollowersBetween(
+                      campaign.getFollowerMin(), campaign.getFollowerMax()))
+              .and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()))
+              .and(PublicCreatorMetricSpecification.hasNicheIn(campaign.getNiches()))
+              .and(PublicCreatorMetricSpecification.notInCreatorIds(seenCreatorIds));
+
+      List<com.influencermatch.backend.creator.model.PublicCreatorMetric> res2 =
+          metricRepository.findAll(spec2, fetchPage).getContent();
+      for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : res2) {
+        if (finalCandidates.size() >= TARGET_CANDIDATES) break;
+        if (seenCreatorIds.add(m.getCreator().getId())) {
+          finalCandidates.add(m);
         }
+      }
     }
 
     // 3. Relax Follower Range
     if (finalCandidates.size() < TARGET_CANDIDATES) {
-        Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> spec3 =
-            Specification.where(PublicCreatorMetricSpecification.isFresh())
-                .and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()))
-                .and(PublicCreatorMetricSpecification.hasNicheIn(campaign.getNiches()))
-                .and(PublicCreatorMetricSpecification.notInCreatorIds(seenCreatorIds));
-        
-        List<com.influencermatch.backend.creator.model.PublicCreatorMetric> res3 = metricRepository.findAll(spec3, fetchPage).getContent();
-        for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : res3) {
-            if (finalCandidates.size() >= TARGET_CANDIDATES) break;
-            if (seenCreatorIds.add(m.getCreator().getId())) {
-                finalCandidates.add(m);
-            }
+      Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> spec3 =
+          Specification.where(PublicCreatorMetricSpecification.isFresh())
+              .and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()))
+              .and(PublicCreatorMetricSpecification.hasNicheIn(campaign.getNiches()))
+              .and(PublicCreatorMetricSpecification.notInCreatorIds(seenCreatorIds));
+
+      List<com.influencermatch.backend.creator.model.PublicCreatorMetric> res3 =
+          metricRepository.findAll(spec3, fetchPage).getContent();
+      for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : res3) {
+        if (finalCandidates.size() >= TARGET_CANDIDATES) break;
+        if (seenCreatorIds.add(m.getCreator().getId())) {
+          finalCandidates.add(m);
         }
+      }
     }
 
     // 4. Relax Niche
     if (finalCandidates.size() < TARGET_CANDIDATES) {
-        Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> spec4 =
-            Specification.where(PublicCreatorMetricSpecification.isFresh())
-                .and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()))
-                .and(PublicCreatorMetricSpecification.notInCreatorIds(seenCreatorIds));
-        
-        List<com.influencermatch.backend.creator.model.PublicCreatorMetric> res4 = metricRepository.findAll(spec4, fetchPage).getContent();
-        for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : res4) {
-            if (finalCandidates.size() >= TARGET_CANDIDATES) break;
-            if (seenCreatorIds.add(m.getCreator().getId())) {
-                finalCandidates.add(m);
-            }
+      Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> spec4 =
+          Specification.where(PublicCreatorMetricSpecification.isFresh())
+              .and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()))
+              .and(PublicCreatorMetricSpecification.notInCreatorIds(seenCreatorIds));
+
+      List<com.influencermatch.backend.creator.model.PublicCreatorMetric> res4 =
+          metricRepository.findAll(spec4, fetchPage).getContent();
+      for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : res4) {
+        if (finalCandidates.size() >= TARGET_CANDIDATES) break;
+        if (seenCreatorIds.add(m.getCreator().getId())) {
+          finalCandidates.add(m);
         }
+      }
     }
 
     // Fetch recent posts in batch to avoid N+1 query problem
-    List<UUID> candidateCreatorIds = finalCandidates.stream().map(m -> m.getCreator().getId()).toList();
-    List<com.influencermatch.backend.creator.model.Post> allPosts = candidateCreatorIds.isEmpty() ? new ArrayList<>() : postRepository.findByCreatorIdIn(candidateCreatorIds);
-    Map<UUID, List<com.influencermatch.backend.creator.model.Post>> postsByCreatorId = allPosts.stream()
-        .collect(java.util.stream.Collectors.groupingBy(p -> p.getCreator().getId()));
+    List<UUID> candidateCreatorIds =
+        finalCandidates.stream().map(m -> m.getCreator().getId()).toList();
+    List<com.influencermatch.backend.creator.model.Post> allPosts =
+        candidateCreatorIds.isEmpty()
+            ? new ArrayList<>()
+            : postRepository.findByCreatorIdIn(candidateCreatorIds);
+    Map<UUID, List<com.influencermatch.backend.creator.model.Post>> postsByCreatorId =
+        allPosts.stream()
+            .collect(java.util.stream.Collectors.groupingBy(p -> p.getCreator().getId()));
 
     // Map to responses
-    List<CreatorDiscoveryResponse> responses = finalCandidates.stream()
-        .map(metric -> CreatorDiscoveryResponse.builder()
-            .creatorId(metric.getCreator().getId())
-            .platform(metric.getCreator().getPlatform())
-            .userName(metric.getCreator().getUserName())
-            .profileUrl(metric.getCreator().getProfileUrl())
-            .followers(metric.getFollowers())
-            .engagementRate(metric.getEngagementRate())
-            .niche(metric.getNiche())
-            .location(metric.getLocation())
-            .contentSummary(metric.getContentSummary())
-            .displayName(metric.getCreator().getDisplayName())
-            .avatarUrl(metric.getCreator().getAvatarUrl())
-            .creatorType(metric.getCreatorType())
-            .recentPosts(
-                postsByCreatorId.getOrDefault(metric.getCreator().getId(), new ArrayList<>())
-                    .stream()
-                    .map(p -> com.influencermatch.backend.creator.dto.PostDto.builder()
-                        .platformPostId(p.getPlatformPostId())
-                        .postUrl(p.getPostUrl())
-                        .caption(p.getCaption())
-                        .views(p.getViews())
-                        .likes(p.getLikes())
-                        .comments(p.getComments())
-                        .shares(p.getShares())
-                        .postedAt(p.getPostedAt())
+    List<CreatorDiscoveryResponse> responses =
+        finalCandidates.stream()
+            .map(
+                metric ->
+                    CreatorDiscoveryResponse.builder()
+                        .creatorId(metric.getCreator().getId())
+                        .platform(metric.getCreator().getPlatform())
+                        .userName(metric.getCreator().getUserName())
+                        .profileUrl(metric.getCreator().getProfileUrl())
+                        .followers(metric.getFollowers())
+                        .engagementRate(metric.getEngagementRate())
+                        .niche(metric.getNiche())
+                        .location(metric.getLocation())
+                        .contentSummary(metric.getContentSummary())
+                        .displayName(metric.getCreator().getDisplayName())
+                        .avatarUrl(metric.getCreator().getAvatarUrl())
+                        .creatorType(metric.getCreatorType())
+                        .recentPosts(
+                            postsByCreatorId
+                                .getOrDefault(metric.getCreator().getId(), new ArrayList<>())
+                                .stream()
+                                .map(
+                                    p ->
+                                        com.influencermatch.backend.creator.dto.PostDto.builder()
+                                            .platformPostId(p.getPlatformPostId())
+                                            .postUrl(p.getPostUrl())
+                                            .caption(p.getCaption())
+                                            .views(p.getViews())
+                                            .likes(p.getLikes())
+                                            .comments(p.getComments())
+                                            .shares(p.getShares())
+                                            .postedAt(p.getPostedAt())
+                                            .build())
+                                .toList())
                         .build())
-                    .toList()
-            )
-            .build())
-        .toList();
+            .toList();
 
     int start = (int) pageable.getOffset();
     int end = Math.min((start + pageable.getPageSize()), responses.size());
-    List<CreatorDiscoveryResponse> pagedResponses = (start <= end && start < responses.size()) 
-            ? responses.subList(start, end) 
+    List<CreatorDiscoveryResponse> pagedResponses =
+        (start <= end && start < responses.size())
+            ? responses.subList(start, end)
             : new ArrayList<>();
-    
-    return PageResponse.from(new org.springframework.data.domain.PageImpl<>(pagedResponses, pageable, responses.size()));
+
+    return PageResponse.from(
+        new org.springframework.data.domain.PageImpl<>(pagedResponses, pageable, responses.size()));
   }
 
   @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
   public CampaignResponse update(UUID id, CampaignRequest request, Authentication authentication) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.UPDATE_CAMPAIGN);
     Campaign campaign = requireCampaign(id);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
     campaign.getStatus().requireEditable();
@@ -207,7 +246,11 @@ public class CampaignService {
   }
 
   @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('CHANGE_CAMPAIGN_STATUS')")
   public CampaignResponse archive(UUID id, Authentication authentication) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.CHANGE_CAMPAIGN_STATUS);
     Campaign campaign = requireCampaign(id);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
     if (campaign.getStatus() != CampaignStatus.ARCHIVED) {
@@ -218,8 +261,12 @@ public class CampaignService {
   }
 
   @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('CHANGE_CAMPAIGN_STATUS')")
   public CampaignResponse changeStatus(
       UUID id, CampaignStatusRequest request, Authentication authentication) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.CHANGE_CAMPAIGN_STATUS);
     Campaign campaign = requireCampaign(id);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
     CampaignStatus target = request.status();

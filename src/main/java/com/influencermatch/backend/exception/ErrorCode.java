@@ -3,10 +3,17 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  LAST_ACTIVE_ADMIN(HttpStatus.CONFLICT, "The last active administrator cannot be removed"),
+  BRAND_ROLE_CHANGE_CONFLICT(
+      HttpStatus.CONFLICT, "Brand profile prevents internal role assignment"),
+  INGESTION_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "Creator ingestion is not configured"),
+  PAID_PLAN_REQUIRES_PAYMENT(HttpStatus.CONFLICT, "Paid subscription requires checkout"),
+  SUBSCRIPTION_CONFLICT(HttpStatus.CONFLICT, "An active subscription already exists"),
   GOOGLE_OAUTH_DISABLED(HttpStatus.SERVICE_UNAVAILABLE, "Google login is not configured"),
   GOOGLE_AUTHENTICATION_FAILED(HttpStatus.UNAUTHORIZED, "Google authentication failed"),
   GOOGLE_EMAIL_NOT_VERIFIED(HttpStatus.UNAUTHORIZED, "Google email is not verified"),
-  AUTH_CODE_INVALID_OR_EXPIRED(HttpStatus.UNAUTHORIZED, "Authentication code is invalid or expired"),
+  AUTH_CODE_INVALID_OR_EXPIRED(
+      HttpStatus.UNAUTHORIZED, "Authentication code is invalid or expired"),
   VALIDATION_ERROR(HttpStatus.BAD_REQUEST, "Validation failed"),
   MALFORMED_REQUEST(HttpStatus.BAD_REQUEST, "Malformed request"),
   EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "Email already exists"),

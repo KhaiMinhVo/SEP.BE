@@ -63,6 +63,7 @@ public class AuthServiceImpl implements AuthService {
   @Override
   @Transactional
   public LoginResponse login(LoginRequest request) {
+    userRepository.lockRoleChanges();
     Authentication authentication =
         authenticationManager.authenticate(
             new UsernamePasswordAuthenticationToken(
@@ -88,6 +89,8 @@ public class AuthServiceImpl implements AuthService {
                 .fullName(user.getFullName())
                 .role(user.getRole().name())
                 .status(user.getStatus().name())
+                .permissions(
+                    com.influencermatch.backend.security.RolePermissions.names(user.getRole()))
                 .lastLoginAt(user.getLastLoginAt())
                 .build())
         .build();
@@ -111,6 +114,8 @@ public class AuthServiceImpl implements AuthService {
                 .fullName(user.getFullName())
                 .role(user.getRole().name())
                 .status(user.getStatus().name())
+                .permissions(
+                    com.influencermatch.backend.security.RolePermissions.names(user.getRole()))
                 .lastLoginAt(user.getLastLoginAt())
                 .build())
         .build();
@@ -124,12 +129,16 @@ public class AuthServiceImpl implements AuthService {
 
   @Override
   public UserProfileResponse getProfile(User currentUser) {
+    com.influencermatch.backend.security.Permissions.require(
+        com.influencermatch.backend.security.Permission.VIEW_OWN_PROFILE);
     return UserProfileResponse.builder()
         .id(currentUser.getId())
         .email(currentUser.getEmail())
         .fullName(currentUser.getFullName())
         .role(currentUser.getRole().name())
         .status(currentUser.getStatus().name())
+        .permissions(
+            com.influencermatch.backend.security.RolePermissions.names(currentUser.getRole()))
         .createdAt(currentUser.getCreatedAt())
         .updatedAt(currentUser.getUpdatedAt())
         .lastLoginAt(currentUser.getLastLoginAt())

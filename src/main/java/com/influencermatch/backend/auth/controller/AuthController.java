@@ -10,10 +10,10 @@ import com.influencermatch.backend.auth.model.*;
 import com.influencermatch.backend.auth.repository.*;
 import com.influencermatch.backend.auth.service.*;
 import com.influencermatch.backend.auth.service.AuthService;
+import com.influencermatch.backend.common.dto.ApiResponse;
 import com.influencermatch.backend.config.GoogleOAuthProperties;
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ErrorCode;
-import com.influencermatch.backend.common.dto.ApiResponse;
 import com.influencermatch.backend.user.model.User;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -41,22 +41,28 @@ public class AuthController {
   private final GoogleAuthService googleAuthService;
   private final GoogleOAuthProperties googleOAuthProperties;
 
-  @Operation(summary = "Start Google login for brand accounts", security = {})
+  @Operation(
+      summary = "Start Google login for brand accounts",
+      security = {})
   @GetMapping("/google")
   public ResponseEntity<Void> googleLogin() {
     if (!googleOAuthProperties.isEnabled()) {
-      throw new BusinessException(ErrorCode.GOOGLE_OAUTH_DISABLED, "Google login is not configured");
+      throw new BusinessException(
+          ErrorCode.GOOGLE_OAUTH_DISABLED, "Google login is not configured");
     }
     return ResponseEntity.status(302)
-        .location(URI.create("/api/v1/oauth2/authorization/google")).build();
+        .location(URI.create("/api/v1/oauth2/authorization/google"))
+        .build();
   }
 
-  @Operation(summary = "Exchange a one-time Google login code for tokens", security = {})
+  @Operation(
+      summary = "Exchange a one-time Google login code for tokens",
+      security = {})
   @PostMapping("/google/exchange")
   public ResponseEntity<ApiResponse<LoginResponse>> googleExchange(
       @Valid @RequestBody GoogleCodeExchangeRequest request) {
-    return ResponseEntity.ok(ApiResponse.ok("Google login successful.",
-        googleAuthService.exchange(request.code())));
+    return ResponseEntity.ok(
+        ApiResponse.ok("Google login successful.", googleAuthService.exchange(request.code())));
   }
 
   @Operation(
@@ -99,6 +105,7 @@ public class AuthController {
       summary = "Get the current authenticated user's profile",
       security = @SecurityRequirement(name = "BearerAuth"))
   @GetMapping("/me")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('VIEW_OWN_PROFILE')")
   public ResponseEntity<ApiResponse<UserProfileResponse>> me(
       @AuthenticationPrincipal User currentUser) {
     return ResponseEntity.ok(

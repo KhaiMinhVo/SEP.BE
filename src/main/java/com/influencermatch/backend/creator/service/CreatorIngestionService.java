@@ -8,7 +8,6 @@ import com.influencermatch.backend.creator.enums.*;
 import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.repository.*;
 import java.time.LocalDateTime;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +21,8 @@ public class CreatorIngestionService {
   private final PostRepository postRepository;
 
   @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('SERVICE_INGEST_CREATOR')")
   public CreatorIngestionResponse ingestCreatorData(CreatorIngestionRequest request) {
     // Find existing creator or create new one
     Creator creator =
@@ -93,17 +94,18 @@ public class CreatorIngestionService {
     if (request.getRecentPosts() != null && !request.getRecentPosts().isEmpty()) {
       postRepository.deleteByCreatorId(creator.getId());
       for (PostDto dto : request.getRecentPosts()) {
-        Post post = Post.builder()
-            .creator(creator)
-            .platformPostId(dto.getPlatformPostId())
-            .postUrl(dto.getPostUrl())
-            .caption(dto.getCaption())
-            .views(dto.getViews())
-            .likes(dto.getLikes())
-            .comments(dto.getComments())
-            .shares(dto.getShares())
-            .postedAt(dto.getPostedAt())
-            .build();
+        Post post =
+            Post.builder()
+                .creator(creator)
+                .platformPostId(dto.getPlatformPostId())
+                .postUrl(dto.getPostUrl())
+                .caption(dto.getCaption())
+                .views(dto.getViews())
+                .likes(dto.getLikes())
+                .comments(dto.getComments())
+                .shares(dto.getShares())
+                .postedAt(dto.getPostedAt())
+                .build();
         postRepository.save(post);
       }
     }

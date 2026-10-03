@@ -88,6 +88,11 @@ public class GlobalExceptionHandler {
         ErrorCode.OPTIMISTIC_CONFLICT, "Resource changed; reload and retry", req, Map.of());
   }
 
+  @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+  ResponseEntity<ProblemDetail> denied(Exception ex, HttpServletRequest req) {
+    return response(ErrorCode.ACCESS_DENIED, "Permission required", req, Map.of());
+  }
+
   @ExceptionHandler(Exception.class)
   ResponseEntity<ProblemDetail> unexpected(Exception ex, HttpServletRequest req) {
     log.error("Unhandled error traceId={}", MDC.get("traceId"), ex);

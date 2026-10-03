@@ -13,14 +13,12 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.util.Collection;
-import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.experimental.SuperBuilder;
 import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
 @Getter
@@ -37,8 +35,7 @@ public class User extends BaseEntity implements UserDetails {
   private String email;
 
   /** BCrypt-hashed password. Never store or log the raw value. */
-  @Column
-  private String passwordHash;
+  @Column private String passwordHash;
 
   @Column(nullable = false, length = 150)
   private String fullName;
@@ -51,6 +48,9 @@ public class User extends BaseEntity implements UserDetails {
   @Column(nullable = false, length = 10)
   private UserStatus status;
 
+  @Column(nullable = false)
+  private long authVersion;
+
   @Column private LocalDateTime lastLoginAt;
 
   @Override
@@ -60,7 +60,7 @@ public class User extends BaseEntity implements UserDetails {
 
   @Override
   public Collection<? extends GrantedAuthority> getAuthorities() {
-    return List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));
+    return com.influencermatch.backend.security.RolePermissions.authorities(role);
   }
 
   @Override

@@ -47,6 +47,7 @@ public class AdminBootstrapRunner implements ApplicationRunner {
     }
     if (existing.getStatus() != UserStatus.ACTIVE) {
       existing.setStatus(UserStatus.ACTIVE);
+      existing.setAuthVersion(existing.getAuthVersion() + 1);
       users.save(existing);
       log.info("Reactivated development ADMIN account email='{}'", email);
     }

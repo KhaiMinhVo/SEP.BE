@@ -28,11 +28,18 @@ public class RefreshTokenService {
 
   @Transactional
   public Issued issue(User user) {
+    users.lockRoleChanges();
+    User current = users.findById(user.getId()).orElseThrow(this::invalid);
+    if (!current.isEnabled()
+        || !current.isAccountNonLocked()
+        || current.getAuthVersion() != user.getAuthVersion()
+        || current.getRole() != user.getRole()) throw invalid();
     return create(user);
   }
 
   @Transactional
   public Rotated rotate(String raw) {
+    users.lockRoleChanges();
     LocalDateTime now = LocalDateTime.now();
     RefreshToken old = tokens.findByTokenHash(hash(raw)).orElseThrow(this::invalid);
     if (!old.active(now)) {

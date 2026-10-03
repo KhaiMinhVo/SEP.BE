@@ -26,8 +26,22 @@ import org.springframework.web.bind.annotation.*;
 public class AdminUserController {
   private final AdminUserService service;
 
+  @Operation(
+      summary = "Assign a fixed role",
+      description =
+          "ASSIGN_USER_ROLE; requires a reason. Revokes existing tokens. Cannot remove the last"
+              + " active admin or promote a Brand with a profile.")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('ASSIGN_USER_ROLE')")
+  @PatchMapping("/{id}/role")
+  public ApiResponse<AdminUserResponse> role(
+      @PathVariable UUID id,
+      @Valid @RequestBody com.influencermatch.backend.user.dto.UpdateUserRoleRequest request) {
+    return ApiResponse.ok(service.changeRole(id, request));
+  }
+
   @Operation(summary = "List users")
   @GetMapping
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('VIEW_USER')")
   public ApiResponse<PageResponse<AdminUserResponse>> list(
       @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
     return ApiResponse.ok(
@@ -36,6 +50,7 @@ public class AdminUserController {
   }
 
   @Operation(summary = "Get a user")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('VIEW_USER')")
   @GetMapping("/{id}")
   public ApiResponse<AdminUserResponse> get(@PathVariable UUID id) {
     return ApiResponse.ok(service.get(id));
@@ -44,6 +59,7 @@ public class AdminUserController {
   @Operation(
       summary = "Change account status",
       description = "ACTIVE unlocks; LOCKED and DISABLED revoke all refresh tokens")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CHANGE_USER_STATUS')")
   @PatchMapping("/{id}/status")
   public ApiResponse<AdminUserResponse> status(
       @PathVariable UUID id, @Valid @RequestBody UpdateUserStatusRequest request) {

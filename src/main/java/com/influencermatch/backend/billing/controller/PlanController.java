@@ -19,14 +19,14 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/v1/plans")
+@RequestMapping({"/plans", "/api/v1/plans"})
 @RequiredArgsConstructor
 public class PlanController extends BaseController {
 
   private final PlanService planService;
 
   @PostMapping
-  @PreAuthorize("hasRole('ADMIN')")
+  @PreAuthorize("hasAuthority('MANAGE_PLAN')")
   public ResponseEntity<ApiResponse<PlanDTOs.PlanResponse>> createPlan(
       @Valid @RequestBody PlanDTOs.PlanCreateRequest request) {
     PlanDTOs.PlanResponse response = planService.createPlan(request);
@@ -34,6 +34,8 @@ public class PlanController extends BaseController {
   }
 
   @GetMapping
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_PLAN') or hasAuthority('MANAGE_PLAN')")
   public ResponseEntity<ApiResponse<PageResponse<PlanDTOs.PlanResponse>>> getAllPlans(
       @RequestParam(required = false) Integer page,
       @RequestParam(required = false) Integer size,
@@ -46,19 +48,21 @@ public class PlanController extends BaseController {
   }
 
   @GetMapping("/{id}")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_PLAN') or hasAuthority('MANAGE_PLAN')")
   public ResponseEntity<ApiResponse<PlanDTOs.PlanResponse>> getPlanById(@PathVariable UUID id) {
     return ok("Plan retrieved successfully", planService.getPlanById(id));
   }
 
   @PutMapping("/{id}")
-  @PreAuthorize("hasRole('ADMIN')")
+  @PreAuthorize("hasAuthority('MANAGE_PLAN')")
   public ResponseEntity<ApiResponse<PlanDTOs.PlanResponse>> updatePlan(
       @PathVariable UUID id, @Valid @RequestBody PlanDTOs.PlanUpdateRequest request) {
     return ok("Plan updated successfully", planService.updatePlan(id, request));
   }
 
   @DeleteMapping("/{id}")
-  @PreAuthorize("hasRole('ADMIN')")
+  @PreAuthorize("hasAuthority('MANAGE_PLAN')")
   public ResponseEntity<ApiResponse<Void>> deactivatePlan(@PathVariable UUID id) {
     planService.deactivatePlan(id);
     return ok("Plan deactivated successfully");

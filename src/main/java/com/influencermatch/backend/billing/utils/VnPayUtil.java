@@ -2,7 +2,6 @@ package com.influencermatch.backend.billing.utils;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -21,7 +20,7 @@ public class VnPayUtil {
         throw new NullPointerException();
       }
       final Mac hmac512 = Mac.getInstance("HmacSHA512");
-      byte[] hmacKeyBytes = key.getBytes();
+      byte[] hmacKeyBytes = key.getBytes(StandardCharsets.UTF_8);
       final SecretKeySpec secretKey = new SecretKeySpec(hmacKeyBytes, "HmacSHA512");
       hmac512.init(secretKey);
       byte[] dataBytes = data.getBytes(StandardCharsets.UTF_8);
@@ -46,9 +45,9 @@ public class VnPayUtil {
       String fieldName = (String) itr.next();
       String fieldValue = (String) fields.get(fieldName);
       if ((fieldValue != null) && (fieldValue.length() > 0)) {
-        sb.append(fieldName);
+        sb.append(java.net.URLEncoder.encode(fieldName, StandardCharsets.US_ASCII));
         sb.append("=");
-        sb.append(fieldValue);
+        sb.append(java.net.URLEncoder.encode(fieldValue, StandardCharsets.US_ASCII));
       }
       if (itr.hasNext()) {
         sb.append("&");

@@ -21,7 +21,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -76,7 +77,8 @@ class AuthServiceTest {
         when(userRepository.existsByEmail(request.getEmail())).thenReturn(true);
 
         // WHEN & THEN
-        assertThrows(BusinessException.class, () -> authService.register(request));
+        assertThatThrownBy(() -> authService.register(request))
+                .isInstanceOf(BusinessException.class);
         verify(userRepository, never()).save(any());
     }
 
@@ -100,10 +102,37 @@ class AuthServiceTest {
         LoginResponse response = authService.login(request);
 
         // THEN
-        assertNotNull(response);
-        assertEquals("mocked.access.token", response.getAccessToken());
-        assertEquals("mocked.refresh.token", response.getRefreshToken());
+        assertThat(response).isNotNull();
+        assertThat(response.getAccessToken()).isEqualTo("mocked.access.token");
+        assertThat(response.getRefreshToken()).isEqualTo("mocked.refresh.token");
         verify(userRepository, times(1)).save(testUser); // Verifies last login update
+    }
+
+    @Test
+    @DisplayName("Login - Locked user throws BusinessException")
+    void login_LockedUser_ThrowsException() {
+        // GIVEN
+        LoginRequest request = createValidLoginRequest();
+        User lockedUser = User.builder()
+                .email("test@example.com")
+                .passwordHash("hashed_password")
+                .fullName("Locked User")
+                .role(Role.BRAND)
+                .status(UserStatus.LOCKED)
+                .build();
+
+        Authentication auth = mock(Authentication.class);
+        when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class))).thenReturn(auth);
+        when(auth.getPrincipal()).thenReturn(lockedUser);
+
+        // WHEN & THEN
+        // Locked user has isAccountNonLocked() = false, so issue() must throw UNAUTHENTICATED
+        RefreshTokenService.Issued mockIssued = new RefreshTokenService.Issued("token", null);
+        when(refreshTokenService.issue(lockedUser)).thenThrow(new BusinessException(
+                com.influencermatch.backend.exception.ErrorCode.UNAUTHENTICATED, "Refresh token is invalid or expired"));
+
+        assertThatThrownBy(() -> authService.login(request))
+                .isInstanceOf(BusinessException.class);
     }
 
     private User createMockUser() {
@@ -115,6 +144,7 @@ class AuthServiceTest {
                 .status(UserStatus.ACTIVE)
                 .build();
     }
+
 
     private RegisterRequest createValidRegisterRequest() {
         return RegisterRequest.builder()

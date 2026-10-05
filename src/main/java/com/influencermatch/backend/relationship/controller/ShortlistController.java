@@ -57,6 +57,6 @@ public class ShortlistController {
             @PathVariable UUID shortlistItemId,
             @AuthenticationPrincipal User currentUser) {
         shortlistService.removeCreatorFromShortlist(shortlistItemId, currentUser.getId());
-        return ResponseEntity.ok(ApiResponse.empty("Creator removed from shortlist."));
+        return ResponseEntity.ok(ApiResponse.empty());
     }
 }

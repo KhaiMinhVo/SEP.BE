@@ -17,7 +17,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping({"/subscriptions", "/api/v1/subscriptions"})
+@RequestMapping("/subscriptions")
 @RequiredArgsConstructor
 public class SubscriptionController extends BaseController {
 

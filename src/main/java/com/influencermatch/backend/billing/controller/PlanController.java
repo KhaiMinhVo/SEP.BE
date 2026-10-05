@@ -19,7 +19,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping({"/plans", "/api/v1/plans"})
+@RequestMapping("/plans")
 @RequiredArgsConstructor
 public class PlanController extends BaseController {
 

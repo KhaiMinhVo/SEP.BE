@@ -22,6 +22,7 @@ public enum ErrorCode {
   ACCOUNT_LOCKED(HttpStatus.UNAUTHORIZED, "Account locked"),
   ACCESS_DENIED(HttpStatus.FORBIDDEN, "Access denied"),
   RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "Resource not found"),
+  RESOURCE_ALREADY_EXISTS(HttpStatus.CONFLICT, "Resource already exists"),
   BRAND_NOT_FOUND(HttpStatus.NOT_FOUND, "Brand not found"),
   BRAND_ALREADY_EXISTS(HttpStatus.CONFLICT, "Brand already exists"),
   CAMPAIGN_NOT_FOUND(HttpStatus.NOT_FOUND, "Campaign not found"),

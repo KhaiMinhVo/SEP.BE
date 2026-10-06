@@ -39,14 +39,6 @@ public class OpenApiConfig {
   public OpenAPI influencerMatchOpenAPI() {
     return new OpenAPI()
         .info(apiInfo())
-        .servers(
-            List.of(
-                new Server()
-                    .url("http://localhost:" + serverPort + "/api/v1")
-                    .description("Local Development Server"),
-                new Server()
-                    .url("https://api.influencermatch.com/api/v1")
-                    .description("Production Server")))
         .addSecurityItem(new SecurityRequirement().addList(SECURITY_SCHEME_NAME))
         .components(
             new Components()

@@ -1,15 +1,13 @@
 package com.influencermatch.backend.creator.model;
 
-import com.influencermatch.backend.creator.controller.*;
-import com.influencermatch.backend.creator.dto.*;
 import com.influencermatch.backend.creator.enums.*;
-import com.influencermatch.backend.creator.repository.*;
-import com.influencermatch.backend.creator.service.*;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "public_creator_metric")
@@ -76,4 +74,9 @@ public class PublicCreatorMetric {
 
   @Column(length = 120)
   private String category;
+  
+  // Maps the TSVECTOR column to JPA for use in Criteria API search queries
+  @Column(name = "search_vector", columnDefinition = "tsvector", insertable = false, updatable = false)
+  @JdbcTypeCode(SqlTypes.OTHER)
+  private Object searchVector;
 }

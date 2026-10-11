@@ -19,7 +19,7 @@ services:
       retries: 5
 
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: influencermatch_postgres
     restart: unless-stopped
     environment:
@@ -51,6 +51,9 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-influencermatch_dev}
       SPRING_DATASOURCE_USERNAME: ${DB_USER:-influencermatch_user}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASS:-12345}
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://host.docker.internal:8000/api/v1/ai/embed}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
     depends_on:

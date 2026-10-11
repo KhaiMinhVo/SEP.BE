@@ -44,4 +44,5 @@ public class CreatorIngestionRequest {
   private BigDecimal dataConfidence;
   
   private List<PostDto> recentPosts;
+  private List<Float> embedding;
 }

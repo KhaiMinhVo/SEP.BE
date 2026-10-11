@@ -1,35 +1,36 @@
 package com.influencermatch.backend.creator.controller;
 
 import com.influencermatch.backend.common.dto.ApiResponse;
-import com.influencermatch.backend.creator.model.PublicCreatorMetric;
+import com.influencermatch.backend.creator.client.AiServiceClient;
 import com.influencermatch.backend.creator.dto.CreatorVectorSearchProjection;
-import com.influencermatch.backend.creator.dto.CreatorVectorSearchRequest;
+import com.influencermatch.backend.creator.model.PublicCreatorMetric;
 import com.influencermatch.backend.creator.repository.CreatorRepository;
 import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.stream.Collectors;
-
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ErrorCode;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/creators")
 @RequiredArgsConstructor
-@Tag(name = "Creators", description = "Brand-facing Creator Search and Listing")
+@Tag(name = "Creators", description = "Brand-facing Creator Search, Listing, and Data Ingestion")
 public class CreatorController {
 
     private final PublicCreatorMetricRepository metricRepository;
     private final CreatorRepository creatorRepository;
-    private final com.influencermatch.backend.creator.client.AiServiceClient aiServiceClient;
+    private final AiServiceClient aiServiceClient;
 
     @GetMapping("/search/semantic")
     @Transactional(readOnly = true)
@@ -49,17 +50,6 @@ public class CreatorController {
         int effectiveLimit = Math.max(1, Math.min(limit, 50));
         List<CreatorVectorSearchProjection> results =
             creatorRepository.searchSimilarCreators(vector.toString(), effectiveLimit);
-        return ResponseEntity.ok(ApiResponse.ok(results));
-    }
-
-    @PostMapping("/search/vector")
-    @Transactional(readOnly = true)
-    @Operation(summary = "Vector search creators", description = "Find creators semantically similar to the provided embedding vector.")
-    public ResponseEntity<ApiResponse<List<CreatorVectorSearchProjection>>> searchByVector(
-        @RequestBody CreatorVectorSearchRequest request) {
-        String vectorStr = request.getVector() != null ? request.getVector().toString() : "[]";
-        int limit = request.getLimit() > 0 ? request.getLimit() : 10;
-        List<CreatorVectorSearchProjection> results = creatorRepository.searchSimilarCreators(vectorStr, limit);
         return ResponseEntity.ok(ApiResponse.ok(results));
     }
 

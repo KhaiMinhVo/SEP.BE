@@ -1,10 +1,7 @@
 package com.influencermatch.backend.creator.repository;
 
-import com.influencermatch.backend.creator.controller.*;
-import com.influencermatch.backend.creator.dto.*;
-import com.influencermatch.backend.creator.enums.*;
-import com.influencermatch.backend.creator.model.*;
-import com.influencermatch.backend.creator.service.*;
+import com.influencermatch.backend.creator.dto.CreatorVectorSearchProjection;
+import com.influencermatch.backend.creator.model.Creator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;

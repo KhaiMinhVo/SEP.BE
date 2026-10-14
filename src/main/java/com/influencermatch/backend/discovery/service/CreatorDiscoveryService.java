@@ -8,6 +8,9 @@ import com.influencermatch.backend.creator.repository.PublicCreatorMetricReposit
 import com.influencermatch.backend.discovery.dto.DiscoveryContext;
 import com.influencermatch.backend.discovery.dto.DiscoverySearchRequest;
 import com.influencermatch.backend.discovery.dto.HybridDiscoveryCreatorProjection;
+import com.influencermatch.backend.exception.ConflictException;
+import com.influencermatch.backend.exception.ErrorCode;
+import com.influencermatch.backend.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -31,12 +34,14 @@ public class CreatorDiscoveryService {
 
     @Transactional(readOnly = true)
     public Page<HybridDiscoveryCreatorProjection> discoverCreators(UUID campaignId, DiscoverySearchRequest req) {
-        // 1. Fetch Campaign and validate status
+        // 1. Fetch Campaign and validate existence
         Campaign campaign = campaignRepository.findById(campaignId)
-                .orElseThrow(() -> new IllegalArgumentException("Campaign not found with ID: " + campaignId));
+                .orElseThrow(() -> new ResourceNotFoundException("Campaign", "id", campaignId));
 
-        if (campaign.getStatus() == CampaignStatus.DRAFT) {
-            throw new IllegalStateException("Cannot run discovery on a DRAFT campaign. Please activate or ready it first.");
+        // Allow DRAFT, READY_FOR_DISCOVERY, and ACTIVE campaigns to preview/discover creators.
+        // Only block ARCHIVED campaigns.
+        if (campaign.getStatus() == CampaignStatus.ARCHIVED) {
+            throw new ConflictException(ErrorCode.CAMPAIGN_CONTEXT_NOT_READY, "Cannot run discovery on an ARCHIVED campaign.");
         }
 
         // BƯỚC 1: LỌC KHUNG CỨNG (Extract M3 Context)

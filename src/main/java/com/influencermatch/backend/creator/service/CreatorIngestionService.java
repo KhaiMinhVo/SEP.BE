@@ -110,6 +110,10 @@ public class CreatorIngestionService {
       }
     }
 
+    if (request.getEmbedding() != null && !request.getEmbedding().isEmpty()) {
+      creatorRepository.updateEmbedding(creator.getId(), request.getEmbedding().toString());
+    }
+
     return CreatorIngestionResponse.builder()
         .creatorId(creator.getId())
         .metricId(metric.getId())

@@ -1,8 +1,8 @@
 package com.influencermatch.backend.discovery.controller;
 
 import com.influencermatch.backend.common.dto.ApiResponse;
-import com.influencermatch.backend.creator.model.PublicCreatorMetric;
 import com.influencermatch.backend.discovery.dto.DiscoverySearchRequest;
+import com.influencermatch.backend.discovery.dto.HybridDiscoveryCreatorProjection;
 import com.influencermatch.backend.discovery.service.CreatorDiscoveryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -27,7 +27,7 @@ public class CreatorDiscoveryController {
 
     @GetMapping("/{campaignId}/discovery")
     @Transactional(readOnly = true)
-    @Operation(summary = "Discover creators for campaign", description = "Executes the Hybrid Discovery Pipeline to find creators matching campaign context and UI search parameters.")
+    @Operation(summary = "Discover creators for campaign", description = "Executes the 4-Stage Hybrid Discovery Pipeline (Hard Filters + Semantic & FTS Search + Rank Fusion + Fallback) to find creators.")
     public ResponseEntity<ApiResponse<Page<Map<String, Object>>>> discoverCreators(
             @PathVariable UUID campaignId,
             @ParameterObject @ModelAttribute DiscoverySearchRequest searchRequest) {
@@ -40,24 +40,27 @@ public class CreatorDiscoveryController {
             searchRequest.setPage(0);
         }
             
-        Page<PublicCreatorMetric> pool = discoveryService.discoverCreators(campaignId, searchRequest);
+        Page<HybridDiscoveryCreatorProjection> pool = discoveryService.discoverCreators(campaignId, searchRequest);
         
-        Page<Map<String, Object>> result = pool.map(m -> {
+        Page<Map<String, Object>> result = pool.map(p -> {
             Map<String, Object> map = new HashMap<>();
-            map.put("id", m.getId());
-            map.put("followers", m.getFollowers());
-            map.put("niche", m.getNiche());
-            map.put("engagementRate", m.getEngagementRate());
-            map.put("contentSummary", m.getContentSummary());
+            map.put("id", p.getId());
+            map.put("creatorId", p.getCreatorId());
+            map.put("userName", p.getUserName());
+            map.put("displayName", p.getDisplayName());
+            map.put("platform", p.getPlatform());
+            map.put("avatarUrl", p.getAvatarUrl());
+            map.put("profileUrl", p.getProfileUrl());
+            map.put("followers", p.getFollowers());
+            map.put("niche", p.getNiche());
+            map.put("category", p.getCategory());
+            map.put("engagementRate", p.getEngagementRate());
+            map.put("contentSummary", p.getContentSummary());
             
-            if (m.getCreator() != null) {
-                map.put("creatorId", m.getCreator().getId());
-                map.put("userName", m.getCreator().getUserName());
-                map.put("displayName", m.getCreator().getDisplayName());
-                map.put("platform", m.getCreator().getPlatform());
-                map.put("avatarUrl", m.getCreator().getAvatarUrl());
-                map.put("profileUrl", m.getCreator().getProfileUrl());
-            }
+            // Điểm số xếp hạng Hybrid
+            map.put("semanticScore", p.getSemanticScore());
+            map.put("ftsScore", p.getFtsScore());
+            map.put("hybridScore", p.getHybridScore());
             return map;
         });
         

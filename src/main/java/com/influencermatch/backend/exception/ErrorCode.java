@@ -3,6 +3,14 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  DATA_QUALITY_REVIEW_CONFLICT(HttpStatus.CONFLICT, "Snapshot is no longer pending quality review"),
+  CREATOR_CLAIM_CONFLICT(HttpStatus.CONFLICT, "Creator claim conflict"),
+  CREATOR_ROLE_CHANGE_CONFLICT(HttpStatus.CONFLICT, "Creator has active ownership or pending claims"),
+  GOOGLE_LOGIN_ROLE_MISMATCH(HttpStatus.FORBIDDEN, "Use the Google login for your account role"),
+  COLLABORATION_ALREADY_EXISTS(HttpStatus.CONFLICT, "Collaboration already exists"),
+  OUTCOME_ALREADY_EXISTS(HttpStatus.CONFLICT, "Outcome already exists"),
+  CREATOR_REVIEW_ALREADY_EXISTS(HttpStatus.CONFLICT, "Creator review already exists"),
+  INVALID_COLLABORATION_STATE(HttpStatus.CONFLICT, "Collaboration workflow conflict"),
   LAST_ACTIVE_ADMIN(HttpStatus.CONFLICT, "The last active administrator cannot be removed"),
   BRAND_ROLE_CHANGE_CONFLICT(
       HttpStatus.CONFLICT, "Brand profile prevents internal role assignment"),

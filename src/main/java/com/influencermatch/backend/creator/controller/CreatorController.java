@@ -75,6 +75,9 @@ public class CreatorController {
                 map.put("platform", m.getCreator().getPlatform());
                 map.put("avatarUrl", m.getCreator().getAvatarUrl());
                 map.put("profileUrl", m.getCreator().getProfileUrl());
+                map.put("sourceType", m.getCreator().getSourceType());
+                map.put("verifiedByInfluencerMatch", m.getCreator().getSourceType()==com.influencermatch.backend.creator.enums.CreatorSourceType.AUTHORIZED && m.getCreator().getOwner()!=null);
+                map.put("authorizedAt", m.getCreator().getAuthorizedAt());
             }
             return map;
         }).collect(Collectors.toList());

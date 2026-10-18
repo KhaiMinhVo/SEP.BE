@@ -16,6 +16,12 @@ import org.springframework.stereotype.Repository;
 public interface PublicCreatorMetricRepository
     extends JpaRepository<PublicCreatorMetric, UUID>, JpaSpecificationExecutor<PublicCreatorMetric> {
 
+    @Query(value="""
+        SELECT DISTINCT ON (m.creator_id) m.* FROM public_creator_metric m
+        WHERE m.creator_id IN (:ids) ORDER BY m.creator_id, m.collected_at DESC, m.id DESC
+        """, nativeQuery=true)
+    List<PublicCreatorMetric> latestForCreators(@Param("ids") java.util.Collection<UUID> ids);
+
     @Query(
         value = """
             SELECT 

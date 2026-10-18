@@ -18,6 +18,13 @@ import org.hibernate.type.SqlTypes;
 @Builder
 public class PublicCreatorMetric {
 
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "quality_reviewed_by")
+  @com.fasterxml.jackson.annotation.JsonIgnore
+  private com.influencermatch.backend.user.model.User qualityReviewedBy;
+
+  private LocalDateTime qualityReviewedAt;
+
   @Id
   @GeneratedValue(strategy = GenerationType.UUID)
   @Column

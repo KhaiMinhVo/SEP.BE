@@ -27,7 +27,11 @@ public class GoogleOAuthSuccessHandler implements AuthenticationSuccessHandler {
         OidcUser user = (OidcUser) authentication.getPrincipal();
         Boolean verified = user.getEmailVerified();
         try {
-            String code = googleAuthService.completeGoogleLogin(user.getSubject(), user.getEmail(), user.getFullName(), Boolean.TRUE.equals(verified));
+            Object intent=request.getAttribute(GoogleLoginIntent.ATTRIBUTE);
+            if (!("BRAND".equals(intent) || "CREATOR".equals(intent)))
+                throw new com.influencermatch.backend.exception.BusinessException(
+                    com.influencermatch.backend.exception.ErrorCode.GOOGLE_AUTHENTICATION_FAILED,"Missing state-bound Google login intent");
+            String code = googleAuthService.completeGoogleLogin(user.getSubject(), user.getEmail(), user.getFullName(), Boolean.TRUE.equals(verified),Role.valueOf(intent.toString()));
             if (request.getSession(false) != null) request.getSession(false).invalidate();
             String target = UriComponentsBuilder.fromUriString(properties.getFrontendCallbackUrl())
                     .queryParam("code", code).build().encode().toUriString();

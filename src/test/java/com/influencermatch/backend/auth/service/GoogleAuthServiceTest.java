@@ -69,6 +69,36 @@ class GoogleAuthServiceTest {
   @Mock RefreshTokenService refreshTokens;
   GoogleAuthService service;
 
+  @Test
+  void creatorLoginCreatesCreatorAndBindsExchangeIntent() {
+    when(users.save(any())).thenAnswer(invocation -> {
+      User user = invocation.getArgument(0);
+      user.setId(UUID.randomUUID());
+      return user;
+    });
+    assertThat(service.completeGoogleLogin("creator-sub", "creator@example.test", "Creator", true, Role.CREATOR))
+        .isNotBlank();
+    var created = ArgumentCaptor.forClass(User.class);
+    verify(users).save(created.capture());
+    assertThat(created.getValue().getRole()).isEqualTo(Role.CREATOR);
+    assertThat(created.getValue().getPasswordHash()).isNull();
+    var code = ArgumentCaptor.forClass(AuthExchangeCode.class);
+    verify(exchangeCodes).save(code.capture());
+    assertThat(code.getValue().getLoginRole()).isEqualTo(Role.CREATOR);
+  }
+
+  @Test
+  void brandCannotUseCreatorLoginToChangeRole() {
+    User brand = User.builder().email("brand@example.test").role(Role.BRAND).status(UserStatus.ACTIVE).build();
+    when(users.findByEmail(brand.getEmail())).thenReturn(Optional.of(brand));
+    assertThatThrownBy(() -> service.completeGoogleLogin("sub", brand.getEmail(), "Brand", true, Role.CREATOR))
+        .isInstanceOfSatisfying(BusinessException.class,
+            e -> assertThat(e.code()).isEqualTo(ErrorCode.GOOGLE_LOGIN_ROLE_MISMATCH));
+    assertThat(brand.getRole()).isEqualTo(Role.BRAND);
+    verify(identities, never()).save(any());
+    verify(exchangeCodes, never()).save(any());
+  }
+
   @BeforeEach
   void setUp() {
     GoogleOAuthProperties properties = new GoogleOAuthProperties();
@@ -130,7 +160,7 @@ class GoogleAuthServiceTest {
     assertThatThrownBy(() -> service.completeGoogleLogin("sub", "admin@example.com", "Admin", true))
         .isInstanceOf(BusinessException.class)
         .extracting(ex -> ((BusinessException) ex).code())
-        .isEqualTo(ErrorCode.ACCESS_DENIED);
+        .isEqualTo(ErrorCode.GOOGLE_LOGIN_ROLE_MISMATCH);
     verify(identities, never()).save(any());
   }
 
@@ -157,7 +187,7 @@ class GoogleAuthServiceTest {
             () -> service.completeGoogleLogin("sub", manager.getEmail(), "Manager", true))
         .isInstanceOf(BusinessException.class)
         .extracting(ex -> ((BusinessException) ex).code())
-        .isEqualTo(ErrorCode.ACCESS_DENIED);
+        .isEqualTo(ErrorCode.GOOGLE_LOGIN_ROLE_MISMATCH);
     verify(identities, never()).save(any());
   }
 

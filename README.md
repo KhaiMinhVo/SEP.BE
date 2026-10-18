@@ -46,8 +46,8 @@ Các địa chỉ sau phải truy cập được:
 - Health: http://localhost:8080/api/v1/actuator/health
 - Swagger UI: http://localhost:8080/api/v1/swagger-ui.html
 - OpenAPI JSON: http://localhost:8080/api/v1/api-docs
-- Auth demo: `docs/AuthPoc.http`
-- Full Flow 1 HTTP demo: `docs/Flow1.http`
+
+Kiểm thử API tại `http://localhost:8080/api/v1`. Tham khảo Swagger UI để xem endpoint và request body; dùng Bearer token cho API yêu cầu đăng nhập.
 
 Kiểm tra health bằng PowerShell:
 
@@ -228,6 +228,9 @@ Docker Compose hiện truyền biến trong `.env` vào container API qua `env_f
 
 Permission Notification, Recommendation, Shortlist/CRM, Collaboration/Outcome/Learning,
 Usage/Billing read và các tác vụ Data Manager mới chỉ được khai báo nếu chưa có API tương ứng.
-Không tạo workflow claim, dynamic role/permission hoặc quota engine mới. Không có entitlement/quota
+Luồng Creator claim được mô tả tại [Creator Claim Profile](docs/creator-claim.md).
+Hàng đợi duyệt KOC được mô tả tại [Data Quality](docs/data-quality.md).
+API so sánh shortlist và mock thanh toán: [Compare & Mock Payment](docs/compare-and-mock-payment.md).
+Không tạo dynamic role/permission hoặc quota engine mới. Không có entitlement/quota
 gate đầy đủ cho mọi API hiện tại; RBAC không thay thế các kiểm tra này khi chúng được triển khai.
 Không thể xem các permission đã khai báo là chức năng đã hoạt động.

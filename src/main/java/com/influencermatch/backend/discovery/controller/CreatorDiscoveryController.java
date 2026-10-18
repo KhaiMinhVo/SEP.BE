@@ -26,6 +26,7 @@ public class CreatorDiscoveryController {
     private final CreatorDiscoveryService discoveryService;
 
     @GetMapping("/{campaignId}/discovery")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SEARCH_CREATOR')")
     @Transactional(readOnly = true)
     @Operation(summary = "Discover creators for campaign", description = "Executes the 4-Stage Hybrid Discovery Pipeline (Hard Filters + Semantic & FTS Search + Rank Fusion + Fallback) to find creators.")
     public ResponseEntity<ApiResponse<Page<Map<String, Object>>>> discoverCreators(

@@ -34,10 +34,13 @@ public class CreatorDiscoveryService {
 
     @Transactional(readOnly = true)
     public Page<HybridDiscoveryCreatorProjection> discoverCreators(UUID campaignId, DiscoverySearchRequest req) {
+        com.influencermatch.backend.security.Permissions.require(com.influencermatch.backend.security.Permission.SEARCH_CREATOR);
         // 1. Fetch Campaign and validate existence
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new ResourceNotFoundException("Campaign", "id", campaignId));
 
+        if (!campaign.getBrandProfile().getUser().getId().equals(com.influencermatch.backend.security.Permissions.actor().getId()))
+            throw new com.influencermatch.backend.exception.ForbiddenException("Campaign belongs to another brand");
         // Allow DRAFT, READY_FOR_DISCOVERY, and ACTIVE campaigns to preview/discover creators.
         // Only block ARCHIVED campaigns.
         if (campaign.getStatus() == CampaignStatus.ARCHIVED) {

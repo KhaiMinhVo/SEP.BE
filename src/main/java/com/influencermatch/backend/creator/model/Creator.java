@@ -22,6 +22,17 @@ import org.hibernate.annotations.UpdateTimestamp;
 @AllArgsConstructor
 @Builder
 public class Creator {
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "owner_user_id")
+  @com.fasterxml.jackson.annotation.JsonIgnore
+  private com.influencermatch.backend.user.model.User owner;
+
+  @Builder.Default
+  @Enumerated(EnumType.STRING)
+  @Column(name = "source_type", nullable = false, length = 16)
+  private com.influencermatch.backend.creator.enums.CreatorSourceType sourceType = com.influencermatch.backend.creator.enums.CreatorSourceType.PUBLIC;
+
+  private LocalDateTime authorizedAt;
 
   @Id
   @GeneratedValue(strategy = GenerationType.UUID)

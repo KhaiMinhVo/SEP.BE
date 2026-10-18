@@ -68,6 +68,12 @@ spring:
 #  JWT Security
 # ------------------------------------------------------------------------------------
 application:
+  auth:
+    creator-mock:
+      enabled: ${CREATOR_MOCK_LOGIN_ENABLED:false}
+  payment:
+    mock:
+      enabled: ${PAYMENT_MOCK_ENABLED:false}
   oauth2:
     google:
       enabled: ${GOOGLE_OAUTH_ENABLED:false}

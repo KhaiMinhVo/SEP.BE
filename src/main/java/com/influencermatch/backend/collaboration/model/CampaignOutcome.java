@@ -36,6 +36,10 @@ public class CampaignOutcome {
   @Column(precision = 19, scale = 2)
   private BigDecimal kpiActual;
 
+  private Long views;
+
+  private Long clicks;
+
   private String resultNote;
 
   private LocalDateTime recordedAt;

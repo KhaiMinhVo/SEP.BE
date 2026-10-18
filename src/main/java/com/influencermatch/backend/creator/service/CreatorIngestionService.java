@@ -19,6 +19,7 @@ public class CreatorIngestionService {
   private final CreatorRepository creatorRepository;
   private final PublicCreatorMetricRepository metricRepository;
   private final PostRepository postRepository;
+  private final jakarta.persistence.EntityManager entityManager;
 
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize(
@@ -27,7 +28,7 @@ public class CreatorIngestionService {
     // Find existing creator or create new one
     Creator creator =
         creatorRepository
-            .findByPlatformAndExternalId(request.getPlatform(), request.getExternalId())
+            .findLockedByPlatformAndExternalId(request.getPlatform(), request.getExternalId())
             .orElseGet(
                 () ->
                     Creator.builder()
@@ -35,7 +36,8 @@ public class CreatorIngestionService {
                         .externalId(request.getExternalId())
                         .build());
 
-    // Update creator core fields
+    if (creator.getId() != null) entityManager.refresh(creator);
+    // Only public core fields are writable by ingestion; ownership and rates are not accepted.
     creator.setUserName(request.getUserName());
     if (request.getDisplayName() != null) {
       creator.setDisplayName(request.getDisplayName());

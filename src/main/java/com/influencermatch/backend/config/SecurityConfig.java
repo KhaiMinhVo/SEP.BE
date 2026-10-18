@@ -43,6 +43,7 @@ public class SecurityConfig {
     "/auth/login",
     "/auth/refresh",
     "/auth/google",
+    "/auth/google/creator",
     "/auth/google/exchange",
     "/oauth2/**",
     "/login/oauth2/**",
@@ -80,7 +81,9 @@ public class SecurityConfig {
 
   @Bean
   @org.springframework.core.annotation.Order(2)
-  public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+  public SecurityFilterChain securityFilterChain(HttpSecurity http,
+      org.springframework.beans.factory.ObjectProvider<org.springframework.security.oauth2.client.registration.ClientRegistrationRepository> clients,
+      org.springframework.beans.factory.ObjectProvider<com.influencermatch.backend.auth.service.DevCreatorLoginService> devCreatorLogin) throws Exception {
     http.csrf(AbstractHttpConfigurer::disable)
         .formLogin(AbstractHttpConfigurer::disable)
         .httpBasic(AbstractHttpConfigurer::disable)
@@ -103,21 +106,31 @@ public class SecurityConfig {
                         ? SessionCreationPolicy.IF_REQUIRED
                         : SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(
-            auth ->
+            auth -> {
+                if (devCreatorLogin.getIfAvailable() != null) {
+                  auth.requestMatchers(org.springframework.http.HttpMethod.POST, "/auth/dev/creator-login").permitAll();
+                }
                 auth.requestMatchers(PUBLIC_ENDPOINTS)
                     .permitAll()
+                    .requestMatchers(org.springframework.http.HttpMethod.GET, "/admin/data-quality/pending")
+                    .hasAuthority("REVIEW_CREATOR_CLASSIFICATION")
+                    .requestMatchers(org.springframework.http.HttpMethod.PUT, "/admin/data-quality/{id}/approve")
+                    .hasAuthority("REVIEW_CREATOR_CLASSIFICATION")
                     .requestMatchers("/admin/**")
                     .hasRole("ADMIN")
                     .requestMatchers("/auth/me", "/auth/logout")
                     .authenticated()
                     .anyRequest()
-                    .authenticated())
+                    .authenticated(); })
         .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
     if (googleOAuthProperties.isEnabled()) {
       http.oauth2Login(
           oauth ->
               oauth
+                  .authorizationEndpoint(endpoint -> endpoint
+                      .authorizationRequestResolver(new com.influencermatch.backend.security.GoogleLoginIntent.Resolver(clients.getObject()))
+                      .authorizationRequestRepository(new com.influencermatch.backend.security.GoogleLoginIntent.Repository()))
                   .successHandler(googleOAuthSuccessHandler)
                   .failureHandler(googleOAuthFailureHandler));
     }

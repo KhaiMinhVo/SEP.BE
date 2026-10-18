@@ -27,6 +27,16 @@ import java.util.UUID;
 public class ShortlistController {
 
     private final ShortlistService shortlistService;
+    private final com.influencermatch.backend.relationship.service.ShortlistCompareService compareService;
+
+    @PostMapping("/compare")
+    @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
+    @Operation(summary="Compare 2–5 shortlisted Creators without ranking",security=@SecurityRequirement(name="BearerAuth"))
+    public ApiResponse<com.influencermatch.backend.relationship.dto.CompareDtos.Response> compare(
+            @PathVariable UUID campaignId,
+            @Valid @RequestBody com.influencermatch.backend.relationship.dto.CompareDtos.Request request) {
+        return ApiResponse.ok(compareService.compare(campaignId,request));
+    }
 
     @Operation(summary = "Add a creator to campaign shortlist", security = @SecurityRequirement(name = "BearerAuth"))
     @PostMapping

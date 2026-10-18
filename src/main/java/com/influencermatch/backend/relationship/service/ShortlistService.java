@@ -8,7 +8,7 @@ import org.springframework.data.domain.Pageable;
 import java.util.UUID;
 
 public interface ShortlistService {
-    ShortlistItemDto addCreatorToShortlist(UUID campaignId, AddShortlistItemRequest request, UUID userId);
+    ShortlistItemDto addCreatorToShortlist(UUID campaignId, AddShortlistItemRequest request);
     Page<ShortlistItemDto> getShortlistByCampaign(UUID campaignId, Pageable pageable);
-    void removeCreatorFromShortlist(UUID shortlistItemId, UUID userId);
+    void removeCreatorFromShortlist(UUID campaignId, UUID shortlistItemId);
 }

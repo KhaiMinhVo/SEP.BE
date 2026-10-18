@@ -11,6 +11,8 @@ import java.util.UUID;
 
 @Repository
 public interface BrandCreatorRelationshipRepository extends JpaRepository<BrandCreatorRelationship, UUID> {
+    Page<BrandCreatorRelationship> findByCampaignIdAndUserId(UUID campaignId, UUID userId, Pageable pageable);
+    Optional<BrandCreatorRelationship> findByIdAndCampaignIdAndUserId(UUID id, UUID campaignId, UUID userId);
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @org.springframework.data.jpa.repository.Query("select r from BrandCreatorRelationship r where r.id = :id")
     Optional<BrandCreatorRelationship> findLockedById(@org.springframework.data.repository.query.Param("id") UUID id);

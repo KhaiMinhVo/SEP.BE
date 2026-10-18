@@ -173,4 +173,86 @@ class ComparePaymentPostgresIntegrationTest {
     assertThat(jdbc.queryForObject("SELECT used_campaign_quota FROM subscription WHERE id=?",Integer.class,p.getSubscription().getId())).isEqualTo(3);
     assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id=? AND action='MOCK_PAYMENT_WEBHOOK'",Integer.class,p.getId())).isEqualTo(1);
   }
+
+  @Test void anotherBrandCannotReadOrMutateShortlistAndRelationships() throws Exception {
+    var owner=user(Role.BRAND);var attacker=user(Role.BRAND);var c=campaign(brand(owner));var a=creator();var b=creator();
+    var shortItem=call(owner,post("/campaigns/"+c.getId()+"/shortlist"),Map.of("creatorId",a.getId(),"priority","HIGH"),200);
+    var relationship=call(owner,post("/campaigns/"+c.getId()+"/relationships"),Map.of("creatorId",a.getId()),200);
+    String base="/campaigns/"+c.getId();
+    call(attacker,get(base+"/shortlist"),null,404);
+    call(attacker,post(base+"/shortlist"),Map.of("creatorId",b.getId(),"priority","HIGH"),404);
+    // Existing entries must not leak their existence via duplicate-conflict responses.
+    call(attacker,post(base+"/shortlist"),Map.of("creatorId",a.getId(),"priority","HIGH"),404);
+    call(attacker,delete(base+"/shortlist/"+shortItem.path("id").asText()),null,404);
+    call(attacker,get(base+"/relationships"),null,404);
+    call(attacker,post(base+"/relationships"),Map.of("creatorId",b.getId()),404);
+    call(attacker,post(base+"/relationships"),Map.of("creatorId",a.getId()),404);
+    String rel=base+"/relationships/"+relationship.path("id").asText();
+    call(attacker,get(rel),null,404);
+    call(attacker,patch(rel+"/stage"),Map.of("stage","INTERESTED"),404);
+    call(attacker,patch(rel+"/details"),Map.of("notes","tampered"),404);
+    assertThat(call(owner,get(rel),null,200).path("stage").asText()).isEqualTo("CONTACTED");
+    assertThat(shortlist.existsById(UUID.fromString(shortItem.path("id").asText()))).isTrue();
+    assertThat(shortlist.existsByCampaignIdAndCreatorId(c.getId(),b.getId())).isFalse();
+  }
+
+  @Test void owningBothCampaignsDoesNotPermitWrongNestedCampaignPath() throws Exception {
+    var owner=user(Role.BRAND);var brand=brand(owner);var c=campaign(brand);var other=campaign(brand);var a=creator();
+    var s=call(owner,post("/campaigns/"+c.getId()+"/shortlist"),Map.of("creatorId",a.getId(),"priority","HIGH"),200);
+    var r=call(owner,post("/campaigns/"+c.getId()+"/relationships"),Map.of("creatorId",a.getId(),"shortlistItemId",s.path("id").asText()),200);
+    String wrong="/campaigns/"+other.getId();
+    call(owner,delete(wrong+"/shortlist/"+s.path("id").asText()),null,404);
+    String rel=wrong+"/relationships/"+r.path("id").asText();
+    call(owner,get(rel),null,404);
+    call(owner,patch(rel+"/stage"),Map.of("stage","INTERESTED"),404);
+    call(owner,patch(rel+"/details"),Map.of("notes","wrong campaign"),404);
+    call(owner,post(wrong+"/relationships"),Map.of("creatorId",a.getId(),"shortlistItemId",s.path("id").asText()),404);
+    String correct="/campaigns/"+c.getId()+"/relationships/"+r.path("id").asText();
+    call(owner,patch(correct+"/stage"),Map.of("stage","INTERESTED"),200);
+    assertThat(call(owner,patch(correct+"/details"),Map.of("notes","owner updated"),200).path("notes").asText()).isEqualTo("owner updated");
+    assertThat(call(owner,get("/campaigns/"+c.getId()+"/shortlist"),null,200).path("content").size()).isEqualTo(1);
+    assertThat(call(owner,get("/campaigns/"+c.getId()+"/relationships"),null,200).path("content").size()).isEqualTo(1);
+    var removable=call(owner,post("/campaigns/"+c.getId()+"/shortlist"),
+        Map.of("creatorId",creator().getId(),"priority","HIGH"),200);
+    call(owner,delete("/campaigns/"+c.getId()+"/shortlist/"+removable.path("id").asText()),null,200);
+  }
+
+  @Test void relationshipCannotAttachForeignOrMismatchedShortlistItem() throws Exception {
+    var owner=user(Role.BRAND);var c=campaign(brand(owner));var a=creator();var b=creator();
+    var other=user(Role.BRAND);var foreign=campaign(brand(other));
+    var s=call(owner,post("/campaigns/"+c.getId()+"/shortlist"),Map.of("creatorId",a.getId(),"priority","HIGH"),200);
+    var f=call(other,post("/campaigns/"+foreign.getId()+"/shortlist"),Map.of("creatorId",a.getId(),"priority","HIGH"),200);
+    String path="/campaigns/"+c.getId()+"/relationships";
+    call(owner,post(path),Map.of("creatorId",b.getId(),"shortlistItemId",s.path("id").asText()),400);
+    call(owner,post(path),Map.of("creatorId",a.getId(),"shortlistItemId",f.path("id").asText()),404);
+    call(owner,post(path),Map.of("creatorId",a.getId(),"shortlistItemId",UUID.randomUUID()),404);
+    assertThat(call(owner,get(path),null,200).path("content").size()).isZero();
+  }
+
+  @Test void legacyPollutedRowsDoNotGrantAccessToForeignCampaign() throws Exception {
+    var owner=user(Role.BRAND);var attacker=user(Role.BRAND);var c=campaign(brand(owner));var a=creator();
+    var s=shortlist.saveAndFlush(ShortlistItem.builder().campaign(c).creator(a).user(attacker)
+        .priority(ShortlistPriority.HIGH).addedAt(LocalDateTime.now()).build());
+    String base="/campaigns/"+c.getId();
+    call(attacker,delete(base+"/shortlist/"+s.getId()),null,404);
+    assertThat(call(owner,get(base+"/shortlist"),null,200).path("content").size()).isZero();
+    var r=call(owner,post(base+"/relationships"),Map.of("creatorId",a.getId()),200);
+    jdbc.update("UPDATE relationship SET user_id=? WHERE id=?",attacker.getId(),UUID.fromString(r.path("id").asText()));
+    call(attacker,get(base+"/relationships/"+r.path("id").asText()),null,404);
+    assertThat(call(owner,get(base+"/relationships"),null,200).path("content").size()).isZero();
+  }
+
+  @Test void unauthenticatedAndNonBrandActorsRemainDenied() throws Exception {
+    var owner=user(Role.BRAND);var c=campaign(brand(owner));var a=creator();
+    for(String suffix:List.of("/shortlist","/relationships")) {
+      String path="/campaigns/"+c.getId()+suffix;
+      call(null,get(path),null,401);
+      for(Role role:List.of(Role.ADMIN,Role.DATA_MANAGER,Role.CREATOR)) {
+        call(user(role),get(path),null,403);
+        call(user(role),post(path),Map.of("creatorId",a.getId(),"priority","HIGH"),403);
+      }
+    }
+    call(owner,get("/campaigns/"+UUID.randomUUID()+"/shortlist"),null,404);
+    call(owner,get("/campaigns/"+UUID.randomUUID()+"/relationships"),null,404);
+  }
 }

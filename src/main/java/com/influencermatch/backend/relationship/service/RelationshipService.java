@@ -10,9 +10,9 @@ import org.springframework.data.domain.Pageable;
 import java.util.UUID;
 
 public interface RelationshipService {
-    RelationshipDto createRelationship(UUID campaignId, CreateRelationshipRequest request, UUID userId);
-    RelationshipDto updateStage(UUID relationshipId, UpdateRelationshipStageRequest request, UUID userId);
-    RelationshipDto updateDetails(UUID relationshipId, UpdateRelationshipDetailsRequest request, UUID userId);
+    RelationshipDto createRelationship(UUID campaignId, CreateRelationshipRequest request);
+    RelationshipDto updateStage(UUID campaignId, UUID relationshipId, UpdateRelationshipStageRequest request);
+    RelationshipDto updateDetails(UUID campaignId, UUID relationshipId, UpdateRelationshipDetailsRequest request);
     Page<RelationshipDto> getRelationshipsByCampaign(UUID campaignId, Pageable pageable);
-    RelationshipDto getRelationship(UUID relationshipId, UUID userId);
+    RelationshipDto getRelationship(UUID campaignId, UUID relationshipId);
 }

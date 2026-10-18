@@ -1,5 +1,12 @@
 # Compare Shortlist và mock thanh toán
 
+Các API shortlist/relationship (tạo, danh sách, chi tiết, sửa, xóa) kiểm tra quyền
+sở hữu campaign từ tài khoản đang đăng nhập. ID item/relationship trong URL phải
+thuộc đúng campaign và tài khoản đó; truy cập chéo Brand hoặc sai campaign trả 404.
+Relationship tạo từ shortlist phải dùng item của cùng campaign và cùng Creator;
+item khác Creator trả 400. Dữ liệu cũ gắn sai user không cấp quyền truy cập vào
+campaign của Brand khác và không xuất hiện trong danh sách của owner.
+
 Base URL `/api/v1`. Các request bên dưới cần `Authorization: Bearer <Brand access token>`.
 
 ## So sánh Creator

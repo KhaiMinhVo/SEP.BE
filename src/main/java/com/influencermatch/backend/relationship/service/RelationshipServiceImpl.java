@@ -1,7 +1,6 @@
 package com.influencermatch.backend.relationship.service;
 
 import com.influencermatch.backend.campaign.model.Campaign;
-import com.influencermatch.backend.campaign.repository.CampaignRepository;
 import com.influencermatch.backend.creator.model.Creator;
 import com.influencermatch.backend.creator.repository.CreatorRepository;
 import com.influencermatch.backend.exception.BusinessException;
@@ -23,6 +22,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.influencermatch.backend.security.*;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -32,19 +32,19 @@ public class RelationshipServiceImpl implements RelationshipService {
 
     private final BrandCreatorRelationshipRepository relationshipRepository;
     private final ShortlistItemRepository shortlistItemRepository;
-    private final CampaignRepository campaignRepository;
+    private final CampaignOwnershipService ownership;
     private final CreatorRepository creatorRepository;
     private final UserRepository userRepository;
 
     @Override
     @Transactional
-    public RelationshipDto createRelationship(UUID campaignId, CreateRelationshipRequest request, UUID userId) {
+    public RelationshipDto createRelationship(UUID campaignId, CreateRelationshipRequest request) {
+        Permissions.require(Permission.UPDATE_CAMPAIGN);
+        Campaign campaign = ownership.requireOwned(campaignId);
+        UUID userId = Permissions.actor().getId();
         if (relationshipRepository.existsByCampaignIdAndCreatorId(campaignId, request.getCreatorId())) {
             throw new BusinessException(ErrorCode.RESOURCE_ALREADY_EXISTS, "Relationship already exists for this creator in the campaign");
         }
-
-        Campaign campaign = campaignRepository.findById(campaignId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Campaign not found"));
 
         Creator creator = creatorRepository.findById(request.getCreatorId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Creator not found"));
@@ -54,9 +54,12 @@ public class RelationshipServiceImpl implements RelationshipService {
 
         ShortlistItem shortlistItem = null;
         if (request.getShortlistItemId() != null) {
-            shortlistItem = shortlistItemRepository.findById(request.getShortlistItemId())
+            shortlistItem = shortlistItemRepository.findByIdAndCampaignIdAndUserId(request.getShortlistItemId(), campaignId, userId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Shortlist item not found"));
         }
+
+        if (shortlistItem != null && !shortlistItem.getCreator().getId().equals(creator.getId()))
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Shortlist item belongs to another Creator");
 
         BrandCreatorRelationship relationship = BrandCreatorRelationship.builder()
                 .campaign(campaign)
@@ -79,8 +82,9 @@ public class RelationshipServiceImpl implements RelationshipService {
 
     @Override
     @Transactional
-    public RelationshipDto updateStage(UUID relationshipId, UpdateRelationshipStageRequest request, UUID userId) {
-        BrandCreatorRelationship relationship = getEntity(relationshipId, userId);
+    public RelationshipDto updateStage(UUID campaignId, UUID relationshipId, UpdateRelationshipStageRequest request) {
+        Permissions.require(Permission.UPDATE_CAMPAIGN);
+        BrandCreatorRelationship relationship = getEntity(campaignId, relationshipId);
         relationship.setStage(request.getStage());
         relationship.setUpdatedAt(LocalDateTime.now());
         return mapToDto(relationshipRepository.save(relationship));
@@ -88,8 +92,9 @@ public class RelationshipServiceImpl implements RelationshipService {
 
     @Override
     @Transactional
-    public RelationshipDto updateDetails(UUID relationshipId, UpdateRelationshipDetailsRequest request, UUID userId) {
-        BrandCreatorRelationship relationship = getEntity(relationshipId, userId);
+    public RelationshipDto updateDetails(UUID campaignId, UUID relationshipId, UpdateRelationshipDetailsRequest request) {
+        Permissions.require(Permission.UPDATE_CAMPAIGN);
+        BrandCreatorRelationship relationship = getEntity(campaignId, relationshipId);
         
         if (request.getContactMethod() != null) relationship.setContactMethod(request.getContactMethod());
         if (request.getQuotedFee() != null) relationship.setQuotedFee(request.getQuotedFee());
@@ -105,17 +110,19 @@ public class RelationshipServiceImpl implements RelationshipService {
     @Override
     @Transactional(readOnly = true)
     public Page<RelationshipDto> getRelationshipsByCampaign(UUID campaignId, Pageable pageable) {
-        return relationshipRepository.findByCampaignId(campaignId, pageable).map(this::mapToDto);
+        ownership.requireOwned(campaignId);
+        return relationshipRepository.findByCampaignIdAndUserId(campaignId, Permissions.actor().getId(), pageable).map(this::mapToDto);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public RelationshipDto getRelationship(UUID relationshipId, UUID userId) {
-        return mapToDto(getEntity(relationshipId, userId));
+    public RelationshipDto getRelationship(UUID campaignId, UUID relationshipId) {
+        return mapToDto(getEntity(campaignId, relationshipId));
     }
 
-    private BrandCreatorRelationship getEntity(UUID id, UUID userId) {
-        return relationshipRepository.findByIdAndUserId(id, userId)
+    private BrandCreatorRelationship getEntity(UUID campaignId, UUID id) {
+        ownership.requireOwned(campaignId);
+        return relationshipRepository.findByIdAndCampaignIdAndUserId(id, campaignId, Permissions.actor().getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Relationship not found or access denied"));
     }
 

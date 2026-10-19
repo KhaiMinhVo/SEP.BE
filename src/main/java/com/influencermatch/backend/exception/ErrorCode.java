@@ -34,6 +34,8 @@ public enum ErrorCode {
   OPTIMISTIC_CONFLICT(HttpStatus.CONFLICT, "Concurrent update conflict"),
   METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "Method not allowed"),
   UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported media type"),
+  AI_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI service is unavailable"),
+  AI_PARSE_ERROR(HttpStatus.BAD_GATEWAY, "AI returned an unprocessable response"),
   INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
   private final HttpStatus status;
   private final String title;

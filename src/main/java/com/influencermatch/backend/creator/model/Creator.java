@@ -1,10 +1,7 @@
 package com.influencermatch.backend.creator.model;
 
-import com.influencermatch.backend.creator.controller.*;
-import com.influencermatch.backend.creator.dto.*;
-import com.influencermatch.backend.creator.enums.*;
-import com.influencermatch.backend.creator.repository.*;
-import com.influencermatch.backend.creator.service.*;
+import com.influencermatch.backend.creator.enums.CreatorSourceType;
+import com.influencermatch.backend.user.model.User;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.UUID;

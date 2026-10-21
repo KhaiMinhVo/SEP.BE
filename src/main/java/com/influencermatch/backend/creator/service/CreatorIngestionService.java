@@ -1,6 +1,5 @@
 package com.influencermatch.backend.creator.service;
 
-import com.influencermatch.backend.creator.controller.*;
 import com.influencermatch.backend.creator.dto.*;
 import com.influencermatch.backend.creator.dto.CreatorIngestionRequest;
 import com.influencermatch.backend.creator.dto.CreatorIngestionResponse;

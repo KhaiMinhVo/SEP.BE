@@ -816,30 +816,30 @@ Tuần 3: Kết Nối Kênh Thứ Hai & Demo Xuyên Suốt (P1)
 ### 🔗 PHASE 6: Multi-channel Linking & Conflict Resolution (Kênh 2+ OAuth)
 > **Mục tiêu**: KOC đã có Master M1 vào Portal kết nối kênh thứ 2, 3 qua OAuth và xử lý xung đột tranh chấp kênh.
 
-- [ ] **6.1. Triển khai Service `CreatorAccountLinkService.java`**:
-  - [ ] Phương thức `linkAdditionalAccount(UUID userId, String platform, String authorizationCode)`:
-  - [ ] Lấy Master hiện tại của KOC: `CreatorMaster master = creatorMasterRepository.findByUserId(userId)`.
-  - [ ] Xác thực Proof of Control lấy `externalId` và `username` từ OAuth Provider.
-  - [ ] **Xử lý 4 kịch bản liên kết**:
-    - [ ] **Case 1 (Tài khoản đã có trong DB qua crawler, `master_id = null`)**:
+- [x] **6.1. Triển khai Service `CreatorAccountLinkService.java`**:
+  - [x] Phương thức `linkAdditionalAccount(UUID userId, String platform, String authorizationCode)`:
+  - [x] Lấy Master hiện tại của KOC: `CreatorMaster master = creatorMasterRepository.findByUserId(userId)`.
+  - [x] Xác thực Proof of Control lấy `externalId` và `username` từ OAuth Provider.
+  - [x] **Xử lý 4 kịch bản liên kết**:
+    - [x] **Case 1 (Tài khoản đã có trong DB qua crawler, `master_id = null`)**:
       - Tái sử dụng bản ghi A002 hiện có.
       - Gán `A002.setMaster(master)`, `A002.setSourceType(AUTHORIZED)`, `A002.setAuthorizedAt(NOW())`.
       - Lưu verification token và ghi audit log.
-    - [ ] **Case 2 (Tài khoản mới chưa từng cào)**:
+    - [x] **Case 2 (Tài khoản mới chưa từng cào)**:
       - Tạo bản ghi mới A003, gán ngay `master_id = master`, `source_type = AUTHORIZED`.
-    - [ ] **Case 3 (Tài khoản đã thuộc chính Master M1)**:
+    - [x] **Case 3 (Tài khoản đã thuộc chính Master M1)**:
       - Cập nhật access/refresh token trong `creator_account_verification` và trả về thành công.
-    - [ ] **Case 4 (Tài khoản đã thuộc Master M2 khác - Xung đột)**:
+    - [x] **Case 4 (Tài khoản đã thuộc Master M2 khác - Xung đột)**:
       - **Tuyệt đối không tự ý đổi chủ**. Ghi bản ghi vào `creator_identity_conflict` (loại `ACCOUNT_ALREADY_LINKED`, status `PENDING_MANAGER`).
       - Báo cho KOC biết yêu cầu đã được chuyển tới Data Manager xét duyệt tranh chấp.
-- [ ] **6.2. Tạo Controller `CreatorPortalAccountController.java`**:
-  - [ ] `POST /api/v1/creators/portal/accounts/connect/{platform}/start`: Bắt đầu kết nối kênh thứ 2.
-  - [ ] `POST /api/v1/creators/portal/accounts/connect/{platform}/callback`: Hoàn tất liên kết kênh thứ 2.
-  - [ ] `GET /api/v1/creators/portal/accounts`: Danh sách các kênh mạng xã hội đã liên kết vào Master của KOC.
-- [ ] **6.3. Tạo Controller `AdminIdentityConflictController.java`**:
-  - [ ] `GET /api/v1/admin/creator-conflicts`: Danh sách tranh chấp kênh (Data Manager / Admin).
-  - [ ] `POST /api/v1/admin/creator-conflicts/{id}/resolve`: Quyết định phê duyệt chuyển kênh (`APPROVE_TRANSFER`), từ chối (`REJECT`) hoặc yêu cầu bổ sung bằng chứng.
-- [ ] **DoD**:
+- [x] **6.2. Tạo Controller `CreatorPortalAccountController.java`**:
+  - [x] `POST /api/v1/creators/portal/accounts/connect/{platform}/start`: Bắt đầu kết nối kênh thứ 2.
+  - [x] `POST /api/v1/creators/portal/accounts/connect/{platform}/callback`: Hoàn tất liên kết kênh thứ 2.
+  - [x] `GET /api/v1/creators/portal/accounts`: Danh sách các kênh mạng xã hội đã liên kết vào Master của KOC.
+- [x] **6.3. Tạo Controller `AdminIdentityConflictController.java`**:
+  - [x] `GET /api/v1/admin/creator-conflicts`: Danh sách tranh chấp kênh (Data Manager / Admin).
+  - [x] `POST /api/v1/admin/creator-conflicts/{id}/resolve`: Quyết định phê duyệt chuyển kênh (`APPROVE_TRANSFER`), từ chối (`REJECT`) hoặc yêu cầu bổ sung bằng chứng.
+- [x] **DoD**:
   - KOC kết nối thành công kênh thứ 2, bảng `creator` hiển thị cả 2 kênh cùng chung `master_id = M1`.
   - Trường hợp kết nối kênh đã có chủ sinh bản ghi conflict chờ Admin duyệt.
 

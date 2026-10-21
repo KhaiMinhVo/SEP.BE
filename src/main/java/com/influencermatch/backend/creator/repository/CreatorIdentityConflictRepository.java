@@ -14,6 +14,9 @@ public interface CreatorIdentityConflictRepository
 
   List<CreatorIdentityConflict> findByStatus(String status);
 
+  org.springframework.data.domain.Page<CreatorIdentityConflict> findByStatus(
+      String status, org.springframework.data.domain.Pageable pageable);
+
   List<CreatorIdentityConflict> findBySourceAccountId(UUID sourceAccountId);
 
   List<CreatorIdentityConflict> findByTargetMasterId(UUID targetMasterId);

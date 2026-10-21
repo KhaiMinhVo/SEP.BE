@@ -1,5 +1,11 @@
+-- V3__auth_identity_and_exchange.sql
+-- 1. Cho phép tài khoản OAuth không cần password_hash ban đầu
 ALTER TABLE "user" ALTER COLUMN "password_hash" DROP NOT NULL;
 
+-- 2. Quản lý phiên bản xác thực tài khoản (Token Replay & Revocation)
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS auth_version BIGINT NOT NULL DEFAULT 0;
+
+-- 3. Bảng lưu định danh bên ngoài (Google OAuth2 identity)
 CREATE TABLE "external_identity" (
     "id" UUID PRIMARY KEY,
     "user_id" UUID NOT NULL,
@@ -16,6 +22,7 @@ CREATE TABLE "external_identity" (
 
 CREATE INDEX "ix_external_identity_user" ON "external_identity"("user_id");
 
+-- 4. Bảng lưu mã trao đổi one-time token cho luồng OAuth callback
 CREATE TABLE "auth_exchange_code" (
     "id" UUID PRIMARY KEY,
     "user_id" UUID NOT NULL,

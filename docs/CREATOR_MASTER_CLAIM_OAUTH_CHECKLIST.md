@@ -776,30 +776,30 @@ Tuần 3: Kết Nối Kênh Thứ Hai & Demo Xuyên Suốt (P1)
 ### 📩 PHASE 5: Invitation Engine & Profile Claim Flow (Kênh 1 OAuth)
 > **Mục tiêu**: Brand gửi lời mời claim kênh, KOC đăng nhập OAuth kênh đầu tiên để xác thực Proof of Control và tạo `CreatorMaster` nguyên tử.
 
-- [ ] **5.1. Tạo DTOs cho lời mời và Claim** trong `com.influencermatch.backend.creator.dto`:
-  - [ ] `SendInvitationRequest(String email, UUID campaignId)`
-  - [ ] `InvitationResponse(UUID id, UUID creatorId, String email, String status, LocalDateTime expiresAt)`
-  - [ ] `VerifyTokenResponse(UUID creatorId, String platform, String userName, String displayName, String avatarUrl)`
-  - [ ] `OAuthCallbackResponse(UUID masterId, UUID creatorId, String canonicalName, String status)`
-- [ ] **5.2. Triển khai Service `CreatorInvitationService.java`**:
-  - [ ] `sendInvitation(UUID creatorId, String email, UUID brandId, UUID campaignId)`:
-    - [ ] Sinh token ngẫu nhiên 32-byte bằng `SecureRandom`, băm SHA-256 lưu `token_hash`.
-    - [ ] Hạn dùng 7 ngày (`expires_at = NOW() + 7 days`).
-    - [ ] Gửi email mời tới KOC kèm link `/claim-profile?token=RAW_TOKEN`.
-  - [ ] `verifyInvitationToken(String rawToken)`: Băm SHA-256 tìm kiếm và kiểm tra hạn dùng.
-- [ ] **5.3. Tạo Controller `CreatorInvitationController.java`**:
-  - [ ] `POST /api/v1/creators/{id}/invite`: Gửi lời mời (yêu cầu quyền `MANAGE_OWN_SHORTLIST`).
-  - [ ] `GET /api/v1/creators/claim/invitation/verify?token=...`: Public API cho KOC kiểm tra lời mời.
-- [ ] **5.4. Tạo Controller `CreatorClaimOAuthController.java`**:
-  - [ ] `GET /api/v1/creators/claim/oauth/{platform}/start?token=...`: Lưu nonce/state chống CSRF, redirect sang OAuth provider.
-  - [ ] `GET /api/v1/creators/claim/oauth/{platform}/callback?code=...&state=...`: Nhận callback.
-- [ ] **5.5. Triển khai Service `CreatorClaimResolutionService.java`**:
-  - [ ] Đổi authorization code lấy access token từ Google/TikTok.
-  - [ ] Kiểm tra Proof of Control:
+- [x] **5.1. Tạo DTOs cho lời mời và Claim** trong `com.influencermatch.backend.creator.dto`:
+  - [x] `SendInvitationRequest(String email, UUID campaignId)`
+  - [x] `InvitationResponse(UUID id, UUID creatorId, String email, String status, LocalDateTime expiresAt)`
+  - [x] `VerifyTokenResponse(UUID creatorId, String platform, String userName, String displayName, String avatarUrl)`
+  - [x] `OAuthCallbackResponse(UUID masterId, UUID creatorId, String canonicalName, String status)`
+- [x] **5.2. Triển khai Service `CreatorInvitationService.java`**:
+  - [x] `sendInvitation(UUID creatorId, String email, UUID brandId, UUID campaignId)`:
+    - [x] Sinh token ngẫu nhiên 32-byte bằng `SecureRandom`, băm SHA-256 lưu `token_hash`.
+    - [x] Hạn dùng 7 ngày (`expires_at = NOW() + 7 days`).
+    - [x] Gửi email mời tới KOC kèm link `/claim-profile?token=RAW_TOKEN`.
+  - [x] `verifyInvitationToken(String rawToken)`: Băm SHA-256 tìm kiếm và kiểm tra hạn dùng.
+- [x] **5.3. Tạo Controller `CreatorInvitationController.java`**:
+  - [x] `POST /api/v1/creators/{id}/invite`: Gửi lời mời (yêu cầu quyền `MANAGE_OWN_SHORTLIST`).
+  - [x] `GET /api/v1/creators/claim/invitation/verify?token=...`: Public API cho KOC kiểm tra lời mời.
+- [x] **5.4. Tạo Controller `CreatorClaimOAuthController.java`**:
+  - [x] `GET /api/v1/creators/claim/oauth/{platform}/start?token=...`: Lưu nonce/state chống CSRF, redirect sang OAuth provider.
+  - [x] `GET /api/v1/creators/claim/oauth/{platform}/callback?code=...&state=...`: Nhận callback.
+- [x] **5.5. Triển khai Service `CreatorClaimResolutionService.java`**:
+  - [x] Đổi authorization code lấy access token từ Google/TikTok.
+  - [x] Kiểm tra Proof of Control:
     - *YouTube*: Gọi Google API `/youtube/v3/channels?mine=true` lấy `channel.id` so sánh với `creator.external_id`.
     - *TikTok*: Gọi `/v2/user/info/` lấy `username` chuẩn hóa so sánh với `creator.user_name`.
     - Nếu không khớp ➔ ném `IdentityMismatchException`.
-  - [ ] **Thực hiện Atomic Transaction (`@Transactional`)**:
+  - [x] **Thực hiện Atomic Transaction (`@Transactional`)**:
     1. Khóa tài khoản A001 (`findLockedById` - `PESSIMISTIC_WRITE`).
     2. Kiểm tra `A001.getMaster() == null` (chưa bị ai claim trước đó).
     3. Tìm hoặc tạo mới `CreatorMaster` M1 cho `claimantUser` (`creatorMasterRepository.findByUserId(...)`).
@@ -809,7 +809,7 @@ Tuần 3: Kết Nối Kênh Thứ Hai & Demo Xuyên Suốt (P1)
     7. Đánh dấu `creator_invitation.status = 'ACCEPTED'`.
     8. Ghi log `creator_identity_audit`.
     9. Tự động cập nhật `master_id = M1` cho toàn bộ bản ghi `shortlist_item`, `relationship` liên quan đến A001.
-- [ ] **DoD**: Mô phỏng thành công luồng: Gửi mời -> Nhận token -> OAuth Callback -> Kênh chuyển sang `AUTHORIZED`, Master M1 được tạo và gán cho User.
+- [x] **DoD**: Mô phỏng thành công luồng: Gửi mời -> Nhận token -> OAuth Callback -> Kênh chuyển sang `AUTHORIZED`, Master M1 được tạo và gán cho User.
 
 ---
 

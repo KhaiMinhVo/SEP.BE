@@ -18,4 +18,9 @@ public interface ShortlistItemRepository extends JpaRepository<ShortlistItem, UU
     Page<ShortlistItem> findByCampaignId(UUID campaignId, Pageable pageable);
     boolean existsByCampaignIdAndCreatorId(UUID campaignId, UUID creatorId);
     Optional<ShortlistItem> findByIdAndUserId(UUID id, UUID userId);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("UPDATE ShortlistItem s SET s.master = :master WHERE s.creator.id = :creatorId")
+    int updateMasterForCreator(@org.springframework.data.repository.query.Param("creatorId") UUID creatorId,
+                               @org.springframework.data.repository.query.Param("master") com.influencermatch.backend.creator.model.CreatorMaster master);
 }

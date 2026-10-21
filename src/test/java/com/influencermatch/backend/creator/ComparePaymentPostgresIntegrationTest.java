@@ -255,4 +255,99 @@ class ComparePaymentPostgresIntegrationTest {
     call(owner,get("/campaigns/"+UUID.randomUUID()+"/shortlist"),null,404);
     call(owner,get("/campaigns/"+UUID.randomUUID()+"/relationships"),null,404);
   }
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(ints={2,5})
+  void compareAcceptsSelectionBoundariesWithoutChangingShortlist(int size) throws Exception {
+    var u=user(Role.BRAND);var c=campaign(brand(u));List<UUID> ids=new ArrayList<>();
+    for(int i=0;i<size;i++){var item=creator();add(c,item,u);ids.add(item.getId());}
+    Collections.reverse(ids);
+    var before=shortlist.findByCampaignId(c.getId(),org.springframework.data.domain.Pageable.unpaged()).getContent();
+    var data=call(u,post(compare(c)),Map.of("creatorIds",ids),200);
+    List<String> actual=new ArrayList<>();data.path("creators").forEach(item->{
+      actual.add(item.path("creatorId").asText());
+      assertThat(item.has("metrics")).isTrue();assertThat(item.path("metrics").isNull()).isTrue();
+      assertThat(item.path("rateCard").path("items").size()).isZero();
+    });
+    assertThat(actual).containsExactlyElementsOf(ids.stream().map(UUID::toString).toList());
+    var after=shortlist.findByCampaignId(c.getId(),org.springframework.data.domain.Pageable.unpaged()).getContent();
+    assertThat(after).extracting(ShortlistItem::getId).containsExactlyInAnyOrderElementsOf(before.stream().map(ShortlistItem::getId).toList());
+    assertThat(after).allSatisfy(item->{assertThat(item.getPriority()).isEqualTo(ShortlistPriority.HIGH);assertThat(item.getNote()).isEqualTo("My note");});
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings={"empty","one","six","null","duplicate","badUUID","missing"})
+  void compareRejectsMalformedSelectionsWithoutMutation(String scenario) throws Exception {
+    var u=user(Role.BRAND);var c=campaign(brand(u));var a=creator();var b=creator();add(c,a,u);add(c,b,u);
+    var body=json.createObjectNode();var ids=body.putArray("creatorIds");
+    switch(scenario) {
+      case "one" -> ids.add(a.getId().toString());
+      case "six" -> {for(int i=0;i<6;i++)ids.add(UUID.randomUUID().toString());}
+      case "null" -> {ids.add(a.getId().toString());ids.addNull();}
+      case "duplicate" -> {ids.add(a.getId().toString());ids.add(a.getId().toString());}
+      case "badUUID" -> {ids.add(a.getId().toString());ids.add("invalid-uuid");}
+      case "missing" -> body.remove("creatorIds");
+      default -> {}
+    }
+    mvc.perform(post(compare(c)).header("Authorization","Bearer "+jwt.generateToken(u))
+        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)))
+        .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code")
+            .value(scenario.equals("badUUID")?"MALFORMED_REQUEST":"VALIDATION_ERROR"));
+    assertThat(shortlist.findByCampaignId(c.getId(),org.springframework.data.domain.Pageable.unpaged()).getTotalElements()).isEqualTo(2);
+  }
+
+  @Test void compareUsesUuidTieBreakAndDoesNotConflateNullWithZeroMetrics() throws Exception {
+    var u=user(Role.BRAND);var c=campaign(brand(u));var a=creator();var b=creator();add(c,a,u);add(c,b,u);
+    var at=LocalDateTime.now().withNano(0);
+    for(String niche:List.of("First","Second"))metrics.saveAndFlush(PublicCreatorMetric.builder().creator(a).creatorType("KOC")
+        .niche(niche).avgViews(BigDecimal.ZERO).collectedAt(at).freshnessStatus(MetricDataStatus.FRESH).build());
+    String latest=jdbc.queryForObject("SELECT id::text FROM public_creator_metric WHERE creator_id=? ORDER BY collected_at DESC,id DESC LIMIT 1",String.class,a.getId());
+    var result=call(u,post(compare(c)),Map.of("creatorIds",List.of(a.getId(),b.getId())),200).path("creators");
+    var m=result.get(0).path("metrics");
+    assertThat(m.path("metricId").asText()).isEqualTo(latest);
+    assertThat(m.path("avgViews").decimalValue()).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(m.path("avgLikes").isMissingNode()||m.path("avgLikes").isNull()).isTrue();
+    assertThat(m.path("followers").isMissingNode()||m.path("followers").isNull()).isTrue();
+    assertThat(result.get(1).path("metrics").isNull()).isTrue();
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings={"SUCCESS","FAILED"})
+  void terminalPaymentOutcomePreservesDatesQuotasAndSingleAudit(String outcome) throws Exception {
+    var u=user(Role.BRAND);var plan=plan();var p=payment(brand(u),plan);var subId=p.getSubscription().getId();
+    jdbc.update("UPDATE subscription SET used_campaign_quota=3,used_ai_quota=4,used_refresh_quota=5 WHERE id=?",subId);
+    LocalDate today=LocalDate.now();
+    var first=call(u,post(mock),outcome(p,outcome),200);
+    var saved=subscriptions.findById(subId).orElseThrow();
+    if(outcome.equals("SUCCESS")) {
+      assertThat(saved.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+      assertThat(saved.getStartDate()).isBetween(today,LocalDate.now());
+      assertThat(saved.getExpirationDate()).isEqualTo(saved.getStartDate().plusDays(plan.getDurationDays()));
+    } else {
+      assertThat(saved.getStatus()).isEqualTo(SubscriptionStatus.CANCELLED);
+      assertThat(saved.getStartDate()).isEqualTo(p.getSubscription().getStartDate());
+      assertThat(saved.getExpirationDate()).isEqualTo(p.getSubscription().getExpirationDate());
+    }
+    var paidAt=payments.findById(p.getId()).orElseThrow().getPaidAt();
+    assertThat(call(u,post(mock),outcome(p,outcome),200)).isEqualTo(first);
+    call(u,post(mock),outcome(p,outcome.equals("SUCCESS")?"FAILED":"SUCCESS"),409);
+    var after=subscriptions.findById(subId).orElseThrow();
+    assertThat(after.getStartDate()).isEqualTo(saved.getStartDate());assertThat(after.getExpirationDate()).isEqualTo(saved.getExpirationDate());
+    assertThat(after.getUsedCampaignQuota()).isEqualTo(3);assertThat(after.getUsedRecommendationQuota()).isEqualTo(4);assertThat(after.getUsedRefreshQuota()).isEqualTo(5);
+    assertThat(payments.findById(p.getId()).orElseThrow().getPaidAt()).isEqualTo(paidAt);
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id=? AND action='MOCK_PAYMENT_WEBHOOK'",Integer.class,p.getId())).isEqualTo(1);
+  }
+
+  @Test void mockAuditFailureRollsBackPaymentAndSubscriptionActivation() throws Exception {
+    var u=user(Role.BRAND);var p=payment(brand(u),plan());var subId=p.getSubscription().getId();
+    jdbc.execute("CREATE FUNCTION mock_payment_test_audit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='MOCK_PAYMENT_WEBHOOK' AND NEW.entity_id='"+p.getId()+"'::uuid THEN RAISE EXCEPTION 'mock payment audit test failure'; END IF; RETURN NEW; END $$");
+    jdbc.execute("CREATE TRIGGER mock_payment_test_audit_failure BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION mock_payment_test_audit_failure()");
+    try {call(u,post(mock),outcome(p,"SUCCESS"),500);}
+    finally {jdbc.execute("DROP TRIGGER mock_payment_test_audit_failure ON audit_log");jdbc.execute("DROP FUNCTION mock_payment_test_audit_failure()");}
+    var stored=payments.findById(p.getId()).orElseThrow();var sub=subscriptions.findById(subId).orElseThrow();
+    assertThat(stored.getStatus()).isEqualTo(PaymentStatus.PENDING);assertThat(stored.getPaidAt()).isNull();
+    assertThat(sub.getStatus()).isEqualTo(SubscriptionStatus.PENDING);assertThat(sub.getStartDate()).isEqualTo(p.getSubscription().getStartDate());
+    assertThat(sub.getExpirationDate()).isEqualTo(p.getSubscription().getExpirationDate());
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id=? AND action='MOCK_PAYMENT_WEBHOOK'",Integer.class,p.getId())).isZero();
+  }
+
 }

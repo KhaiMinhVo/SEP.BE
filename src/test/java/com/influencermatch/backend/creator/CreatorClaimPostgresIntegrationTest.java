@@ -180,4 +180,65 @@ class CreatorClaimPostgresIntegrationTest {
           .containsExactlyInAnyOrder(200, 409);
     }
   }
+  @Autowired com.influencermatch.backend.auth.repository.ExternalIdentityRepository identities;
+  @Autowired com.influencermatch.backend.creator.repository.CreatorClaimRepository claimRepository;
+  @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+  @Test void claimEvidenceIsPrivateAcrossCreatorsAndPublicProfile() throws Exception {
+    var owner=user(Role.CREATOR,true);var other=user(Role.CREATOR,true);var c=channel();
+    String id=claim(owner,c);
+    var own=json.readTree(call(owner,get("/creator-claims/me"),null,200).getResponse().getContentAsString()).path("data");
+    assertThat(own.path("items").size()).isEqualTo(1);
+    assertThat(own.path("items").get(0).path("id").asText()).isEqualTo(id);
+    assertThat(own.path("items").get(0).path("evidenceUrls").size()).isEqualTo(1);
+    var foreign=json.readTree(call(other,get("/creator-claims/me"),null,200).getResponse().getContentAsString()).path("data");
+    assertThat(foreign.path("items").size()).isZero();
+    call(other,get("/data/creator-claims/"+id),null,403);
+    var profile=call(other,get("/creators/"+c.getId()),null,200).getResponse().getContentAsString();
+    assertThat(profile).doesNotContain("evidenceUrls","claimantId","My channel");
+  }
+
+  @Test void unverifiedGoogleIdentityCannotSubmitClaim() throws Exception {
+    var owner=user(Role.CREATOR,false);var c=channel();
+    identities.saveAndFlush(com.influencermatch.backend.auth.model.ExternalIdentity.builder().user(owner)
+        .provider(com.influencermatch.backend.auth.model.ExternalIdentityProvider.GOOGLE)
+        .providerSubject(UUID.randomUUID().toString()).providerEmail(owner.getEmail()).emailVerified(false).build());
+    call(owner,post("/creators/"+c.getId()+"/claim"),EVIDENCE,403);
+    assertThat(claimRepository.existsByCreatorIdAndClaimantIdAndStatus(c.getId(),owner.getId(),
+        com.influencermatch.backend.creator.enums.CreatorClaimStatus.PENDING)).isFalse();
+    assertThat(creators.findById(c.getId()).orElseThrow().getOwner()).isNull();
+  }
+
+  @Test void rejectedClaimCanBeResubmittedAndOnlyReviewerCanDecide() throws Exception {
+    var owner=user(Role.CREATOR,true);var c=channel();String id=claim(owner,c);
+    String approve="{\"decision\":\"APPROVED\",\"reason\":\"Not allowed\"}";
+    for(var actor:List.of(owner,user(Role.BRAND,false))) {
+      call(actor,patch("/data/creator-claims/"+id+"/review"),approve,403);
+      call(actor,post("/data/creator-claims/"+id+"/revoke"),"{\"reason\":\"Not allowed\"}",403);
+    }
+    var manager=user(Role.DATA_MANAGER,false);
+    call(manager,patch("/data/creator-claims/"+id+"/review"),"{\"decision\":\"REJECTED\",\"reason\":\"More evidence required\"}",200);
+    assertThat(creators.findById(c.getId()).orElseThrow().getSourceType().name()).isEqualTo("PUBLIC");
+    String resubmitted=claim(owner,c);assertThat(resubmitted).isNotEqualTo(id);
+    assertThat(claimRepository.findById(UUID.fromString(id)).orElseThrow().getStatus().name()).isEqualTo("REJECTED");
+    assertThat(claimRepository.findById(UUID.fromString(resubmitted)).orElseThrow().getStatus().name()).isEqualTo("PENDING");
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.CsvSource({"0,200", "1.001,400", "100000000000000000,400"})
+  void rateCardPrecisionAndZeroLeaveValidRatesIntact(String price,int expected) throws Exception {
+    var owner=user(Role.CREATOR,true);var c=channel();String id=claim(owner,c);
+    call(user(Role.ADMIN,false),patch("/data/creator-claims/"+id+"/review"),"{\"decision\":\"APPROVED\",\"reason\":\"Verified\"}",200);
+    String path="/creators/"+c.getId()+"/rate-card";
+    call(owner,put(path),RATE,200);
+    int before=jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action='UPDATE_CREATOR_RATE_CARD' AND entity_id=?",Integer.class,c.getId());
+    call(owner,put(path),RATE.replace("1500000",price),expected);
+    var result=json.readTree(call(owner,get(path),null,200).getResponse().getContentAsString()).path("data");
+    assertThat(result.path("items").get(0).path("price").decimalValue()).isEqualByComparingTo(expected==200?price:"1500000");
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action='UPDATE_CREATOR_RATE_CARD' AND entity_id=?",Integer.class,c.getId()))
+        .isEqualTo(before+(expected==200?1:0));
+    call(owner,put(path),"{\"items\":[]}",200);
+    assertThat(json.readTree(call(owner,get(path),null,200).getResponse().getContentAsString()).path("data").path("items").size()).isZero();
+  }
+
 }

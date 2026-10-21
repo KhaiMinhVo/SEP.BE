@@ -470,6 +470,64 @@ VALUES ('10000000-0000-0000-0000-000000000007','10000000-0000-0000-0000-00000000
     }
   }
 
+
+  @org.junit.jupiter.params.ParameterizedTest(name="fee={0}, HTTP {1}")
+  @org.junit.jupiter.params.provider.CsvSource({"0,201", "-0.01,400", "1.001,400", "100000000000000000,400"})
+  void agreedFeeBoundariesPreserveStateOnFailure(String fee, int expected) throws Exception {
+    var f=fixture();
+    String body="{\"relationshipId\":\""+f.relationship().getId()+"\",\"agreedFee\":"+fee+",\"currency\":\"VND\"}";
+    postJson("/campaigns/"+f.campaign().getId()+"/collaborations",f.owner(),body,expected);
+    assertThat(collaborations.existsByRelationshipId(f.relationship().getId())).isEqualTo(expected==201);
+    var saved=relationships.findById(f.relationship().getId()).orElseThrow();
+    assertThat(saved.getStage()).isEqualTo(expected==201?RelationshipStage.COLLABORATING:RelationshipStage.CONTACTED);
+    if(expected==201) assertThat(saved.getAgreedFee()).isEqualByComparingTo(fee);
+    else assertThat(saved.getAgreedFee()).isNull();
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest(name="views={0}, clicks={1}")
+  @org.junit.jupiter.params.provider.CsvSource({"null,null,400", "0,null,201", "null,0,201", "0,0,201", "-1,0,400", "0,-1,400"})
+  void outcomeMetricBoundariesDoNotCompleteRejectedRequests(String views,String clicks,int expected) throws Exception {
+    var f=fixture();UUID id=UUID.fromString(create(f,201).path("id").asText());
+    postJson("/collaborations/"+id+"/outcome",f.owner(),
+        "{\"views\":"+views+",\"clicks\":"+clicks+",\"publishedContentUrl\":\"https://example.com/post\"}",expected);
+    assertThat(outcomes.existsByCollaborationId(id)).isEqualTo(expected==201);
+    var stored=collaborations.findById(id).orElseThrow();
+    assertThat(stored.getPaymentStatus()).isEqualTo(CollaborationPaymentStatus.PENDING);
+    assertThat(stored.getStatus()).isEqualTo(expected==201?CollaborationStatus.COMPLETED:CollaborationStatus.IN_PROGRESS);
+    assertThat(relationships.findById(f.relationship().getId()).orElseThrow().getStage())
+        .isEqualTo(expected==201?RelationshipStage.COMPLETED:RelationshipStage.COLLABORATING);
+    if(expected==201) {
+      var result=outcomes.findByCollaborationId(id).orElseThrow();
+      assertThat(result.getViews()).isEqualTo("null".equals(views)?null:Long.valueOf(views));
+      assertThat(result.getClicks()).isEqualTo("null".equals(clicks)?null:Long.valueOf(clicks));
+    } else assertThat(stored.getPublishedContentUrl()).isNull();
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings={"", "ftp://example.com/post", "javascript:alert(1)", "https://"})
+  void invalidPostLinksDoNotWriteOutcome(String link) throws Exception {
+    var f=fixture();UUID id=UUID.fromString(create(f,201).path("id").asText());
+    var body=json.createObjectNode().put("views",1).put("publishedContentUrl",link);
+    postJson("/collaborations/"+id+"/outcome",f.owner(),json.writeValueAsString(body),400);
+    assertThat(outcomes.existsByCollaborationId(id)).isFalse();
+    var stored=collaborations.findById(id).orElseThrow();
+    assertThat(stored.getStatus()).isEqualTo(CollaborationStatus.IN_PROGRESS);
+    assertThat(stored.getPublishedContentUrl()).isNull();
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.CsvSource({"overallRating,0", "overallRating,6", "brandFitRating,0", "brandFitRating,6",
+      "overallRating,4.5", "brandFitRating,true", "overallRating,\"5\"", "brandFitRating,null"})
+  void invalidReviewStarsDoNotPersistReview(String field,String value) throws Exception {
+    var f=fixture();UUID id=UUID.fromString(create(f,201).path("id").asText());
+    postJson("/collaborations/"+id+"/outcome",f.owner(),outcomeBody(),201);
+    var body=json.readTree(reviewBody());((com.fasterxml.jackson.databind.node.ObjectNode)body).set(field,json.readTree(value));
+    postJson("/collaborations/"+id+"/review",f.owner(),json.writeValueAsString(body),400);
+    assertThat(reviews.existsByCollaborationId(id)).isFalse();
+    assertThat(outcomes.existsByCollaborationId(id)).isTrue();
+    assertThat(collaborations.findById(id).orElseThrow().getStatus()).isEqualTo(CollaborationStatus.COMPLETED);
+  }
+
   void race(String path, User actor, String body) throws Exception {
     var pool = Executors.newFixedThreadPool(2);
     var start = new CountDownLatch(1);

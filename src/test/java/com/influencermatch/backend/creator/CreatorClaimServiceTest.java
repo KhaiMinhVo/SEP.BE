@@ -149,4 +149,13 @@ class CreatorClaimServiceTest {
     verify(audit, times(2)).record(eq("UPDATE_CREATOR_RATE_CARD"), eq("Creator"), eq(creator.getId()),
         any(RateResponse.class), any(RateResponse.class), anyString());
   }
+  @Test void devMockIdentityIsNotAcceptedWhenMockServiceIsDisabled() {
+    when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
+    lenient().when(identities.findByUserIdAndProvider(owner.getId(),ExternalIdentityProvider.DEV_MOCK))
+        .thenReturn(Optional.of(ExternalIdentity.builder().provider(ExternalIdentityProvider.DEV_MOCK).user(owner).build()));
+    assertThatThrownBy(()->service.claim(creator.getId(),request())).isInstanceOf(ForbiddenException.class);
+    verify(identities,never()).findByUserIdAndProvider(owner.getId(),ExternalIdentityProvider.DEV_MOCK);
+    verifyNoInteractions(claims,cards,audit);
+  }
+
 }

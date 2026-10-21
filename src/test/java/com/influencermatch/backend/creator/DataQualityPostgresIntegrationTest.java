@@ -203,4 +203,71 @@ class DataQualityPostgresIntegrationTest {
     assertThat(saved.getQualityReviewedAt()).isNull();
     assertThat(saved.getNiche()).isEqualTo("Original");
   }
+  @Test void paginationIsStableAndOrdersConfidenceThenTimeThenUuid() throws Exception {
+    var reviewer=user(Role.DATA_MANAGER);var at=LocalDateTime.now().withNano(0).minusHours(2);
+    var low=metric(creator(),"KOC","0.1233",at.plusMinutes(1));
+    var early=metric(creator(),"KOC","0.3211",at);
+    var tieA=metric(creator(),"KOC","0.3211",at.plusMinutes(1));
+    var tieB=metric(creator(),"KOC","0.3211",at.plusMinutes(1));
+    List<com.fasterxml.jackson.databind.JsonNode> all=new ArrayList<>();
+    int pages=1;
+    for(int page=0;page<pages;page++) {
+      var data=json.readTree(call(reviewer,get("/admin/data-quality/pending?page="+page+"&size=2"),null,200)
+          .getResponse().getContentAsString()).path("data");
+      pages=data.path("totalPages").asInt();
+      assertThat(data.path("page").asInt()).isEqualTo(page);
+      assertThat(data.path("items").size()).isLessThanOrEqualTo(2);
+      data.path("items").forEach(all::add);
+    }
+    var ids=all.stream().map(n->n.path("metricId").asText()).toList();
+    assertThat(new HashSet<>(ids)).hasSize(ids.size());
+    var tieIds=new ArrayList<>(List.of(tieA.getId().toString(),tieB.getId().toString()));Collections.sort(tieIds);
+    var fixtureIds=Set.of(low.getId().toString(),early.getId().toString(),tieIds.get(0),tieIds.get(1));
+    assertThat(ids.stream().filter(fixtureIds::contains).toList())
+        .containsExactly(low.getId().toString(),early.getId().toString(),tieIds.get(0),tieIds.get(1));
+    for(int i=1;i<all.size();i++) assertThat(all.get(i).path("dataConfidence").decimalValue())
+        .isGreaterThanOrEqualTo(all.get(i-1).path("dataConfidence").decimalValue());
+    var repeated=json.readTree(call(reviewer,get("/admin/data-quality/pending?page=0&size=2"),null,200)
+        .getResponse().getContentAsString()).path("data").path("items");
+    assertThat(repeated.get(0).path("metricId").asText()).isEqualTo(ids.get(0));
+  }
+
+  @Test void latestKolSuppressesOlderLowConfidenceKocWithoutWritingAudit() throws Exception {
+    var reviewer=user(Role.DATA_MANAGER);var c=creator();
+    var old=metric(c,"KOC","0.1",LocalDateTime.now().minusDays(1));
+    var latest=metric(c,"KOL","0.1",LocalDateTime.now());
+    var pending=call(reviewer,get("/admin/data-quality/pending?size=100"),null,200).getResponse().getContentAsString();
+    assertThat(pending).doesNotContain(old.getId().toString(),latest.getId().toString());
+    call(reviewer,put(path(old)),"{}",409);call(reviewer,put(path(latest)),"{}",409);
+    for(var m:List.of(old,latest)) {
+      assertThat(metrics.findById(m.getId()).orElseThrow().getQualityReviewedAt()).isNull();
+      assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id=? AND action='APPROVE_DATA_QUALITY'",Integer.class,m.getId())).isZero();
+    }
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.CsvSource({"0,400","120,200","121,400"})
+  void nicheLengthAfterTrimmingAndRejectedRequestsAreAtomic(int length,int expected) throws Exception {
+    var reviewer=user(Role.DATA_MANAGER);var m=metric(creator(),"KOC","0.2",LocalDateTime.now());
+    String niche=" "+"x".repeat(length)+" ";
+    call(reviewer,put(path(m)),json.writeValueAsString(Map.of("niche",niche)),expected);
+    var stored=metrics.findById(m.getId()).orElseThrow();
+    assertThat(stored.getNiche()).isEqualTo(expected==200?niche.trim():"Original");
+    assertThat(stored.getDataConfidence()).isEqualByComparingTo("0.2");
+    assertThat(stored.getQualityReviewedAt()!=null).isEqualTo(expected==200);
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id=? AND action='APPROVE_DATA_QUALITY'",Integer.class,m.getId())).isEqualTo(expected==200?1:0);
+  }
+
+  @Test void emptyApprovalBodyKeepsNicheAndRecordsOneReview() throws Exception {
+    var reviewer=user(Role.DATA_MANAGER);var m=metric(creator(),"KOC","0.4",LocalDateTime.now());
+    call(reviewer,put(path(m)),"{}",200);
+    var stored=metrics.findById(m.getId()).orElseThrow();
+    assertThat(stored.getNiche()).isEqualTo("Original");
+    assertThat(stored.getContentSummary()).isEqualTo("Sample content");
+    assertThat(stored.getDataConfidence()).isEqualByComparingTo("0.4");
+    assertThat(stored.getQualityReviewedAt()).isNotNull();
+    call(reviewer,put(path(m)),"{}",409);
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id=? AND action='APPROVE_DATA_QUALITY'",Integer.class,m.getId())).isEqualTo(1);
+  }
+
 }

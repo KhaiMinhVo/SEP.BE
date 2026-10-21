@@ -1,0 +1,161 @@
+package com.influencermatch.backend.creator;
+
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+import com.influencermatch.backend.audit.service.AuditService;
+import com.influencermatch.backend.auth.model.*;
+import com.influencermatch.backend.auth.repository.ExternalIdentityRepository;
+import com.influencermatch.backend.creator.dto.CreatorClaimDtos.*;
+import com.influencermatch.backend.creator.enums.*;
+import com.influencermatch.backend.creator.model.*;
+import com.influencermatch.backend.creator.repository.*;
+import com.influencermatch.backend.creator.service.CreatorClaimService;
+import com.influencermatch.backend.exception.*;
+import com.influencermatch.backend.user.enums.*;
+import com.influencermatch.backend.user.model.User;
+import com.influencermatch.backend.user.repository.UserRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.validation.*;
+import java.math.BigDecimal;
+import java.util.*;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.*;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+@ExtendWith(MockitoExtension.class)
+class CreatorClaimServiceTest {
+  @Mock CreatorRepository creators;
+  @Mock CreatorClaimRepository claims;
+  @Mock CreatorRateCardRepository cards;
+  @Mock ExternalIdentityRepository identities;
+  @Mock UserRepository users;
+  @Mock AuditService audit;
+  @Mock EntityManager em;
+  CreatorClaimService service;
+  ValidatorFactory factory;
+  User owner;
+  Creator creator;
+
+  @BeforeEach void setup() {
+    factory = Validation.buildDefaultValidatorFactory();
+    service = new CreatorClaimService(creators, claims, cards, identities, users, audit, em, factory.getValidator(), Optional.empty());
+    owner = User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
+    creator = Creator.builder().id(UUID.randomUUID()).build();
+    login(owner);
+  }
+  @AfterEach void cleanup() { SecurityContextHolder.clearContext(); factory.close(); }
+  void login(User user) {
+    SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
+  }
+  void verified() {
+    when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
+    when(identities.findByUserIdAndProvider(owner.getId(), ExternalIdentityProvider.GOOGLE))
+        .thenReturn(Optional.of(ExternalIdentity.builder().emailVerified(true).build()));
+  }
+  void locked() { when(creators.findLockedById(creator.getId())).thenReturn(Optional.of(creator)); }
+  ClaimRequest request() { return new ClaimRequest(List.of("https://example.test/proof"), "My channel"); }
+
+  @Test void submissionStaysPublicAndAuditsWithoutEvidence() {
+    verified(); locked();
+    when(claims.saveAndFlush(any())).thenAnswer(i -> {
+      CreatorClaim c = i.getArgument(0); c.setId(UUID.randomUUID()); return c;
+    });
+    var response = service.claim(creator.getId(), request());
+    assertThat(response.status()).isEqualTo(CreatorClaimStatus.PENDING);
+    assertThat(creator.getOwner()).isNull();
+    assertThat(creator.getSourceType()).isEqualTo(CreatorSourceType.PUBLIC);
+    verify(audit).record(eq("SUBMIT_CREATOR_CLAIM"), eq("CreatorClaim"), eq(response.id()), isNull(),
+        eq(Map.of("status", "PENDING", "creatorId", creator.getId(), "claimantId", owner.getId())), anyString());
+  }
+
+  @Test void unverifiedIdentityCannotClaim() {
+    when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
+    assertThatThrownBy(() -> service.claim(creator.getId(), request())).isInstanceOf(ForbiddenException.class);
+    verify(claims, never()).saveAndFlush(any());
+  }
+
+  @Test void inactiveCreatorCannotClaim() {
+    User current = User.builder().role(Role.CREATOR).status(UserStatus.LOCKED).build();
+    when(users.findById(owner.getId())).thenReturn(Optional.of(current));
+    assertThatThrownBy(() -> service.claim(creator.getId(), request())).isInstanceOf(ConflictException.class);
+  }
+
+  @Test void approvalRejectsCompetitorAndRevocationHidesRates() {
+    User reviewer = User.builder().id(UUID.randomUUID()).role(Role.DATA_MANAGER).status(UserStatus.ACTIVE).build();
+    login(reviewer); verified(); locked();
+    CreatorClaim claim = CreatorClaim.builder().id(UUID.randomUUID()).creator(creator).claimant(owner).status(CreatorClaimStatus.PENDING).build();
+    CreatorClaim competing = CreatorClaim.builder().id(UUID.randomUUID()).creator(creator).claimant(owner).status(CreatorClaimStatus.PENDING).build();
+    when(claims.findById(claim.getId())).thenReturn(Optional.of(claim));
+    when(claims.findByCreatorIdAndStatus(creator.getId(), CreatorClaimStatus.PENDING)).thenReturn(List.of(claim, competing));
+    service.review(claim.getId(), new ReviewRequest(Decision.APPROVED, "Checked ownership"));
+    assertThat(creator.getOwner()).isSameAs(owner);
+    assertThat(creator.getSourceType()).isEqualTo(CreatorSourceType.AUTHORIZED);
+    assertThat(creator.getAuthorizedAt()).isNotNull();
+    assertThat(competing.getStatus()).isEqualTo(CreatorClaimStatus.REJECTED);
+    service.revoke(claim.getId(), new RevokeRequest("Ownership withdrawn"));
+    assertThat(creator.getOwner()).isNull();
+    assertThat(creator.getAuthorizedAt()).isNull();
+    assertThat(service.rateCard(creator.getId()).items()).isEmpty();
+    verifyNoInteractions(cards);
+  }
+
+  @Test void rejectedClaimNeverAuthorizesChannel() {
+    login(User.builder().id(UUID.randomUUID()).role(Role.ADMIN).status(UserStatus.ACTIVE).build());
+    locked();
+    CreatorClaim claim = CreatorClaim.builder().id(UUID.randomUUID()).creator(creator).claimant(owner).status(CreatorClaimStatus.PENDING).build();
+    when(claims.findById(claim.getId())).thenReturn(Optional.of(claim));
+    assertThat(service.review(claim.getId(), new ReviewRequest(Decision.REJECTED, "Insufficient proof")).status())
+        .isEqualTo(CreatorClaimStatus.REJECTED);
+    assertThat(creator.getSourceType()).isEqualTo(CreatorSourceType.PUBLIC);
+    assertThat(creator.getOwner()).isNull();
+  }
+
+  @Test void invalidRatesNeverDeleteExistingPrices() {
+    verified(); locked(); creator.setOwner(owner);
+    var claim = CreatorClaim.builder().id(UUID.randomUUID()).claimant(owner).build();
+    when(claims.findFirstByCreatorIdAndStatus(creator.getId(), CreatorClaimStatus.APPROVED)).thenReturn(Optional.of(claim));
+    var item = new RateItem(RateCardContentType.VIDEO, BigDecimal.ONE, "VND", null);
+    assertThatThrownBy(() -> service.replaceRateCard(creator.getId(), new RateRequest(List.of(item, item))))
+        .isInstanceOf(com.influencermatch.backend.exception.ValidationException.class);
+    assertThatThrownBy(() -> service.replaceRateCard(creator.getId(), new RateRequest(List.of(
+        new RateItem(RateCardContentType.VIDEO, BigDecimal.ONE, "ZZZ", null)))))
+        .isInstanceOf(com.influencermatch.backend.exception.ValidationException.class);
+    verifyNoInteractions(cards);
+  }
+
+  @Test void negativePriceRejectedBeforeOwnershipLookup() {
+    assertThatThrownBy(() -> service.replaceRateCard(creator.getId(), new RateRequest(List.of(
+        new RateItem(RateCardContentType.VIDEO, BigDecimal.ONE.negate(), "VND", null)))))
+        .isInstanceOf(ConstraintViolationException.class);
+    verifyNoInteractions(cards, creators, users);
+  }
+
+  @Test void ownerCanReplaceAndClearRatesWithAudit() {
+    verified(); locked(); creator.setOwner(owner);
+    var claim = CreatorClaim.builder().id(UUID.randomUUID()).claimant(owner).build();
+    when(claims.findFirstByCreatorIdAndStatus(creator.getId(), CreatorClaimStatus.APPROVED)).thenReturn(Optional.of(claim));
+    List<CreatorRateCard> stored = new ArrayList<>();
+    when(cards.findByClaimIdOrderByContentTypeAsc(claim.getId())).thenAnswer(i -> List.copyOf(stored));
+    doAnswer(i -> { stored.clear(); return null; }).when(cards).deleteByClaimId(claim.getId());
+    when(cards.save(any())).thenAnswer(i -> { CreatorRateCard card = i.getArgument(0); stored.add(card); return card; });
+    var item = new RateItem(RateCardContentType.VIDEO, new BigDecimal("1500000"), "vnd", "My price");
+    assertThat(service.replaceRateCard(creator.getId(), new RateRequest(List.of(item))).items()).containsExactly(item);
+    assertThat(service.replaceRateCard(creator.getId(), new RateRequest(List.of())).items()).isEmpty();
+    verify(audit, times(2)).record(eq("UPDATE_CREATOR_RATE_CARD"), eq("Creator"), eq(creator.getId()),
+        any(RateResponse.class), any(RateResponse.class), anyString());
+  }
+  @Test void devMockIdentityIsNotAcceptedWhenMockServiceIsDisabled() {
+    when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
+    lenient().when(identities.findByUserIdAndProvider(owner.getId(),ExternalIdentityProvider.DEV_MOCK))
+        .thenReturn(Optional.of(ExternalIdentity.builder().provider(ExternalIdentityProvider.DEV_MOCK).user(owner).build()));
+    assertThatThrownBy(()->service.claim(creator.getId(),request())).isInstanceOf(ForbiddenException.class);
+    verify(identities,never()).findByUserIdAndProvider(owner.getId(),ExternalIdentityProvider.DEV_MOCK);
+    verifyNoInteractions(claims,cards,audit);
+  }
+
+}

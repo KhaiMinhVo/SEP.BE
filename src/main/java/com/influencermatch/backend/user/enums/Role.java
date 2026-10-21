@@ -8,5 +8,6 @@ import com.influencermatch.backend.user.service.*;
 public enum Role {
   ADMIN,
   DATA_MANAGER,
-  BRAND
+  BRAND,
+  CREATOR
 }

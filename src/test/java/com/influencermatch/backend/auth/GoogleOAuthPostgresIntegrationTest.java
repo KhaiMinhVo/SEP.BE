@@ -19,13 +19,12 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import org.junit.jupiter.api.Disabled;
+import org.testcontainers.utility.DockerImageName;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@Disabled("Tạm thời vô hiệu hóa vì máy Tester không chạy Docker")
 @SpringBootTest(properties = {
     "spring.jpa.hibernate.ddl-auto=validate", "spring.flyway.enabled=true",
     "application.bootstrap-admin.enabled=false", "application.oauth2.google.enabled=false"
@@ -34,7 +33,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Testcontainers
 class GoogleOAuthPostgresIntegrationTest {
   @Container
-  static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+  static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
+      DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
 
   @DynamicPropertySource
   static void database(DynamicPropertyRegistry registry) throws Exception {

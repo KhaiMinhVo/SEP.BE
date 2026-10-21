@@ -1,6 +1,7 @@
 package com.influencermatch.backend.billing.service;
 
 import com.influencermatch.backend.billing.enums.PaymentStatus;
+import com.influencermatch.backend.billing.dto.PaymentResponse;
 import com.influencermatch.backend.billing.enums.SubscriptionStatus;
 import com.influencermatch.backend.billing.model.Payment;
 import com.influencermatch.backend.billing.model.Plan;
@@ -34,10 +35,10 @@ public class PaymentService {
   private final PaymentRepository paymentRepository;
   private final VnPayConfig vnPayConfig;
   private final com.influencermatch.backend.brand.repository.BrandProfileRepository brands;
-  private final jakarta.persistence.EntityManager entityManager;
+  private final PaymentSettlementService settlement;
 
   @Transactional
-  public String createPaymentUrl(UUID planId, BrandProfile brand, String ipAddress)
+  public PaymentResponse createCheckout(UUID planId, BrandProfile brand, String ipAddress)
       throws UnsupportedEncodingException {
     com.influencermatch.backend.security.Permissions.require(
         com.influencermatch.backend.security.Permission.MANAGE_OWN_SUBSCRIPTION);
@@ -130,7 +131,7 @@ public class PaymentService {
             .collect(java.util.stream.Collectors.joining("&"));
     queryString += "&vnp_SecureHash=" + vnp_SecureHash;
 
-    return vnPayConfig.getPayUrl() + "?" + queryString;
+    return new PaymentResponse(vnPayConfig.getPayUrl() + "?" + queryString, txnRef);
   }
 
   @Transactional
@@ -157,39 +158,13 @@ public class PaymentService {
     Payment existing =
         paymentRepository.findByTransactionCode(params.get("vnp_TxnRef")).orElse(null);
     if (existing == null) return false;
-    // The same brand lock serializes free/admin activation and payment callbacks.
-    brands.lockForBilling(existing.getBrandProfile().getId()).orElseThrow();
-    Payment payment =
-        paymentRepository.findLockedByTransactionCode(params.get("vnp_TxnRef")).orElseThrow();
-    entityManager.refresh(payment);
+    Payment payment = settlement.lock(existing);
     long expectedAmount =
         payment.getAmount().multiply(java.math.BigDecimal.valueOf(100)).longValueExact();
     if (!Long.toString(expectedAmount).equals(params.get("vnp_Amount"))) return false;
     boolean success =
         "00".equals(params.get("vnp_ResponseCode"))
             && "00".equals(params.get("vnp_TransactionStatus"));
-    if (payment.getStatus() == PaymentStatus.PAID) return success;
-    if (payment.getStatus() == PaymentStatus.FAILED) return !success;
-    if (payment.getStatus() != PaymentStatus.PENDING) return false;
-    Subscription sub = payment.getSubscription();
-    entityManager.refresh(sub);
-    if (sub.getStatus() != SubscriptionStatus.PENDING) return false;
-    if (success) {
-      if (subscriptionRepository.existsByBrandProfileIdAndStatusAndExpirationDateGreaterThanEqual(
-          payment.getBrandProfile().getId(), SubscriptionStatus.ACTIVE, LocalDate.now()))
-        return false;
-      payment.setStatus(PaymentStatus.PAID);
-      payment.setPaidAt(LocalDateTime.now());
-      sub.setStatus(SubscriptionStatus.ACTIVE);
-      sub.setStartDate(LocalDate.now());
-      sub.setExpirationDate(LocalDate.now().plusDays(sub.getPlan().getDurationDays()));
-    } else {
-      payment.setStatus(PaymentStatus.FAILED);
-      payment.setFailureReason(params.get("vnp_ResponseCode"));
-      sub.setStatus(SubscriptionStatus.CANCELLED);
-    }
-    paymentRepository.save(payment);
-    subscriptionRepository.save(sub);
-    return true;
+    return settlement.apply(payment, success, params.get("vnp_ResponseCode"));
   }
 }

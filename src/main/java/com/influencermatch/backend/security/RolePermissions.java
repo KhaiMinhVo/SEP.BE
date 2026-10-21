@@ -19,6 +19,9 @@ public final class RolePermissions {
   public static Set<Permission> forRole(Role role) {
     Objects.requireNonNull(role, "role");
     EnumSet<Permission> permissions = EnumSet.copyOf(COMMON);
+    if (role == Role.CREATOR) permissions.addAll(EnumSet.of(Permission.CLAIM_CREATOR_PROFILE,
+        Permission.VIEW_OWN_CREATOR_CLAIM, Permission.MANAGE_OWN_RATE_CARD));
+    if (role == Role.ADMIN || role == Role.DATA_MANAGER) permissions.add(Permission.REVIEW_CREATOR_CLAIM);
     if (role == Role.BRAND)
       permissions.addAll(
           EnumSet.of(

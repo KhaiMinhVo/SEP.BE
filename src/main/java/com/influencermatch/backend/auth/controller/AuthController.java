@@ -41,6 +41,14 @@ public class AuthController {
   private final GoogleAuthService googleAuthService;
   private final GoogleOAuthProperties googleOAuthProperties;
 
+  @Operation(summary="Start Google login for Creator accounts",security={})
+  @GetMapping("/google/creator")
+  public ResponseEntity<Void> creatorGoogleLogin() {
+    if (!googleOAuthProperties.isEnabled())
+      throw new BusinessException(ErrorCode.GOOGLE_OAUTH_DISABLED,"Google login is not configured");
+    return ResponseEntity.status(302).location(URI.create("/api/v1/oauth2/authorization/google?login_intent=CREATOR")).build();
+  }
+
   @Operation(
       summary = "Start Google login for brand accounts",
       security = {})

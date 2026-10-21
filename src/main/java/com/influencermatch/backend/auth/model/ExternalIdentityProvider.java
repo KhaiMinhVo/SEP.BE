@@ -1,3 +1,3 @@
 package com.influencermatch.backend.auth.model;
 
-public enum ExternalIdentityProvider { GOOGLE }
+public enum ExternalIdentityProvider { GOOGLE, DEV_MOCK }

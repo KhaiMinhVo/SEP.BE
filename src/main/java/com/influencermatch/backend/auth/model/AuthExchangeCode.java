@@ -8,6 +8,8 @@ import java.util.UUID;
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 @Entity @Table(name = "authExchangeCode")
 public class AuthExchangeCode {
+    @Builder.Default @Enumerated(EnumType.STRING) @Column(nullable=false,length=20)
+    private com.influencermatch.backend.user.enums.Role loginRole = com.influencermatch.backend.user.enums.Role.BRAND;
     @Id @GeneratedValue(strategy = GenerationType.UUID)
     @Column(name = "id", nullable = false, updatable = false)
     private UUID id;

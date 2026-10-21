@@ -27,11 +27,11 @@ import org.springframework.test.context.*;
 import org.springframework.test.web.servlet.*;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.junit.jupiter.api.Disabled;
+import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.junit.jupiter.*;
 
-@Disabled("Tạm thời vô hiệu hóa vì máy Tester không chạy Docker")
 @SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {
       "spring.jpa.hibernate.ddl-auto=validate", "spring.flyway.enabled=true",
       "application.bootstrap-admin.enabled=false", "application.oauth2.google.enabled=false",
@@ -41,9 +41,11 @@ import org.testcontainers.junit.jupiter.*;
 @AutoConfigureMockMvc
 @Testcontainers
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RbacPostgresIntegrationTest {
   @Container
-  static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+  static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
+      DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
 
   @DynamicPropertySource
   static void database(DynamicPropertyRegistry registry) throws Exception {
@@ -75,6 +77,48 @@ class RbacPostgresIntegrationTest {
   @Autowired AuditLogRepository audits;
   @Autowired PaymentRepository payments;
   @Autowired SubscriptionRepository subscriptions;
+  @org.springframework.boot.test.web.server.LocalServerPort int port;
+
+  // Opt-in CLI verification against this disposable PostgreSQL-backed HTTP server.
+  // Run with -Drbac.brunoCli=<absolute path to Bruno CLI bin/bru.js>.
+  @AfterAll
+  void runBrunoIfConfigured() throws Exception {
+    String cli = System.getProperty("rbac.brunoCli");
+    if (cli == null) return;
+    var admin = account(Role.ADMIN);
+    var process =
+        new ProcessBuilder(
+                "node",
+                cli,
+                "run",
+                "--env",
+                "local",
+                "--env-var",
+                "baseUrl=http://localhost:" + port + "/api/v1",
+                "--env-var",
+                "adminEmail=" + admin.getEmail(),
+                "--env-var",
+                "adminPassword=RbacTest123!",
+                "--env-var",
+                "fixturePassword=RbacTest123!",
+                "--env-var",
+                "ingestionKey=integration-test-key")
+            .directory(new java.io.File("docs/bruno/InfluencerMatch"))
+            .redirectErrorStream(true)
+            .redirectOutput(
+                java.nio.file.Path.of(
+                        System.getProperty("java.io.tmpdir"), "influencermatch-bruno-rbac.log")
+                    .toFile())
+            .start();
+    if (!process.waitFor(180, TimeUnit.SECONDS)) {
+      process.destroyForcibly();
+      fail("Bruno CLI timed out");
+    }
+    assertThat(process.exitValue())
+        .as("Bruno collection: see temporary influencermatch-bruno-rbac.log")
+        .isZero();
+  }
+
   @Test
   @Order(1)
   void migrationUpgradeAndEmptyDatabasePreserveDataAndValidate() {
@@ -87,7 +131,7 @@ class RbacPostgresIntegrationTest {
             .schemas("empty_rbac")
             .defaultSchema("empty_rbac")
             .load();
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(4);
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(10);
     assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
   }
 

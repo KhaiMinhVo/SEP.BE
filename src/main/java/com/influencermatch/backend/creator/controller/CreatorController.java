@@ -8,16 +8,21 @@ import com.influencermatch.backend.creator.repository.CreatorRepository;
 import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ErrorCode;
+import com.influencermatch.backend.creator.dto.CreatorDetailResponse;
+import com.influencermatch.backend.creator.service.CreatorService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -31,6 +36,15 @@ public class CreatorController {
     private final PublicCreatorMetricRepository metricRepository;
     private final CreatorRepository creatorRepository;
     private final AiServiceClient aiServiceClient;
+    private final CreatorService creatorService;
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('VIEW_CREATOR_PROFILE')")
+    @Transactional(readOnly = true)
+    @Operation(summary = "Get creator profile details", description = "Get full creator profile including metrics, rate card, and recent posts.")
+    public ResponseEntity<ApiResponse<CreatorDetailResponse>> getCreatorDetail(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(creatorService.getCreatorDetail(id)));
+    }
 
     @GetMapping("/search/semantic")
     @Transactional(readOnly = true)
@@ -63,6 +77,10 @@ public class CreatorController {
             Map<String, Object> map = new HashMap<>();
             map.put("id", m.getId());
             map.put("followers", m.getFollowers());
+            map.put("avgViews", m.getAvgViews());
+            map.put("avgLikes", m.getAvgLikes());
+            map.put("avgComments", m.getAvgComments());
+            map.put("avgShares", m.getAvgShares());
             map.put("niche", m.getNiche());
             map.put("category", m.getCategory());
             map.put("engagementRate", m.getEngagementRate());
@@ -75,6 +93,9 @@ public class CreatorController {
                 map.put("platform", m.getCreator().getPlatform());
                 map.put("avatarUrl", m.getCreator().getAvatarUrl());
                 map.put("profileUrl", m.getCreator().getProfileUrl());
+                map.put("sourceType", m.getCreator().getSourceType());
+                map.put("verifiedByInfluencerMatch", m.getCreator().getSourceType()==com.influencermatch.backend.creator.enums.CreatorSourceType.AUTHORIZED && m.getCreator().getOwner()!=null);
+                map.put("authorizedAt", m.getCreator().getAuthorizedAt());
             }
             return map;
         }).collect(Collectors.toList());

@@ -52,10 +52,10 @@ public class PaymentController {
       ipAddress = httpServletRequest.getRemoteAddr();
     }
 
-    String paymentUrl =
-        paymentService.createPaymentUrl(request.getPlanId(), brandProfile, ipAddress);
+    PaymentResponse checkout =
+        paymentService.createCheckout(request.getPlanId(), brandProfile, ipAddress);
 
-    return ResponseEntity.ok(ApiResponse.ok(new PaymentResponse(paymentUrl)));
+    return ResponseEntity.ok(ApiResponse.ok(checkout));
   }
 
   @io.swagger.v3.oas.annotations.Operation(

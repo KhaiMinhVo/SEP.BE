@@ -31,6 +31,15 @@ public class GoogleAuthService {
   @Transactional
   public String completeGoogleLogin(
       String subject, String email, String fullName, boolean emailVerified) {
+    return completeGoogleLogin(subject,email,fullName,emailVerified,Role.BRAND);
+  }
+
+  @Transactional
+  public String completeGoogleLogin(
+      String subject,String email,String fullName,boolean emailVerified,Role loginRole) {
+    if (loginRole != Role.BRAND && loginRole != Role.CREATOR)
+      throw new BusinessException(ErrorCode.GOOGLE_LOGIN_ROLE_MISMATCH,"Unsupported Google login role");
+    users.lockRoleChanges();
     if (!emailVerified)
       throw new BusinessException(
           ErrorCode.GOOGLE_EMAIL_NOT_VERIFIED, "Google account email is not verified");
@@ -60,10 +69,10 @@ public class GoogleAuthService {
                               .email(normalizedEmail)
                               .passwordHash(null)
                               .fullName(normalizeName(fullName, normalizedEmail))
-                              .role(Role.BRAND)
+                              .role(loginRole)
                               .status(UserStatus.ACTIVE)
                               .build()));
-      requireBrand(user);
+      requireLoginRole(user,loginRole);
       identities
           .findByUserIdAndProvider(user.getId(), ExternalIdentityProvider.GOOGLE)
           .ifPresent(
@@ -81,9 +90,9 @@ public class GoogleAuthService {
               .emailVerified(true)
               .build());
     }
-    requireBrand(user);
+    requireLoginRole(user,loginRole);
     requireActive(user);
-    return createExchangeCode(user);
+    return createExchangeCode(user,loginRole);
   }
 
   @Transactional
@@ -94,7 +103,7 @@ public class GoogleAuthService {
         exchangeCodes.findByCodeHash(hash(rawCode.trim())).orElseThrow(this::invalidCode);
     if (code.getConsumedAt() != null || !code.getExpiresAt().isAfter(now)) throw invalidCode();
     User user = users.findById(code.getUserId()).orElseThrow(this::invalidCode);
-    requireBrand(user);
+    requireLoginRole(user,code.getLoginRole());
     requireActive(user);
     code.setConsumedAt(now);
     user.setLastLoginAt(now);
@@ -119,13 +128,14 @@ public class GoogleAuthService {
         .build();
   }
 
-  private String createExchangeCode(User user) {
+  private String createExchangeCode(User user,Role loginRole) {
     byte[] bytes = new byte[32];
     secureRandom.nextBytes(bytes);
     String raw = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     LocalDateTime now = LocalDateTime.now();
     exchangeCodes.save(
         AuthExchangeCode.builder()
+            .loginRole(loginRole)
             .userId(user.getId())
             .codeHash(hash(raw))
             .createdAt(now)
@@ -134,10 +144,10 @@ public class GoogleAuthService {
     return raw;
   }
 
-  private void requireBrand(User user) {
-    if (user.getRole() != Role.BRAND)
+  private void requireLoginRole(User user,Role loginRole) {
+    if ((loginRole != Role.BRAND && loginRole != Role.CREATOR) || user.getRole() != loginRole)
       throw new BusinessException(
-          ErrorCode.ACCESS_DENIED, "Google login is available only for brand accounts");
+          ErrorCode.GOOGLE_LOGIN_ROLE_MISMATCH, "Use the Google login for your existing account role");
   }
 
   private void requireActive(User user) {

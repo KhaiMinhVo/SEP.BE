@@ -13,6 +13,13 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface CreatorRepository extends JpaRepository<Creator, UUID> {
+  boolean existsByOwnerId(UUID ownerId);
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @Query("select c from Creator c where c.id=:id")
+  Optional<Creator> findLockedById(@Param("id") UUID id);
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @Query("select c from Creator c where c.platform=:platform and c.externalId=:externalId")
+  Optional<Creator> findLockedByPlatformAndExternalId(@Param("platform") String platform,@Param("externalId") String externalId);
   Optional<Creator> findByPlatformAndExternalId(String platform, String externalId);
 
   @Modifying

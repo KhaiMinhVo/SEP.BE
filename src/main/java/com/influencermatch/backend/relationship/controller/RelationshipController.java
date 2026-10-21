@@ -6,7 +6,6 @@ import com.influencermatch.backend.relationship.dto.RelationshipDto;
 import com.influencermatch.backend.relationship.dto.UpdateRelationshipDetailsRequest;
 import com.influencermatch.backend.relationship.dto.UpdateRelationshipStageRequest;
 import com.influencermatch.backend.relationship.service.RelationshipService;
-import com.influencermatch.backend.user.model.User;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -17,7 +16,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -35,9 +33,8 @@ public class RelationshipController {
     @PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
     public ResponseEntity<ApiResponse<RelationshipDto>> createRelationship(
             @PathVariable UUID campaignId,
-            @Valid @RequestBody CreateRelationshipRequest request,
-            @AuthenticationPrincipal User currentUser) {
-        RelationshipDto dto = relationshipService.createRelationship(campaignId, request, currentUser.getId());
+            @Valid @RequestBody CreateRelationshipRequest request) {
+        RelationshipDto dto = relationshipService.createRelationship(campaignId, request);
         return ResponseEntity.ok(ApiResponse.ok("Relationship initiated.", dto));
     }
 
@@ -55,10 +52,9 @@ public class RelationshipController {
     @GetMapping("/{relationshipId}")
     @PreAuthorize("hasAuthority('VIEW_OWN_CAMPAIGN')")
     public ResponseEntity<ApiResponse<RelationshipDto>> getRelationship(
-            @PathVariable UUID campaignId, // path variable exists but unused in service
-            @PathVariable UUID relationshipId,
-            @AuthenticationPrincipal User currentUser) {
-        RelationshipDto dto = relationshipService.getRelationship(relationshipId, currentUser.getId());
+            @PathVariable UUID campaignId,
+            @PathVariable UUID relationshipId) {
+        RelationshipDto dto = relationshipService.getRelationship(campaignId, relationshipId);
         return ResponseEntity.ok(ApiResponse.ok(dto));
     }
 
@@ -68,9 +64,8 @@ public class RelationshipController {
     public ResponseEntity<ApiResponse<RelationshipDto>> updateStage(
             @PathVariable UUID campaignId,
             @PathVariable UUID relationshipId,
-            @Valid @RequestBody UpdateRelationshipStageRequest request,
-            @AuthenticationPrincipal User currentUser) {
-        RelationshipDto dto = relationshipService.updateStage(relationshipId, request, currentUser.getId());
+            @Valid @RequestBody UpdateRelationshipStageRequest request) {
+        RelationshipDto dto = relationshipService.updateStage(campaignId, relationshipId, request);
         return ResponseEntity.ok(ApiResponse.ok("Stage updated.", dto));
     }
 
@@ -80,9 +75,8 @@ public class RelationshipController {
     public ResponseEntity<ApiResponse<RelationshipDto>> updateDetails(
             @PathVariable UUID campaignId,
             @PathVariable UUID relationshipId,
-            @Valid @RequestBody UpdateRelationshipDetailsRequest request,
-            @AuthenticationPrincipal User currentUser) {
-        RelationshipDto dto = relationshipService.updateDetails(relationshipId, request, currentUser.getId());
+            @Valid @RequestBody UpdateRelationshipDetailsRequest request) {
+        RelationshipDto dto = relationshipService.updateDetails(campaignId, relationshipId, request);
         return ResponseEntity.ok(ApiResponse.ok("Details updated.", dto));
     }
 }

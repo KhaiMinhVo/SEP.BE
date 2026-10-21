@@ -1,10 +1,7 @@
 package com.influencermatch.backend.creator.model;
 
-import com.influencermatch.backend.creator.controller.*;
-import com.influencermatch.backend.creator.dto.*;
-import com.influencermatch.backend.creator.enums.*;
-import com.influencermatch.backend.creator.repository.*;
-import com.influencermatch.backend.creator.service.*;
+import com.influencermatch.backend.creator.enums.CreatorSourceType;
+import com.influencermatch.backend.user.model.User;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -22,6 +19,17 @@ import org.hibernate.annotations.UpdateTimestamp;
 @AllArgsConstructor
 @Builder
 public class Creator {
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "owner_user_id")
+  @com.fasterxml.jackson.annotation.JsonIgnore
+  private com.influencermatch.backend.user.model.User owner;
+
+  @Builder.Default
+  @Enumerated(EnumType.STRING)
+  @Column(name = "source_type", nullable = false, length = 16)
+  private com.influencermatch.backend.creator.enums.CreatorSourceType sourceType = com.influencermatch.backend.creator.enums.CreatorSourceType.PUBLIC;
+
+  private LocalDateTime authorizedAt;
 
   @Id
   @GeneratedValue(strategy = GenerationType.UUID)

@@ -7,7 +7,7 @@ public interface CreatorRateCardRepository extends JpaRepository<CreatorRateCard
       select r from CreatorRateCard r join fetch r.claim claim join fetch claim.creator c
       where c.id in :ids and c.sourceType=com.influencermatch.backend.creator.enums.CreatorSourceType.AUTHORIZED
       and claim.status=com.influencermatch.backend.creator.enums.CreatorClaimStatus.APPROVED
-      and c.owner.id=claim.claimant.id order by r.contentType
+      and c.master.user.id=claim.claimant.id order by r.contentType
       """)
   List<CreatorRateCard> visibleForCreators(@org.springframework.data.repository.query.Param("ids") Collection<UUID> ids);
   List<CreatorRateCard> findByClaimIdOrderByContentTypeAsc(UUID claimId);

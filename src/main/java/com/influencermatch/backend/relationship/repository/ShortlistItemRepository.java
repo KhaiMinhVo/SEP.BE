@@ -13,7 +13,7 @@ import java.util.UUID;
 public interface ShortlistItemRepository extends JpaRepository<ShortlistItem, UUID> {
     Page<ShortlistItem> findByCampaignIdAndUserId(UUID campaignId, UUID userId, Pageable pageable);
     Optional<ShortlistItem> findByIdAndCampaignIdAndUserId(UUID id, UUID campaignId, UUID userId);
-    @org.springframework.data.jpa.repository.EntityGraph(attributePaths={"creator","creator.owner"})
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths={"creator","creator.master"})
     java.util.List<ShortlistItem> findByCampaignIdAndCreatorIdIn(UUID campaignId, java.util.Collection<UUID> creatorIds);
     Page<ShortlistItem> findByCampaignId(UUID campaignId, Pageable pageable);
     boolean existsByCampaignIdAndCreatorId(UUID campaignId, UUID creatorId);

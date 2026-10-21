@@ -866,4 +866,5 @@ Tuần 3: Kết Nối Kênh Thứ Hai & Demo Xuyên Suốt (P1)
     ```bash
     mvn test -Dtest=CreatorClaimOAuthIntegrationTest,CreatorAccountLinkIntegrationTest,DiscoveryHybridGroupingIntegrationTest
     ```
-  - **DoD**: Toàn bộ 18 test cases chạy xanh (Passed 100%), hoàn tất điều kiện nghiệm thu cho Hội đồng Review 2.
+  - **DoD**: Toàn bộ 18 test cases ch
+  ạy xanh (Passed 100%), hoàn tất điều kiện nghiệm thu cho Hội đồng Review 2.

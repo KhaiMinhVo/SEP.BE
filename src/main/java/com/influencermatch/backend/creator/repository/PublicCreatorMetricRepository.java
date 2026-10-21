@@ -3,6 +3,7 @@ package com.influencermatch.backend.creator.repository;
 import com.influencermatch.backend.creator.model.PublicCreatorMetric;
 import com.influencermatch.backend.discovery.dto.HybridDiscoveryCreatorProjection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -15,6 +16,8 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface PublicCreatorMetricRepository
     extends JpaRepository<PublicCreatorMetric, UUID>, JpaSpecificationExecutor<PublicCreatorMetric> {
+
+  Optional<PublicCreatorMetric> findByCreatorId(UUID creatorId);
 
     @Query(value="""
         SELECT DISTINCT ON (m.creator_id) m.* FROM public_creator_metric m

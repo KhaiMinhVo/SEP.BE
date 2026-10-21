@@ -26,6 +26,7 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 @SecurityRequirement(name = "BearerAuth")
 public class CampaignController {
   private final CampaignService service;
+  private final GeminiCampaignAutofillService autofillService;
 
   @PostMapping("/brands/{brandId}/campaigns")
   @Operation(summary = "Create a draft campaign")
@@ -107,4 +108,19 @@ public class CampaignController {
         service.discoverCreators(
             id, PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)), auth));
   }
+
+  @Operation(
+      summary = "AI-assisted campaign form autofill",
+      description =
+          "Brand provides a short natural-language description of the campaign. "
+              + "Gemini AI parses it and returns suggested values for all campaign fields. "
+              + "The response is a non-binding suggestion; the brand should review and adjust before submitting.")
+  @PostMapping("/ai/campaign-autofill")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CREATE_CAMPAIGN')")
+  public ApiResponse<CampaignAutofillResponse> autofill(
+      @Valid @RequestBody CampaignAutofillRequest request) {
+    return ApiResponse.ok(autofillService.autofill(request));
+  }
 }
+
+

@@ -51,7 +51,7 @@ public class CreatorIngestionService {
       creator.setProfileUrl(request.getProfileUrl());
     }
 
-    creator = creatorRepository.save(creator);
+    final Creator savedCreator = creatorRepository.save(creator);
 
     // Parse Freshness Status
     MetricDataStatus status = MetricDataStatus.FRESH;
@@ -63,26 +63,26 @@ public class CreatorIngestionService {
       }
     }
 
-    // Create new metric snapshot
+    // Upsert metric: update existing metric if found, otherwise create new one
     PublicCreatorMetric metric =
-        PublicCreatorMetric.builder()
-            .creator(creator)
-            .followers(request.getFollowers())
-            .avgViews(request.getAvgViews())
-            .avgLikes(request.getAvgLikes())
-            .avgComments(request.getAvgComments())
-            .avgShares(request.getAvgShares())
-            .engagementRate(request.getEngagementRate())
-            .niche(request.getNiche())
-            .location(request.getLocation())
-            .contentSummary(request.getContentSummary())
-            .collectedAt(LocalDateTime.now())
-            .creatorType(request.getCreatorType())
-            .freshnessStatus(status)
-            .dataConfidence(request.getDataConfidence())
-            .contact(request.getContact())
-            .category(request.getCategory())
-            .build();
+        metricRepository.findByCreatorId(savedCreator.getId()).orElseGet(
+            () -> PublicCreatorMetric.builder().creator(savedCreator).build());
+
+    metric.setFollowers(request.getFollowers());
+    metric.setAvgViews(request.getAvgViews());
+    metric.setAvgLikes(request.getAvgLikes());
+    metric.setAvgComments(request.getAvgComments());
+    metric.setAvgShares(request.getAvgShares());
+    metric.setEngagementRate(request.getEngagementRate());
+    metric.setNiche(request.getNiche());
+    metric.setLocation(request.getLocation());
+    metric.setContentSummary(request.getContentSummary());
+    metric.setCollectedAt(LocalDateTime.now());
+    metric.setCreatorType(request.getCreatorType());
+    metric.setFreshnessStatus(status);
+    metric.setDataConfidence(request.getDataConfidence());
+    metric.setContact(request.getContact());
+    metric.setCategory(request.getCategory());
 
     // Optional urlProfile on metric (often redundant with creator.profileUrl, but keeping for DB
     // schema matching)
@@ -93,11 +93,11 @@ public class CreatorIngestionService {
     metric = metricRepository.save(metric);
 
     if (request.getRecentPosts() != null && !request.getRecentPosts().isEmpty()) {
-      postRepository.deleteByCreatorId(creator.getId());
+      postRepository.deleteByCreatorId(savedCreator.getId());
       for (PostDto dto : request.getRecentPosts()) {
         Post post =
             Post.builder()
-                .creator(creator)
+                .creator(savedCreator)
                 .platformPostId(dto.getPlatformPostId())
                 .postUrl(dto.getPostUrl())
                 .caption(dto.getCaption())
@@ -112,11 +112,11 @@ public class CreatorIngestionService {
     }
 
     if (request.getEmbedding() != null && !request.getEmbedding().isEmpty()) {
-      creatorRepository.updateEmbedding(creator.getId(), request.getEmbedding().toString());
+      creatorRepository.updateEmbedding(savedCreator.getId(), request.getEmbedding().toString());
     }
 
     return CreatorIngestionResponse.builder()
-        .creatorId(creator.getId())
+        .creatorId(savedCreator.getId())
         .metricId(metric.getId())
         .status("SUCCESS")
         .message("Creator data ingested successfully")

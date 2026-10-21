@@ -38,7 +38,7 @@ public class ShortlistController {
 
     @Operation(summary = "Add a creator to campaign shortlist", security = @SecurityRequirement(name = "BearerAuth"))
     @PostMapping
-    @PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
+    @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
     public ResponseEntity<ApiResponse<ShortlistItemDto>> addCreatorToShortlist(
             @PathVariable UUID campaignId,
             @Valid @RequestBody AddShortlistItemRequest request) {
@@ -48,7 +48,7 @@ public class ShortlistController {
 
     @Operation(summary = "Get shortlist for a campaign", security = @SecurityRequirement(name = "BearerAuth"))
     @GetMapping
-    @PreAuthorize("hasAuthority('VIEW_OWN_CAMPAIGN')")
+    @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
     public ResponseEntity<ApiResponse<Page<ShortlistItemDto>>> getShortlist(
             @PathVariable UUID campaignId,
             @PageableDefault(size = 20) Pageable pageable) {
@@ -58,7 +58,7 @@ public class ShortlistController {
 
     @Operation(summary = "Remove a creator from shortlist", security = @SecurityRequirement(name = "BearerAuth"))
     @DeleteMapping("/{shortlistItemId}")
-    @PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
+    @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
     public ResponseEntity<ApiResponse<Void>> removeCreatorFromShortlist(
             @PathVariable UUID campaignId,
             @PathVariable UUID shortlistItemId) {

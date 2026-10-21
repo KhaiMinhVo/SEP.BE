@@ -33,7 +33,7 @@ public class ShortlistServiceImpl implements ShortlistService {
     @Override
     @Transactional
     public ShortlistItemDto addCreatorToShortlist(UUID campaignId, AddShortlistItemRequest request) {
-        Permissions.require(Permission.UPDATE_CAMPAIGN);
+        Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
         Campaign campaign = ownership.requireOwned(campaignId);
         UUID userId = Permissions.actor().getId();
         if (shortlistItemRepository.existsByCampaignIdAndCreatorId(campaignId, request.getCreatorId())) {
@@ -62,6 +62,7 @@ public class ShortlistServiceImpl implements ShortlistService {
     @Override
     @Transactional(readOnly = true)
     public Page<ShortlistItemDto> getShortlistByCampaign(UUID campaignId, Pageable pageable) {
+        Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
         ownership.requireOwned(campaignId);
         return shortlistItemRepository.findByCampaignIdAndUserId(campaignId, Permissions.actor().getId(), pageable)
                 .map(this::mapToDto);
@@ -70,7 +71,7 @@ public class ShortlistServiceImpl implements ShortlistService {
     @Override
     @Transactional
     public void removeCreatorFromShortlist(UUID campaignId, UUID shortlistItemId) {
-        Permissions.require(Permission.UPDATE_CAMPAIGN);
+        Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
         ownership.requireOwned(campaignId);
         ShortlistItem item = shortlistItemRepository.findByIdAndCampaignIdAndUserId(shortlistItemId, campaignId, Permissions.actor().getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Shortlist item not found or you don't have permission"));

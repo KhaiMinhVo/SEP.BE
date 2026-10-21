@@ -133,7 +133,7 @@ VALUES ('10000000-0000-0000-0000-000000000007','10000000-0000-0000-0000-00000000
           Flyway.configure()
               .dataSource(fresh.getJdbcUrl(), fresh.getUsername(), fresh.getPassword())
               .load();
-      assertThat(flyway.migrate().migrationsExecuted).isEqualTo(10);
+      assertThat(flyway.migrate().migrationsExecuted).isEqualTo(11);
       assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
     }
   }

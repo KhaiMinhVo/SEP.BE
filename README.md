@@ -171,7 +171,9 @@ docker compose logs --tail 200 api
 4. Open `http://localhost:8080/api/v1/auth/google` in a browser.
 5. Exchange the one-time callback code through `POST /api/v1/auth/google/exchange` using `{ "code": "..." }`.
 
-Google login is available only to `BRAND`. A first login creates an active Brand user but does not create a Brand Profile. Access and refresh tokens behave the same as password login.
+Google login supports `BRAND` via `/auth/google` and `CREATOR` via `/auth/google/creator`.
+A first Brand login does not create a Brand Profile. Existing accounts cannot change
+role through Google login. Access and refresh tokens behave the same as password login.
 
 On `develop`, migration `V3__google_oauth2_login.sql` upgrades the V1/V2 snake_case schema.
 The older `khai` V1-V10 migration history is not interchangeable with this schema.
@@ -182,11 +184,13 @@ Public registration luôn tạo role `BRAND`; `/admin/**` yêu cầu role `ADMIN
 
 ## RBAC và phạm vi triển khai
 
-Ba role cố định: `BRAND` (25 permission), `DATA_MANAGER` (12), `ADMIN` (22).
-Tổng cộng 43 permission, không wildcard; danh sách tính từ role trong database và trả qua
-`user.permissions` khi login/refresh/Google exchange, `permissions` khi gọi `/auth/me`.
-Bốn quyền chung cấp cho cả ba role; tám quyền vận hành dữ liệu dùng chung cho Manager và Admin.
-Nguồn ma trận: `security/Permission.java` và `security/RolePermissions.java`.
+Bốn role: `BRAND`, `CREATOR`, `DATA_MANAGER`, `ADMIN`. Danh mục permission và ma trận
+mặc định nằm trong `security/Permission.java`, `security/RolePermissions.java`.
+Admin có thể bật/tắt chức năng sẵn có của ba role còn lại; không cấp chéo role.
+Quyền Admin giữ cố định. Quyền hiệu lực được nạp một lần mỗi request, không cache
+liên request; token hiện tại nhận cấu hình mới từ request tiếp theo sau khi lưu.
+Login/refresh/Google exchange/mock login trả `user.permissions`; `/auth/me` trả `permissions`.
+API và ma trận chức năng: [Role Permission Management](docs/role-permissions.md).
 
 Các API hiện có đã được bảo vệ:
 
@@ -224,13 +228,15 @@ Không cấu hình trả `503 INGESTION_NOT_CONFIGURED`; thiếu/sai key trả `
 Key chỉ dùng cho ingestion, không cấp quyền API quản trị hay dữ liệu riêng.
 Docker Compose hiện truyền biến trong `.env` vào container API qua `env_file`.
 
-### Chưa triển khai trong đợt RBAC này
+### Chức năng và giới hạn
 
-Permission Notification, Recommendation, Shortlist/CRM, Collaboration/Outcome/Learning,
-Usage/Billing read và các tác vụ Data Manager mới chỉ được khai báo nếu chưa có API tương ứng.
+Shortlist/Relationship và Collaboration/Outcome/Review đã có API và test. Permission
+Notification, Recommendation, History/Insights, Usage/Billing read và các tác vụ
+vận hành dữ liệu chưa có API chỉ được khai báo trong enum; danh mục role-permissions
+đánh dấu chúng `implemented=false`, `editable=false`.
 Luồng Creator claim được mô tả tại [Creator Claim Profile](docs/creator-claim.md).
 Hàng đợi duyệt KOC được mô tả tại [Data Quality](docs/data-quality.md).
 API so sánh shortlist và mock thanh toán: [Compare & Mock Payment](docs/compare-and-mock-payment.md).
-Không tạo dynamic role/permission hoặc quota engine mới. Không có entitlement/quota
-gate đầy đủ cho mọi API hiện tại; RBAC không thay thế các kiểm tra này khi chúng được triển khai.
+Không tạo role mới hoặc cấp quyền chéo role. Chưa có entitlement/quota gate đầy đủ
+cho mọi API hiện tại; RBAC không thay thế các kiểm tra này khi chúng được triển khai.
 Không thể xem các permission đã khai báo là chức năng đã hoạt động.

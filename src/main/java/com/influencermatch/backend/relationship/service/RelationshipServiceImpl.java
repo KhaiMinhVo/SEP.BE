@@ -39,7 +39,7 @@ public class RelationshipServiceImpl implements RelationshipService {
     @Override
     @Transactional
     public RelationshipDto createRelationship(UUID campaignId, CreateRelationshipRequest request) {
-        Permissions.require(Permission.UPDATE_CAMPAIGN);
+        Permissions.require(Permission.MANAGE_OWN_RELATIONSHIP);
         Campaign campaign = ownership.requireOwned(campaignId);
         UUID userId = Permissions.actor().getId();
         if (relationshipRepository.existsByCampaignIdAndCreatorId(campaignId, request.getCreatorId())) {
@@ -83,7 +83,7 @@ public class RelationshipServiceImpl implements RelationshipService {
     @Override
     @Transactional
     public RelationshipDto updateStage(UUID campaignId, UUID relationshipId, UpdateRelationshipStageRequest request) {
-        Permissions.require(Permission.UPDATE_CAMPAIGN);
+        Permissions.require(Permission.MANAGE_OWN_RELATIONSHIP);
         BrandCreatorRelationship relationship = getEntity(campaignId, relationshipId);
         relationship.setStage(request.getStage());
         relationship.setUpdatedAt(LocalDateTime.now());
@@ -93,7 +93,7 @@ public class RelationshipServiceImpl implements RelationshipService {
     @Override
     @Transactional
     public RelationshipDto updateDetails(UUID campaignId, UUID relationshipId, UpdateRelationshipDetailsRequest request) {
-        Permissions.require(Permission.UPDATE_CAMPAIGN);
+        Permissions.require(Permission.MANAGE_OWN_RELATIONSHIP);
         BrandCreatorRelationship relationship = getEntity(campaignId, relationshipId);
         
         if (request.getContactMethod() != null) relationship.setContactMethod(request.getContactMethod());
@@ -110,6 +110,7 @@ public class RelationshipServiceImpl implements RelationshipService {
     @Override
     @Transactional(readOnly = true)
     public Page<RelationshipDto> getRelationshipsByCampaign(UUID campaignId, Pageable pageable) {
+        Permissions.require(Permission.MANAGE_OWN_RELATIONSHIP);
         ownership.requireOwned(campaignId);
         return relationshipRepository.findByCampaignIdAndUserId(campaignId, Permissions.actor().getId(), pageable).map(this::mapToDto);
     }
@@ -117,6 +118,7 @@ public class RelationshipServiceImpl implements RelationshipService {
     @Override
     @Transactional(readOnly = true)
     public RelationshipDto getRelationship(UUID campaignId, UUID relationshipId) {
+        Permissions.require(Permission.MANAGE_OWN_RELATIONSHIP);
         return mapToDto(getEntity(campaignId, relationshipId));
     }
 

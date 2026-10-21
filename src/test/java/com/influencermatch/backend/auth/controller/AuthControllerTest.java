@@ -27,6 +27,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc(addFilters = false) // Bypass Spring Security filter chain for pure controller test
 class AuthControllerTest {
 
+    @org.springframework.boot.test.mock.mockito.MockBean
+    private com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
+
     @Autowired
     private MockMvc mockMvc;
 

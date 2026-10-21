@@ -24,6 +24,7 @@ public class DevCreatorLoginService {
   private final ExternalIdentityRepository identities;
   private final JwtTokenProvider jwt;
   private final RefreshTokenService refreshTokens;
+  private final com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
 
   @Transactional
   public LoginResponse login() {
@@ -38,7 +39,7 @@ public class DevCreatorLoginService {
     return LoginResponse.builder().accessToken(access).refreshToken(refreshTokens.issue(user).raw())
         .tokenType("Bearer").expiresIn(jwt.extractExpiresInSeconds(access))
         .user(LoginResponse.UserProfile.builder().id(user.getId()).email(user.getEmail()).fullName(user.getFullName())
-            .role(user.getRole().name()).status(user.getStatus().name()).permissions(RolePermissions.names(user.getRole()))
+            .role(user.getRole().name()).status(user.getStatus().name()).permissions(effectivePermissions.names(user.getRole()))
             .lastLoginAt(user.getLastLoginAt()).build()).build();
   }
 }

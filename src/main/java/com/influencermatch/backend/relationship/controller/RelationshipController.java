@@ -30,7 +30,7 @@ public class RelationshipController {
 
     @Operation(summary = "Start a relationship with a creator", security = @SecurityRequirement(name = "BearerAuth"))
     @PostMapping
-    @PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
+    @PreAuthorize("hasAuthority('MANAGE_OWN_RELATIONSHIP')")
     public ResponseEntity<ApiResponse<RelationshipDto>> createRelationship(
             @PathVariable UUID campaignId,
             @Valid @RequestBody CreateRelationshipRequest request) {
@@ -40,7 +40,7 @@ public class RelationshipController {
 
     @Operation(summary = "Get relationships for a campaign", security = @SecurityRequirement(name = "BearerAuth"))
     @GetMapping
-    @PreAuthorize("hasAuthority('VIEW_OWN_CAMPAIGN')")
+    @PreAuthorize("hasAuthority('MANAGE_OWN_RELATIONSHIP')")
     public ResponseEntity<ApiResponse<Page<RelationshipDto>>> getRelationships(
             @PathVariable UUID campaignId,
             @PageableDefault(size = 20) Pageable pageable) {
@@ -50,7 +50,7 @@ public class RelationshipController {
 
     @Operation(summary = "Get relationship details", security = @SecurityRequirement(name = "BearerAuth"))
     @GetMapping("/{relationshipId}")
-    @PreAuthorize("hasAuthority('VIEW_OWN_CAMPAIGN')")
+    @PreAuthorize("hasAuthority('MANAGE_OWN_RELATIONSHIP')")
     public ResponseEntity<ApiResponse<RelationshipDto>> getRelationship(
             @PathVariable UUID campaignId,
             @PathVariable UUID relationshipId) {
@@ -60,7 +60,7 @@ public class RelationshipController {
 
     @Operation(summary = "Update relationship stage (e.g., from CONTACTED to NEGOTIATING)", security = @SecurityRequirement(name = "BearerAuth"))
     @PatchMapping("/{relationshipId}/stage")
-    @PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
+    @PreAuthorize("hasAuthority('MANAGE_OWN_RELATIONSHIP')")
     public ResponseEntity<ApiResponse<RelationshipDto>> updateStage(
             @PathVariable UUID campaignId,
             @PathVariable UUID relationshipId,
@@ -71,7 +71,7 @@ public class RelationshipController {
 
     @Operation(summary = "Update negotiation details (fees, notes, next action)", security = @SecurityRequirement(name = "BearerAuth"))
     @PatchMapping("/{relationshipId}/details")
-    @PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
+    @PreAuthorize("hasAuthority('MANAGE_OWN_RELATIONSHIP')")
     public ResponseEntity<ApiResponse<RelationshipDto>> updateDetails(
             @PathVariable UUID campaignId,
             @PathVariable UUID relationshipId,

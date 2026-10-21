@@ -18,13 +18,15 @@ public final class Permissions {
   }
 
   public static boolean has(Permission permission) {
-    return RolePermissions.forRole(actor().getRole()).contains(permission);
+    actor();
+    return SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
+        .anyMatch(a -> a.getAuthority().equals(permission.name()));
   }
 
   public static void require(Permission... allowed) {
-    User user = actor();
+    actor();
     for (Permission permission : allowed)
-      if (RolePermissions.forRole(user.getRole()).contains(permission)) return;
+      if (has(permission)) return;
     throw new ForbiddenException("Permission required");
   }
 }

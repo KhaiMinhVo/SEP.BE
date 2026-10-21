@@ -26,6 +26,7 @@ public class GoogleAuthService {
   private final JwtTokenProvider jwtTokenProvider;
   private final RefreshTokenService refreshTokens;
   private final GoogleOAuthProperties properties;
+  private final com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
   private final SecureRandom secureRandom = new SecureRandom();
 
   @Transactional
@@ -122,7 +123,7 @@ public class GoogleAuthService {
                 .role(user.getRole().name())
                 .status(user.getStatus().name())
                 .permissions(
-                    com.influencermatch.backend.security.RolePermissions.names(user.getRole()))
+                    effectivePermissions.names(user.getRole()))
                 .lastLoginAt(user.getLastLoginAt())
                 .build())
         .build();

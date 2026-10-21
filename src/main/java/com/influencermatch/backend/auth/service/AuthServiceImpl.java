@@ -36,6 +36,7 @@ public class AuthServiceImpl implements AuthService {
   private final JwtTokenProvider jwtTokenProvider;
   private final AuthenticationManager authenticationManager;
   private final RefreshTokenService refreshTokenService;
+  private final com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
 
   @Override
   @Transactional
@@ -90,7 +91,7 @@ public class AuthServiceImpl implements AuthService {
                 .role(user.getRole().name())
                 .status(user.getStatus().name())
                 .permissions(
-                    com.influencermatch.backend.security.RolePermissions.names(user.getRole()))
+                    effectivePermissions.names(user.getRole()))
                 .lastLoginAt(user.getLastLoginAt())
                 .build())
         .build();
@@ -115,7 +116,7 @@ public class AuthServiceImpl implements AuthService {
                 .role(user.getRole().name())
                 .status(user.getStatus().name())
                 .permissions(
-                    com.influencermatch.backend.security.RolePermissions.names(user.getRole()))
+                    effectivePermissions.names(user.getRole()))
                 .lastLoginAt(user.getLastLoginAt())
                 .build())
         .build();
@@ -138,7 +139,7 @@ public class AuthServiceImpl implements AuthService {
         .role(currentUser.getRole().name())
         .status(currentUser.getStatus().name())
         .permissions(
-            com.influencermatch.backend.security.RolePermissions.names(currentUser.getRole()))
+            effectivePermissions.names(currentUser.getRole()))
         .createdAt(currentUser.getCreatedAt())
         .updatedAt(currentUser.getUpdatedAt())
         .lastLoginAt(currentUser.getLastLoginAt())

@@ -101,11 +101,14 @@ class GoogleAuthServiceTest {
 
   @BeforeEach
   void setUp() {
+    var effectivePermissions = mock(com.influencermatch.backend.security.role.EffectivePermissionService.class);
+    lenient().when(effectivePermissions.names(any())).thenAnswer(i ->
+        com.influencermatch.backend.security.RolePermissions.names(i.getArgument(0)));
     GoogleOAuthProperties properties = new GoogleOAuthProperties();
     properties.setExchangeCodeTtlSeconds(60);
     service =
         new GoogleAuthService(
-            users, identities, exchangeCodes, jwtTokenProvider, refreshTokens, properties);
+            users, identities, exchangeCodes, jwtTokenProvider, refreshTokens, properties, effectivePermissions);
   }
 
   @Test

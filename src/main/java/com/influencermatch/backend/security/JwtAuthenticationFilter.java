@@ -28,6 +28,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
   private final JwtTokenProvider jwtTokenProvider;
   private final UserDetailsService userDetailsService;
+  private final com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
 
   @Override
   protected void doFilterInternal(
@@ -54,7 +55,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             && jwtTokenProvider.isTokenValid(jwt, userDetails)) {
           UsernamePasswordAuthenticationToken authToken =
               new UsernamePasswordAuthenticationToken(
-                  userDetails, null, userDetails.getAuthorities());
+                  userDetails, null, effectivePermissions.authorities(((com.influencermatch.backend.user.model.User) userDetails).getRole(), request));
           authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
           SecurityContextHolder.getContext().setAuthentication(authToken);
           log.debug("JWT authenticated user '{}' for '{}'", username, request.getRequestURI());

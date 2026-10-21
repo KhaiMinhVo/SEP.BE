@@ -75,7 +75,7 @@ class AdminUserServiceTest {
 
     private void setSecurityContext(User user) {
         SecurityContext context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(new UsernamePasswordAuthenticationToken(user, null, List.of()));
+        context.setAuthentication(new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
         SecurityContextHolder.setContext(context);
     }
 

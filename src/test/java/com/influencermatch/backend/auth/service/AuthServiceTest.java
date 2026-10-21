@@ -44,6 +44,9 @@ class AuthServiceTest {
     @Mock
     private RefreshTokenService refreshTokenService;
 
+    @Mock
+    private com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
+
     @InjectMocks
     private AuthServiceImpl authService;
 
@@ -52,6 +55,8 @@ class AuthServiceTest {
     @BeforeEach
     void setUp() {
         testUser = createMockUser();
+        lenient().when(effectivePermissions.names(any())).thenAnswer(i ->
+            com.influencermatch.backend.security.RolePermissions.names(i.getArgument(0)));
     }
 
     @Test

@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS creator_invitation (
     token_hash VARCHAR(64) NOT NULL UNIQUE,
     status VARCHAR(32) NOT NULL DEFAULT 'PENDING', -- PENDING, ACCEPTED, EXPIRED, CANCELLED
     expires_at TIMESTAMP NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_invitation_token ON creator_invitation(token_hash);
 CREATE INDEX IF NOT EXISTS idx_invitation_brand ON creator_invitation(brand_id, status);
@@ -25,6 +26,7 @@ CREATE TABLE IF NOT EXISTS creator_provider_identity (
     provider_username VARCHAR(255),
     raw_profile_data JSONB,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_provider_identity UNIQUE(provider, provider_user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_provider_identity_creator ON creator_provider_identity(creator_id);
@@ -40,7 +42,9 @@ CREATE TABLE IF NOT EXISTS creator_account_verification (
     refresh_token_encrypted TEXT,
     token_expires_at TIMESTAMP,
     status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE', -- ACTIVE, REVOKED, EXPIRED
-    verified_at TIMESTAMP NOT NULL DEFAULT NOW()
+    verified_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_account_verification_creator ON creator_account_verification(creator_id, status);
 
@@ -55,7 +59,8 @@ CREATE TABLE IF NOT EXISTS creator_identity_conflict (
     resolved_by UUID REFERENCES "user"(id),
     resolved_at TIMESTAMP,
     resolution_notes TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 -- 5. Lịch sử kiểm toán danh tính (Audit Trail cho bảo mật và tranh chấp)
@@ -66,5 +71,6 @@ CREATE TABLE IF NOT EXISTS creator_identity_audit (
     account_id UUID REFERENCES creator(id),
     performed_by UUID NOT NULL REFERENCES "user"(id),
     details JSONB NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );

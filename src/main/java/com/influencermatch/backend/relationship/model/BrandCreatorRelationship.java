@@ -37,6 +37,10 @@ public class BrandCreatorRelationship {
   @JoinColumn(nullable = false)
   private Creator creator;
 
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "master_id")
+  private com.influencermatch.backend.creator.model.CreatorMaster master;
+
   @ManyToOne(fetch = FetchType.LAZY, optional = false)
   @JoinColumn(nullable = false)
   private Campaign campaign;

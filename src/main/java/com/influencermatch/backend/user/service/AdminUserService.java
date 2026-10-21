@@ -68,7 +68,7 @@ public class AdminUserService {
     User user = find(id);
     if (user.getRole() == request.role()) return AdminUserResponse.from(user);
     if (user.getRole() == Role.CREATOR && request.role() != Role.CREATOR
-        && (creators.existsByOwnerId(id) || claims.existsByClaimantIdAndStatus(id,
+        && (creators.existsByMasterUserId(id) || claims.existsByClaimantIdAndStatus(id,
             com.influencermatch.backend.creator.enums.CreatorClaimStatus.PENDING)))
       throw new BusinessException(ErrorCode.CREATOR_ROLE_CHANGE_CONFLICT,"Resolve pending claims and revoke channel ownership before changing this role");
     if (request.role() != Role.BRAND && profiles.existsByUserId(id))

@@ -13,7 +13,16 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface CreatorRepository extends JpaRepository<Creator, UUID> {
-  boolean existsByOwnerId(UUID ownerId);
+  boolean existsByMasterUserId(UUID userId);
+
+  default boolean existsByOwnerId(UUID ownerId) {
+    return existsByMasterUserId(ownerId);
+  }
+
+  List<Creator> findByMasterId(UUID masterId);
+
+  @Query(value = "SELECT pg_advisory_xact_lock(hashtext(:lockKey))", nativeQuery = true)
+  void acquireIdentityLock(@Param("lockKey") String lockKey);
   @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
   @Query("select c from Creator c where c.id=:id")
   Optional<Creator> findLockedById(@Param("id") UUID id);

@@ -682,44 +682,44 @@ Tuần 3: Kết Nối Kênh Thứ Hai & Demo Xuyên Suốt (P1)
 ### 🧩 PHASE 2: Domain Entities & Repositories (Java Layer)
 > **Mục tiêu**: Tạo Entity `CreatorMaster`, cập nhật `Creator`, bổ sung 5 Entity mới kế thừa `BaseEntity` và cập nhật các Repository.
 
-- [ ] **2.1. Cập nhật Entity [Creator.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/model/Creator.java)**:
-  - [ ] Xóa trường `private User owner;`.
-  - [ ] Thêm quan hệ `@ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "master_id") private CreatorMaster master;`.
-  - [ ] Thêm trường `@Builder.Default @Column(name = "is_stable_id", nullable = false) private Boolean isStableId = true;`.
-  - [ ] Thêm helper method tương thích ngược:
+- [x] **2.1. Cập nhật Entity [Creator.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/model/Creator.java)**:
+  - [x] Xóa trường `private User owner;`.
+  - [x] Thêm quan hệ `@ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "master_id") private CreatorMaster master;`.
+  - [x] Thêm trường `@Builder.Default @Column(name = "is_stable_id", nullable = false) private Boolean isStableId = true;`.
+  - [x] Thêm helper method tương thích ngược:
     ```java
     public User getOwner() { return master != null ? master.getUser() : null; }
     ```
-- [ ] **2.2. Tạo mới Entity [CreatorMaster.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/model/CreatorMaster.java)**:
-  - [ ] Kế thừa [BaseEntity.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/common/BaseEntity.java) với annotation `@SuperBuilder`.
-  - [ ] `@OneToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "user_id", unique = true, nullable = false) private User user;`.
-  - [ ] `@Column(name = "canonical_name", nullable = false) private String canonicalName;`.
-  - [ ] `@Column(nullable = false, length = 32) private String status;` (ACTIVE, SUSPENDED).
-  - [ ] `@OneToMany(mappedBy = "master") private List<Creator> accounts;`.
-- [ ] **2.3. Tạo 5 Entity mới** trong `com.influencermatch.backend.creator.model` (kế thừa `BaseEntity`):
-  - [ ] `CreatorInvitation.java` (`targetCreator`, `campaign`, `brand`, `invitedBy`, `invitedEmail`, `tokenHash`, `status`, `expiresAt`).
-  - [ ] `CreatorProviderIdentity.java` (`creator`, `provider`, `providerUserId`, `providerUsername`, `rawProfileData`).
-  - [ ] `CreatorAccountVerification.java` (`creator`, `verifiedByUser`, `verificationMethod`, `grantedScopes`, `accessTokenEncrypted`, `refreshTokenEncrypted`, `tokenExpiresAt`, `status`, `verifiedAt`).
-  - [ ] `CreatorIdentityConflict.java` (`conflictType`, `sourceAccount`, `targetMaster`, `conflictDetails`, `status`, `resolvedBy`, `resolvedAt`, `resolutionNotes`).
-  - [ ] `CreatorIdentityAudit.java` (`eventType`, `master`, `account`, `performedBy`, `details`).
-- [ ] **2.4. Cập nhật Dual References trong các Entity liên quan**:
-  - [ ] [ShortlistItem.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/model/ShortlistItem.java): Thêm `@ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "master_id") private CreatorMaster master;`.
-  - [ ] [BrandCreatorRelationship.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/model/BrandCreatorRelationship.java): Thêm `@ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "master_id") private CreatorMaster master;`.
-  - [ ] [Collaboration.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/model/Collaboration.java): Thêm `master`.
-- [ ] **2.5. Tạo và cập nhật Repositories**:
-  - [ ] Tạo `CreatorMasterRepository.java` với `Optional<CreatorMaster> findByUserId(UUID userId);`.
-  - [ ] Tạo `CreatorInvitationRepository.java` với `Optional<CreatorInvitation> findByTokenHash(String tokenHash);` và `boolean existsByTargetCreatorIdAndStatus(UUID creatorId, String status);`.
-  - [ ] Tạo `CreatorProviderIdentityRepository.java` với `Optional<CreatorProviderIdentity> findByProviderAndProviderUserId(String provider, String providerUserId);`.
-  - [ ] Tạo `CreatorAccountVerificationRepository.java`, `CreatorIdentityConflictRepository.java`, `CreatorIdentityAuditRepository.java`.
-  - [ ] Cập nhật [CreatorRepository.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/repository/CreatorRepository.java):
-    - [ ] Thêm method khóa Advisory Lock:
+- [x] **2.2. Tạo mới Entity [CreatorMaster.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/model/CreatorMaster.java)**:
+  - [x] Kế thừa [BaseEntity.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/common/BaseEntity.java) với annotation `@SuperBuilder`.
+  - [x] `@OneToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "user_id", unique = true, nullable = false) private User user;`.
+  - [x] `@Column(name = "canonical_name", nullable = false) private String canonicalName;`.
+  - [x] `@Column(nullable = false, length = 32) private String status;` (ACTIVE, SUSPENDED).
+  - [x] `@OneToMany(mappedBy = "master") private List<Creator> accounts;`.
+- [x] **2.3. Tạo 5 Entity mới** trong `com.influencermatch.backend.creator.model` (kế thừa `BaseEntity`):
+  - [x] `CreatorInvitation.java` (`targetCreator`, `campaign`, `brand`, `invitedBy`, `invitedEmail`, `tokenHash`, `status`, `expiresAt`).
+  - [x] `CreatorProviderIdentity.java` (`creator`, `provider`, `providerUserId`, `providerUsername`, `rawProfileData`).
+  - [x] `CreatorAccountVerification.java` (`creator`, `verifiedByUser`, `verificationMethod`, `grantedScopes`, `accessTokenEncrypted`, `refreshTokenEncrypted`, `tokenExpiresAt`, `status`, `verifiedAt`).
+  - [x] `CreatorIdentityConflict.java` (`conflictType`, `sourceAccount`, `targetMaster`, `conflictDetails`, `status`, `resolvedBy`, `resolvedAt`, `resolutionNotes`).
+  - [x] `CreatorIdentityAudit.java` (`eventType`, `master`, `account`, `performedBy`, `details`).
+- [x] **2.4. Cập nhật Dual References trong các Entity liên quan**:
+  - [x] [ShortlistItem.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/model/ShortlistItem.java): Thêm `@ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "master_id") private CreatorMaster master;`.
+  - [x] [BrandCreatorRelationship.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/model/BrandCreatorRelationship.java): Thêm `@ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "master_id") private CreatorMaster master;`.
+  - [x] [Collaboration.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/model/Collaboration.java): Thêm `master`.
+- [x] **2.5. Tạo và cập nhật Repositories**:
+  - [x] Tạo `CreatorMasterRepository.java` với `Optional<CreatorMaster> findByUserId(UUID userId);`.
+  - [x] Tạo `CreatorInvitationRepository.java` với `Optional<CreatorInvitation> findByTokenHash(String tokenHash);` và `boolean existsByTargetCreatorIdAndStatus(UUID creatorId, String status);`.
+  - [x] Tạo `CreatorProviderIdentityRepository.java` với `Optional<CreatorProviderIdentity> findByProviderAndProviderUserId(String provider, String providerUserId);`.
+  - [x] Tạo `CreatorAccountVerificationRepository.java`, `CreatorIdentityConflictRepository.java`, `CreatorIdentityAuditRepository.java`.
+  - [x] Cập nhật [CreatorRepository.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/repository/CreatorRepository.java):
+    - [x] Thêm method khóa Advisory Lock:
       ```java
       @Query(value = "SELECT pg_advisory_xact_lock(hashtext(:lockKey))", nativeQuery = true)
       void acquireIdentityLock(@Param("lockKey") String lockKey);
       ```
-    - [ ] Thêm `List<Creator> findByMasterId(UUID masterId);`.
-    - [ ] Thay thế `existsByOwnerId` thành `boolean existsByMasterUserId(UUID userId);`.
-- [ ] **DoD**: Dự án compile sạch sẽ (`mvn test-compile -DskipTests`), schema JPA validate khớp hoàn toàn với Flyway.
+    - [x] Thêm `List<Creator> findByMasterId(UUID masterId);`.
+    - [x] Thay thế `existsByOwnerId` thành `boolean existsByMasterUserId(UUID userId);`.
+- [x] **DoD**: Dự án compile sạch sẽ (`mvn test-compile -DskipTests`), schema JPA validate khớp hoàn toàn với Flyway.
 
 ---
 

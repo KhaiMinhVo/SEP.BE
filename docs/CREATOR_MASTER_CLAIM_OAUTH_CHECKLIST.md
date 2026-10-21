@@ -726,25 +726,25 @@ Tuần 3: Kết Nối Kênh Thứ Hai & Demo Xuyên Suốt (P1)
 ### 🔒 PHASE 3: Modularized Security & Token Encryption
 > **Mục tiêu**: Tái cấu trúc package `security/` thành các folder chuyên biệt và xây dựng Service mã hóa OAuth Token.
 
-- [ ] **3.1. Tạo các sub-package cấu trúc mới** trong `com.influencermatch.backend.security`:
+- [x] **3.1. Tạo các sub-package cấu trúc mới** trong `com.influencermatch.backend.security`:
   - `security.jwt`, `security.oauth`, `security.apikey`, `security.evaluator`, `security.permission`, `security.service`.
-- [ ] **3.2. Di chuyển các class hiện tại vào sub-package tương ứng** và cập nhật import:
-  - [ ] Chuyển `JwtTokenProvider`, `JwtAuthenticationFilter`, `JwtAuthenticationEntryPoint`, `JwtAccessDeniedHandler` vào `security.jwt`.
-  - [ ] Chuyển `GoogleLoginIntent`, `GoogleOAuthSuccessHandler`, `GoogleOAuthFailureHandler` vào `security.oauth`.
-  - [ ] Chuyển `CreatorServiceKeyFilter` vào `security.apikey`.
-  - [ ] Chuyển `Permission`, `Permissions`, `RolePermissions`, sub-package `role/` vào `security.permission`.
-  - [ ] Chuyển `UserDetailsServiceImpl` vào `security.service`.
-- [ ] **3.3. Xây dựng `OAuthTokenEncryptionService.java`** trong `security.oauth`:
-  - [ ] Thuật toán: AES-256-GCM với IV ngẫu nhiên 12-byte và Auth Tag 128-bit.
-  - [ ] Cấu hình key qua `application.security.oauth-token.secret-key` trong `application.yml`.
-  - [ ] Cung cấp 2 method: `String encrypt(String rawToken)` và `String decrypt(String encryptedToken)`.
-- [ ] **3.4. Xây dựng `CreatorSecurityEvaluator.java`** trong `security.evaluator`:
-  - [ ] Định nghĩa bean `@Component("creatorSecurity")`.
-  - [ ] Cung cấp method `boolean isOwner(UUID creatorId)`: kiểm tra xem `creator.getMaster().getUser().getId()` có khớp với `Permissions.actor().getId()` không.
-- [ ] **3.5. Cập nhật [SecurityConfig.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/config/SecurityConfig.java)**:
-  - [ ] Cập nhật toàn bộ import theo package mới.
-  - [ ] Mở public endpoint: `/creators/claim/invitation/verify`, `/creators/claim/oauth/**`.
-- [ ] **DoD**: Toàn bộ unit tests bảo mật `GoogleAuthServiceTest`, `AuthControllerTest`, `RolePermissionsTest` pass 100%.
+- [x] **3.2. Di chuyển các class hiện tại vào sub-package tương ứng** và cập nhật import:
+  - [x] Chuyển `JwtTokenProvider`, `JwtAuthenticationFilter`, `JwtAuthenticationEntryPoint`, `JwtAccessDeniedHandler` vào `security.jwt`.
+  - [x] Chuyển `GoogleLoginIntent`, `GoogleOAuthSuccessHandler`, `GoogleOAuthFailureHandler` vào `security.oauth`.
+  - [x] Chuyển `CreatorServiceKeyFilter` vào `security.apikey`.
+  - [x] Chuyển `Permission`, `Permissions`, `RolePermissions`, sub-package `role/` vào `security.permission`.
+  - [x] Chuyển `UserDetailsServiceImpl` vào `security.service`.
+- [x] **3.3. Xây dựng `OAuthTokenEncryptionService.java`** trong `security.oauth`:
+  - [x] Thuật toán: AES-256-GCM với IV ngẫu nhiên 12-byte và Auth Tag 128-bit.
+  - [x] Cấu hình key qua `application.security.oauth-token.secret-key` trong `application.yml`.
+  - [x] Cung cấp 2 method: `String encrypt(String rawToken)` và `String decrypt(String encryptedToken)`.
+- [x] **3.4. Xây dựng `CreatorSecurityEvaluator.java`** trong `security.evaluator`:
+  - [x] Định nghĩa bean `@Component("creatorSecurity")`.
+  - [x] Cung cấp method `boolean isOwner(UUID creatorId)`: kiểm tra xem `creator.getMaster().getUser().getId()` có khớp với `Permissions.actor().getId()` không.
+- [x] **3.5. Cập nhật [SecurityConfig.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/config/SecurityConfig.java)**:
+  - [x] Cập nhật toàn bộ import theo package mới.
+  - [x] Mở public endpoint: `/creators/claim/invitation/verify`, `/creators/claim/oauth/**`.
+- [x] **DoD**: Toàn bộ unit tests bảo mật `GoogleAuthServiceTest`, `AuthControllerTest`, `RolePermissionsTest` pass 100%.
 
 ---
 

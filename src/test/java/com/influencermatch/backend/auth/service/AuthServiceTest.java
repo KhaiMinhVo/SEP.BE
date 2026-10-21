@@ -165,4 +165,21 @@ class AuthServiceTest {
                 .password("Password123!")
                 .build();
     }
+    @Test
+    void registerTrimsEmailAndNameAndNeverPersistsPlainPassword() {
+        var req=RegisterRequest.builder().email("  CASE@EXAMPLE.TEST  ").password("Password123!").fullName("  Test  ").build();
+        when(passwordEncoder.encode(req.getPassword())).thenReturn("encoded");
+        authService.register(req);
+        var saved=org.mockito.ArgumentCaptor.forClass(User.class);verify(userRepository).save(saved.capture());
+        assertThat(saved.getValue().getEmail()).isEqualTo("case@example.test");
+        assertThat(saved.getValue().getFullName()).isEqualTo("Test");assertThat(saved.getValue().getRole()).isEqualTo(Role.BRAND);
+        assertThat(saved.getValue().getPasswordHash()).isEqualTo("encoded");
+    }
+    @Test
+    void invalidPasswordDoesNotGenerateAnyTokens() {
+        when(authenticationManager.authenticate(any())).thenThrow(new org.springframework.security.authentication.BadCredentialsException("Bad password"));
+        assertThatThrownBy(()->authService.login(createValidLoginRequest())).isInstanceOf(org.springframework.security.authentication.BadCredentialsException.class);
+        verifyNoInteractions(jwtTokenProvider,refreshTokenService);verify(userRepository,never()).save(any());
+    }
+
 }

@@ -257,4 +257,44 @@ class RolePermissionPostgresIntegrationTest {
       assertThat(auditCount()).isEqualTo(count+1);
     } finally { pool.shutdownNow(); }
   }
+  @Test void multiPermissionPatchIsAtomicAndIndependentAcrossRoles() throws Exception {
+    var brand=user(Role.BRAND);String access=token(brand),creator=token(user(Role.CREATOR));long count=auditCount();
+    var changes=Map.of("version",0,"changes",List.of(
+        Map.of("permission","CREATE_CAMPAIGN","enabled",false),Map.of("permission","VIEW_CREATOR_PROFILE","enabled",false)));
+    var saved=call(token(admin),patch("/admin/role-permissions/BRAND"),changes,200).path("data");
+    assertThat(saved.path("version").asLong()).isEqualTo(1);assertThat(auditCount()).isEqualTo(count+1);
+    var permissions=call(access,get("/auth/me"),null,200).path("data").path("permissions").toString();
+    assertThat(permissions).doesNotContain("CREATE_CAMPAIGN","VIEW_CREATOR_PROFILE").contains("VIEW_PLAN");
+    assertThat(call(creator,get("/auth/me"),null,200).path("data").path("permissions").toString()).contains("VIEW_CREATOR_PROFILE");
+    var invalid=Map.of("version",1,"changes",List.of(
+        Map.of("permission","CREATE_CAMPAIGN","enabled",true),Map.of("permission","ASSIGN_USER_ROLE","enabled",true)));
+    call(token(admin),patch("/admin/role-permissions/BRAND"),invalid,400);
+    assertThat(jdbc.queryForObject("select version from role_permission_config where role='BRAND'",Long.class)).isEqualTo(1);
+    assertThat(jdbc.queryForObject("select enabled from role_permission_override where role='BRAND' and permission='CREATE_CAMPAIGN'",Boolean.class)).isFalse();
+    assertThat(auditCount()).isEqualTo(count+1);
+  }
+
+  static java.util.stream.Stream<Arguments> protectedOperations() {
+    return java.util.stream.Stream.of(
+      Arguments.of(Role.BRAND,Permission.MANAGE_OWN_COLLABORATION,"POST","/campaigns/{id}/collaborations",
+          Map.of("relationshipId",UUID.randomUUID(),"agreedFee",1,"currency","VND")),
+      Arguments.of(Role.BRAND,Permission.RECORD_OWN_OUTCOME,"POST","/collaborations/{id}/outcome",
+          Map.of("views",0,"publishedContentUrl","https://example.test/post")),
+      Arguments.of(Role.BRAND,Permission.RECORD_OWN_CREATOR_REVIEW,"POST","/collaborations/{id}/review",
+          Map.of("overallRating",5,"brandFitRating",5,"wouldCollaborateAgain",true)),
+      Arguments.of(Role.CREATOR,Permission.CLAIM_CREATOR_PROFILE,"POST","/creators/{id}/claim",
+          Map.of("evidenceUrls",List.of("https://example.test/proof"),"note","Test")),
+      Arguments.of(Role.CREATOR,Permission.MANAGE_OWN_RATE_CARD,"PUT","/creators/{id}/rate-card",Map.of("items",List.of())),
+      Arguments.of(Role.DATA_MANAGER,Permission.REVIEW_CREATOR_CLAIM,"PATCH","/data/creator-claims/{id}/review",
+          Map.of("decision","APPROVED","reason","Verified")),
+      Arguments.of(Role.BRAND,Permission.MANAGE_OWN_SUBSCRIPTION,"POST","/billing/subscribe",Map.of("planId",UUID.randomUUID())));
+  }
+  @ParameterizedTest @MethodSource("protectedOperations")
+  void toggledBusinessOperationsAreForbiddenBeforeAnyResourceMutation(Role role,Permission permission,String method,String path,Object body) throws Exception {
+    String access=token(user(role));setPermission(role,0,permission,false);long count=auditCount();
+    long allAudits=jdbc.queryForObject("select count(*) from audit_log",Long.class);
+    call(access,request(org.springframework.http.HttpMethod.valueOf(method),path.replace("{id}",UUID.randomUUID().toString())),body,403);
+    assertThat(auditCount()).isEqualTo(count);assertThat(jdbc.queryForObject("select count(*) from audit_log",Long.class)).isEqualTo(allAudits);
+  }
+
 }

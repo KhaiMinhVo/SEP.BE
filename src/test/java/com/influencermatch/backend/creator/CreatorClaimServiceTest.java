@@ -158,4 +158,15 @@ class CreatorClaimServiceTest {
     verifyNoInteractions(claims,cards,audit);
   }
 
+  @Test void missingChannelNeverCreatesClaimOrDeletesPrices() {
+    verified();
+    assertThatThrownBy(()->service.claim(UUID.randomUUID(),request())).isInstanceOf(NotFoundException.class);
+    verifyNoInteractions(claims,cards,audit);
+  }
+  @Test void missingReviewTargetNeverAudits() {
+    login(User.builder().id(UUID.randomUUID()).role(Role.DATA_MANAGER).status(UserStatus.ACTIVE).build());
+    assertThatThrownBy(()->service.detail(UUID.randomUUID())).isInstanceOf(NotFoundException.class);
+    verifyNoInteractions(cards,audit);verify(claims,never()).save(any());
+  }
+
 }

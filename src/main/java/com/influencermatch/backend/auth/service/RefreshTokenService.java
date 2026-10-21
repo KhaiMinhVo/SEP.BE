@@ -37,13 +37,18 @@ public class RefreshTokenService {
     return create(user);
   }
 
-  @Transactional
+  @Transactional(noRollbackFor = RefreshTokenReplayException.class)
   public Rotated rotate(String raw) {
     users.lockRoleChanges();
     LocalDateTime now = LocalDateTime.now();
     RefreshToken old = tokens.findByTokenHash(hash(raw)).orElseThrow(this::invalid);
     if (!old.active(now)) {
-      if (old.getRevokedAt() != null) tokens.revokeAll(old.getUserId(), now);
+      if (old.getRevokedAt() != null) {
+        tokens.revokeAll(old.getUserId(), now);
+        // Keep the existing RBAC lock until revocation commits; a new transaction here
+        // would contend with the lock held by the caller's refresh transaction.
+        throw new RefreshTokenReplayException();
+      }
       throw invalid();
     }
     User user =

@@ -11,6 +11,7 @@ import com.influencermatch.backend.auth.model.*;
 import com.influencermatch.backend.auth.repository.*;
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ErrorCode;
+import com.influencermatch.backend.exception.RefreshTokenReplayException;
 import com.influencermatch.backend.security.JwtTokenProvider;
 import com.influencermatch.backend.user.enums.Role;
 import com.influencermatch.backend.user.enums.UserStatus;
@@ -98,7 +99,7 @@ public class AuthServiceImpl implements AuthService {
   }
 
   @Override
-  @Transactional
+  @Transactional(noRollbackFor = RefreshTokenReplayException.class)
   public LoginResponse refresh(RefreshTokenRequest request) {
     RefreshTokenService.Rotated rotated = refreshTokenService.rotate(request.refreshToken());
     User user = rotated.user();

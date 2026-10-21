@@ -230,4 +230,24 @@ class GoogleAuthServiceTest {
         .extracting(ex -> ((BusinessException) ex).code())
         .isEqualTo(ErrorCode.AUTH_CODE_INVALID_OR_EXPIRED);
   }
+  @Test void linkedGoogleEmailChangePreservesAccountEmailPasswordAndName() {
+    var user=User.builder().id(UUID.randomUUID()).email("original@example.test").fullName("Original")
+        .passwordHash("preserved-hash").role(Role.BRAND).status(UserStatus.ACTIVE).build();
+    var identity=ExternalIdentity.builder().user(user).providerSubject("subject").providerEmail(user.getEmail()).build();
+    when(identities.findByProviderAndProviderSubject(ExternalIdentityProvider.GOOGLE,"subject")).thenReturn(Optional.of(identity));
+    service.completeGoogleLogin("subject","NEW@EXAMPLE.TEST","New Name",true);
+    assertThat(user.getEmail()).isEqualTo("original@example.test");assertThat(user.getPasswordHash()).isEqualTo("preserved-hash");
+    assertThat(user.getFullName()).isEqualTo("Original");assertThat(identity.getProviderEmail()).isEqualTo("new@example.test");
+    verify(users,never()).save(any());verify(exchangeCodes).save(any());verifyNoInteractions(jwtTokenProvider,refreshTokens);
+  }
+  @Test void secondGoogleIdentityCannotReplaceExistingLink() {
+    var user=User.builder().id(UUID.randomUUID()).email("brand@example.test").role(Role.BRAND).status(UserStatus.ACTIVE).build();
+    when(users.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
+    when(identities.findByUserIdAndProvider(user.getId(),ExternalIdentityProvider.GOOGLE))
+        .thenReturn(Optional.of(ExternalIdentity.builder().providerSubject("existing-subject").user(user).build()));
+    assertThatThrownBy(()->service.completeGoogleLogin("other-subject",user.getEmail(),"Brand",true))
+        .isInstanceOfSatisfying(BusinessException.class,e->assertThat(e.code()).isEqualTo(ErrorCode.GOOGLE_AUTHENTICATION_FAILED));
+    verify(identities,never()).save(any());verifyNoInteractions(exchangeCodes,jwtTokenProvider,refreshTokens);
+  }
+
 }

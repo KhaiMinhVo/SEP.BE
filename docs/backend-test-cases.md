@@ -1,0 +1,264 @@
+# Backend Test Cases — Khải
+
+## Kết quả thực thi ngày 21/10/2026
+
+- Sau bổ sung test và sửa replay: thêm **123 lượt kiểm thử** so với baseline 234;
+  tổng **357 test / 46 suite**.
+- Full regression sau bản sửa: **357 đạt, 0 thất bại, 0 execution error, 0 bỏ qua**.
+- BUG-AUTH-001 đã sửa và test tái hiện đã đạt. Không có lỗi Docker/PostgreSQL
+  hoặc test bị tắt để che lỗi. Các test có trước vẫn được giữ và đạt.
+- Regression Auth/RBAC chọn lọc sau bản sửa: **51/51 đạt**.
+- Trước khi sửa, full regression 354/355 đạt và integration chọn lọc 87/88 đạt;
+  lỗi duy nhất ở cả hai lần là BUG-AUTH-001, còn 2 refresh token chưa bị thu hồi.
+- Đợt đầu chỉ thêm test/tài liệu; theo yêu cầu tiếp theo đã sửa transaction Auth
+  và thêm exception riêng cho replay. Kết quả được ghi nhận trước khi commit/push. Không thay migration,
+  `.env`, Bruno, cấu hình máy hoặc database dùng chung.
+- Full regression được chạy bằng JDK 21/Maven với `-DforkCount=0` và Byte Buddy
+  agent nạp trước cho Mockito trên Windows. Không đo hoặc tuyên bố tỷ lệ coverage
+  JaCoCo trong lần chạy này.
+- Regression sau rebase lên `develop` tại `385ace3`: **357/357 đạt**, không lỗi
+  hoặc bỏ qua; đã kiểm tra cùng các cập nhật campaign autofill/ingestion mới merge.
+
+## Phạm vi và cách đọc
+
+Danh sách ánh xạ test tự động cho các module backend Khải phụ trách. Giữ bộ 234 test
+trước đợt này; bổ sung unit và integration test theo domain. Đây là tài liệu trong
+repo, chưa phải nội dung đã điền vào Report của nhóm. Không cam kết coverage 100%.
+
+- **Unit**: JUnit 5/Mockito, kiểm tra logic và tương tác repository/service; không
+  chứng minh được commit/rollback thực tế hoặc Spring filter/method security.
+- **Integration**: MockMvc + PostgreSQL/pgvector Testcontainers, chạy Flyway và
+  Hibernate validate; kiểm tra HTTP, quyền, database, constraint và transaction.
+- Một dòng có thể là parameterized test với nhiều bộ dữ liệu. Số lượt thực thi
+  trong Surefire vì vậy lớn hơn số dòng test case.
+- Fixture dùng UUID/owner riêng, không phụ thuộc thứ tự. Các suite integration mới
+  dùng database Docker riêng qua `PostgresApiTestSupport`; container dùng chung
+  trong JVM và được Testcontainers dọn khi JVM kết thúc. Không dùng database chung,
+  tài khoản thật, Google Cloud, VNPay thật hoặc Bruno.
+- Các kiểm thử rollback tạo trigger gây lỗi có chủ đích trên database test và
+  xóa trigger trong `finally`; không chạy những lệnh này vào database nghiệp vụ.
+
+## Chạy kiểm thử
+
+Yêu cầu Java 21, Maven và Docker Desktop chạy Linux containers cho integration.
+Không cần chạy BE riêng hoặc chỉnh `.env`.
+
+```powershell
+# Unit theo domain
+mvn '-Dtest=BrandServiceTest,CampaignServiceTest,DataQualityServiceTest,ShortlistCompareServiceTest,PaymentSettlementServiceTest,PaymentCallbackServiceTest,MockPaymentServiceTest,SubscriptionServiceTest,AuditServiceTest,AdminRoleGuardTest,AuthServiceTest,RefreshTokenServiceTest,GoogleAuthServiceTest,CreatorClaimServiceTest' test
+
+# Integration mới và các suite đã mở rộng
+mvn '-Dtest=BrandPostgresIntegrationTest,CampaignPostgresIntegrationTest,AuditLogPostgresIntegrationTest,AuthSessionPostgresIntegrationTest,SubscriptionPostgresIntegrationTest,CreatorClaimPostgresIntegrationTest,RolePermissionPostgresIntegrationTest' test
+
+# Toàn bộ regression
+mvn test
+
+# Tái hiện riêng BUG-AUTH-001
+mvn '-Dtest=AuthSessionPostgresIntegrationTest#replayedRotatedTokenRevokesAllOtherSessionsEvenWhenRequestIsRejected' test
+```
+
+Xem kết quả từng class/method trong `target/surefire-reports/TEST-*.xml` hoặc file
+`.txt` cùng thư mục. Trước bản sửa, test BUG-AUTH-001 làm Maven trả exit 1; sau bản
+sửa test đó phải đạt. Không bỏ qua test hoặc đổi kỳ vọng để làm xanh suite.
+
+## Lỗi nghiệp vụ phát hiện và bản sửa
+
+### BUG-AUTH-001 — Thu hồi session khi replay refresh token bị rollback
+
+- Test: `AuthSessionPostgresIntegrationTest#replayedRotatedTokenRevokesAllOtherSessionsEvenWhenRequestIsRejected`.
+- Điều kiện: cùng một tài khoản đăng nhập hai lần, sau đó rotate refresh token
+  của session thứ nhất. Còn hai refresh token hoạt động: session thứ hai và token
+  thay thế của session thứ nhất.
+- Thao tác: gửi lại refresh token cũ của session thứ nhất.
+- Mong đợi: HTTP 401 và tất cả refresh token còn hoạt động của tài khoản được thu hồi,
+  đúng với nhánh xử lý replay và unit test `rotate_FailsWhenRevokedAndRevokesAll` hiện có.
+- Trước khi sửa đã tái hiện: HTTP 401 nhưng database vẫn còn **2 token chưa bị thu hồi**.
+- Nguyên nhân: `RefreshTokenService.rotate()` gọi `revokeAll()` rồi ném
+  `BusinessException` trong transaction; `AuthServiceImpl.refresh()` cũng có
+  transaction bao ngoài. Exception dẫn tới rollback cả thao tác thu hồi. Mockito
+  chỉ xác nhận lời gọi `revokeAll()`, không phát hiện rollback này.
+- Ảnh hưởng: các refresh token khác vẫn có thể được dùng để lấy access token;
+  cơ chế thu hồi toàn bộ session khi phát hiện replay chưa có hiệu lực bền vững.
+- Bản sửa theo yêu cầu tiếp theo: thêm `RefreshTokenReplayException`, giữ nguyên
+  HTTP 401/code UNAUTHENTICATED. Cả `RefreshTokenService.rotate()` và transaction
+  bao ngoài `AuthServiceImpl.refresh()` dùng `noRollbackFor` chỉ với exception này,
+  để commit việc thu hồi trong nhánh replay trước khi trả lỗi. Lỗi khác vẫn rollback.
+- Giữ cùng transaction và khóa `rbac_guard`; không dùng REQUIRES_NEW khi transaction
+  ngoài còn giữ khóa, tránh tự chặn nhau. Rotate thành công vẫn tham gia transaction
+  của caller, không commit token mới độc lập.
+- Test gốc giữ nguyên kỳ vọng và thêm kiểm tra token của người khác không bị ảnh
+  hưởng, token bị thu hồi thực sự không refresh được; bổ sung test refresh đồng thời
+  và rollback rotate thành công khi caller thất bại.
+- Trạng thái: **Resolved**, đã qua test tái hiện và full regression 357/357.
+
+Regression Auth/RBAC chọn lọc sau bản sửa: **51/51 đạt**, gồm test gốc và hai test
+bổ sung về transaction/concurrency. HTTP contract và schema database không đổi.
+
+## Danh sách test case
+
+Tên chức năng và mô tả case dùng tiếng Anh để tiện ánh xạ code và báo cáo nhóm.
+Mỗi case bên dưới chỉ rõ class/method; dữ liệu parameterized nằm ngay trong source.
+
+### Authentication & Google OAuth
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-001 | Unit | Register padded mixed-case email/name | Save trimmed lowercase email, trimmed name, BRAND and encoded password | [AuthServiceTest](../src/test/java/com/influencermatch/backend/auth/service/AuthServiceTest.java)`#registerTrimsEmailAndNameAndNeverPersistsPlainPassword` |
+| BE-002 | Unit | AuthenticationManager rejects password | Reject without tokens or user save | [AuthServiceTest](../src/test/java/com/influencermatch/backend/auth/service/AuthServiceTest.java)`#invalidPasswordDoesNotGenerateAnyTokens` |
+| BE-003 | Unit | Rotate token expired at fixed past timestamp | Reject; no new token or revocation of other sessions | [RefreshTokenServiceTest](../src/test/java/com/influencermatch/backend/auth/service/RefreshTokenServiceTest.java)`#expiredTokenDoesNotCreateOrRevokeOtherSessions` |
+| BE-004 | Unit | Rotate/revoke unknown token; revoke already revoked token | Reject rotation; revoke is idempotent and preserves timestamp | [RefreshTokenServiceTest](../src/test/java/com/influencermatch/backend/auth/service/RefreshTokenServiceTest.java)`#unknownTokenAndIdempotentRevokeDoNotWrite` |
+| BE-005 | Unit | Principal role differs from database role | Reject before refresh-token write | [RefreshTokenServiceTest](../src/test/java/com/influencermatch/backend/auth/service/RefreshTokenServiceTest.java)`#changedRoleCannotIssueTokenFromStalePrincipal` |
+| BE-006 | Unit | Existing Google subject logs in with changed provider email | Only provider email changes; account email/password/name preserved | [GoogleAuthServiceTest](../src/test/java/com/influencermatch/backend/auth/service/GoogleAuthServiceTest.java)`#linkedGoogleEmailChangePreservesAccountEmailPasswordAndName` |
+| BE-007 | Unit | New subject attempts to replace existing Google link | GOOGLE_AUTHENTICATION_FAILED; no identity/exchange-code writes | [GoogleAuthServiceTest](../src/test/java/com/influencermatch/backend/auth/service/GoogleAuthServiceTest.java)`#secondGoogleIdentityCannotReplaceExistingLink` |
+| BE-008 | Integration | Register mixed-case email with injected ADMIN role; repeat | BRAND, encoded password, trimmed name; duplicate 409; no Brand Profile | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#registrationNormalizesCaseAndIgnoresInjectedRole` |
+| BE-009 | Integration | Wrong password, then uppercase email with valid password | 401 creates no session; valid login token can call /auth/me | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#wrongPasswordDoesNotIssueSessionAndLoginNormalizesEmail` |
+| BE-010 | Integration | Login then mark user LOCKED/DISABLED | Login, refresh and old access token rejected; no extra refresh row | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#inactiveAccountsCannotLoginOrRefresh` |
+| BE-011 | Integration | Expire stored token at fixed past time; also use unknown token | 401 UNAUTHENTICATED; no new refresh rows | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#expiredAndUnknownRefreshTokensCannotCreateSessions` |
+| BE-012 | Integration | Rotate valid token, inspect DB, logout replacement, retry | Old revoked and linked to new token; logout 204; refresh 401 | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#rotationLinksOldTokenAndLogoutRevokesReplacement` |
+| BE-013 | Integration | Two sessions; rotate first; replay first token | 401 and zero active refresh tokens for that account; other account unaffected | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#replayedRotatedTokenRevokesAllOtherSessionsEvenWhenRequestIsRejected` |
+| BE-014 | Integration | Malformed Authorization header or Bearer JWT | 401 | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#invalidAuthorizationIs401` |
+| BE-107 | Integration | Google account exchanges code and retries | JWT works; exchange code consumed only once | [GoogleOAuthPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/GoogleOAuthPostgresIntegrationTest.java)`#googleOnlyUserCanExchangeOnceAndUseJwt` |
+| BE-108 | Integration | Rotate successfully inside caller transaction, then force caller failure | Original token remains active/unreplaced; no replacement row; original can refresh afterward | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#successfulRotationStillRollsBackWithItsCallerTransaction` |
+| BE-109 | Integration | Two concurrent refresh requests use the same token | One 200, one 401; all refresh tokens of that account revoked durably; completes without deadlock | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#concurrentRefreshReplayCommitsRevocationWithoutDeadlock` |
+
+### Access Control & User Management
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-015 | Unit | Assign CREATOR to existing CREATOR with version 5 | Version unchanged; no refresh revocation/audit | [AdminRoleGuardTest](../src/test/java/com/influencermatch/backend/user/service/AdminRoleGuardTest.java)`#sameRoleDoesNotRevokeOrAudit` |
+| BE-016 | Unit | CREATOR owns channel or has pending claim | CREATOR_ROLE_CHANGE_CONFLICT; role/version preserved; no revocation/audit | [AdminRoleGuardTest](../src/test/java/com/influencermatch/backend/user/service/AdminRoleGuardTest.java)`#creatorOwnershipOrPendingClaimPreventsRoleChange` |
+| BE-104 | Integration | Admin changes logged-in account role | Old tokens rejected; new permissions; Manager denied private APIs | [RbacPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RbacPostgresIntegrationTest.java)`#roleChangeRevokesAccessAndRefreshAndManagerCannotAccessPrivateApis` |
+| BE-105 | Integration | Lock/unlock then repeat no-op | Old token never revived; no-op does not revoke valid token | [RbacPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RbacPostgresIntegrationTest.java)`#lockUnlockNeverRestoresOldTokenAndNoOpDoesNotInvalidate` |
+| BE-106 | Integration | Concurrent Admin removal | At least one active Admin remains | [RbacPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RbacPostgresIntegrationTest.java)`#concurrentChangesCannotRemoveLastActiveAdministrator` |
+
+### Role Permission Management
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-017 | Integration | Disable two BRAND permissions; inspect same token/CREATOR; send mixed valid-invalid patch | One version/audit; other role/permissions unchanged; invalid batch writes nothing | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#multiPermissionPatchIsAtomicAndIndependentAcrossRoles` |
+| BE-018 | Integration | Disable permission then reuse token for collaboration/outcome/review/claim/rate-card/claim-review/checkout | 403 before resource mutation; no new audit | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#toggledBusinessOperationsAreForbiddenBeforeAnyResourceMutation` |
+| BE-019 | Integration | Change permission, repeat no-op, submit stale version | Correct version/audit; no-op unchanged; stale update 409 | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#versionAuditAndNoopAreConsistent` |
+| BE-020 | Integration | Database rejects permission-change audit | Override/version/audit rollback together | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#auditFailureRollsBackOverridesAndVersion` |
+| BE-021 | Integration | Two Admins update with same version | One success and one 409 | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#concurrentAdminsCannotOverwriteEachOther` |
+
+### Brand Profile Management
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-022 | Unit | Create with padded/duplicate categories/platforms | Normalized values; initial M4 context version 1 | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#createNormalizesListsAndCreatesInitialContext` |
+| BE-023 | Unit | Owner already has profile | BRAND_ALREADY_EXISTS; no profile/context writes | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#duplicateProfileDoesNotWriteContext` |
+| BE-024 | Unit | BRAND requests another owner ID | Forbidden; no profile/context writes | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#cannotCreateForAnotherUser` |
+| BE-025 | Unit | Update profile with existing learning/evidence | M4 increments and profile JSON changes; learning/evidence preserved | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#updateRefreshesContextAndPreservesLearnedEvidence` |
+| BE-026 | Unit | Read/update foreign profile | Forbidden; original name preserved; no context access | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#foreignBrandCannotReadOrUpdate` |
+| BE-027 | Unit | Get unknown profile ID | BRAND_NOT_FOUND | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#missingProfileReturnsSpecificError` |
+| BE-028 | Unit | Page 1 when owner has one profile | Empty items, total 1; no unrestricted findAll | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#laterListPageContainsNoForeignRows` |
+| BE-029 | Integration | Create, update and list own profile with another owner present | 201/200; m4Version 1 then 2; DB JSON matches profile; no foreign rows | [BrandPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/brand/BrandPostgresIntegrationTest.java)`#createUpdateAndListKeepProfileAndContextConsistent` |
+| BE-030 | Integration | Duplicate create and foreign read/update/create-for-owner | 409/403; original name/context version unchanged | [BrandPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/brand/BrandPostgresIntegrationTest.java)`#duplicateAndForeignAccessNeverChangeProfileOrContext` |
+| BE-031 | Integration | Blank/overlong name, bad website or blank category | 400; no profile row for fixture owner | [BrandPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/brand/BrandPostgresIntegrationTest.java)`#invalidProfileDoesNotCreateAnyRows` |
+| BE-032 | Integration | Admin reads/writes; other roles/anonymous read; unknown ID | Admin read 200/write 403; others 403/401; missing 404 | [BrandPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/brand/BrandPostgresIntegrationTest.java)`#adminHasReadOnlySupportAndOtherRolesAreDenied` |
+| BE-033 | Integration | Trigger rejects context insert/update for fixture marker | 500; create leaves no profile; update preserves name/version | [BrandPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/brand/BrandPostgresIntegrationTest.java)`#contextFailureRollsBackProfileCreationAndUpdate` |
+
+### Campaign Management
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-034 | Unit | Create with padded/duplicate lists | DRAFT with normalized values; no premature M3 | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#createsDraftWithNormalizedListsAndNoPrematureContext` |
+| BE-035 | Unit | End before start, follower max below min, budget max below min | INVALID_CAMPAIGN_RANGE; no campaign/context writes | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#invalidRangesDoNotPersist` |
+| BE-036 | Unit | Update READY_FOR_DISCOVERY/ACTIVE/COMPLETED/ARCHIVED | CAMPAIGN_NOT_EDITABLE; name/status unchanged | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#onlyDraftCanBeEdited` |
+| BE-037 | Unit | DRAFT to READY then ACTIVE | One M3 version 1 with campaign criteria | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#readyTransitionCreatesOneContextAndSequentialActivationDoesNotRecreateIt` |
+| BE-038 | Unit | DRAFT without platforms requests READY | CAMPAIGN_CONTEXT_NOT_READY; DRAFT preserved; no M3 | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#missingPlatformsCannotCreateDiscoveryContext` |
+| BE-039 | Unit | Archive already archived; read unknown ID | ARCHIVED unchanged; CAMPAIGN_NOT_FOUND | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#archiveIsIdempotentAndMissingCampaignIs404` |
+| BE-040 | Unit | Brand access service rejects ownership | Forbidden before name/status/context mutation | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#ownershipFailureHappensBeforeMutation` |
+| BE-041 | Integration | Create/update DRAFT then READY to ACTIVE to COMPLETED; list | Correct states/normalization; one M3; Brand Context unchanged | [CampaignPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/campaign/CampaignPostgresIntegrationTest.java)`#fullLifecycleCreatesOneContextAndPreservesProfile` |
+| BE-042 | Integration | Invalid ranges, negative budget, missing platforms, blank name | 400 and range error code when applicable; no campaign rows | [CampaignPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/campaign/CampaignPostgresIntegrationTest.java)`#invalidCreateDoesNotWriteCampaignOrContext` |
+| BE-043 | Integration | Foreign Brand, Admin read/write, anonymous, unknown ID | 403 foreign/admin write; 200 Admin read; 401 anonymous; 404 missing | [CampaignPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/campaign/CampaignPostgresIntegrationTest.java)`#ownershipAndReadOnlyAdminAreEnforced` |
+| BE-044 | Integration | Skip DRAFT to ACTIVE; archive twice; edit archived | Skip/edit 409; archive 200 twice; no M3 | [CampaignPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/campaign/CampaignPostgresIntegrationTest.java)`#archiveIsIdempotentAndRejectedTransitionsDoNotWrite` |
+| BE-045 | Integration | Trigger rejects initial M3 insert | 500; remain DRAFT with no context | [CampaignPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/campaign/CampaignPostgresIntegrationTest.java)`#contextInsertFailureRollsBackReadyTransition` |
+
+### Creator Ownership Verification & Rate Card Management
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-046 | Unit | Verified Creator claims missing channel | NotFound; no claim/pricing/audit writes | [CreatorClaimServiceTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimServiceTest.java)`#missingChannelNeverCreatesClaimOrDeletesPrices` |
+| BE-047 | Unit | Reviewer reads missing claim | NotFound; no audit or claim save | [CreatorClaimServiceTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimServiceTest.java)`#missingReviewTargetNeverAudits` |
+| BE-048 | Integration | Claim/rate-card for missing channel; reviewer reads/revokes missing claim | Four 404 responses; no new audit/claim rows | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#missingChannelAndClaimReturn404WithoutAudits` |
+| BE-049 | Integration | Competing claims, approval, prices, ingestion, revoke | One owner; ingestion preserves ownership; revoke hides prices | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#completeFlowCompetingClaimsIngestionAndRevocation` |
+| BE-050 | Integration | Another Creator/profile reader requests evidence | Evidence remains private | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#claimEvidenceIsPrivateAcrossCreatorsAndPublicProfile` |
+| BE-051 | Integration | Concurrent competing claim approvals | Exactly one approved owner | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#concurrentReviewsHaveOneWinner` |
+
+### Data Quality Review
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-052 | Unit | Approve low-confidence KOC with padded new Niche | Trim Niche; preserve confidence; reviewer/time saved; creator lock precedes metric; flush then audit | [DataQualityServiceTest](../src/test/java/com/influencermatch/backend/creator/DataQualityServiceTest.java)`#approvalKeepsConfidenceAndLocksCreatorBeforeSnapshot` |
+| BE-053 | Unit | KOL, null/0.7 confidence, reviewed or stale snapshot | DATA_QUALITY_REVIEW_CONFLICT; no mutation/flush/audit | [DataQualityServiceTest](../src/test/java/com/influencermatch/backend/creator/DataQualityServiceTest.java)`#ineligibleSnapshotDoesNotChangeOrAudit` |
+| BE-054 | Unit | Whitespace Niche, then unknown metric with valid body | Validation before lookup; NotFound for missing metric; no audit | [DataQualityServiceTest](../src/test/java/com/influencermatch/backend/creator/DataQualityServiceTest.java)`#invalidNicheFailsBeforeLookupAndMissingMetricIs404` |
+| BE-055 | Unit | Negative page and size 1000 | Repository receives page 0 and size 100 | [DataQualityServiceTest](../src/test/java/com/influencermatch/backend/creator/DataQualityServiceTest.java)`#pendingClampsPageAndSize` |
+| BE-056 | Integration | Historical/latest snapshots, confidence boundary and timestamp ties | Only eligible latest KOC; stable UUID tie-break | [DataQualityPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/DataQualityPostgresIntegrationTest.java)`#filtersLatestBeforeApplyingThresholdAndUsesUuidTieBreak` |
+| BE-057 | Integration | Concurrent review of same metric | One approval and one conflict | [DataQualityPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/DataQualityPostgresIntegrationTest.java)`#concurrentApprovalHasOneWinner` |
+| BE-058 | Integration | Ingestion overlaps review | Recheck latest snapshot under creator lock | [DataQualityPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/DataQualityPostgresIntegrationTest.java)`#ingestionLockForcesApprovalToRecheckLatestSnapshot` |
+| BE-059 | Integration | Audit insert fails during approval | Review fields and Niche rollback | [DataQualityPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/DataQualityPostgresIntegrationTest.java)`#auditFailureRollsBackApprovalAndNiche` |
+
+### Shortlist Comparison / Creator Relationships
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-060 | Unit | Repository order differs; metrics missing; no valid ownership | Request order preserved; null metrics; empty rates; one batch read; no saves | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#batchesReadsPreservesOrderAndMissingMetricsRemainNull` |
+| BE-061 | Unit | Compare another owner's campaign | NotFound before membership/metrics/pricing queries | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#foreignCampaignIsHiddenBeforeReadingMembership` |
+| BE-062 | Unit | Duplicate IDs, then non-shortlisted IDs | Validation errors; no metrics/pricing queries or saves | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#duplicateAndMissingMembersNeverReadMetrics` |
+| BE-063 | Unit | Empty comparison selection | Constraint violation before any repository call | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#invalidSelectionFailsBeforeAnyRepositoryAccess` |
+| BE-100 | Integration | Compare shortlist with snapshots and rates | Request order/latest snapshot; prices only for authorized owner | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#comparePreservesOrderUsesLatestAndOnlyShowsActiveOwnerRates` |
+| BE-101 | Integration | Cross-Brand item/relationship access | Ownership enforced without mutation | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#anotherBrandCannotReadOrMutateShortlistAndRelationships` |
+| BE-102 | Integration | Reference other campaign or Creator's item | Invalid linkage rejected | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#relationshipCannotAttachForeignOrMismatchedShortlistItem` |
+| BE-103 | Integration | Repeated/conflicting mock callbacks | Stable terminal dates/quota; one transition audit | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#terminalPaymentOutcomePreservesDatesQuotasAndSingleAudit` |
+
+### Payment & Subscription Management
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-064 | Unit | Lock existing payment | Brand lock before Payment lock and refresh | [PaymentSettlementServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentSettlementServiceTest.java)`#locksBrandBeforePaymentAndRefreshesLockedEntity` |
+| BE-065 | Unit | Settle PENDING successfully | PAID/ACTIVE; activation dates/duration correct; quotas preserved | [PaymentSettlementServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentSettlementServiceTest.java)`#successUsesActivationDateAndPreservesQuota` |
+| BE-066 | Unit | Settle PENDING as failed | FAILED/CANCELLED with reason; dates/quota preserved | [PaymentSettlementServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentSettlementServiceTest.java)`#failureCancelsWithoutChangingDatesOrQuota` |
+| BE-067 | Unit | PAID/FAILED/REFUNDED with success/failure outcome | Compatible repeat only; terminal state/data unchanged; no writes | [PaymentSettlementServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentSettlementServiceTest.java)`#terminalStatesNeverRewriteDatesOrQuota` |
+| BE-068 | Unit | Another ACTIVE subscription exists | Reject activation; PENDING state unchanged | [PaymentSettlementServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentSettlementServiceTest.java)`#activeSubscriptionPreventsActivationWithoutMutatingPendingPayment` |
+| BE-069 | Unit | Payment pending but subscription CANCELLED | Reject without persistence | [PaymentSettlementServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentSettlementServiceTest.java)`#nonPendingSubscriptionCannotBeActivated` |
+| BE-070 | Unit | Transaction belongs to another Brand | NotFound before settlement/audit | [MockPaymentServiceTest](../src/test/java/com/influencermatch/backend/billing/MockPaymentServiceTest.java)`#foreignPaymentIsHiddenBeforeAcquiringLocks` |
+| BE-071 | Unit | Blank or unknown transaction | Validation/NotFound; no settlement/audit | [MockPaymentServiceTest](../src/test/java/com/influencermatch/backend/billing/MockPaymentServiceTest.java)`#missingAndInvalidRequestsDoNotSettle` |
+| BE-072 | Unit | Shared settlement rejects outcome | SUBSCRIPTION_CONFLICT; no audit | [MockPaymentServiceTest](../src/test/java/com/influencermatch/backend/billing/MockPaymentServiceTest.java)`#conflictingOutcomeDoesNotAudit` |
+| BE-073 | Unit | Successful transition then repeated SUCCESS | PAID response; exactly one audit | [MockPaymentServiceTest](../src/test/java/com/influencermatch/backend/billing/MockPaymentServiceTest.java)`#successfulStateChangeAuditsOnceAndRepeatedOutcomeDoesNotAuditAgain` |
+| BE-074 | Unit | Missing/short signature, tampered amount or signed wrong merchant | Reject before payment lookup/lock | [PaymentCallbackServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentCallbackServiceTest.java)`#invalidSignatureOrMerchantNeverLocksPayment` |
+| BE-075 | Unit | Valid signature/merchant; DB amount mismatch | Reject without settlement apply | [PaymentCallbackServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentCallbackServiceTest.java)`#signedWrongAmountDoesNotSettle` |
+| BE-076 | Unit | Unknown signed transaction then signed gateway failure | Unknown rejected; failure delegates exact code to settlement | [PaymentCallbackServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentCallbackServiceTest.java)`#signedGatewayFailureUsesSharedSettlementAndUnknownTransactionIsRejected` |
+| BE-077 | Unit | Owner subscribes free active plan | ACTIVE, correct duration, zero quota usage; no Admin audit | [SubscriptionServiceTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionServiceTest.java)`#freePlanInitializesDatesAndZeroQuota` |
+| BE-078 | Unit | Brand subscribes paid plan directly | PAID_PLAN_REQUIRES_PAYMENT; no save/audit | [SubscriptionServiceTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionServiceTest.java)`#paidPlanCannotBeActivatedDirectlyByBrand` |
+| BE-079 | Unit | Inactive plan then existing active subscription | Conflict without subscription save/audit | [SubscriptionServiceTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionServiceTest.java)`#inactivePlanAndExistingActiveSubscriptionAreConflicts` |
+| BE-080 | Unit | Read foreign Brand subscription list | Forbidden before subscription query | [SubscriptionServiceTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionServiceTest.java)`#foreignBrandCannotReadSubscriptions` |
+| BE-081 | Unit | Admin cancels twice | CANCELLED; dates/quota preserved; one audit | [SubscriptionServiceTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionServiceTest.java)`#cancellationPreservesQuotaAndAdminNoopDoesNotAudit` |
+| BE-082 | Integration | Free subscribe, duplicate, foreign read/cancel, cancel twice | ACTIVE; duplicate 409; foreign 403; one CANCELLED row | [SubscriptionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionPostgresIntegrationTest.java)`#freeSubscriptionOwnershipDuplicateAndCancellation` |
+| BE-083 | Integration | Brand direct paid subscribe; Admin grant/cancel twice | Brand 409; Admin succeeds; one create and one cancel audit | [SubscriptionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionPostgresIntegrationTest.java)`#paidPlanRequiresCheckoutButAdminCanGrantAndCancelWithAudit` |
+| BE-084 | Integration | Deactivate plan; Brand/Admin read; Brand subscribes | Brand read 404; Admin read 200; subscribe 409 with no new row | [SubscriptionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionPostgresIntegrationTest.java)`#inactivePlanHiddenFromBrandAndCannotBeSubscribed` |
+
+### Audit Log
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-085 | Unit | Authenticated Admin records change with request IP | Actor/action/entity, JSON before/after, reason, IP and timestamp persisted | [AuditServiceTest](../src/test/java/com/influencermatch/backend/audit/AuditServiceTest.java)`#recordsActorEntityPayloadAndRequestAddress` |
+| BE-086 | Unit | No request bound; authenticated actor; null payloads | Null IP and JSON null payloads | [AuditServiceTest](../src/test/java/com/influencermatch/backend/audit/AuditServiceTest.java)`#backgroundInvocationHasNoRequestIpAndAcceptsNullPayloads` |
+| BE-087 | Unit | No User authentication | Reject without save | [AuditServiceTest](../src/test/java/com/influencermatch/backend/audit/AuditServiceTest.java)`#unauthenticatedActorCannotCreateAudit` |
+| BE-088 | Integration | Fixtures vary actor/action/entity/time; combine filters with equal from/to | Exactly matching event; inclusive boundary and correct JSON | [AuditLogPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/audit/AuditLogPostgresIntegrationTest.java)`#combinesAllFiltersAndIncludesTimeBoundaries` |
+| BE-089 | Integration | Distinct timestamps, size 2 and invalid page/size bounds | Newest first; correct totals; page minimum 0, size 1-100 | [AuditLogPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/audit/AuditLogPostgresIntegrationTest.java)`#paginationOrdersLatestFirstAndCapsSize` |
+| BE-090 | Integration | Reversed dates, malformed date/UUID | 400; no new audit | [AuditLogPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/audit/AuditLogPostgresIntegrationTest.java)`#invalidFiltersAre400AndDoNotCreateAudit` |
+| BE-091 | Integration | BRAND/CREATOR/DATA_MANAGER requests logs | 403 | [AuditLogPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/audit/AuditLogPostgresIntegrationTest.java)`#nonAdminCannotReadAudit` |
+| BE-092 | Integration | Anonymous requests logs | 401 | [AuditLogPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/audit/AuditLogPostgresIntegrationTest.java)`#anonymousCannotReadAudit` |
+| BE-093 | Integration | Trigger rejects status audit after account login | 500; ACTIVE/version/refresh preserved; old access token works; no audit | [AuditLogPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/audit/AuditLogPostgresIntegrationTest.java)`#auditFailureRollsBackUserStatusVersionAndRefreshRevocation` |
+
+### Collaboration Management / Campaign Outcome Tracking / Creator Reviews
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-094 | Unit | Owner closes eligible relationship | Agreed fee persisted; relationship stage synchronized | [CollaborationServiceTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationServiceTest.java)`#createsAndSynchronizesFeeAndStage` |
+| BE-095 | Unit | Valid outcome views/clicks/post URL | Collaboration completed; payment unchanged | [CollaborationServiceTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationServiceTest.java)`#outcomeCompletesOnlyCollaborationAndPreservesPayment` |
+| BE-096 | Unit | Review completed collaboration | Review links authenticated owner and actual outcome | [CollaborationServiceTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationServiceTest.java)`#reviewUsesAuthenticatedOwnerAndActualOutcome` |
+| BE-097 | Integration | Invalid fees, metrics, URL or review input | Reject without persisted result | [CollaborationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationPostgresIntegrationTest.java)`#validatesMoneyMetricsUrlStarsAndRequiredBoolean` |
+| BE-098 | Integration | Collaboration transaction fails | Relationship/collaboration rollback together | [CollaborationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationPostgresIntegrationTest.java)`#transactionRollbackRestoresRelationshipAndCollaboration` |
+| BE-099 | Integration | Concurrent duplicate create/outcome/review | Exactly one resource of each type | [CollaborationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationPostgresIntegrationTest.java)`#concurrentRequestsCreateExactlyOneOfEachResource` |

@@ -241,4 +241,15 @@ class CreatorClaimPostgresIntegrationTest {
     assertThat(json.readTree(call(owner,get(path),null,200).getResponse().getContentAsString()).path("data").path("items").size()).isZero();
   }
 
+  @Test void missingChannelAndClaimReturn404WithoutAudits() throws Exception {
+    var owner=user(Role.CREATOR,true);var reviewer=user(Role.DATA_MANAGER,false);var id=UUID.randomUUID();
+    long count=jdbc.queryForObject("select count(*) from audit_log",Long.class);
+    call(owner,post("/creators/"+id+"/claim"),EVIDENCE,404);
+    call(owner,put("/creators/"+id+"/rate-card"),RATE,404);
+    call(reviewer,get("/data/creator-claims/"+id),null,404);
+    call(reviewer,post("/data/creator-claims/"+id+"/revoke"),json.writeValueAsString(Map.of("reason","Missing claim")),404);
+    assertThat(jdbc.queryForObject("select count(*) from audit_log",Long.class)).isEqualTo(count);
+    assertThat(jdbc.queryForObject("select count(*) from creator_claim where claimant_id=?",Long.class,owner.getId())).isZero();
+  }
+
 }

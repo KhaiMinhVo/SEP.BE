@@ -149,7 +149,7 @@ class RefreshTokenServiceTest {
         when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(oldToken));
 
         assertThatThrownBy(() -> refreshTokenService.rotate(rawToken))
-                .isInstanceOf(BusinessException.class)
+                .isInstanceOf(com.influencermatch.backend.exception.RefreshTokenReplayException.class)
                 .extracting(e -> ((BusinessException) e).code()).isEqualTo(ErrorCode.UNAUTHENTICATED);
 
         // Security check: attempting to use a revoked token revokes ALL tokens for that user
@@ -180,4 +180,29 @@ class RefreshTokenServiceTest {
         
         verify(tokens).revokeAll(eq(userId), any(LocalDateTime.class));
     }
+    @Test
+    void expiredTokenDoesNotCreateOrRevokeOtherSessions() {
+        var old=RefreshToken.builder().userId(UUID.randomUUID()).expiresAt(LocalDateTime.of(2000,1,1,0,0)).build();
+        when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(old));
+        assertThatThrownBy(()->refreshTokenService.rotate("expired")).isInstanceOf(BusinessException.class);
+        verify(tokens,never()).save(any());verify(tokens,never()).revokeAll(any(),any());
+        verify(users,never()).findById(any());
+    }
+    @Test
+    void unknownTokenAndIdempotentRevokeDoNotWrite() {
+        assertThatThrownBy(()->refreshTokenService.rotate("unknown")).isInstanceOf(BusinessException.class);
+        refreshTokenService.revoke("unknown");verify(tokens,never()).save(any());verify(tokens,never()).revokeAll(any(),any());
+        var timestamp=LocalDateTime.of(2026,1,1,0,0);
+        var old=RefreshToken.builder().revokedAt(timestamp).build();
+        when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(old));
+        refreshTokenService.revoke("revoked");assertThat(old.getRevokedAt()).isEqualTo(timestamp);
+    }
+    @Test
+    void changedRoleCannotIssueTokenFromStalePrincipal() {
+        var id=UUID.randomUUID();var stale=User.builder().id(id).role(Role.BRAND).status(UserStatus.ACTIVE).build();
+        when(users.findById(id)).thenReturn(Optional.of(User.builder().id(id).role(Role.CREATOR).status(UserStatus.ACTIVE).build()));
+        assertThatThrownBy(()->refreshTokenService.issue(stale)).isInstanceOf(BusinessException.class);
+        verifyNoInteractions(tokens);
+    }
+
 }

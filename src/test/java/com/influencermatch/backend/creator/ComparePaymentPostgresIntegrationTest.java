@@ -19,7 +19,7 @@ import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.relationship.enums.ShortlistPriority;
 import com.influencermatch.backend.relationship.model.ShortlistItem;
 import com.influencermatch.backend.relationship.repository.ShortlistItemRepository;
-import com.influencermatch.backend.security.JwtTokenProvider;
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;

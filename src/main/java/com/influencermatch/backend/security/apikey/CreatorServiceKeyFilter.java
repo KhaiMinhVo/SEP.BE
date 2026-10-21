@@ -1,4 +1,4 @@
-package com.influencermatch.backend.security;
+package com.influencermatch.backend.security.apikey;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.influencermatch.backend.exception.ErrorCode;

@@ -1,4 +1,4 @@
-package com.influencermatch.backend.security;
+package com.influencermatch.backend.security.service;
 
 import com.influencermatch.backend.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;

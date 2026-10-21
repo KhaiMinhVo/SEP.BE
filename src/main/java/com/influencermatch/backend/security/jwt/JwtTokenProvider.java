@@ -1,4 +1,4 @@
-package com.influencermatch.backend.security;
+package com.influencermatch.backend.security.jwt;
 
 import com.influencermatch.backend.user.model.User;
 import io.jsonwebtoken.Claims;

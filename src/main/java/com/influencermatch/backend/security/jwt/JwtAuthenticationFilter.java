@@ -1,5 +1,7 @@
-package com.influencermatch.backend.security;
+package com.influencermatch.backend.security.jwt;
 
+import com.influencermatch.backend.security.permission.EffectivePermissionService;
+import com.influencermatch.backend.user.model.User;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,7 +30,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
   private final JwtTokenProvider jwtTokenProvider;
   private final UserDetailsService userDetailsService;
-  private final com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
+  private final EffectivePermissionService effectivePermissions;
 
   @Override
   protected void doFilterInternal(
@@ -55,7 +57,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             && jwtTokenProvider.isTokenValid(jwt, userDetails)) {
           UsernamePasswordAuthenticationToken authToken =
               new UsernamePasswordAuthenticationToken(
-                  userDetails, null, effectivePermissions.authorities(((com.influencermatch.backend.user.model.User) userDetails).getRole(), request));
+                  userDetails, null, effectivePermissions.authorities(((User) userDetails).getRole(), request));
           authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
           SecurityContextHolder.getContext().setAuthentication(authToken);
           log.debug("JWT authenticated user '{}' for '{}'", username, request.getRequestURI());

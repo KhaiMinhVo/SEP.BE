@@ -1,4 +1,4 @@
-package com.influencermatch.backend.security;
+package com.influencermatch.backend.security.jwt;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -17,16 +17,9 @@ import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
 
 /**
- * Custom {@link AuthenticationEntryPoint} that returns a structured JSON {@link ApiResponse}
+ * Custom {@link AuthenticationEntryPoint} that returns a structured JSON ProblemDetail
  * instead of the default HTML error page when an unauthenticated request reaches a secured
  * endpoint.
- *
- * <p>Spring Security invokes this entry point when:
- *
- * <ul>
- *   <li>No {@code Authorization} header is present on a protected route.
- *   <li>The JWT is invalid, expired, or tampered with.
- * </ul>
  */
 @Slf4j
 @Component

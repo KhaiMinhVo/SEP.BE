@@ -20,7 +20,7 @@ import com.influencermatch.backend.creator.repository.CreatorRepository;
 import com.influencermatch.backend.relationship.enums.RelationshipStage;
 import com.influencermatch.backend.relationship.model.BrandCreatorRelationship;
 import com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository;
-import com.influencermatch.backend.security.JwtTokenProvider;
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;

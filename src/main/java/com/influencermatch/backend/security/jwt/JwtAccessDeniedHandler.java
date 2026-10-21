@@ -1,4 +1,4 @@
-package com.influencermatch.backend.security;
+package com.influencermatch.backend.security.jwt;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -17,12 +17,9 @@ import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
 
 /**
- * Custom {@link AccessDeniedHandler} that returns a structured JSON {@link ApiResponse} instead of
+ * Custom {@link AccessDeniedHandler} that returns a structured JSON ProblemDetail instead of
  * the default HTML 403 page when an authenticated but unauthorised request reaches a protected
  * endpoint.
- *
- * <p>Spring Security invokes this handler when the caller is authenticated but lacks the required
- * authority (e.g., a {@code ROLE_BRAND} user attempting to access an admin-only endpoint).
  */
 @Slf4j
 @Component

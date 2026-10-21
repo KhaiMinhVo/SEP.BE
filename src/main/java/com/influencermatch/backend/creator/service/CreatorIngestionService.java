@@ -24,18 +24,30 @@ public class CreatorIngestionService {
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('SERVICE_INGEST_CREATOR')")
   public CreatorIngestionResponse ingestCreatorData(CreatorIngestionRequest request) {
-    // Find existing creator or create new one
+    // 1. Advisory Lock to prevent concurrent ingestion of the exact same account
+    creatorRepository.acquireIdentityLock(request.getPlatform() + ":" + request.getExternalId());
+
+    // 2. Find existing creator or create new one
     Creator creator =
         creatorRepository
             .findLockedByPlatformAndExternalId(request.getPlatform(), request.getExternalId())
             .orElseGet(
                 () ->
                     Creator.builder()
+                        .master(null)
+                        .sourceType(CreatorSourceType.PUBLIC)
                         .platform(request.getPlatform())
                         .externalId(request.getExternalId())
+                        .isStableId(request.getIsStableExternalId() != null ? request.getIsStableExternalId() : true)
                         .build());
 
-    if (creator.getId() != null) entityManager.refresh(creator);
+    if (creator.getId() != null) {
+      entityManager.refresh(creator);
+      if (request.getIsStableExternalId() != null) {
+        creator.setIsStableId(request.getIsStableExternalId());
+      }
+    }
+
     // Only public core fields are writable by ingestion; ownership and rates are not accepted.
     creator.setUserName(request.getUserName());
     if (request.getDisplayName() != null) {
@@ -52,6 +64,19 @@ public class CreatorIngestionService {
     }
 
     final Creator savedCreator = creatorRepository.save(creator);
+
+    // 3. Snapshot Idempotency check: if crawlRunId already recorded for this creator, skip duplicate metric snapshot
+    if (request.getCrawlRunId() != null
+        && savedCreator.getId() != null
+        && metricRepository.existsByCreatorIdAndCrawlRunId(savedCreator.getId(), request.getCrawlRunId())) {
+      PublicCreatorMetric existingMetric = metricRepository.findByCreatorId(savedCreator.getId()).orElse(null);
+      return CreatorIngestionResponse.builder()
+          .creatorId(savedCreator.getId())
+          .metricId(existingMetric != null ? existingMetric.getId() : null)
+          .status("SKIPPED")
+          .message("Snapshot already recorded for crawlRunId: " + request.getCrawlRunId())
+          .build();
+    }
 
     // Parse Freshness Status
     MetricDataStatus status = MetricDataStatus.FRESH;
@@ -78,6 +103,8 @@ public class CreatorIngestionService {
     metric.setLocation(request.getLocation());
     metric.setContentSummary(request.getContentSummary());
     metric.setCollectedAt(LocalDateTime.now());
+    metric.setCrawlRunId(request.getCrawlRunId());
+    metric.setObservedAt(request.getObservedAt() != null ? request.getObservedAt() : LocalDateTime.now());
     metric.setCreatorType(request.getCreatorType());
     metric.setFreshnessStatus(status);
     metric.setDataConfidence(request.getDataConfidence());

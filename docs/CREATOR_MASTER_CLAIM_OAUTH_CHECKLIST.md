@@ -751,23 +751,23 @@ Tuần 3: Kết Nối Kênh Thứ Hai & Demo Xuyên Suốt (P1)
 ### 🌐 PHASE 4: Ingestion Decoupling & Discovery Hybrid Grouping
 > **Mục tiêu**: Đảm bảo crawler chỉ cào tài khoản độc lập (`master_id = NULL`), chống xung đột cào đồng thời và sửa lỗi sắp xếp query Discovery.
 
-- [ ] **4.1. Cập nhật DTO [CreatorIngestionRequest.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/dto/CreatorIngestionRequest.java)**:
-  - [ ] Thêm các trường: `Boolean isStableExternalId`, `String crawlRunId`, `LocalDateTime observedAt`, `List<String> bioCrossLinks`.
-- [ ] **4.2. Cập nhật [CreatorIngestionService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/service/CreatorIngestionService.java)**:
-  - [ ] Gọi khóa Advisory Lock: `creatorRepository.acquireIdentityLock(request.getPlatform() + ":" + request.getExternalId());`.
-  - [ ] Khi tạo mới `Creator`: luôn gán `.master(null)` và `.sourceType(CreatorSourceType.PUBLIC)`.
-  - [ ] Khi cập nhật `Creator` đã có: giữ nguyên `master_id` và `sourceType` hiện tại (không ghi đè trạng thái đã claim).
-  - [ ] Snapshot Idempotency: Kiểm tra nếu `(creator.id, request.getCrawlRunId())` đã tồn tại trên metric thì bỏ qua ghi log snapshot trùng lặp.
-- [ ] **4.3. Cập nhật interface [HybridDiscoveryCreatorProjection.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/discovery/dto/HybridDiscoveryCreatorProjection.java)**:
-  - [ ] Bổ sung getter: `UUID getMasterId();` và `String getClaimStatus();`.
-- [ ] **4.4. Thay thế native query trong [PublicCreatorMetricRepository.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/repository/PublicCreatorMetricRepository.java)**:
-  - [ ] Triển khai Subquery bọc `DISTINCT ON (COALESCE('MASTER:' || c.master_id::text, 'ACCOUNT:' || c.id::text))`.
-  - [ ] Sắp xếp vòng ngoài: `ORDER BY ranked_creators.hybridScore DESC, ranked_creators.followers DESC`.
-  - [ ] Viết `countQuery`: `SELECT count(DISTINCT COALESCE('MASTER:' || c.master_id::text, 'ACCOUNT:' || c.id::text)) FROM public_creator_metric m JOIN creator c ON m.creator_id = c.id WHERE ...`.
-- [ ] **4.5. Cập nhật `creator-discovery` (Python)**:
-  - [ ] Đánh dấu `isStableExternalId = False` trong [facebook_crawler.py](file:///d:/creator-discovery/app/crawlers/facebook_crawler.py).
-  - [ ] Cập nhật [java_mapper.py](file:///d:/creator-discovery/app/mappers/java_mapper.py) map đủ các trường provenance.
-- [ ] **DoD**:
+- [x] **4.1. Cập nhật DTO [CreatorIngestionRequest.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/dto/CreatorIngestionRequest.java)**:
+  - [x] Thêm các trường: `Boolean isStableExternalId`, `String crawlRunId`, `LocalDateTime observedAt`, `List<String> bioCrossLinks`.
+- [x] **4.2. Cập nhật [CreatorIngestionService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/service/CreatorIngestionService.java)**:
+  - [x] Gọi khóa Advisory Lock: `creatorRepository.acquireIdentityLock(request.getPlatform() + ":" + request.getExternalId());`.
+  - [x] Khi tạo mới `Creator`: luôn gán `.master(null)` và `.sourceType(CreatorSourceType.PUBLIC)`.
+  - [x] Khi cập nhật `Creator` đã có: giữ nguyên `master_id` và `sourceType` hiện tại (không ghi đè trạng thái đã claim).
+  - [x] Snapshot Idempotency: Kiểm tra nếu `(creator.id, request.getCrawlRunId())` đã tồn tại trên metric thì bỏ qua ghi log snapshot trùng lặp.
+- [x] **4.3. Cập nhật interface [HybridDiscoveryCreatorProjection.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/discovery/dto/HybridDiscoveryCreatorProjection.java)**:
+  - [x] Bổ sung getter: `UUID getMasterId();` và `String getClaimStatus();`.
+- [x] **4.4. Thay thế native query trong [PublicCreatorMetricRepository.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/repository/PublicCreatorMetricRepository.java)**:
+  - [x] Triển khai Subquery bọc `DISTINCT ON (COALESCE('MASTER:' || c.master_id::text, 'ACCOUNT:' || c.id::text))`.
+  - [x] Sắp xếp vòng ngoài: `ORDER BY ranked_creators.hybridScore DESC, ranked_creators.followers DESC`.
+  - [x] Viết `countQuery`: `SELECT count(DISTINCT COALESCE('MASTER:' || c.master_id::text, 'ACCOUNT:' || c.id::text)) FROM public_creator_metric m JOIN creator c ON m.creator_id = c.id WHERE ...`.
+- [x] **4.5. Cập nhật `creator-discovery` (Python)**:
+  - [x] Đánh dấu `isStableExternalId = False` trong [facebook_crawler.py](file:///d:/creator-discovery/app/crawlers/facebook_crawler.py).
+  - [x] Cập nhật [java_mapper.py](file:///d:/creator-discovery/app/mappers/java_mapper.py) map đủ các trường provenance.
+- [x] **DoD**:
   - Ingest cào tài khoản mới tạo `creator` với `master_id = null`.
   - Gọi API `/discovery` hiển thị KOC chưa claim độc lập, KOC đã có chung `master_id` được gom nhóm lại thành 1 thẻ duy nhất và xếp đúng theo điểm `hybridScore DESC`.
 

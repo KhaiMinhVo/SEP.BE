@@ -1,32 +1,23 @@
 package com.influencermatch.backend.security;
 
-import com.influencermatch.backend.exception.*;
-import com.influencermatch.backend.user.enums.UserStatus;
+import com.influencermatch.backend.security.permission.Permission;
 import com.influencermatch.backend.user.model.User;
-import org.springframework.security.core.context.SecurityContextHolder;
 
+/**
+ * Backward compatibility adapter forwarding to {@link com.influencermatch.backend.security.permission.Permissions}.
+ */
 public final class Permissions {
   private Permissions() {}
 
   public static User actor() {
-    var auth = SecurityContextHolder.getContext().getAuthentication();
-    if (auth == null || !auth.isAuthenticated() || !(auth.getPrincipal() instanceof User user))
-      throw new BusinessException(ErrorCode.UNAUTHENTICATED, "Authentication required");
-    if (user.getStatus() != UserStatus.ACTIVE)
-      throw new BusinessException(ErrorCode.UNAUTHENTICATED, "Account is not active");
-    return user;
+    return com.influencermatch.backend.security.permission.Permissions.actor();
   }
 
   public static boolean has(Permission permission) {
-    actor();
-    return SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
-        .anyMatch(a -> a.getAuthority().equals(permission.name()));
+    return com.influencermatch.backend.security.permission.Permissions.has(permission);
   }
 
   public static void require(Permission... allowed) {
-    actor();
-    for (Permission permission : allowed)
-      if (has(permission)) return;
-    throw new ForbiddenException("Permission required");
+    com.influencermatch.backend.security.permission.Permissions.require(allowed);
   }
 }

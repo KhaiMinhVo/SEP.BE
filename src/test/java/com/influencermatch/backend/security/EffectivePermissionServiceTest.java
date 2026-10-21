@@ -2,7 +2,7 @@ package com.influencermatch.backend.security;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
-import com.influencermatch.backend.security.role.*;
+import com.influencermatch.backend.security.permission.*;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import java.util.*;

@@ -18,6 +18,7 @@ import com.influencermatch.backend.creator.dto.CreatorDiscoveryResponse;
 import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
 import com.influencermatch.backend.creator.repository.PublicCreatorMetricSpecification;
 import com.influencermatch.backend.exception.*;
+import com.influencermatch.backend.security.permission.*;
 import java.math.BigDecimal;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
@@ -41,8 +42,8 @@ public class CampaignService {
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CREATE_CAMPAIGN')")
   public CampaignResponse create(
       UUID brandId, CampaignRequest request, Authentication authentication) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.CREATE_CAMPAIGN);
+    Permissions.require(
+        Permission.CREATE_CAMPAIGN);
     BrandProfile brandProfile = brandService.requireAccessible(brandId, authentication);
     validate(request);
     Campaign campaign =
@@ -62,9 +63,9 @@ public class CampaignService {
       "hasAuthority('VIEW_OWN_CAMPAIGN') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
   public PageResponse<CampaignResponse> list(
       UUID brandId, Pageable pageable, Authentication authentication) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.VIEW_OWN_CAMPAIGN,
-        com.influencermatch.backend.security.Permission.VIEW_BRAND_SUPPORT_DATA);
+    Permissions.require(
+        Permission.VIEW_OWN_CAMPAIGN,
+        Permission.VIEW_BRAND_SUPPORT_DATA);
     brandService.requireAccessible(brandId, authentication);
     return PageResponse.from(
         campaigns.findByBrandProfileId(brandId, pageable).map(this::loadResponse));
@@ -74,9 +75,9 @@ public class CampaignService {
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('VIEW_OWN_CAMPAIGN') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
   public CampaignResponse get(UUID id, Authentication authentication) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.VIEW_OWN_CAMPAIGN,
-        com.influencermatch.backend.security.Permission.VIEW_BRAND_SUPPORT_DATA);
+    Permissions.require(
+        Permission.VIEW_OWN_CAMPAIGN,
+        Permission.VIEW_BRAND_SUPPORT_DATA);
     Campaign campaign = requireCampaign(id);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
     return loadResponse(campaign);
@@ -86,8 +87,8 @@ public class CampaignService {
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SEARCH_CREATOR')")
   public PageResponse<CreatorDiscoveryResponse> discoverCreators(
       UUID campaignId, Pageable pageable, Authentication authentication) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.SEARCH_CREATOR);
+    Permissions.require(
+        Permission.SEARCH_CREATOR);
     Campaign campaign = requireCampaign(campaignId);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
 
@@ -235,8 +236,8 @@ public class CampaignService {
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
   public CampaignResponse update(UUID id, CampaignRequest request, Authentication authentication) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.UPDATE_CAMPAIGN);
+    Permissions.require(
+        Permission.UPDATE_CAMPAIGN);
     Campaign campaign = requireCampaign(id);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
     campaign.getStatus().requireEditable();
@@ -249,8 +250,8 @@ public class CampaignService {
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('CHANGE_CAMPAIGN_STATUS')")
   public CampaignResponse archive(UUID id, Authentication authentication) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.CHANGE_CAMPAIGN_STATUS);
+    Permissions.require(
+        Permission.CHANGE_CAMPAIGN_STATUS);
     Campaign campaign = requireCampaign(id);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
     if (campaign.getStatus() != CampaignStatus.ARCHIVED) {
@@ -265,8 +266,8 @@ public class CampaignService {
       "hasAuthority('CHANGE_CAMPAIGN_STATUS')")
   public CampaignResponse changeStatus(
       UUID id, CampaignStatusRequest request, Authentication authentication) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.CHANGE_CAMPAIGN_STATUS);
+    Permissions.require(
+        Permission.CHANGE_CAMPAIGN_STATUS);
     Campaign campaign = requireCampaign(id);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
     CampaignStatus target = request.status();

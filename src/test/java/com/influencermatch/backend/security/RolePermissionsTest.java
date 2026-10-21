@@ -2,6 +2,7 @@ package com.influencermatch.backend.security;
 
 import static org.assertj.core.api.Assertions.*;
 
+import com.influencermatch.backend.security.permission.Permission;
 import com.influencermatch.backend.user.enums.Role;
 import java.util.*;
 import org.junit.jupiter.api.Test;

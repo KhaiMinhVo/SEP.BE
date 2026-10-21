@@ -6,7 +6,7 @@ import com.influencermatch.backend.auth.service.RefreshTokenService;
 import com.influencermatch.backend.brand.repository.BrandProfileRepository;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.exception.NotFoundException;
-import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.permission.*;
 import com.influencermatch.backend.user.controller.*;
 import com.influencermatch.backend.user.dto.UpdateUserRoleRequest;
 import com.influencermatch.backend.user.enums.*;

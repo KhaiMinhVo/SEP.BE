@@ -1,13 +1,15 @@
-package com.influencermatch.backend.security.role;
+package com.influencermatch.backend.security.permission;
 
-import com.influencermatch.backend.security.Permission;
 import java.util.*;
 
 /** Explicit inventory of implemented capability endpoints, not inferred from enum declarations. */
 public final class PermissionCatalog {
   private PermissionCatalog() {}
+
   public record Entry(String name, String module) {}
+
   private static final Map<Permission, Entry> ENTRIES = new EnumMap<>(Permission.class);
+
   static {
     add("Authentication", Permission.VIEW_OWN_PROFILE, "View own profile");
     add("Creators", Permission.VIEW_CREATOR_PROFILE, "View creator profile and rate card");
@@ -39,10 +41,15 @@ public final class PermissionCatalog {
     add("Audit", Permission.VIEW_AUDIT_LOG, "View audit logs");
     add("Support", Permission.VIEW_BRAND_SUPPORT_DATA, "View brand support data");
   }
+
   private static void add(String module, Permission permission, String name) {
     ENTRIES.put(permission, new Entry(name, module));
   }
-  public static boolean implemented(Permission p) { return ENTRIES.containsKey(p); }
+
+  public static boolean implemented(Permission p) {
+    return ENTRIES.containsKey(p);
+  }
+
   public static Entry entry(Permission p) {
     return ENTRIES.getOrDefault(p, new Entry(p.name(), "Not implemented"));
   }

@@ -6,6 +6,7 @@ import com.influencermatch.backend.billing.model.Payment;
 import com.influencermatch.backend.billing.repository.PaymentRepository;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.permission.Permission;
 import jakarta.validation.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

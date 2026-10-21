@@ -1,4 +1,4 @@
-package com.influencermatch.backend.security;
+package com.influencermatch.backend.security.permission;
 
 /** Fixed capability catalog; declarations do not imply that a feature API exists. */
 public enum Permission {

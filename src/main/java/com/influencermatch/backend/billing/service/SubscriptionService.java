@@ -9,6 +9,7 @@ import com.influencermatch.backend.brand.model.BrandProfile;
 import com.influencermatch.backend.brand.repository.BrandProfileRepository;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.permission.Permission;
 import java.time.LocalDate;
 import java.util.*;
 import lombok.RequiredArgsConstructor;

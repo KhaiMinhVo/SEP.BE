@@ -1,6 +1,5 @@
-package com.influencermatch.backend.security.role;
+package com.influencermatch.backend.security.permission;
 
-import com.influencermatch.backend.security.*;
 import com.influencermatch.backend.user.enums.Role;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
@@ -10,7 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.*;
 
 /** Immutable permission snapshot per role per request; never cached between requests. */
-@Service @RequiredArgsConstructor
+@Service
+@RequiredArgsConstructor
 public class EffectivePermissionService {
   private static final String CACHE = EffectivePermissionService.class.getName() + ".";
   private final RolePermissionOverrideRepository overrides;

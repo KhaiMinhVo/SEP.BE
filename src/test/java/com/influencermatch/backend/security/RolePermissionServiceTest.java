@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.influencermatch.backend.audit.service.AuditService;
 import com.influencermatch.backend.exception.*;
-import com.influencermatch.backend.security.role.*;
+import com.influencermatch.backend.security.permission.*;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import jakarta.validation.Validation;
@@ -13,7 +13,7 @@ import java.util.*;
 import org.junit.jupiter.api.*;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import static com.influencermatch.backend.security.role.RolePermissionDtos.*;
+import static com.influencermatch.backend.security.permission.RolePermissionDtos.*;
 
 class RolePermissionServiceTest {
   final RolePermissionConfigRepository configs=mock(RolePermissionConfigRepository.class);

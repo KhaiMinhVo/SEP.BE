@@ -4,6 +4,7 @@ import com.influencermatch.backend.audit.model.AuditLog;
 import com.influencermatch.backend.audit.repository.AuditLogRepository;
 import com.influencermatch.backend.common.dto.*;
 import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.permission.Permission;
 import io.swagger.v3.oas.annotations.*;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.LocalDateTime;

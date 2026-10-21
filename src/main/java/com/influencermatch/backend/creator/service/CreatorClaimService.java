@@ -9,7 +9,7 @@ import com.influencermatch.backend.creator.enums.*;
 import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.exception.*;
-import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.permission.*;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;

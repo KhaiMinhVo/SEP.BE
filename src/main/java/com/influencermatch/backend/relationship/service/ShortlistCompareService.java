@@ -7,7 +7,7 @@ import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.relationship.dto.CompareDtos.*;
 import com.influencermatch.backend.relationship.repository.ShortlistItemRepository;
-import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.permission.*;
 import jakarta.validation.*;
 import java.util.*;
 import java.util.stream.Collectors;

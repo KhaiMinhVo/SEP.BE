@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AuthControllerTest {
 
     @org.springframework.boot.test.mock.mockito.MockBean
-    private com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
+    private com.influencermatch.backend.security.permission.EffectivePermissionService effectivePermissions;
 
     @Autowired
     private MockMvc mockMvc;
@@ -46,7 +46,7 @@ class AuthControllerTest {
     private com.influencermatch.backend.config.GoogleOAuthProperties googleOAuthProperties;
 
     @MockBean
-    private com.influencermatch.backend.security.JwtTokenProvider jwtTokenProvider;
+    private com.influencermatch.backend.security.jwt.JwtTokenProvider jwtTokenProvider;
 
     @MockBean
     private org.springframework.security.core.userdetails.UserDetailsService userDetailsService;

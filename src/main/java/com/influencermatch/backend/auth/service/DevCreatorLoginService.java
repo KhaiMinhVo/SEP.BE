@@ -3,7 +3,8 @@ package com.influencermatch.backend.auth.service;
 import com.influencermatch.backend.auth.dto.LoginResponse;
 import com.influencermatch.backend.auth.model.*;
 import com.influencermatch.backend.auth.repository.ExternalIdentityRepository;
-import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
+import com.influencermatch.backend.security.permission.EffectivePermissionService;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
@@ -24,7 +25,7 @@ public class DevCreatorLoginService {
   private final ExternalIdentityRepository identities;
   private final JwtTokenProvider jwt;
   private final RefreshTokenService refreshTokens;
-  private final com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
+  private final EffectivePermissionService effectivePermissions;
 
   @Transactional
   public LoginResponse login() {

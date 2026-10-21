@@ -35,7 +35,4 @@ public class CreatorClaimController {
   @GetMapping("/creators/{id}/rate-card") @PreAuthorize("hasAuthority('VIEW_CREATOR_PROFILE')")
   @Operation(summary="Read a verified channel's declared rates",description="Returns an empty list for unverified/revoked channels.")
   public ApiResponse<RateResponse> rates(@PathVariable UUID id) {return ApiResponse.ok(service.rateCard(id));}
-  @GetMapping("/creators/{id}") @PreAuthorize("hasAuthority('VIEW_CREATOR_PROFILE')")
-  @Operation(summary="Read public creator profile",description="AUTHORIZED means verified by InfluencerMatch; it is not a social platform badge or private analytics authorization.")
-  public ApiResponse<PublicCreator> detail(@PathVariable UUID id) {return ApiResponse.ok(service.publicDetail(id));}
 }

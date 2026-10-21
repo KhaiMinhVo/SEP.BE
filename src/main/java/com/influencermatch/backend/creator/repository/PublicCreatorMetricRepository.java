@@ -33,6 +33,8 @@ public interface PublicCreatorMetricRepository
                 c.avatar_url AS avatarUrl,
                 c.profile_url AS profileUrl,
                 m.followers AS followers,
+                m.avg_views AS avgViews,
+                m.avg_likes AS avgLikes,
                 m.niche AS niche,
                 m.category AS category,
                 m.engagement_rate AS engagementRate,

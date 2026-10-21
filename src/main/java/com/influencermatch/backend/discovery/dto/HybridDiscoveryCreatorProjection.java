@@ -12,6 +12,8 @@ public interface HybridDiscoveryCreatorProjection {
     String getAvatarUrl();
     String getProfileUrl();
     Long getFollowers();
+    BigDecimal getAvgViews();
+    BigDecimal getAvgLikes();
     String getNiche();
     String getCategory();
     BigDecimal getEngagementRate();

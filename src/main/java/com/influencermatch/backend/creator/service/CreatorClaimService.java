@@ -163,15 +163,6 @@ public class CreatorClaimService {
     return rateResponse(creator,approvedClaim(creator));
   }
 
-  @Transactional(readOnly=true) @PreAuthorize("hasAuthority('VIEW_CREATOR_PROFILE')")
-  public PublicCreator publicDetail(UUID id) {
-    Permissions.require(Permission.VIEW_CREATOR_PROFILE);
-    Creator c=creators.findById(id).orElseThrow(()->new NotFoundException("Creator not found"));
-    return new PublicCreator(c.getId(),c.getPlatform(),c.getExternalId(),c.getUserName(),c.getDisplayName(),
-        c.getProfileUrl(),c.getAvatarUrl(),c.getLocation(),c.getSourceType(),
-        c.getSourceType()==CreatorSourceType.AUTHORIZED && c.getOwner()!=null,c.getAuthorizedAt());
-  }
-
   private RateResponse rateResponse(Creator creator,CreatorClaim claim) {
     return new RateResponse(creator.getId(),"CREATOR_DECLARED",cards.findByClaimIdOrderByContentTypeAsc(claim.getId()).stream()
         .map(c->new RateItem(c.getContentType(),c.getPrice(),c.getCurrency(),c.getNote())).toList());

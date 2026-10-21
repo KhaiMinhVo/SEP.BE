@@ -53,6 +53,8 @@ public class CreatorDiscoveryController {
             map.put("avatarUrl", p.getAvatarUrl());
             map.put("profileUrl", p.getProfileUrl());
             map.put("followers", p.getFollowers());
+            map.put("avgViews", p.getAvgViews());
+            map.put("avgLikes", p.getAvgLikes());
             map.put("niche", p.getNiche());
             map.put("category", p.getCategory());
             map.put("engagementRate", p.getEngagementRate());

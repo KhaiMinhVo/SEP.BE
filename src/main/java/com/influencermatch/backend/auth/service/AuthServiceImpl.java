@@ -14,6 +14,7 @@ import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.exception.RefreshTokenReplayException;
 import com.influencermatch.backend.security.jwt.JwtTokenProvider;
 import com.influencermatch.backend.security.permission.*;
+import com.influencermatch.backend.security.permission.service.EffectivePermissionService;
 import com.influencermatch.backend.user.enums.Role;
 import com.influencermatch.backend.user.enums.UserStatus;
 import com.influencermatch.backend.user.model.User;

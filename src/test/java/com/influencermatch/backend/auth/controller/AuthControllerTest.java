@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AuthControllerTest {
 
     @org.springframework.boot.test.mock.mockito.MockBean
-    private com.influencermatch.backend.security.permission.EffectivePermissionService effectivePermissions;
+    private com.influencermatch.backend.security.permission.service.EffectivePermissionService effectivePermissions;
 
     @Autowired
     private MockMvc mockMvc;

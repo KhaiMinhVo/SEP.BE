@@ -1,9 +1,12 @@
-package com.influencermatch.backend.security.permission;
+package com.influencermatch.backend.security.permission.service;
 
-import static com.influencermatch.backend.security.permission.RolePermissionDtos.*;
+import static com.influencermatch.backend.security.permission.dto.RolePermissionDtos.*;
 
 import com.influencermatch.backend.audit.service.AuditService;
 import com.influencermatch.backend.exception.*;
+import com.influencermatch.backend.security.permission.*;
+import com.influencermatch.backend.security.permission.model.*;
+import com.influencermatch.backend.security.permission.repository.*;
 import com.influencermatch.backend.user.enums.Role;
 import jakarta.validation.Validator;
 import java.util.*;

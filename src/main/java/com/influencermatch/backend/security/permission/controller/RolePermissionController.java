@@ -1,8 +1,9 @@
-package com.influencermatch.backend.security.permission;
+package com.influencermatch.backend.security.permission.controller;
 
-import static com.influencermatch.backend.security.permission.RolePermissionDtos.*;
+import static com.influencermatch.backend.security.permission.dto.RolePermissionDtos.*;
 
 import com.influencermatch.backend.common.dto.ApiResponse;
+import com.influencermatch.backend.security.permission.service.RolePermissionService;
 import com.influencermatch.backend.user.enums.Role;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;

@@ -4,7 +4,7 @@ import com.influencermatch.backend.auth.dto.LoginResponse;
 import com.influencermatch.backend.auth.model.*;
 import com.influencermatch.backend.auth.repository.ExternalIdentityRepository;
 import com.influencermatch.backend.security.jwt.JwtTokenProvider;
-import com.influencermatch.backend.security.permission.EffectivePermissionService;
+import com.influencermatch.backend.security.permission.service.EffectivePermissionService;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;

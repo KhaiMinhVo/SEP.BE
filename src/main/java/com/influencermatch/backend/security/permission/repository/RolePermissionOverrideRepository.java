@@ -1,5 +1,6 @@
-package com.influencermatch.backend.security.permission;
+package com.influencermatch.backend.security.permission.repository;
 
+import com.influencermatch.backend.security.permission.model.RolePermissionOverride;
 import com.influencermatch.backend.user.enums.Role;
 import java.util.List;
 import java.util.UUID;

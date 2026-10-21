@@ -1,5 +1,6 @@
-package com.influencermatch.backend.security.permission;
+package com.influencermatch.backend.security.permission.dto;
 
+import com.influencermatch.backend.security.permission.Permission;
 import com.influencermatch.backend.user.enums.Role;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;

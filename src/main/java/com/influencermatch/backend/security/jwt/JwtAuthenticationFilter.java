@@ -1,6 +1,6 @@
 package com.influencermatch.backend.security.jwt;
 
-import com.influencermatch.backend.security.permission.EffectivePermissionService;
+import com.influencermatch.backend.security.permission.service.EffectivePermissionService;
 import com.influencermatch.backend.user.model.User;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

@@ -6,7 +6,7 @@ import com.influencermatch.backend.auth.repository.*;
 import com.influencermatch.backend.config.GoogleOAuthProperties;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.security.jwt.JwtTokenProvider;
-import com.influencermatch.backend.security.permission.EffectivePermissionService;
+import com.influencermatch.backend.security.permission.service.EffectivePermissionService;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;

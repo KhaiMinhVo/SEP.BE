@@ -18,8 +18,8 @@ class DevCreatorLoginConfigurationTest {
       .withBean(UserRepository.class,()->mock(UserRepository.class))
       .withBean(ExternalIdentityRepository.class,()->mock(ExternalIdentityRepository.class))
       .withBean(JwtTokenProvider.class,()->mock(JwtTokenProvider.class))
-      .withBean(com.influencermatch.backend.security.permission.EffectivePermissionService.class,
-          ()->mock(com.influencermatch.backend.security.permission.EffectivePermissionService.class))
+      .withBean(com.influencermatch.backend.security.permission.service.EffectivePermissionService.class,
+          ()->mock(com.influencermatch.backend.security.permission.service.EffectivePermissionService.class))
       .withBean(RefreshTokenService.class,()->mock(RefreshTokenService.class));
 
   @Test void onlyEnabledInExplicitDevWithFlag() {

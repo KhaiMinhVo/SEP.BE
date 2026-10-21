@@ -45,7 +45,7 @@ class AuthServiceTest {
     private RefreshTokenService refreshTokenService;
 
     @Mock
-    private com.influencermatch.backend.security.permission.EffectivePermissionService effectivePermissions;
+    private com.influencermatch.backend.security.permission.service.EffectivePermissionService effectivePermissions;
 
     @InjectMocks
     private AuthServiceImpl authService;

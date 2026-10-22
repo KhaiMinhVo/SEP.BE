@@ -120,7 +120,20 @@ public class JwtTokenProvider {
   }
 
   private SecretKey getSigningKey() {
-    byte[] keyBytes = Decoders.BASE64.decode(secretKey);
+    byte[] keyBytes;
+    try {
+      keyBytes = Decoders.BASE64.decode(secretKey);
+    } catch (Exception e) {
+      keyBytes = secretKey.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+    if (keyBytes.length < 32) {
+      try {
+        keyBytes = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(secretKey.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      } catch (java.security.NoSuchAlgorithmException e) {
+        throw new IllegalStateException("SHA-256 algorithm not available", e);
+      }
+    }
     return Keys.hmacShaKeyFor(keyBytes);
   }
 }

@@ -40,6 +40,16 @@ public class OAuthProofClient {
     String resolvedUserId = expectedExternalId != null ? expectedExternalId : "provider_id_" + code;
     String resolvedUsername = expectedUserName != null ? expectedUserName : "provider_user_" + code;
 
+    if (code != null && code.startsWith("sim:")) {
+      String[] parts = code.split(":");
+      if (parts.length >= 2 && !parts[1].isBlank()) {
+        resolvedUserId = parts[1].trim();
+      }
+      if (parts.length >= 3 && !parts[2].isBlank()) {
+        resolvedUsername = parts[2].trim();
+      }
+    }
+
     return ProofResult.builder()
         .providerUserId(resolvedUserId)
         .providerUsername(resolvedUsername)

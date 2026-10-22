@@ -29,7 +29,7 @@ class CreatorIngestionOwnershipTest {
     when(creators.save(any())).thenAnswer(i -> i.getArgument(0));
     when(metrics.save(any())).thenAnswer(i -> i.getArgument(0));
     new CreatorIngestionService(creators, metrics, posts, em).ingestCreatorData(
-        CreatorIngestionRequest.builder().platform("TIKTOK").externalId("channel").userName("updated").build());
+        CreatorIngestionRequest.builder().platform("TIKTOK").externalId("channel").userName("updated").creatorType("KOC").followers(10000L).build());
     assertThat(creator.getUserName()).isEqualTo("updated");
     assertThat(creator.getOwner()).isSameAs(owner);
     assertThat(creator.getSourceType()).isEqualTo(CreatorSourceType.AUTHORIZED);
@@ -62,6 +62,7 @@ class CreatorIngestionOwnershipTest {
             .platform("FACEBOOK")
             .externalId("vanity_slug")
             .userName("fb_koc")
+            .creatorType("KOC")
             .isStableExternalId(false)
             .crawlRunId("CR-001")
             .observedAt(observedAt)
@@ -118,6 +119,8 @@ class CreatorIngestionOwnershipTest {
             .externalId("ch_123")
             .crawlRunId("CR-EXISTING-99")
             .userName("koc_tiktok")
+            .creatorType("KOC")
+            .followers(10000L)
             .build());
 
     assertThat(response.getStatus()).isEqualTo("SKIPPED");

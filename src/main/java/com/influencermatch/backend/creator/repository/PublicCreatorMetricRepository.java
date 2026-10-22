@@ -68,14 +68,15 @@ public interface PublicCreatorMetricRepository
               JOIN creator c ON m.creator_id = c.id
               LEFT JOIN creator_master cm ON c.master_id = cm.id
               WHERE 
-                  (:hasPlatforms = false OR c.platform IN (:platforms))
-                  AND (:hasNiches = false OR m.niche IN (:niches))
-                  AND (:uiNiche IS NULL OR m.niche = :uiNiche)
+                  m.creator_type IN ('KOL', 'KOC')
+                  AND (:hasPlatforms = false OR c.platform IN (:platforms))
+                  AND (:hasNiches = false OR m.niche IN (:niches) OR m.category IN (:niches))
+                  AND (:uiNiche IS NULL OR m.niche = :uiNiche OR m.category = :uiNiche)
                   AND (:followerMin IS NULL OR m.followers >= :followerMin)
                   AND (:followerMax IS NULL OR m.followers <= :followerMax)
                   AND (
-                      :hasKeyword = false 
-                      OR (:hasVector = true AND :queryVector IS NOT NULL AND c.embedding IS NOT NULL AND (1 - (c.embedding <=> cast(NULLIF(:queryVector, '') as vector))) > 0.3)
+                      :isStrictSearch = false 
+                      OR (:hasVector = true AND :queryVector IS NOT NULL AND c.embedding IS NOT NULL AND (1 - (c.embedding <=> cast(NULLIF(:queryVector, '') as vector))) > 0.2)
                       OR (:formattedKeyword IS NOT NULL AND :formattedKeyword != '' AND m.search_vector @@ to_tsquery('simple', :formattedKeyword))
                   )
               ORDER BY 
@@ -98,14 +99,15 @@ public interface PublicCreatorMetricRepository
           FROM public_creator_metric m
           JOIN creator c ON m.creator_id = c.id
           WHERE 
-              (:hasPlatforms = false OR c.platform IN (:platforms))
-              AND (:hasNiches = false OR m.niche IN (:niches))
-              AND (:uiNiche IS NULL OR m.niche = :uiNiche)
+              m.creator_type IN ('KOL', 'KOC')
+              AND (:hasPlatforms = false OR c.platform IN (:platforms))
+              AND (:hasNiches = false OR m.niche IN (:niches) OR m.category IN (:niches))
+              AND (:uiNiche IS NULL OR m.niche = :uiNiche OR m.category = :uiNiche)
               AND (:followerMin IS NULL OR m.followers >= :followerMin)
               AND (:followerMax IS NULL OR m.followers <= :followerMax)
               AND (
-                  :hasKeyword = false 
-                  OR (:hasVector = true AND :queryVector IS NOT NULL AND c.embedding IS NOT NULL AND (1 - (c.embedding <=> cast(NULLIF(:queryVector, '') as vector))) > 0.3)
+                  :isStrictSearch = false 
+                  OR (:hasVector = true AND :queryVector IS NOT NULL AND c.embedding IS NOT NULL AND (1 - (c.embedding <=> cast(NULLIF(:queryVector, '') as vector))) > 0.2)
                   OR (:formattedKeyword IS NOT NULL AND :formattedKeyword != '' AND m.search_vector @@ to_tsquery('simple', :formattedKeyword))
               )
           """,
@@ -119,6 +121,7 @@ public interface PublicCreatorMetricRepository
         @Param("uiNiche") String uiNiche,
         @Param("followerMin") Long followerMin,
         @Param("followerMax") Long followerMax,
+        @Param("isStrictSearch") boolean isStrictSearch,
         @Param("hasKeyword") boolean hasKeyword,
         @Param("formattedKeyword") String formattedKeyword,
         @Param("hasVector") boolean hasVector,

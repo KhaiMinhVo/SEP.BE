@@ -24,6 +24,23 @@ public class CreatorIngestionService {
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('SERVICE_INGEST_CREATOR')")
   public CreatorIngestionResponse ingestCreatorData(CreatorIngestionRequest request) {
+    // 0. Data Quality Gatekeeper: Chỉ tiếp nhận KOL hoặc KOC
+    String type = request.getCreatorType();
+    if (type == null || (!"KOL".equalsIgnoreCase(type) && !"KOC".equalsIgnoreCase(type))) {
+      return CreatorIngestionResponse.builder()
+          .status("REJECTED")
+          .message("Rejected: Only KOL or KOC accounts are accepted for market discovery.")
+          .build();
+    }
+
+    // Kiểm tra ngưỡng followers tối thiểu (5,000 followers)
+    if (request.getFollowers() != null && request.getFollowers() < 5000) {
+      return CreatorIngestionResponse.builder()
+          .status("REJECTED")
+          .message("Rejected: Minimum 5,000 followers required for market discovery.")
+          .build();
+    }
+
     // 1. Advisory Lock to prevent concurrent ingestion of the exact same account
     creatorRepository.acquireIdentityLock(request.getPlatform() + ":" + request.getExternalId());
 

@@ -1,7 +1,5 @@
 package com.influencermatch.backend.config;
 
-import com.influencermatch.backend.security.GoogleOAuthFailureHandler;
-import com.influencermatch.backend.security.GoogleOAuthSuccessHandler;
 import com.influencermatch.backend.security.JwtAccessDeniedHandler;
 import com.influencermatch.backend.security.JwtAuthenticationEntryPoint;
 import com.influencermatch.backend.security.JwtAuthenticationFilter;
@@ -33,20 +31,18 @@ public class SecurityConfig {
   private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
   private final JwtAccessDeniedHandler jwtAccessDeniedHandler;
   private final UserDetailsService userDetailsService;
-  private final GoogleOAuthProperties googleOAuthProperties;
-  private final GoogleOAuthSuccessHandler googleOAuthSuccessHandler;
-  private final GoogleOAuthFailureHandler googleOAuthFailureHandler;
 
   // Patterns are relative to context-path /api/v1
   private static final String[] PUBLIC_ENDPOINTS = {
     "/auth/register",
+    "/auth/creator-invitations/resolve",
+    "/auth/creator/register",
+    "/auth/password-setup/request",
+    "/auth/password-setup/confirm",
+    "/auth/verify-email",
+    "/auth/resend-verification",
     "/auth/login",
     "/auth/refresh",
-    "/auth/google",
-    "/auth/google/creator",
-    "/auth/google/exchange",
-    "/oauth2/**",
-    "/login/oauth2/**",
     "/actuator/health",
     "/v3/api-docs/**",
     "/api-docs/**",
@@ -82,7 +78,6 @@ public class SecurityConfig {
   @Bean
   @org.springframework.core.annotation.Order(2)
   public SecurityFilterChain securityFilterChain(HttpSecurity http,
-      org.springframework.beans.factory.ObjectProvider<org.springframework.security.oauth2.client.registration.ClientRegistrationRepository> clients,
       org.springframework.beans.factory.ObjectProvider<com.influencermatch.backend.auth.service.DevCreatorLoginService> devCreatorLogin) throws Exception {
     http.csrf(AbstractHttpConfigurer::disable)
         .formLogin(AbstractHttpConfigurer::disable)
@@ -99,12 +94,7 @@ public class SecurityConfig {
             ex ->
                 ex.authenticationEntryPoint(jwtAuthenticationEntryPoint)
                     .accessDeniedHandler(jwtAccessDeniedHandler))
-        .sessionManagement(
-            s ->
-                s.sessionCreationPolicy(
-                    googleOAuthProperties.isEnabled()
-                        ? SessionCreationPolicy.IF_REQUIRED
-                        : SessionCreationPolicy.STATELESS))
+        .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(
             auth -> {
                 if (devCreatorLogin.getIfAvailable() != null) {
@@ -124,16 +114,6 @@ public class SecurityConfig {
                     .authenticated(); })
         .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
-    if (googleOAuthProperties.isEnabled()) {
-      http.oauth2Login(
-          oauth ->
-              oauth
-                  .authorizationEndpoint(endpoint -> endpoint
-                      .authorizationRequestResolver(new com.influencermatch.backend.security.GoogleLoginIntent.Resolver(clients.getObject()))
-                      .authorizationRequestRepository(new com.influencermatch.backend.security.GoogleLoginIntent.Repository()))
-                  .successHandler(googleOAuthSuccessHandler)
-                  .failureHandler(googleOAuthFailureHandler));
-    }
     return http.build();
   }
 

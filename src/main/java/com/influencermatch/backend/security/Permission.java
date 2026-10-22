@@ -2,6 +2,7 @@ package com.influencermatch.backend.security;
 
 /** Fixed capability catalog; declarations do not imply that a feature API exists. */
 public enum Permission {
+  INVITE_CREATOR,
   CLAIM_CREATOR_PROFILE,
   VIEW_OWN_CREATOR_CLAIM,
   REVIEW_CREATOR_CLAIM,

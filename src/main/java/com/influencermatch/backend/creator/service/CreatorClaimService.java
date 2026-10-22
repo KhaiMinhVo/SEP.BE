@@ -1,7 +1,5 @@
 package com.influencermatch.backend.creator.service;
 
-import com.influencermatch.backend.auth.model.ExternalIdentityProvider;
-import com.influencermatch.backend.auth.repository.ExternalIdentityRepository;
 import com.influencermatch.backend.audit.service.AuditService;
 import com.influencermatch.backend.common.dto.PageResponse;
 import com.influencermatch.backend.creator.dto.CreatorClaimDtos.*;
@@ -28,12 +26,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class CreatorClaimService {
   private final CreatorRepository creators;
   private final CreatorClaimRepository claims;
-  private final ExternalIdentityRepository identities;
   private final UserRepository users;
   private final AuditService audit;
   private final EntityManager em;
   private final Validator validator;
-  private final Optional<com.influencermatch.backend.auth.service.DevCreatorLoginService> devCreatorLogin;
 
   @Transactional @PreAuthorize("hasAuthority('CLAIM_CREATOR_PROFILE')")
   public ClaimResponse claim(UUID creatorId,ClaimRequest request) {
@@ -133,12 +129,8 @@ public class CreatorClaimService {
     User user=users.findById(id).orElseThrow(()->conflict("Claimant no longer exists"));
     if(user.getRole()!=Role.CREATOR || user.getStatus()!=UserStatus.ACTIVE)
       throw conflict("Claimant must be an active Creator");
-    boolean googleVerified=identities.findByUserIdAndProvider(id,ExternalIdentityProvider.GOOGLE)
-        .filter(i->i.isEmailVerified()).isPresent();
-    boolean devMock=devCreatorLogin.isPresent()
-        && identities.findByUserIdAndProvider(id,ExternalIdentityProvider.DEV_MOCK).isPresent();
-    if(!googleVerified && !devMock)
-      throw new ForbiddenException("A verified Google identity is required");
+    if(!user.isEmailVerified())
+      throw new ForbiddenException("Verified email is required");
     return user;
   }
   private Creator lockedCreator(UUID id) {

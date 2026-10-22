@@ -21,7 +21,7 @@ public final class RolePermissions {
     EnumSet<Permission> permissions = EnumSet.copyOf(COMMON);
     if (role == Role.CREATOR) permissions.addAll(EnumSet.of(Permission.CLAIM_CREATOR_PROFILE,
         Permission.VIEW_OWN_CREATOR_CLAIM));
-    if (role == Role.ADMIN || role == Role.DATA_MANAGER) permissions.add(Permission.REVIEW_CREATOR_CLAIM);
+    if (role == Role.ADMIN || role == Role.DATA_MANAGER) permissions.addAll(EnumSet.of(Permission.REVIEW_CREATOR_CLAIM, Permission.INVITE_CREATOR));
     if (role == Role.BRAND)
       permissions.addAll(
           EnumSet.of(

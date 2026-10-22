@@ -5,7 +5,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.fasterxml.jackson.databind.*;
-import com.influencermatch.backend.auth.service.GoogleAuthService;
 import com.influencermatch.backend.brand.model.BrandProfile;
 import com.influencermatch.backend.brand.repository.BrandProfileRepository;
 import com.influencermatch.backend.campaign.enums.*;
@@ -38,7 +37,7 @@ import org.testcontainers.junit.jupiter.*;
 import org.testcontainers.utility.DockerImageName;
 
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=validate", "spring.flyway.enabled=true",
-    "application.bootstrap-admin.enabled=false", "application.oauth2.google.enabled=false",
+    "application.bootstrap-admin.enabled=false",
     "application.auth.creator-mock.enabled=true", "spring.jpa.show-sql=false"})
 @ActiveProfiles("dev") @AutoConfigureMockMvc @Testcontainers
 class RolePermissionPostgresIntegrationTest {
@@ -53,7 +52,6 @@ class RolePermissionPostgresIntegrationTest {
   @Autowired UserRepository users; @Autowired PasswordEncoder encoder; @Autowired JdbcTemplate jdbc;
   @Autowired BrandProfileRepository brands; @Autowired CampaignRepository campaigns;
   @Autowired CreatorRepository creators; @Autowired ShortlistItemRepository shortlist;
-  @Autowired GoogleAuthService google;
   User admin;
 
   @BeforeEach void setup() {
@@ -192,16 +190,13 @@ class RolePermissionPostgresIntegrationTest {
     call(manager,get("/admin/data-quality/pending"),null,200);
   }
 
-  @Test void loginRefreshGoogleAndMockResponsesContainEffectivePermissions() throws Exception {
+  @Test void loginRefreshAndMockResponsesContainEffectivePermissions() throws Exception {
     var brand=user(Role.BRAND);
     setPermission(Role.BRAND,0,Permission.MANAGE_OWN_SHORTLIST,false);
     var login=call(null,post("/auth/login"),Map.of("email",brand.getEmail(),"password","Password123!"),200).path("data");
     assertThat(login.path("user").path("permissions").toString()).doesNotContain("MANAGE_OWN_SHORTLIST");
     var refresh=call(null,post("/auth/refresh"),Map.of("refreshToken",login.path("refreshToken").asText()),200).path("data");
     assertThat(refresh.path("user").path("permissions")).isEqualTo(login.path("user").path("permissions"));
-    String code=google.completeGoogleLogin(UUID.randomUUID().toString(),UUID.randomUUID()+"@google.test","Google Brand",true);
-    var exchange=call(null,post("/auth/google/exchange"),Map.of("code",code),200).path("data");
-    assertThat(exchange.path("user").path("permissions").toString()).doesNotContain("MANAGE_OWN_SHORTLIST");
     setPermission(Role.CREATOR,0,Permission.CLAIM_CREATOR_PROFILE,false);
     var mock=call(null,post("/auth/dev/creator-login"),null,200).path("data");
     assertThat(mock.path("user").path("permissions").toString()).doesNotContain("CLAIM_CREATOR_PROFILE");

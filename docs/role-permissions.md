@@ -92,7 +92,7 @@ service checks và response permissions. Không cache giữa các request/instan
 Thay đổi đã commit có hiệu lực từ request tiếp theo; request đang xử lý tiếp tục
 theo snapshot ban đầu. Token hiện tại vẫn hợp lệ, không cần đăng nhập lại.
 
-Login, refresh, Google exchange, mock Creator login và `/auth/me` trả permissions
+Login, refresh, mock Creator login và `/auth/me` trả permissions
 hiệu lực. Frontend cần tải lại permissions để cập nhật menu; backend luôn chặn API
 bị tắt bằng 403. Tắt VIEW_OWN_PROFILE cũng chặn `/auth/me`; frontend có thể nhận
 lại permissions khi refresh/login. Logout và refresh không phụ thuộc công tắc này.
@@ -122,3 +122,10 @@ quyền ADMIN cố định, validation, optimistic conflict, no-op và audit rol
 `MANAGE_OWN_RATE_CARD` không còn trong enum, quyền mặc định hoặc danh mục Admin.
 Migration V12 xóa override cũ và tăng version cấu hình chỉ cho role có override bị xóa;
 Admin dùng version cũ sẽ gặp conflict. Không xóa bảng giá hoặc audit lịch sử.
+
+## Creator invitations
+
+`INVITE_CREATOR` mặc định dành cho ADMIN và DATA_MANAGER, thuộc module Creator Registration.
+Admin có thể bật/tắt quyền này của DATA_MANAGER; ADMIN giữ quyền cố định.
+Quyền cho phép gửi link đăng ký Creator, không cấp ownership hoặc quyền duyệt Claim.
+Xem [Creator Registration](creator-registration.md).

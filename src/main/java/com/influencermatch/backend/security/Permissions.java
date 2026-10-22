@@ -12,6 +12,8 @@ public final class Permissions {
     var auth = SecurityContextHolder.getContext().getAuthentication();
     if (auth == null || !auth.isAuthenticated() || !(auth.getPrincipal() instanceof User user))
       throw new BusinessException(ErrorCode.UNAUTHENTICATED, "Authentication required");
+    if (!user.isEmailVerified())
+      throw new BusinessException(ErrorCode.EMAIL_NOT_VERIFIED,"Verify your email before continuing");
     if (user.getStatus() != UserStatus.ACTIVE)
       throw new BusinessException(ErrorCode.UNAUTHENTICATED, "Account is not active");
     return user;

@@ -19,6 +19,11 @@ import lombok.Setter;
 @AllArgsConstructor
 @Builder
 public class RegisterRequest {
+  @com.fasterxml.jackson.annotation.JsonSetter(value="role",nulls=com.fasterxml.jackson.annotation.Nulls.FAIL)
+  public void rejectRole(Object role) {
+    throw new com.influencermatch.backend.exception.ValidationException("Public registration is for Brand only; role is not accepted");
+  }
+
 
   @NotBlank(message = "Email is required.")
   @Email(message = "Email must be a valid address.")

@@ -1,26 +1,25 @@
 # Creator Claim Profile (Controlled Hybrid)
 
-Để test không cần Google Cloud: bật `CREATOR_MOCK_LOGIN_ENABLED=true` ở profile dev,
-gọi `POST /auth/dev/creator-login` không body để nhận token Creator test mới.
-Identity DEV_MOCK được tách khỏi GOOGLE, chỉ được dùng để test claim khi mock bật ở dev. Cờ mặc định false; profile prod
-luôn chặn mock. Không tự cấp ownership hoặc giả xác minh email Google.
+Creator đăng ký từ link mời do Admin/Data Manager gửi, xác minh email OTP rồi đăng nhập
+bằng mật khẩu. Xem [Creator Registration](creator-registration.md).
+Để thử riêng ở dev: bật `CREATOR_MOCK_LOGIN_ENABLED=true`, gọi `POST /auth/dev/creator-login`.
+Mock chỉ tạo tài khoản mới, không cấp ownership; mặc định tắt và luôn bị chặn ở prod.
 
 Base URL: `http://localhost:8080/api/v1`. Các API dữ liệu dùng header
 `Authorization: Bearer <accessToken>` và response bọc trong `data`.
 
 ## Luồng thử thủ công
 
-1. Mở `GET /auth/google/creator` bằng trình duyệt. Sau callback, frontend nhận
-   one-time `code`; gọi `POST /auth/google/exchange` với `{"code":"..."}` để lấy token.
-   Cần bật Google OAuth và cấu hình client/callback hợp lệ. Creator phải ACTIVE;
-   login Creator không chuyển một tài khoản BRAND/ADMIN/DATA_MANAGER thành Creator.
+1. Nhận lời mời, đăng ký qua `POST /auth/creator/register`, xác minh OTP bằng
+   `POST /auth/verify-email`, rồi gọi `POST /auth/login` để nhận token Creator.
+   Tài khoản phải ACTIVE và email đã xác minh; không còn yêu cầu Google identity.
 2. Gọi `POST /creators/{creatorId}/claim`:
 
    ```json
    {"evidenceUrls":["https://example.com/ownership-proof"],"note":"Bằng chứng quản lý kênh"}
    ```
 
-   Kết quả HTTP 201, `data.status=PENDING`. Google xác minh danh tính đăng nhập,
+   Kết quả HTTP 201, `data.status=PENDING`. OTP chỉ xác minh email,
    quyền sở hữu kênh vẫn cần người duyệt kiểm tra bằng chứng. URL không được backend
    tự tải; bằng chứng chỉ chủ claim và người duyệt được đọc qua các API tương ứng.
 3. Creator theo dõi `GET /creator-claims/me`. Admin/Data Manager dùng token riêng
@@ -48,8 +47,8 @@ Ingestion chỉ cập nhật dữ liệu công khai, không thay ownership.
 Yêu cầu JDK 21, Maven; integration test cần Docker chạy Linux containers:
 
 ```powershell
-mvn '-Dtest=CreatorClaimServiceTest,CreatorIngestionOwnershipTest,GoogleAuthServiceTest,RolePermissionsTest,AuthControllerTest,JwtAuthVersionTest,CreatorServiceKeyFilterTest' test
-mvn '-Dtest=CreatorClaimPostgresIntegrationTest,GoogleOAuthPostgresIntegrationTest,RbacPostgresIntegrationTest,RetiredRateCardPostgresIntegrationTest' test
+mvn '-Dtest=CreatorClaimServiceTest,CreatorIngestionOwnershipTest,RolePermissionsTest,AuthControllerTest,JwtAuthVersionTest,CreatorServiceKeyFilterTest' test
+mvn '-Dtest=CreatorClaimPostgresIntegrationTest,CreatorRegistrationPostgresIntegrationTest,RbacPostgresIntegrationTest,RetiredRateCardPostgresIntegrationTest' test
 ```
 
 Integration suite dùng PostgreSQL 16 + pgvector qua Testcontainers, chạy Flyway và

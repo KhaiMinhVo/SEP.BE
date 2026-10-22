@@ -1,5 +1,38 @@
 # Backend Test Cases — Khải
 
+## Kết quả thực thi ngày 22/10/2026 — Creator invitations, gỡ Google Login
+
+- Full regression bản cuối: **450 test / 50 suite; 450 đạt, 0 thất bại, 0 lỗi thực thi, 0 bỏ qua**.
+- Danh sách hiện tại ánh xạ **176 nhóm test case**; giữ ID cũ, bỏ các dòng chỉ thuộc Google Login đã gỡ.
+- Suite Creator registration/PostgreSQL: **52/52 đạt**; unit lời mời: **8/8 đạt**;
+  SMTP template: **5/5 đạt**. Các suite Claim, OTP, phân quyền và nghiệp vụ khác vẫn đạt.
+- Đã kiểm chứng Brand không nhận role (kể cả null), Creator chỉ đăng ký qua lời mời,
+  OTP trước login, Claim không cần Google identity và không tự cấp ownership.
+- V14 được kiểm thử nâng cấp từ V13, giữ account/identity/exchange code/ownership/OTP cũ;
+  kiểm tra giới hạn gửi, SMTP/audit/database rollback và cạnh tranh đăng ký/đặt mật khẩu.
+- Test ban đầu cần cập nhật số quyền mới và gửi JSON nguyên bản cho `role: null` vì ObjectMapper
+  của test bỏ trường null khỏi map. Đã sửa fixture và chạy lại toàn bộ thành công.
+- Đã gỡ test thuần Google Login, chuyển fixture sang tài khoản đã xác minh email;
+  bổ sung test tài khoản Google cũ đặt mật khẩu, không giảm kiểm tra ownership/Claim.
+- Build/test dùng POM tạm và output riêng tại `target/invitation-validation` để không kích hoạt
+  DevTools của BE đang phục vụ. Database chỉ là PostgreSQL/pgvector Testcontainers; email giả lập.
+- Không sửa `.env` thật/Bruno, không gửi email thật, không chạy V14 trên database dùng chung,
+  không khởi động lại BE và chưa commit/push. Xem [Creator Registration](creator-registration.md).
+- Các kết quả 407/362/357 bên dưới là lịch sử trước lần thay đổi này.
+
+## Kết quả thực thi ngày 22/10/2026 — đăng ký xác minh email OTP
+
+- Full regression bản cuối: **407 test / 50 suite; 407 đạt, 0 thất bại, 0 lỗi thực thi, 0 bỏ qua**.
+- Tăng **45 lượt kiểm thử** so với baseline 362; tài liệu ánh xạ **145 nhóm test case**.
+- Suite OTP PostgreSQL: **22/22 đạt**; thêm unit service/SMTP và kiểm tra login chưa xác minh.
+- Đã kiểm chứng migration V12 → V13, tài khoản cũ, sai/hết hạn/dùng lại mã, gửi lại/rate limit,
+  rollback SMTP/database, bộ đếm sai được commit, cạnh tranh verify/Admin và chặn JWT/refresh/Google.
+- Test ban đầu phát hiện hai vấn đề fixture: H2 dùng nhầm PostgreSQL dialect và assertion so sánh
+  toàn bộ response có metadata riêng cho mỗi request. Đã sửa cấu hình/assertion và chạy lại thành công.
+- SMTP sender/clock được giả lập trong test; chưa gửi email thật hoặc dùng thông tin SMTP thật.
+  Không sửa `.env`, Bruno hoặc database dùng chung. Chỉ thêm cấu hình mẫu vào `.env.example`.
+- Chưa commit/push phần OTP. Xem [Registration Email Verification](email-verification.md).
+
 ## Kết quả thực thi ngày 22/10/2026 — gỡ Creator Rate Card
 
 - Clean full regression: **362 test / 47 suite; 362 đạt, 0 thất bại, 0 lỗi thực thi, 0 bỏ qua**.
@@ -12,7 +45,7 @@
   không có assertion thất bại). Sau khi Docker hoạt động, đã chạy lại bằng clean full regression
   trên PostgreSQL/pgvector Testcontainers riêng và đạt kết quả trên.
 - V9 không đổi; không chạy migration lên database dùng chung. Không sửa `.env`, Bruno hoặc frontend.
-- Các kết quả 357 test dưới đây là lịch sử trước khi gỡ chức năng; chưa commit/push đợt này.
+- Các kết quả 357 test dưới đây là lịch sử trước khi gỡ chức năng; phần gỡ đã push ở commit `6e6f6fd`.
 
 ## Kết quả thực thi ngày 21/10/2026
 
@@ -59,7 +92,7 @@ Không cần chạy BE riêng hoặc chỉnh `.env`.
 
 ```powershell
 # Unit theo domain
-mvn '-Dtest=BrandServiceTest,CampaignServiceTest,DataQualityServiceTest,ShortlistCompareServiceTest,PaymentSettlementServiceTest,PaymentCallbackServiceTest,MockPaymentServiceTest,SubscriptionServiceTest,AuditServiceTest,AdminRoleGuardTest,AuthServiceTest,RefreshTokenServiceTest,GoogleAuthServiceTest,CreatorClaimServiceTest' test
+mvn '-Dtest=BrandServiceTest,CampaignServiceTest,DataQualityServiceTest,ShortlistCompareServiceTest,PaymentSettlementServiceTest,PaymentCallbackServiceTest,MockPaymentServiceTest,SubscriptionServiceTest,AuditServiceTest,AdminRoleGuardTest,AuthServiceTest,RefreshTokenServiceTest,CreatorClaimServiceTest' test
 
 # Integration mới và các suite đã mở rộng
 mvn '-Dtest=BrandPostgresIntegrationTest,CampaignPostgresIntegrationTest,AuditLogPostgresIntegrationTest,AuthSessionPostgresIntegrationTest,SubscriptionPostgresIntegrationTest,CreatorClaimPostgresIntegrationTest,RolePermissionPostgresIntegrationTest' test
@@ -122,16 +155,13 @@ Mỗi case bên dưới chỉ rõ class/method; dữ liệu parameterized nằm 
 | BE-003 | Unit | Rotate token expired at fixed past timestamp | Reject; no new token or revocation of other sessions | [RefreshTokenServiceTest](../src/test/java/com/influencermatch/backend/auth/service/RefreshTokenServiceTest.java)`#expiredTokenDoesNotCreateOrRevokeOtherSessions` |
 | BE-004 | Unit | Rotate/revoke unknown token; revoke already revoked token | Reject rotation; revoke is idempotent and preserves timestamp | [RefreshTokenServiceTest](../src/test/java/com/influencermatch/backend/auth/service/RefreshTokenServiceTest.java)`#unknownTokenAndIdempotentRevokeDoNotWrite` |
 | BE-005 | Unit | Principal role differs from database role | Reject before refresh-token write | [RefreshTokenServiceTest](../src/test/java/com/influencermatch/backend/auth/service/RefreshTokenServiceTest.java)`#changedRoleCannotIssueTokenFromStalePrincipal` |
-| BE-006 | Unit | Existing Google subject logs in with changed provider email | Only provider email changes; account email/password/name preserved | [GoogleAuthServiceTest](../src/test/java/com/influencermatch/backend/auth/service/GoogleAuthServiceTest.java)`#linkedGoogleEmailChangePreservesAccountEmailPasswordAndName` |
-| BE-007 | Unit | New subject attempts to replace existing Google link | GOOGLE_AUTHENTICATION_FAILED; no identity/exchange-code writes | [GoogleAuthServiceTest](../src/test/java/com/influencermatch/backend/auth/service/GoogleAuthServiceTest.java)`#secondGoogleIdentityCannotReplaceExistingLink` |
-| BE-008 | Integration | Register mixed-case email with injected ADMIN role; repeat | BRAND, encoded password, trimmed name; duplicate 409; no Brand Profile | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#registrationNormalizesCaseAndIgnoresInjectedRole` |
+| BE-008 | Integration | Register mixed-case Brand email; repeat | BRAND, encoded password, trimmed name; duplicate 409; no Brand Profile | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#registrationNormalizesCaseAndCreatesBrand` |
 | BE-009 | Integration | Wrong password, then uppercase email with valid password | 401 creates no session; valid login token can call /auth/me | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#wrongPasswordDoesNotIssueSessionAndLoginNormalizesEmail` |
 | BE-010 | Integration | Login then mark user LOCKED/DISABLED | Login, refresh and old access token rejected; no extra refresh row | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#inactiveAccountsCannotLoginOrRefresh` |
 | BE-011 | Integration | Expire stored token at fixed past time; also use unknown token | 401 UNAUTHENTICATED; no new refresh rows | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#expiredAndUnknownRefreshTokensCannotCreateSessions` |
 | BE-012 | Integration | Rotate valid token, inspect DB, logout replacement, retry | Old revoked and linked to new token; logout 204; refresh 401 | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#rotationLinksOldTokenAndLogoutRevokesReplacement` |
 | BE-013 | Integration | Two sessions; rotate first; replay first token | 401 and zero active refresh tokens for that account; other account unaffected | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#replayedRotatedTokenRevokesAllOtherSessionsEvenWhenRequestIsRejected` |
 | BE-014 | Integration | Malformed Authorization header or Bearer JWT | 401 | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#invalidAuthorizationIs401` |
-| BE-107 | Integration | Google account exchanges code and retries | JWT works; exchange code consumed only once | [GoogleOAuthPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/GoogleOAuthPostgresIntegrationTest.java)`#googleOnlyUserCanExchangeOnceAndUseJwt` |
 | BE-108 | Integration | Rotate successfully inside caller transaction, then force caller failure | Original token remains active/unreplaced; no replacement row; original can refresh afterward | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#successfulRotationStillRollsBackWithItsCallerTransaction` |
 | BE-109 | Integration | Two concurrent refresh requests use the same token | One 200, one 401; all refresh tokens of that account revoked durably; completes without deadlock | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#concurrentRefreshReplayCommitsRevocationWithoutDeadlock` |
 
@@ -286,3 +316,81 @@ Mỗi case bên dưới chỉ rõ class/method; dữ liệu parameterized nằm 
 | BE-112 | Integration | Read permission catalog/auth and submit retired permission | Permission absent; update rejected | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#retiredPermissionIsAbsentAndCannotBeConfigured` |
 | BE-113 | Integration | Upgrade V11 to V12 with/without retired override | Prices/audits retained; override removed; only affected role version increases | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#upgradePreservesLegacyDataAndOnlyBumpsAffectedConfiguration` |
 | BE-114 | Integration | Claim already authorized channel | 409; existing owner retained | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#authorizedChannelRejectsNewClaims` |
+
+### Registration Email Verification
+
+Các test trước đây đăng ký rồi đăng nhập đã được cập nhật để xác minh email trước;
+fixture tạo trực tiếp User vẫn mặc định đã xác minh như dữ liệu cũ.
+
+| ID | Level | Condition / action | Expected | Automated test |
+| --- | --- | --- | --- | --- |
+| BE-115 | Unit | Leading-zero code / initial send | Only keyed hash stored; 10-minute expiry | [EmailVerificationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/EmailVerificationServiceTest.java)`#initialDeliveryKeepsLeadingZerosAndOnlyStoresKeyedHash` |
+| BE-116 | Unit | Verify with normalized email | Verified and code consumed | [EmailVerificationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/EmailVerificationServiceTest.java)`#verifyNormalizesEmailConsumesCodeAndMarksVerified` |
+| BE-117 | Unit | Wrong attempts 1–5 | Counter increments, fifth attempt locks | [EmailVerificationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/EmailVerificationServiceTest.java)`#wrongAttemptIsCountedAndFifthLocksCode` |
+| BE-118 | Unit | Expired/consumed/exhausted code | Cannot verify | [EmailVerificationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/EmailVerificationServiceTest.java)`#unusableCodesNeverVerify` |
+| BE-119 | Unit | Unknown or verified account | No verification | [EmailVerificationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/EmailVerificationServiceTest.java)`#alreadyVerifiedAndUnknownEmailsCannotBeVerified` |
+| BE-120 | Unit | Unknown or verified account resend | No email sent | [EmailVerificationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/EmailVerificationServiceTest.java)`#resendDoesNothingForVerifiedOrUnknownEmail` |
+| BE-121 | Unit | Resend after cooldown | Reset attempts; invalidate previous code | [EmailVerificationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/EmailVerificationServiceTest.java)`#resendAfterCooldownResetsAttemptsAndInvalidatesOldCode` |
+| BE-122 | Unit | Cooldown/hourly rate limit | No code replacement/send | [EmailVerificationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/EmailVerificationServiceTest.java)`#resendLimitsNeverReplaceCodeOrSend` |
+| BE-123 | Unit | Random collision with previous code | Regenerate different code | [EmailVerificationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/EmailVerificationServiceTest.java)`#resendRegeneratesIfRandomCodeMatchesPreviousCode` |
+| BE-124 | Unit | SMTP unavailable | Fail before resend lookup | [EmailVerificationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/EmailVerificationServiceTest.java)`#unavailableSenderFailsBeforeAnyLookup` |
+| BE-125 | Unit | OTP crypto and format | Six digits, account/secret-bound hash | [EmailVerificationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/EmailVerificationServiceTest.java)`#keyedHashIsBoundToAccountAndSecretAndGeneratorHasSixDigits` |
+| BE-126 | Unit | SMTP disabled/incomplete | 503, no sending | [SmtpVerificationEmailSenderTest](../src/test/java/com/influencermatch/backend/auth/service/SmtpVerificationEmailSenderTest.java)`#disabledOrIncompleteConfigurationCannotSend` |
+| BE-127 | Unit | SMTP message delivery | Correct recipient/code/expiry | [SmtpVerificationEmailSenderTest](../src/test/java/com/influencermatch/backend/auth/service/SmtpVerificationEmailSenderTest.java)`#sendsOtpToRecipientAndIncludesExpiration` |
+| BE-128 | Unit | SMTP provider exception | 503 without server details | [SmtpVerificationEmailSenderTest](../src/test/java/com/influencermatch/backend/auth/service/SmtpVerificationEmailSenderTest.java)`#smtpErrorsAreMappedWithoutLeakingServerDetails` |
+| BE-129 | Unit | Unverified login | No token or last-login update | [AuthServiceTest](../src/test/java/com/influencermatch/backend/auth/service/AuthServiceTest.java)`#unverifiedLoginNeverUpdatesLastLoginOrIssuesTokens` |
+| BE-130 | Integration | Registration → verify → login | No tokens until verified; duplicate/reuse rejected | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#registrationMustBeVerifiedBeforeLoginAndTokensAreNeverLeaked` |
+| BE-131 | Integration | Wrong verification attempts | Counter persists despite error and locks at five | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#failedAttemptsCommitAndFifthAttemptLocksEvenTheCorrectCode` |
+| BE-132 | Integration | Expiry exactly ten minutes | Reject; resend can restore verification | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#codeExpiresAtTenMinutesAndCanBeReplacedWithoutSleep` |
+| BE-133 | Integration | Resend at 59/60 seconds | Cooldown enforced; old code invalid | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#resendCooldownAndReplacementInvalidateOldCode` |
+| BE-134 | Integration | Rolling-hour send budget | Initial email counted; budget recovers | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#fiveEmailsPerRollingHourIncludesRegistration` |
+| BE-135 | Integration | Resend verified/unknown email | Same public response semantics, no sending | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#resendOfUnknownOrVerifiedEmailUsesSameEnvelopeAndDoesNotSend` |
+| BE-136 | Integration | Registration SMTP/config failure | 503 and account/code rollback | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#registrationFailureRollsBackAccountAndCode` |
+| BE-137 | Integration | Resend SMTP failure | Old code/counters/delivery history retained | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#smtpFailureDuringResendRollsBackHashCountersAndDelivery` |
+| BE-138 | Integration | Malformed OTP body | 400 without consuming attempts | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#invalidOtpPayloadNeverChangesAttemptCount` |
+| BE-139 | Integration | Missing account or OTP state | 400, account not verified | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#unknownEmailAndMissingOtpStateCannotBeVerified` |
+| BE-140 | Integration | Concurrent verify | Exactly one success | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#concurrentVerificationConsumesCodeOnlyOnce` |
+| BE-141 | Integration | Pending account / Admin role/status update | Cannot bypass email verification | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#pendingAccountCannotBeActivatedByAdminStatusOrRole` |
+| BE-142 | Integration | Existing account and refresh | Existing verified; token/refresh cannot bypass flag | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#existingAccountsRemainVerifiedButRefreshCannotBypassVerification` |
+| BE-143 | Integration | Verification database update failure | Flag and code consumption both roll back | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#verificationDatabaseFailureRollsBackConsumptionAndAccountFlag` |
+| BE-144 | Integration | V12 → V13 migration | Existing accounts verified; new tables created | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#v13UpgradeGrandfathersExistingAccountsAndAddsVerificationStorage` |
+| BE-145 | Integration | Verify concurrently with Admin role change | Both updates retained; verified flag remains true | [EmailVerificationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/EmailVerificationPostgresIntegrationTest.java)`#concurrentAdminRoleChangeCannotOverwriteSuccessfulVerification` |
+
+### Creator Invitations and Legacy Password Setup
+
+| ID | Level | Condition / action | Expected | Automated test |
+| --- | --- | --- | --- | --- |
+| BE-146 | Integration | Invited Creator registers, verifies OTP, logs in and claims | No Google identity; no ownership until manual approval | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#creatorInvitationRegistrationOtpLoginAndClaimCompleteWithoutGoogle` |
+| BE-147 | Integration | Admin/Data Manager sends invitation | 201 metadata only; link only in email | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#adminsAndDataManagersCanInviteWithoutTokensInResponse` |
+| BE-148 | Integration | Brand/Creator sends invitation | 403; no mail | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#otherRolesCannotInvite` |
+| BE-149 | Integration | Anonymous or same token after permission disabled | 401/403; enabling again works | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#anonymousAndDynamicallyDisabledInviterAreDenied` |
+| BE-150 | Integration | Public registration includes any role, including null | 400; no account created | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#publicRegistrationRejectsAnyRoleProperty` |
+| BE-151 | Integration | Public registration without role | BRAND unverified, OTP then login | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#publicRegistrationAlwaysCreatesUnverifiedBrand` |
+| BE-152 | Integration | Creator request overrides email/role | 400; invitation remains usable | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#creatorRegistrationRejectsClientEmailOrRole` |
+| BE-153 | Integration | Missing token/password, short password or blank name | 400; no account or token consumption | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#invalidCreatorRegistrationNeverConsumesInvitation` |
+| BE-154 | Integration | Invalid recipient email | 400; no invitation mail | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#invalidInvitationEmailNeverSends` |
+| BE-155 | Integration | Invalid/expired/replaced invitation and cooldown boundary | 400 for old token; 429 before 60 seconds | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#invalidExpiredAndReplacedInvitationCannotRegister` |
+| BE-156 | Integration | Five invitations per rolling hour | Registration-independent send budget recovers after hour | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#invitationSendBudgetIsFivePerRollingHour` |
+| BE-157 | Integration | Invited email becomes existing Brand | 409; no role conversion | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#existingBrandCannotBeInvitedOrConverted` |
+| BE-158 | Integration | Initial invitation SMTP failure | Invitation, delivery and audit rolled back | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#invitationSmtpFailureRollsBackTokenDeliveryAndAudit` |
+| BE-159 | Integration | Replacement invitation SMTP failure | Previous link and delivery count retained | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#failedInvitationReplacementPreservesPreviousLinkAndBudget` |
+| BE-160 | Integration | Invitation audit database failure | Invitation and delivery rolled back | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#auditFailureRollsBackInvitationAndDelivery` |
+| BE-161 | Integration | Creator registration OTP SMTP failure | No account; invitation remains valid | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#registrationSmtpFailureLeavesInvitationUsableAndNoAccount` |
+| BE-162 | Integration | Two registrations use same invitation | One 201 and one 400; one account and OTP | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#concurrentRegistrationConsumesInvitationOnce` |
+| BE-163 | Integration | Authenticated calls to removed OAuth routes | 404; no Google login | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#removedGoogleEndpointsAre404ForAuthenticatedUsers` |
+| BE-164 | Integration | Legacy BRAND/CREATOR sets first password | Role/ID preserved; version increased; old sessions revoked | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#legacyGoogleAccountSetsPasswordAndRevokesOldSessions` |
+| BE-165 | Integration | Unknown/inactive/privileged/already-password/no-identity account | Generic request success, no mail; confirm rejected | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#ineligiblePasswordSetupIsGenericAndDoesNotSend` |
+| BE-166 | Integration | Wrong password-setup OTP five times then resend | Attempts persist, code locks; replacement resets | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#passwordWrongAttemptsPersistAndResendResetsWithNewPurposeBoundCode` |
+| BE-167 | Integration | Code purpose and exact expiration | Setup code cannot verify registration; expires at ten minutes | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#passwordCodeCannotBeUsedForRegistrationAndExpiresAtTenMinutes` |
+| BE-168 | Integration | Shared account OTP send budget | Registration delivery history limits password setup | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#passwordSetupSharesHourlyDeliveryBudget` |
+| BE-169 | Integration | Password setup resend SMTP failure | Old code and budget preserved | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#passwordSmtpFailurePreservesOldCodeAndBudget` |
+| BE-170 | Integration | Password update database failure | Password/version/code/session revocation rolled back | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#passwordDatabaseFailureRollsBackPasswordVersionCodeAndRevocation` |
+| BE-171 | Integration | Two password confirmations | One success; one invalid confirmation | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#concurrentPasswordConfirmationOnlySucceedsOnce` |
+| BE-172 | Integration | V13 to V14 migration | Accounts/identity/exchange/ownership/old OTP preserved | [CreatorRegistrationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/CreatorRegistrationPostgresIntegrationTest.java)`#v14UpgradePreservesAccountsIdentitiesOwnershipAndExistingOtp` |
+| BE-173 | Unit | Normalize invitation and generate link | Account-independent 256-bit token, hash stored, metadata-only audit | [CreatorInvitationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/CreatorInvitationServiceTest.java)`#invitationNormalizesEmailStoresHashAndAuditsOnlyMetadata` |
+| BE-174 | Unit | Invite existing account | No role conversion or mail | [CreatorInvitationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/CreatorInvitationServiceTest.java)`#existingAccountIsNeverConvertedOrEmailed` |
+| BE-175 | Unit | Invitation cooldown or hourly budget exceeded | No token replacement | [CreatorInvitationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/CreatorInvitationServiceTest.java)`#rateLimitNeverReplacesToken` |
+| BE-176 | Unit | Expired/consumed/missing invitation | No account created | [CreatorInvitationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/CreatorInvitationServiceTest.java)`#invalidInvitationNeverCreatesAccount` |
+| BE-177 | Unit | Register with valid invitation | Bound email, CREATOR, unverified flag and OTP | [CreatorInvitationServiceTest](../src/test/java/com/influencermatch/backend/auth/service/CreatorInvitationServiceTest.java)`#registrationUsesInvitedEmailAndCreatorRoleAndRequiresOtp` |
+| BE-178 | Unit | Invitation email template | Configured link, 48-hour expiry | [SmtpVerificationEmailSenderTest](../src/test/java/com/influencermatch/backend/auth/service/SmtpVerificationEmailSenderTest.java)`#invitationMessageContainsConfiguredLinkAndFortyEightHourLimit` |
+| BE-179 | Unit | Password setup email template | Purpose-specific subject and ten-minute expiry | [SmtpVerificationEmailSenderTest](../src/test/java/com/influencermatch/backend/auth/service/SmtpVerificationEmailSenderTest.java)`#passwordSetupMessageHasItsOwnPurpose` |

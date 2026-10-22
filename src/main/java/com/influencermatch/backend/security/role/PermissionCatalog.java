@@ -24,6 +24,7 @@ public final class PermissionCatalog {
     add("Collaborations", Permission.MANAGE_OWN_COLLABORATION, "Create collaboration");
     add("Collaborations", Permission.RECORD_OWN_OUTCOME, "Record campaign outcome");
     add("Collaborations", Permission.RECORD_OWN_CREATOR_REVIEW, "Review creator");
+    add("Creator Registration", Permission.INVITE_CREATOR, "Invite creator by email");
     add("Creator Ownership", Permission.CLAIM_CREATOR_PROFILE, "Submit ownership claim");
     add("Creator Ownership", Permission.VIEW_OWN_CREATOR_CLAIM, "View own ownership claims");
     add("Creator Ownership", Permission.REVIEW_CREATOR_CLAIM, "Review and revoke ownership claims");

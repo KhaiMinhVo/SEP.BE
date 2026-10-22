@@ -16,6 +16,6 @@ public class DevCreatorLoginController {
   private final DevCreatorLoginService service;
   @PostMapping("/auth/dev/creator-login")
   @Operation(summary="Create and log in a new mock Creator (dev only)",
-      description="No Google credentials needed. Creates a new DEV_MOCK identity every call; does not log in existing users.", security={})
+      description="Development-only disposable Creator login. Creates a new DEV_MOCK identity every call; does not log in existing users.", security={})
   public ApiResponse<LoginResponse> login() { return ApiResponse.ok(service.login()); }
 }

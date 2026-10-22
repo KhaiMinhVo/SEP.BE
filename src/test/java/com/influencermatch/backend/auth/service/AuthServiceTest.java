@@ -47,6 +47,9 @@ class AuthServiceTest {
     @Mock
     private com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
 
+    @Mock
+    private com.influencermatch.backend.auth.service.EmailVerificationService emailVerification;
+
     @InjectMocks
     private AuthServiceImpl authService;
 
@@ -71,7 +74,7 @@ class AuthServiceTest {
         authService.register(request);
 
         // THEN
-        verify(userRepository, times(1)).save(any(User.class));
+        verify(userRepository, times(1)).saveAndFlush(any(User.class));
     }
 
     @Test
@@ -140,6 +143,17 @@ class AuthServiceTest {
                 .isInstanceOf(BusinessException.class);
     }
 
+    @Test
+    void unverifiedLoginNeverUpdatesLastLoginOrIssuesTokens() {
+        var user=createMockUser();user.setEmailVerified(false);
+        Authentication auth=mock(Authentication.class);when(auth.getPrincipal()).thenReturn(user);
+        when(authenticationManager.authenticate(any())).thenReturn(auth);
+        assertThatThrownBy(()->authService.login(createValidLoginRequest())).isInstanceOfSatisfying(BusinessException.class,
+            e->assertThat(e.code()).isEqualTo(com.influencermatch.backend.exception.ErrorCode.EMAIL_NOT_VERIFIED));
+        verifyNoInteractions(jwtTokenProvider,refreshTokenService);verify(userRepository,never()).save(any());
+        assertThat(user.getLastLoginAt()).isNull();
+    }
+
     private User createMockUser() {
         return User.builder()
                 .email("test@example.com")
@@ -170,10 +184,12 @@ class AuthServiceTest {
         var req=RegisterRequest.builder().email("  CASE@EXAMPLE.TEST  ").password("Password123!").fullName("  Test  ").build();
         when(passwordEncoder.encode(req.getPassword())).thenReturn("encoded");
         authService.register(req);
-        var saved=org.mockito.ArgumentCaptor.forClass(User.class);verify(userRepository).save(saved.capture());
+        var saved=org.mockito.ArgumentCaptor.forClass(User.class);verify(userRepository).saveAndFlush(saved.capture());
         assertThat(saved.getValue().getEmail()).isEqualTo("case@example.test");
         assertThat(saved.getValue().getFullName()).isEqualTo("Test");assertThat(saved.getValue().getRole()).isEqualTo(Role.BRAND);
         assertThat(saved.getValue().getPasswordHash()).isEqualTo("encoded");
+        assertThat(saved.getValue().isEmailVerified()).isFalse();
+        verify(emailVerification).sendInitial(saved.getValue());
     }
     @Test
     void invalidPasswordDoesNotGenerateAnyTokens() {

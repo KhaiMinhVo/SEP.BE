@@ -41,7 +41,7 @@ import org.testcontainers.junit.jupiter.*;
 import org.testcontainers.utility.DockerImageName;
 
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=validate","spring.flyway.enabled=true",
-    "application.bootstrap-admin.enabled=false","application.oauth2.google.enabled=false",
+    "application.bootstrap-admin.enabled=false",
     "application.payment.mock.enabled=true","spring.jpa.show-sql=false"})
 @ActiveProfiles("dev") @AutoConfigureMockMvc @Testcontainers
 class ComparePaymentPostgresIntegrationTest {

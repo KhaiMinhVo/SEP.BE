@@ -2,7 +2,6 @@ package com.influencermatch.backend.creator;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import com.influencermatch.backend.auth.service.GoogleAuthService;
 import com.influencermatch.backend.creator.model.Creator;
 import com.influencermatch.backend.creator.repository.CreatorRepository;
 import com.influencermatch.backend.support.PostgresApiTestSupport;
@@ -18,7 +17,6 @@ import org.springframework.http.HttpMethod;
 
 class RetiredRateCardPostgresIntegrationTest extends PostgresApiTestSupport {
   @Autowired CreatorRepository creators;
-  @Autowired GoogleAuthService google;
   Creator channel() {return creators.saveAndFlush(Creator.builder().platform("TIKTOK")
       .externalId(UUID.randomUUID().toString()).userName("Channel").build());}
 
@@ -33,8 +31,7 @@ class RetiredRateCardPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test void claimRevokeAndCompareWorkWithoutExposingOrModifyingLegacyPrices() throws Exception {
-    var login=google.exchange(google.completeGoogleLogin(UUID.randomUUID().toString(),UUID.randomUUID()+"@creator.test","Creator",true,Role.CREATOR));
-    var owner=users.findById(login.getUser().getId()).orElseThrow();var reviewer=account(Role.DATA_MANAGER);
+    var owner=account(Role.CREATOR);var reviewer=account(Role.DATA_MANAGER);
     var a=channel();var b=channel();
     var claim=UUID.fromString(call(owner,post("/creators/"+a.getId()+"/claim"),
         Map.of("evidenceUrls",List.of("https://example.test/proof"),"note","Proof"),201).path("data").path("id").asText());
@@ -86,7 +83,7 @@ class RetiredRateCardPostgresIntegrationTest extends PostgresApiTestSupport {
       jdbc.update("update "+prefix+"role_permission_config set version=case role when 'CREATOR' then 7 when 'BRAND' then 3 else 5 end");
       jdbc.update("insert into "+prefix+"role_permission_override(id,role,permission,enabled) values(?,'CREATOR','CLAIM_CREATOR_PROFILE',false)",UUID.randomUUID());
       if(hasRetiredOverride)jdbc.update("insert into "+prefix+"role_permission_override(id,role,permission,enabled) values(?,'CREATOR','MANAGE_OWN_RATE_CARD',false)",UUID.randomUUID());
-      var current=Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema).defaultSchema(schema).load();
+      var current=Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema).defaultSchema(schema).target("12").load();
       assertThat(current.migrate().migrationsExecuted).isEqualTo(1);assertThat(current.validateWithResult().validationSuccessful).isTrue();
       assertThat(jdbc.queryForObject("select count(*) from "+prefix+"role_permission_override where permission='MANAGE_OWN_RATE_CARD'",Long.class)).isZero();
       assertThat(jdbc.queryForObject("select version from "+prefix+"role_permission_config where role='CREATOR'",Long.class)).isEqualTo(hasRetiredOverride?8:7);

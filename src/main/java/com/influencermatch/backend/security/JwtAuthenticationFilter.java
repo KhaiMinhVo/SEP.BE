@@ -50,7 +50,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
         UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
-        if (userDetails.isEnabled()
+        if (((com.influencermatch.backend.user.model.User) userDetails).isEmailVerified()
+            && userDetails.isEnabled()
             && userDetails.isAccountNonLocked()
             && jwtTokenProvider.isTokenValid(jwt, userDetails)) {
           UsernamePasswordAuthenticationToken authToken =

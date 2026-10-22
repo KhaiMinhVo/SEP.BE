@@ -30,7 +30,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 class CreatorClaimServiceTest {
   @Mock CreatorRepository creators;
   @Mock CreatorClaimRepository claims;
-  @Mock ExternalIdentityRepository identities;
   @Mock UserRepository users;
   @Mock AuditService audit;
   @Mock EntityManager em;
@@ -41,7 +40,7 @@ class CreatorClaimServiceTest {
 
   @BeforeEach void setup() {
     factory = Validation.buildDefaultValidatorFactory();
-    service = new CreatorClaimService(creators, claims, identities, users, audit, em, factory.getValidator(), Optional.empty());
+    service = new CreatorClaimService(creators, claims, users, audit, em, factory.getValidator());
     owner = User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
     creator = Creator.builder().id(UUID.randomUUID()).build();
     login(owner);
@@ -52,8 +51,6 @@ class CreatorClaimServiceTest {
   }
   void verified() {
     when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
-    when(identities.findByUserIdAndProvider(owner.getId(), ExternalIdentityProvider.GOOGLE))
-        .thenReturn(Optional.of(ExternalIdentity.builder().emailVerified(true).build()));
   }
   void locked() { when(creators.findLockedById(creator.getId())).thenReturn(Optional.of(creator)); }
   ClaimRequest request() { return new ClaimRequest(List.of("https://example.test/proof"), "My channel"); }
@@ -71,8 +68,9 @@ class CreatorClaimServiceTest {
         eq(Map.of("status", "PENDING", "creatorId", creator.getId(), "claimantId", owner.getId())), anyString());
   }
 
-  @Test void unverifiedIdentityCannotClaim() {
-    when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
+  @Test void unverifiedEmailCannotClaim() {
+    var current=User.builder().id(owner.getId()).role(Role.CREATOR).status(UserStatus.ACTIVE).emailVerified(false).build();
+    when(users.findById(owner.getId())).thenReturn(Optional.of(current));
     assertThatThrownBy(() -> service.claim(creator.getId(), request())).isInstanceOf(ForbiddenException.class);
     verify(claims, never()).saveAndFlush(any());
   }
@@ -113,15 +111,6 @@ class CreatorClaimServiceTest {
     assertThat(creator.getOwner()).isNull();
   }
 
-
-  @Test void devMockIdentityIsNotAcceptedWhenMockServiceIsDisabled() {
-    when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
-    lenient().when(identities.findByUserIdAndProvider(owner.getId(),ExternalIdentityProvider.DEV_MOCK))
-        .thenReturn(Optional.of(ExternalIdentity.builder().provider(ExternalIdentityProvider.DEV_MOCK).user(owner).build()));
-    assertThatThrownBy(()->service.claim(creator.getId(),request())).isInstanceOf(ForbiddenException.class);
-    verify(identities,never()).findByUserIdAndProvider(owner.getId(),ExternalIdentityProvider.DEV_MOCK);
-    verifyNoInteractions(claims,audit);
-  }
 
   @Test void missingChannelNeverCreatesClaim() {
     verified();

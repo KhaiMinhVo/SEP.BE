@@ -49,7 +49,7 @@ import org.testcontainers.utility.DockerImageName;
 @SpringBootTest(
     properties = {
       "spring.jpa.hibernate.ddl-auto=validate", "spring.flyway.enabled=true",
-      "application.bootstrap-admin.enabled=false", "application.oauth2.google.enabled=false",
+      "application.bootstrap-admin.enabled=false",
       "spring.jpa.show-sql=false", "logging.level.org.hibernate.SQL=WARN",
       "logging.level.com.influencermatch=INFO"
     })
@@ -133,7 +133,7 @@ VALUES ('10000000-0000-0000-0000-000000000007','10000000-0000-0000-0000-00000000
           Flyway.configure()
               .dataSource(fresh.getJdbcUrl(), fresh.getUsername(), fresh.getPassword())
               .load();
-      assertThat(flyway.migrate().migrationsExecuted).isEqualTo(12);
+      assertThat(flyway.migrate().migrationsExecuted).isEqualTo(14);
       assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
     }
   }

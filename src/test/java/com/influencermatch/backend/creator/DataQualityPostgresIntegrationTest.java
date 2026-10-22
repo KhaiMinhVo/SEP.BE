@@ -32,7 +32,7 @@ import org.testcontainers.utility.DockerImageName;
 
 @SpringBootTest(properties = {
     "spring.jpa.hibernate.ddl-auto=validate", "spring.flyway.enabled=true",
-    "application.bootstrap-admin.enabled=false", "application.oauth2.google.enabled=false",
+    "application.bootstrap-admin.enabled=false",
     "spring.jpa.show-sql=false", "logging.level.org.hibernate.SQL=WARN"
 })
 @AutoConfigureMockMvc

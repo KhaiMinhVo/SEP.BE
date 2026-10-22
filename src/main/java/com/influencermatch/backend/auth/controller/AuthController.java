@@ -11,7 +11,6 @@ import com.influencermatch.backend.auth.repository.*;
 import com.influencermatch.backend.auth.service.*;
 import com.influencermatch.backend.auth.service.AuthService;
 import com.influencermatch.backend.common.dto.ApiResponse;
-import com.influencermatch.backend.config.GoogleOAuthProperties;
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.user.model.User;
@@ -38,43 +37,23 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
   private final AuthService authService;
-  private final GoogleAuthService googleAuthService;
-  private final GoogleOAuthProperties googleOAuthProperties;
+  private final EmailVerificationService emailVerification;
 
-  @Operation(summary="Start Google login for Creator accounts",security={})
-  @GetMapping("/google/creator")
-  public ResponseEntity<Void> creatorGoogleLogin() {
-    if (!googleOAuthProperties.isEnabled())
-      throw new BusinessException(ErrorCode.GOOGLE_OAUTH_DISABLED,"Google login is not configured");
-    return ResponseEntity.status(302).location(URI.create("/api/v1/oauth2/authorization/google?login_intent=CREATOR")).build();
+  @PostMapping("/verify-email")
+  @Operation(summary="Verify registration email using a one-time six-digit code",security={})
+  public ApiResponse<Void> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+    emailVerification.verify(request.email(),request.otp());return ApiResponse.empty();
+  }
+
+  @PostMapping("/resend-verification")
+  @Operation(summary="Resend email verification code",security={})
+  public ApiResponse<Void> resendVerification(@Valid @RequestBody ResendVerificationRequest request) {
+    emailVerification.resend(request.email());
+    return ApiResponse.ok("If this email needs verification, a code has been sent.",null);
   }
 
   @Operation(
-      summary = "Start Google login for brand accounts",
-      security = {})
-  @GetMapping("/google")
-  public ResponseEntity<Void> googleLogin() {
-    if (!googleOAuthProperties.isEnabled()) {
-      throw new BusinessException(
-          ErrorCode.GOOGLE_OAUTH_DISABLED, "Google login is not configured");
-    }
-    return ResponseEntity.status(302)
-        .location(URI.create("/api/v1/oauth2/authorization/google"))
-        .build();
-  }
-
-  @Operation(
-      summary = "Exchange a one-time Google login code for tokens",
-      security = {})
-  @PostMapping("/google/exchange")
-  public ResponseEntity<ApiResponse<LoginResponse>> googleExchange(
-      @Valid @RequestBody GoogleCodeExchangeRequest request) {
-    return ResponseEntity.ok(
-        ApiResponse.ok("Google login successful.", googleAuthService.exchange(request.code())));
-  }
-
-  @Operation(
-      summary = "Register a new brand account",
+      summary = "Register a brand account and send email verification OTP",
       security = {})
   @PostMapping("/register")
   public ResponseEntity<ApiResponse<Void>> register(@Valid @RequestBody RegisterRequest request) {

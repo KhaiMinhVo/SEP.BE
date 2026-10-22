@@ -24,8 +24,8 @@ import org.springframework.test.web.servlet.MockMvc;
 /**
  * Smoke test that verifies the Spring application context loads without errors.
  *
- * <p>Integration suite backed by PostgreSQL Testcontainers so JSONB, arrays, Flyway, constraints
- * and optimistic locking use the same database semantics as production.
+ * <p>H2 API smoke tests. Domain PostgreSQL Testcontainers suites separately verify
+ * migrations, database constraints, transactions and concurrent updates.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -37,14 +37,19 @@ import org.springframework.test.web.servlet.MockMvc;
       "spring.datasource.username=sa",
       "spring.datasource.password=",
       "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect",
+      "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.H2Dialect",
       "spring.jpa.hibernate.ddl-auto=create-drop",
       "spring.jpa.properties.hibernate.default_schema=PUBLIC",
       "spring.flyway.enabled=false",
+      "application.auth.email-verification.secret=test-email-otp-secret-at-least-32-characters",
       "application.security.jwt.secret-key=404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970",
       "application.security.jwt.expiration=86400000",
       "application.security.jwt.refresh-token.expiration=604800000"
     })
 class BackendApplicationTests {
+
+  @org.springframework.boot.test.mock.mockito.MockBean
+  com.influencermatch.backend.auth.service.VerificationEmailSender mail;
 
   @Autowired MockMvc mvc;
   @Autowired UserRepository users;
@@ -117,10 +122,11 @@ class BackendApplicationTests {
                     "{\"email\":\""
                         + brandEmail
                         + "\",\"password\":\"Password123!\",\"fullName\":\"PoC"
-                        + " Brand\",\"role\":\"ADMIN\"}"))
+                        + " Brand\"}"))
         .andExpect(status().isCreated());
     assertThat(users.findByEmail(brandEmail)).get().extracting("role").isEqualTo(Role.BRAND);
 
+    verifyRegistration(brandEmail);
     JsonNode brandLogin =
         json(
             mvc.perform(
@@ -432,6 +438,7 @@ class BackendApplicationTests {
                         + fullName
                         + "\"}"))
         .andExpect(status().isCreated());
+    verifyRegistration(email);
     String body =
         mvc.perform(
                 post("/auth/login")
@@ -442,6 +449,14 @@ class BackendApplicationTests {
             .getResponse()
             .getContentAsString();
     return json(body).at("/data/accessToken").asText();
+  }
+
+  private void verifyRegistration(String email) throws Exception {
+    var code=org.mockito.ArgumentCaptor.forClass(String.class);
+    org.mockito.Mockito.verify(mail).send(org.mockito.ArgumentMatchers.eq(email),code.capture());
+    mvc.perform(post("/auth/verify-email").contentType(MediaType.APPLICATION_JSON)
+        .content(objectMapper.writeValueAsString(java.util.Map.of("email",email,"otp",code.getValue()))))
+        .andExpect(status().isOk());
   }
 
   private String createAdminAndLogin(String email) throws Exception {

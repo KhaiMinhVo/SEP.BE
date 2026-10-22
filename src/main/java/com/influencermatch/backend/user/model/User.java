@@ -51,6 +51,10 @@ public class User extends BaseEntity implements UserDetails {
   @Column(nullable = false)
   private long authVersion;
 
+  @lombok.Builder.Default
+  @Column(nullable = false)
+  private boolean emailVerified = true;
+
   @Column private LocalDateTime lastLoginAt;
 
   @Override

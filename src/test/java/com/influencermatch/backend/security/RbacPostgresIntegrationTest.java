@@ -34,7 +34,7 @@ import org.testcontainers.junit.jupiter.*;
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {
       "spring.jpa.hibernate.ddl-auto=validate", "spring.flyway.enabled=true",
-      "application.bootstrap-admin.enabled=false", "application.oauth2.google.enabled=false",
+      "application.bootstrap-admin.enabled=false",
       "CREATOR_INGESTION_API_KEY=integration-test-key", "application.vnpay.tmn-code=TEST",
       "application.vnpay.hash-secret=integration-test-signing-secret", "spring.jpa.show-sql=false"
     })
@@ -131,7 +131,7 @@ class RbacPostgresIntegrationTest {
             .schemas("empty_rbac")
             .defaultSchema("empty_rbac")
             .load();
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(12);
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(14);
     assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
   }
 

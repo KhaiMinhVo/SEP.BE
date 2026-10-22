@@ -3,10 +3,15 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  CREATOR_INVITATION_INVALID(HttpStatus.BAD_REQUEST, "Creator invitation is invalid, expired or already used"),
+  EMAIL_NOT_VERIFIED(HttpStatus.FORBIDDEN, "Verify your email before signing in"),
+  EMAIL_ALREADY_VERIFIED(HttpStatus.CONFLICT, "Email is already verified"),
+  EMAIL_OTP_INVALID_OR_EXPIRED(HttpStatus.BAD_REQUEST, "Verification code is invalid or expired"),
+  EMAIL_OTP_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Verification limit reached"),
+  EMAIL_DELIVERY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Verification email is unavailable"),
   DATA_QUALITY_REVIEW_CONFLICT(HttpStatus.CONFLICT, "Snapshot is no longer pending quality review"),
   CREATOR_CLAIM_CONFLICT(HttpStatus.CONFLICT, "Creator claim conflict"),
   CREATOR_ROLE_CHANGE_CONFLICT(HttpStatus.CONFLICT, "Creator has active ownership or pending claims"),
-  GOOGLE_LOGIN_ROLE_MISMATCH(HttpStatus.FORBIDDEN, "Use the Google login for your account role"),
   COLLABORATION_ALREADY_EXISTS(HttpStatus.CONFLICT, "Collaboration already exists"),
   OUTCOME_ALREADY_EXISTS(HttpStatus.CONFLICT, "Outcome already exists"),
   CREATOR_REVIEW_ALREADY_EXISTS(HttpStatus.CONFLICT, "Creator review already exists"),
@@ -17,11 +22,6 @@ public enum ErrorCode {
   INGESTION_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "Creator ingestion is not configured"),
   PAID_PLAN_REQUIRES_PAYMENT(HttpStatus.CONFLICT, "Paid subscription requires checkout"),
   SUBSCRIPTION_CONFLICT(HttpStatus.CONFLICT, "An active subscription already exists"),
-  GOOGLE_OAUTH_DISABLED(HttpStatus.SERVICE_UNAVAILABLE, "Google login is not configured"),
-  GOOGLE_AUTHENTICATION_FAILED(HttpStatus.UNAUTHORIZED, "Google authentication failed"),
-  GOOGLE_EMAIL_NOT_VERIFIED(HttpStatus.UNAUTHORIZED, "Google email is not verified"),
-  AUTH_CODE_INVALID_OR_EXPIRED(
-      HttpStatus.UNAUTHORIZED, "Authentication code is invalid or expired"),
   VALIDATION_ERROR(HttpStatus.BAD_REQUEST, "Validation failed"),
   MALFORMED_REQUEST(HttpStatus.BAD_REQUEST, "Malformed request"),
   EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "Email already exists"),

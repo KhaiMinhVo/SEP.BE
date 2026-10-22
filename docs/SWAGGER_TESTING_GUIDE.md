@@ -43,6 +43,7 @@ Gửi request tới API Auth:
   "avgViews": 15000,
   "avgLikes": 4200,
   "engagementRate": 4.94,
+  "creatorType": "KOC",
   "niche": "BEAUTY",
   "category": "Skincare & Cosmetics",
   "location": "Ho Chi Minh City",

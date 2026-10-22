@@ -34,6 +34,21 @@ public class CreatorInvitationController {
     return ApiResponse.ok(response);
   }
 
+  @PostMapping("/invitations")
+  @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
+  @SecurityRequirement(name = "BearerAuth")
+  @Operation(summary = "Send claim invitation to creator (collection endpoint)")
+  public ApiResponse<InvitationResponse> sendInvitationCollection(
+      @Valid @RequestBody SendInvitationRequest request) {
+    if (request.getCreatorId() == null) {
+      throw new com.influencermatch.backend.exception.BusinessException(
+          com.influencermatch.backend.exception.ErrorCode.MALFORMED_REQUEST, "creatorId is required");
+    }
+    InvitationResponse response =
+        invitationService.sendInvitation(request.getCreatorId(), request.getEmail(), null, request.getCampaignId());
+    return ApiResponse.ok(response);
+  }
+
   @GetMapping("/claim/invitation/verify")
   @Operation(summary = "Verify creator claim invitation token (Public)")
   public ApiResponse<VerifyTokenResponse> verifyInvitation(

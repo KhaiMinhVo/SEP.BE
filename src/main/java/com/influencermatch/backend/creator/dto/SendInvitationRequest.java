@@ -14,6 +14,8 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class SendInvitationRequest {
 
+  private UUID creatorId;
+
   @NotBlank(message = "Email is required")
   @Email(message = "Invalid email format")
   private String email;

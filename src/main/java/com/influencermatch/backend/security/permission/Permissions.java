@@ -9,11 +9,18 @@ public final class Permissions {
   private Permissions() {}
 
   public static User actor() {
+    User user = actorOrNull();
+    if (user == null)
+      throw new BusinessException(ErrorCode.UNAUTHENTICATED, "Authentication required");
+    return user;
+  }
+
+  public static User actorOrNull() {
     var auth = SecurityContextHolder.getContext().getAuthentication();
     if (auth == null || !auth.isAuthenticated() || !(auth.getPrincipal() instanceof User user))
-      throw new BusinessException(ErrorCode.UNAUTHENTICATED, "Authentication required");
+      return null;
     if (user.getStatus() != UserStatus.ACTIVE)
-      throw new BusinessException(ErrorCode.UNAUTHENTICATED, "Account is not active");
+      return null;
     return user;
   }
 

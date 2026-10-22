@@ -106,7 +106,7 @@ public class CreatorClaimResolutionService {
     }
 
     // 4. Resolve Claimant User
-    User claimantUser = explicitUser != null ? explicitUser : Permissions.actor();
+    User claimantUser = explicitUser != null ? explicitUser : Permissions.actorOrNull();
     if (claimantUser == null) {
       claimantUser = userRepository.findByEmail(invitation.getInvitedEmail())
           .orElseGet(() -> {
@@ -116,6 +116,7 @@ public class CreatorClaimResolutionService {
                 .role(Role.CREATOR)
                 .status(UserStatus.ACTIVE)
                 .authVersion(1L)
+                .passwordHash("$2a$10$A/bxwOtUf1iUtnhbppaG5uBmF/iK7f100XS/H/Y.VpjKyRqiEUh52")
                 .build();
             return userRepository.save(newUser);
           });

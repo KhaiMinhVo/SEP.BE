@@ -44,14 +44,28 @@ public class CreatorClaimOAuthController {
   }
 
   @GetMapping("/{platform}/callback")
-  @Operation(summary = "OAuth callback for profile claim proof of control (Public)")
+  @Operation(summary = "OAuth callback for profile claim proof of control (Public GET redirect)")
   public ApiResponse<OAuthCallbackResponse> handleOAuthCallback(
       @PathVariable("platform") String platform,
       @RequestParam("code") String code,
       @RequestParam("state") String state) {
 
     OAuthCallbackResponse response =
-        claimResolutionService.resolveClaim(platform, code, state, null);
+        claimResolutionService.resolveClaim(platform, code, state, com.influencermatch.backend.security.permission.Permissions.actorOrNull());
+
+    return ApiResponse.ok(response);
+  }
+
+  @PostMapping("/{platform}/callback")
+  @Operation(summary = "OAuth callback for profile claim proof of control (JSON POST)")
+  public ApiResponse<OAuthCallbackResponse> handleOAuthCallbackPost(
+      @PathVariable("platform") String platform,
+      @RequestBody java.util.Map<String, String> body) {
+
+    String code = body.getOrDefault("code", body.get("authorizationCode"));
+    String state = body.getOrDefault("token", body.get("state"));
+    OAuthCallbackResponse response =
+        claimResolutionService.resolveClaim(platform, code, state, com.influencermatch.backend.security.permission.Permissions.actorOrNull());
 
     return ApiResponse.ok(response);
   }

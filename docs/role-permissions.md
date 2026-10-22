@@ -56,7 +56,7 @@ thời điểm trong cùng transaction; audit lỗi thì cấu hình/version rol
 BRAND:
 
 - Authentication: `VIEW_OWN_PROFILE`.
-- Creator Profile: `VIEW_CREATOR_PROFILE` (gồm đọc Rate Card).
+- Creator Profile: `VIEW_CREATOR_PROFILE`.
 - Brand Profile: `CREATE_BRAND_PROFILE`, `VIEW_OWN_BRAND_DATA`, `UPDATE_BRAND_PROFILE`.
 - Campaign: `CREATE_CAMPAIGN`, `VIEW_OWN_CAMPAIGN`, `UPDATE_CAMPAIGN`, `CHANGE_CAMPAIGN_STATUS`.
 - Creator Discovery: `SEARCH_CREATOR`.
@@ -70,7 +70,7 @@ BRAND:
 CREATOR:
 
 - `VIEW_OWN_PROFILE`, `VIEW_CREATOR_PROFILE`.
-- `CLAIM_CREATOR_PROFILE`, `VIEW_OWN_CREATOR_CLAIM`, `MANAGE_OWN_RATE_CARD`.
+- `CLAIM_CREATOR_PROFILE`, `VIEW_OWN_CREATOR_CLAIM`.
 
 DATA_MANAGER:
 
@@ -116,3 +116,9 @@ mvn test
 PostgreSQL/pgvector Testcontainers dùng database riêng. Test kiểm tra migration,
 defaults, request cache, cùng token trước/sau thay đổi, các response xác thực,
 quyền ADMIN cố định, validation, optimistic conflict, no-op và audit rollback.
+
+## Permission đã gỡ
+
+`MANAGE_OWN_RATE_CARD` không còn trong enum, quyền mặc định hoặc danh mục Admin.
+Migration V12 xóa override cũ và tăng version cấu hình chỉ cho role có override bị xóa;
+Admin dùng version cũ sẽ gặp conflict. Không xóa bảng giá hoặc audit lịch sử.

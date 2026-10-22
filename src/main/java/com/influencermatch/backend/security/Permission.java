@@ -4,7 +4,6 @@ package com.influencermatch.backend.security;
 public enum Permission {
   CLAIM_CREATOR_PROFILE,
   VIEW_OWN_CREATOR_CLAIM,
-  MANAGE_OWN_RATE_CARD,
   REVIEW_CREATOR_CLAIM,
   VIEW_OWN_PROFILE,
   VIEW_OWN_NOTIFICATION,

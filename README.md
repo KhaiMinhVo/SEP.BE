@@ -240,3 +240,9 @@ API so sánh shortlist và mock thanh toán: [Compare & Mock Payment](docs/compa
 Không tạo role mới hoặc cấp quyền chéo role. Chưa có entitlement/quota gate đầy đủ
 cho mọi API hiện tại; RBAC không thay thế các kiểm tra này khi chúng được triển khai.
 Không thể xem các permission đã khai báo là chức năng đã hoạt động.
+
+### Creator Claim API change
+
+Creator Rate Card endpoints have been removed. Creator profile and shortlist compare responses
+no longer contain `rateCard`. Claim/ownership verification is unchanged. V12 preserves legacy
+prices and audits while retiring the permission override. See [Creator Claim](docs/creator-claim.md).

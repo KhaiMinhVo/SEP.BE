@@ -1,15 +1,10 @@
 package com.influencermatch.backend.creator.service;
 
-import com.influencermatch.backend.creator.dto.CreatorClaimDtos.RateItem;
-import com.influencermatch.backend.creator.dto.CreatorClaimDtos.RateResponse;
 import com.influencermatch.backend.creator.dto.CreatorDetailResponse;
 import com.influencermatch.backend.creator.dto.PostDto;
-import com.influencermatch.backend.creator.enums.CreatorClaimStatus;
 import com.influencermatch.backend.creator.enums.CreatorSourceType;
 import com.influencermatch.backend.creator.model.Creator;
 import com.influencermatch.backend.creator.model.PublicCreatorMetric;
-import com.influencermatch.backend.creator.repository.CreatorClaimRepository;
-import com.influencermatch.backend.creator.repository.CreatorRateCardRepository;
 import com.influencermatch.backend.creator.repository.CreatorRepository;
 import com.influencermatch.backend.creator.repository.PostRepository;
 import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
@@ -30,8 +25,6 @@ public class CreatorService {
   private final CreatorRepository creatorRepository;
   private final PublicCreatorMetricRepository metricRepository;
   private final PostRepository postRepository;
-  private final CreatorClaimRepository claimRepository;
-  private final CreatorRateCardRepository rateCardRepository;
 
   @Transactional(readOnly = true)
   @PreAuthorize("hasAuthority('VIEW_CREATOR_PROFILE')")
@@ -42,21 +35,6 @@ public class CreatorService {
 
     boolean verified = c.getSourceType() == CreatorSourceType.AUTHORIZED && c.getOwner() != null;
     PublicCreatorMetric metric = metricRepository.latestForCreators(List.of(id)).stream().findFirst().orElse(null);
-
-    RateResponse rateCard;
-    if (verified) {
-      rateCard = claimRepository.findFirstByCreatorIdAndStatus(c.getId(), CreatorClaimStatus.APPROVED)
-          .filter(claim -> c.getOwner() != null && claim.getClaimant().getId().equals(c.getOwner().getId()))
-          .map(claim -> {
-            var items = rateCardRepository.findByClaimIdOrderByContentTypeAsc(claim.getId()).stream()
-                .map(r -> new RateItem(r.getContentType(), r.getPrice(), r.getCurrency(), r.getNote()))
-                .toList();
-            return new RateResponse(c.getId(), "CREATOR_DECLARED", items);
-          })
-          .orElseGet(() -> new RateResponse(c.getId(), "CREATOR_DECLARED", List.of()));
-    } else {
-      rateCard = new RateResponse(c.getId(), "CREATOR_DECLARED", List.of());
-    }
 
     List<PostDto> recentPosts = postRepository.findByCreatorId(c.getId()).stream()
         .map(p -> PostDto.builder()
@@ -92,7 +70,6 @@ public class CreatorService {
         .niche(metric != null ? metric.getNiche() : null)
         .category(metric != null ? metric.getCategory() : null)
         .contentSummary(metric != null ? metric.getContentSummary() : null)
-        .rateCard(rateCard)
         .recentPosts(recentPosts)
         .build();
   }

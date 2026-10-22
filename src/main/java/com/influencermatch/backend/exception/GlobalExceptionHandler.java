@@ -93,6 +93,14 @@ public class GlobalExceptionHandler {
     return response(ErrorCode.ACCESS_DENIED, "Permission required", req, Map.of());
   }
 
+  @ExceptionHandler({
+    org.springframework.web.servlet.resource.NoResourceFoundException.class,
+    org.springframework.web.servlet.NoHandlerFoundException.class
+  })
+  ResponseEntity<ProblemDetail> missingEndpoint(Exception ex, HttpServletRequest req) {
+    return response(ErrorCode.RESOURCE_NOT_FOUND, "Resource not found", req, Map.of());
+  }
+
   @ExceptionHandler(Exception.class)
   ResponseEntity<ProblemDetail> unexpected(Exception ex, HttpServletRequest req) {
     log.error("Unhandled error traceId={}", MDC.get("traceId"), ex);

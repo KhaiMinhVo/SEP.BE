@@ -28,7 +28,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class CreatorClaimService {
   private final CreatorRepository creators;
   private final CreatorClaimRepository claims;
-  private final CreatorRateCardRepository cards;
   private final ExternalIdentityRepository identities;
   private final UserRepository users;
   private final AuditService audit;
@@ -130,50 +129,6 @@ public class CreatorClaimService {
     return response(claim);
   }
 
-  @Transactional @PreAuthorize("hasAuthority('MANAGE_OWN_RATE_CARD')")
-  public RateResponse replaceRateCard(UUID id,RateRequest request) {
-    Permissions.require(Permission.MANAGE_OWN_RATE_CARD);validate(request);
-    users.lockRoleChanges();User owner=verifiedCreator(Permissions.actor().getId());
-    Creator creator=lockedCreator(id);
-    if(creator.getOwner()==null || !creator.getOwner().getId().equals(owner.getId()))
-      throw new ForbiddenException("Only the verified owner may change this rate card");
-    CreatorClaim claim=approvedClaim(creator);
-    EnumSet<RateCardContentType> types=EnumSet.noneOf(RateCardContentType.class);
-    for(RateItem item:request.items()) {
-      if(!types.add(item.contentType()))throw new com.influencermatch.backend.exception.ValidationException("Duplicate rate card content type");
-      try { Currency.getInstance(item.currency()); }
-      catch(IllegalArgumentException e) {throw new com.influencermatch.backend.exception.ValidationException("Invalid ISO currency");}
-    }
-    RateResponse before=rateResponse(creator,claim);
-    cards.deleteByClaimId(claim.getId());cards.flush();
-    for(RateItem item:request.items())cards.save(CreatorRateCard.builder().claim(claim).contentType(item.contentType())
-        .price(item.price()).currency(item.currency()).note(item.note()).updatedAt(LocalDateTime.now()).build());
-    cards.flush();
-    RateResponse after=rateResponse(creator,claim);
-    audit.record("UPDATE_CREATOR_RATE_CARD","Creator",id,before,after,"Creator declared rates");
-    return after;
-  }
-
-  @Transactional @PreAuthorize("hasAuthority('VIEW_CREATOR_PROFILE')")
-  public RateResponse rateCard(UUID id) {
-    Permissions.require(Permission.VIEW_CREATOR_PROFILE);
-    Creator creator=lockedCreator(id);
-    if(creator.getSourceType()!=CreatorSourceType.AUTHORIZED || creator.getOwner()==null)
-      return new RateResponse(id,"CREATOR_DECLARED",List.of());
-    return rateResponse(creator,approvedClaim(creator));
-  }
-
-  private RateResponse rateResponse(Creator creator,CreatorClaim claim) {
-    return new RateResponse(creator.getId(),"CREATOR_DECLARED",cards.findByClaimIdOrderByContentTypeAsc(claim.getId()).stream()
-        .map(c->new RateItem(c.getContentType(),c.getPrice(),c.getCurrency(),c.getNote())).toList());
-  }
-  private CreatorClaim approvedClaim(Creator c) {
-    CreatorClaim claim=claims.findFirstByCreatorIdAndStatus(c.getId(),CreatorClaimStatus.APPROVED)
-        .orElseThrow(()->conflict("Channel has no approved claim"));
-    if(c.getOwner()==null || !claim.getClaimant().getId().equals(c.getOwner().getId()))
-      throw conflict("Channel ownership is inconsistent");
-    return claim;
-  }
   private User verifiedCreator(UUID id) {
     User user=users.findById(id).orElseThrow(()->conflict("Claimant no longer exists"));
     if(user.getRole()!=Role.CREATOR || user.getStatus()!=UserStatus.ACTIVE)

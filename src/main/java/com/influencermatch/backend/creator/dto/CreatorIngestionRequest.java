@@ -40,4 +40,10 @@ public class CreatorIngestionRequest {
   
   private List<PostDto> recentPosts;
   private List<Float> embedding;
+
+  // Identity & Provenance
+  private Boolean isStableExternalId;
+  private String crawlRunId;
+  private java.time.LocalDateTime observedAt;
+  private List<String> bioCrossLinks;
 }

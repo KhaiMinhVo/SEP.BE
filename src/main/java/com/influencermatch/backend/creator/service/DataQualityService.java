@@ -6,7 +6,7 @@ import com.influencermatch.backend.creator.dto.DataQualityDtos.*;
 import com.influencermatch.backend.creator.model.PublicCreatorMetric;
 import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.exception.*;
-import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.permission.*;
 import jakarta.persistence.EntityManager;
 import jakarta.validation.*;
 import java.math.BigDecimal;

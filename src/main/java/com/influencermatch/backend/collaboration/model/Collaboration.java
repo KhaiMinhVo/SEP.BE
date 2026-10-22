@@ -40,6 +40,10 @@ public class Collaboration {
   @JoinColumn(nullable = false)
   private Creator creator;
 
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "master_id")
+  private com.influencermatch.backend.creator.model.CreatorMaster master;
+
   @Column(precision = 19, scale = 2)
   private BigDecimal agreedFee;
 

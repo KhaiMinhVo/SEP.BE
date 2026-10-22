@@ -5,7 +5,8 @@ import com.influencermatch.backend.auth.model.*;
 import com.influencermatch.backend.auth.repository.*;
 import com.influencermatch.backend.config.GoogleOAuthProperties;
 import com.influencermatch.backend.exception.*;
-import com.influencermatch.backend.security.JwtTokenProvider;
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
+import com.influencermatch.backend.security.permission.service.EffectivePermissionService;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
@@ -26,7 +27,7 @@ public class GoogleAuthService {
   private final JwtTokenProvider jwtTokenProvider;
   private final RefreshTokenService refreshTokens;
   private final GoogleOAuthProperties properties;
-  private final com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
+  private final EffectivePermissionService effectivePermissions;
   private final SecureRandom secureRandom = new SecureRandom();
 
   @Transactional

@@ -19,4 +19,9 @@ public interface BrandCreatorRelationshipRepository extends JpaRepository<BrandC
     Page<BrandCreatorRelationship> findByCampaignId(UUID campaignId, Pageable pageable);
     boolean existsByCampaignIdAndCreatorId(UUID campaignId, UUID creatorId);
     Optional<BrandCreatorRelationship> findByIdAndUserId(UUID id, UUID userId);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("UPDATE BrandCreatorRelationship r SET r.master = :master WHERE r.creator.id = :creatorId")
+    int updateMasterForCreator(@org.springframework.data.repository.query.Param("creatorId") UUID creatorId,
+                               @org.springframework.data.repository.query.Param("master") com.influencermatch.backend.creator.model.CreatorMaster master);
 }

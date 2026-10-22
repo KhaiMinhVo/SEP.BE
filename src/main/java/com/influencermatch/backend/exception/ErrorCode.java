@@ -5,6 +5,10 @@ import org.springframework.http.HttpStatus;
 public enum ErrorCode {
   DATA_QUALITY_REVIEW_CONFLICT(HttpStatus.CONFLICT, "Snapshot is no longer pending quality review"),
   CREATOR_CLAIM_CONFLICT(HttpStatus.CONFLICT, "Creator claim conflict"),
+  CREATOR_ALREADY_LINKED(HttpStatus.CONFLICT, "Creator account has already been claimed and linked"),
+  IDENTITY_MISMATCH(HttpStatus.CONFLICT, "Authenticated identity does not match target creator account"),
+  INVITATION_ALREADY_PROCESSED(HttpStatus.CONFLICT, "Invitation has already been processed"),
+  INVITATION_EXPIRED(HttpStatus.CONFLICT, "Invitation has expired"),
   CREATOR_ROLE_CHANGE_CONFLICT(HttpStatus.CONFLICT, "Creator has active ownership or pending claims"),
   GOOGLE_LOGIN_ROLE_MISMATCH(HttpStatus.FORBIDDEN, "Use the Google login for your account role"),
   COLLABORATION_ALREADY_EXISTS(HttpStatus.CONFLICT, "Collaboration already exists"),

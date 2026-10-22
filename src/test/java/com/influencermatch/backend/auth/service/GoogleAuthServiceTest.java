@@ -8,7 +8,7 @@ import com.influencermatch.backend.auth.model.*;
 import com.influencermatch.backend.auth.repository.*;
 import com.influencermatch.backend.config.GoogleOAuthProperties;
 import com.influencermatch.backend.exception.*;
-import com.influencermatch.backend.security.JwtTokenProvider;
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
@@ -101,9 +101,9 @@ class GoogleAuthServiceTest {
 
   @BeforeEach
   void setUp() {
-    var effectivePermissions = mock(com.influencermatch.backend.security.role.EffectivePermissionService.class);
+    var effectivePermissions = mock(com.influencermatch.backend.security.permission.service.EffectivePermissionService.class);
     lenient().when(effectivePermissions.names(any())).thenAnswer(i ->
-        com.influencermatch.backend.security.RolePermissions.names(i.getArgument(0)));
+        com.influencermatch.backend.security.permission.RolePermissions.names(i.getArgument(0)));
     GoogleOAuthProperties properties = new GoogleOAuthProperties();
     properties.setExchangeCodeTtlSeconds(60);
     service =

@@ -36,7 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AdminUserControllerTest {
 
     @org.springframework.boot.test.mock.mockito.MockBean
-    private com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
+    private com.influencermatch.backend.security.permission.service.EffectivePermissionService effectivePermissions;
 
     @Autowired
     private MockMvc mockMvc;
@@ -48,7 +48,7 @@ class AdminUserControllerTest {
     private AdminUserService adminUserService;
 
     @MockBean
-    private com.influencermatch.backend.security.JwtTokenProvider jwtTokenProvider;
+    private com.influencermatch.backend.security.jwt.JwtTokenProvider jwtTokenProvider;
 
     @MockBean
     private org.springframework.security.core.userdetails.UserDetailsService userDetailsService;

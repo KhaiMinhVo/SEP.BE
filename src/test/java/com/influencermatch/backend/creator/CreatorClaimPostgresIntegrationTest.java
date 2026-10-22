@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.influencermatch.backend.auth.service.GoogleAuthService;
 import com.influencermatch.backend.creator.model.Creator;
 import com.influencermatch.backend.creator.repository.CreatorRepository;
-import com.influencermatch.backend.security.JwtTokenProvider;
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;

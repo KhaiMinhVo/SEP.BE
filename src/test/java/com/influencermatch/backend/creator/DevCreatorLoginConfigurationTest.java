@@ -5,7 +5,7 @@ import static org.mockito.Mockito.*;
 import com.influencermatch.backend.auth.controller.DevCreatorLoginController;
 import com.influencermatch.backend.auth.service.*;
 import com.influencermatch.backend.auth.repository.ExternalIdentityRepository;
-import com.influencermatch.backend.security.JwtTokenProvider;
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
 import com.influencermatch.backend.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -18,8 +18,8 @@ class DevCreatorLoginConfigurationTest {
       .withBean(UserRepository.class,()->mock(UserRepository.class))
       .withBean(ExternalIdentityRepository.class,()->mock(ExternalIdentityRepository.class))
       .withBean(JwtTokenProvider.class,()->mock(JwtTokenProvider.class))
-      .withBean(com.influencermatch.backend.security.role.EffectivePermissionService.class,
-          ()->mock(com.influencermatch.backend.security.role.EffectivePermissionService.class))
+      .withBean(com.influencermatch.backend.security.permission.service.EffectivePermissionService.class,
+          ()->mock(com.influencermatch.backend.security.permission.service.EffectivePermissionService.class))
       .withBean(RefreshTokenService.class,()->mock(RefreshTokenService.class));
 
   @Test void onlyEnabledInExplicitDevWithFlag() {

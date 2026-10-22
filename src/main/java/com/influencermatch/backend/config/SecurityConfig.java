@@ -1,10 +1,12 @@
 package com.influencermatch.backend.config;
 
-import com.influencermatch.backend.security.GoogleOAuthFailureHandler;
-import com.influencermatch.backend.security.GoogleOAuthSuccessHandler;
-import com.influencermatch.backend.security.JwtAccessDeniedHandler;
-import com.influencermatch.backend.security.JwtAuthenticationEntryPoint;
-import com.influencermatch.backend.security.JwtAuthenticationFilter;
+import com.influencermatch.backend.security.apikey.CreatorServiceKeyFilter;
+import com.influencermatch.backend.security.jwt.JwtAccessDeniedHandler;
+import com.influencermatch.backend.security.jwt.JwtAuthenticationEntryPoint;
+import com.influencermatch.backend.security.jwt.JwtAuthenticationFilter;
+import com.influencermatch.backend.security.oauth.GoogleLoginIntent;
+import com.influencermatch.backend.security.oauth.GoogleOAuthFailureHandler;
+import com.influencermatch.backend.security.oauth.GoogleOAuthSuccessHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -54,7 +56,9 @@ public class SecurityConfig {
     "/swagger-ui.html",
     "/webjars/**",
     "/billing/vnpay/return",
-    "/billing/vnpay/ipn"
+    "/billing/vnpay/ipn",
+    "/creators/claim/invitation/verify",
+    "/creators/claim/oauth/**"
   };
 
   @Bean
@@ -74,7 +78,7 @@ public class SecurityConfig {
                     new org.springframework.security.web.context.NullSecurityContextRepository()))
         .authorizeHttpRequests(a -> a.anyRequest().hasAuthority("SERVICE_INGEST_CREATOR"))
         .addFilterBefore(
-            new com.influencermatch.backend.security.CreatorServiceKeyFilter(key, mapper),
+            new CreatorServiceKeyFilter(key, mapper),
             UsernamePasswordAuthenticationFilter.class);
     return http.build();
   }
@@ -129,8 +133,8 @@ public class SecurityConfig {
           oauth ->
               oauth
                   .authorizationEndpoint(endpoint -> endpoint
-                      .authorizationRequestResolver(new com.influencermatch.backend.security.GoogleLoginIntent.Resolver(clients.getObject()))
-                      .authorizationRequestRepository(new com.influencermatch.backend.security.GoogleLoginIntent.Repository()))
+                      .authorizationRequestResolver(new GoogleLoginIntent.Resolver(clients.getObject()))
+                      .authorizationRequestRepository(new GoogleLoginIntent.Repository()))
                   .successHandler(googleOAuthSuccessHandler)
                   .failureHandler(googleOAuthFailureHandler));
     }

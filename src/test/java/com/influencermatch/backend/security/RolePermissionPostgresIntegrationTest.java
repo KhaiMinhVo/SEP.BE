@@ -5,6 +5,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.fasterxml.jackson.databind.*;
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
+import com.influencermatch.backend.security.permission.*;
 import com.influencermatch.backend.auth.service.GoogleAuthService;
 import com.influencermatch.backend.brand.model.BrandProfile;
 import com.influencermatch.backend.brand.repository.BrandProfileRepository;

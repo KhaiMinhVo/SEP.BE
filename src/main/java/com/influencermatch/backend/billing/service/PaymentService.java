@@ -13,6 +13,7 @@ import com.influencermatch.backend.billing.utils.VnPayUtil;
 import com.influencermatch.backend.brand.model.BrandProfile;
 import com.influencermatch.backend.config.VnPayConfig;
 import com.influencermatch.backend.exception.ResourceNotFoundException;
+import com.influencermatch.backend.security.permission.*;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -40,12 +41,12 @@ public class PaymentService {
   @Transactional
   public PaymentResponse createCheckout(UUID planId, BrandProfile brand, String ipAddress)
       throws UnsupportedEncodingException {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.MANAGE_OWN_SUBSCRIPTION);
+    Permissions.require(
+        Permission.MANAGE_OWN_SUBSCRIPTION);
     if (!brand
         .getUser()
         .getId()
-        .equals(com.influencermatch.backend.security.Permissions.actor().getId()))
+        .equals(Permissions.actor().getId()))
       throw new com.influencermatch.backend.exception.ForbiddenException(
           "Payment belongs to another brand");
     brands

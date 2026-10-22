@@ -20,9 +20,13 @@ import org.hibernate.annotations.UpdateTimestamp;
 @Builder
 public class Creator {
   @ManyToOne(fetch = FetchType.LAZY)
-  @JoinColumn(name = "owner_user_id")
+  @JoinColumn(name = "master_id")
   @com.fasterxml.jackson.annotation.JsonIgnore
-  private com.influencermatch.backend.user.model.User owner;
+  private CreatorMaster master;
+
+  @Builder.Default
+  @Column(name = "is_stable_id", nullable = false)
+  private Boolean isStableId = true;
 
   @Builder.Default
   @Enumerated(EnumType.STRING)
@@ -30,6 +34,37 @@ public class Creator {
   private com.influencermatch.backend.creator.enums.CreatorSourceType sourceType = com.influencermatch.backend.creator.enums.CreatorSourceType.PUBLIC;
 
   private LocalDateTime authorizedAt;
+
+  public User getOwner() {
+    return master != null ? master.getUser() : null;
+  }
+
+  public void setOwner(User owner) {
+    if (owner == null) {
+      this.master = null;
+    } else {
+      this.master =
+          CreatorMaster.builder()
+              .user(owner)
+              .canonicalName(owner.getFullName() != null ? owner.getFullName() : "Creator")
+              .build();
+    }
+  }
+
+  public static class CreatorBuilder {
+    public CreatorBuilder owner(User owner) {
+      if (owner != null) {
+        this.master =
+            CreatorMaster.builder()
+                .user(owner)
+                .canonicalName(owner.getFullName() != null ? owner.getFullName() : "Creator")
+                .build();
+      } else {
+        this.master = null;
+      }
+      return this;
+    }
+  }
 
   @Id
   @GeneratedValue(strategy = GenerationType.UUID)

@@ -34,12 +34,12 @@ public class CreatorDiscoveryService {
 
     @Transactional(readOnly = true)
     public Page<HybridDiscoveryCreatorProjection> discoverCreators(UUID campaignId, DiscoverySearchRequest req) {
-        com.influencermatch.backend.security.Permissions.require(com.influencermatch.backend.security.Permission.SEARCH_CREATOR);
+        com.influencermatch.backend.security.permission.Permissions.require(com.influencermatch.backend.security.permission.Permission.SEARCH_CREATOR);
         // 1. Fetch Campaign and validate existence
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new ResourceNotFoundException("Campaign", "id", campaignId));
 
-        if (!campaign.getBrandProfile().getUser().getId().equals(com.influencermatch.backend.security.Permissions.actor().getId()))
+        if (!campaign.getBrandProfile().getUser().getId().equals(com.influencermatch.backend.security.permission.Permissions.actor().getId()))
             throw new com.influencermatch.backend.exception.ForbiddenException("Campaign belongs to another brand");
         // Allow DRAFT, READY_FOR_DISCOVERY, and ACTIVE campaigns to preview/discover creators.
         // Only block ARCHIVED campaigns.
@@ -58,8 +58,31 @@ public class CreatorDiscoveryService {
                 .build();
 
         // BƯỚC 2: TÌM KIẾM THÔNG MINH KÉP (AI Semantic + FTS Lexical)
-        boolean hasKeyword = (req.getKeyword() != null && !req.getKeyword().trim().isEmpty());
-        String formattedKeyword = formatKeyword(req.getKeyword());
+        boolean hasExplicitKeyword = (req.getKeyword() != null && !req.getKeyword().trim().isEmpty());
+        String effectiveKeyword;
+        boolean isStrictSearch;
+
+        if (hasExplicitKeyword) {
+            effectiveKeyword = req.getKeyword().trim();
+            isStrictSearch = true;
+        } else {
+            // Khi không truyền keyword, tự động dùng context của Campaign để tính Semantic & FTS Score
+            StringBuilder sb = new StringBuilder();
+            if (campaign.getProductService() != null && !campaign.getProductService().isBlank()) {
+                sb.append(campaign.getProductService()).append(" ");
+            }
+            if (campaign.getName() != null && !campaign.getName().isBlank()) {
+                sb.append(campaign.getName()).append(" ");
+            }
+            if (campaign.getNiches() != null && !campaign.getNiches().isEmpty()) {
+                sb.append(String.join(" ", campaign.getNiches())).append(" ");
+            }
+            effectiveKeyword = sb.toString().trim();
+            isStrictSearch = false;
+        }
+
+        boolean hasKeyword = !effectiveKeyword.isEmpty();
+        String formattedKeyword = formatKeyword(effectiveKeyword);
         
         List<Float> vector = Collections.emptyList();
         boolean hasVector = false;
@@ -68,7 +91,7 @@ public class CreatorDiscoveryService {
         if (hasKeyword) {
             try {
                 // Nhánh 1: Gọi Python AI Service lấy vector 768 chiều
-                vector = aiServiceClient.getEmbedding(req.getKeyword().trim());
+                vector = aiServiceClient.getEmbedding(effectiveKeyword);
                 if (vector != null && !vector.isEmpty()) {
                     hasVector = true;
                     queryVectorStr = vector.toString();
@@ -84,7 +107,7 @@ public class CreatorDiscoveryService {
         Pageable pageable = PageRequest.of(req.getPage(), req.getSize());
 
         // BƯỚC 3: TRỘN ĐIỂM XẾP HẠNG (Chạy Native Hybrid Query)
-        Page<HybridDiscoveryCreatorProjection> pool = executeHybridSearch(ctx, req, hasKeyword, formattedKeyword, hasVector, queryVectorStr, pageable);
+        Page<HybridDiscoveryCreatorProjection> pool = executeHybridSearch(ctx, req, isStrictSearch, hasKeyword, formattedKeyword, hasVector, queryVectorStr, pageable);
 
         // BƯỚC 4: TỰ CHỮA LÀNH (FALLBACK - Nới lỏng ràng buộc nếu < 5 ứng viên)
         if (req.getPage() == 0 && pool.getContent().size() < 5) {
@@ -92,7 +115,7 @@ public class CreatorDiscoveryService {
             while (pool.getContent().size() < 5 && attempt <= 2) {
                 log.info("Discovery Fallback triggered: Attempt {}", attempt);
                 relaxConstraints(ctx, req, attempt);
-                pool = executeHybridSearch(ctx, req, hasKeyword, formattedKeyword, hasVector, queryVectorStr, pageable);
+                pool = executeHybridSearch(ctx, req, isStrictSearch, hasKeyword, formattedKeyword, hasVector, queryVectorStr, pageable);
                 attempt++;
             }
         }
@@ -103,6 +126,7 @@ public class CreatorDiscoveryService {
     private Page<HybridDiscoveryCreatorProjection> executeHybridSearch(
             DiscoveryContext ctx,
             DiscoverySearchRequest req,
+            boolean isStrictSearch,
             boolean hasKeyword,
             String formattedKeyword,
             boolean hasVector,
@@ -126,6 +150,7 @@ public class CreatorDiscoveryService {
                 req.getNiche(),
                 followerMin,
                 followerMax,
+                isStrictSearch,
                 hasKeyword,
                 formattedKeyword,
                 hasVector,
@@ -150,9 +175,19 @@ public class CreatorDiscoveryService {
                 req.setMaxFollowers((long) (req.getMaxFollowers() * 1.2));
             }
         } else if (level == 2) {
-            // Lần 2: Gỡ bỏ giới hạn Niche
-            ctx.setNiches(null);
-            req.setNiche(null);
+            // Lần 2: Nới biên độ follower ra 50% nhưng giữ nguyên Niche/Category để tránh kéo creator sai ngành
+            if (ctx.getFollowerMin() != null) {
+                ctx.setFollowerMin((long) (ctx.getFollowerMin() * 0.5));
+            }
+            if (ctx.getFollowerMax() != null) {
+                ctx.setFollowerMax((long) (ctx.getFollowerMax() * 1.5));
+            }
+            if (req.getMinFollowers() != null) {
+                req.setMinFollowers((long) (req.getMinFollowers() * 0.5));
+            }
+            if (req.getMaxFollowers() != null) {
+                req.setMaxFollowers((long) (req.getMaxFollowers() * 1.5));
+            }
         }
     }
 

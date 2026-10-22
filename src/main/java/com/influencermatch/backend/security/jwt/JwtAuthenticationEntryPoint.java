@@ -1,0 +1,58 @@
+package com.influencermatch.backend.security.jwt;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.net.URI;
+import java.time.Instant;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.stereotype.Component;
+
+/**
+ * Custom {@link AuthenticationEntryPoint} that returns a structured JSON ProblemDetail
+ * instead of the default HTML error page when an unauthenticated request reaches a secured
+ * endpoint.
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
+
+  private final ObjectMapper objectMapper;
+
+  @Override
+  public void commence(
+      HttpServletRequest request,
+      HttpServletResponse response,
+      AuthenticationException authException)
+      throws IOException {
+
+    log.warn(
+        "Unauthorized access attempt to '{}': {}",
+        request.getRequestURI(),
+        authException.getMessage());
+
+    response.setStatus(HttpStatus.UNAUTHORIZED.value());
+    response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+    ProblemDetail body =
+        ProblemDetail.forStatusAndDetail(
+            HttpStatus.UNAUTHORIZED,
+            "Authentication required. Please provide a valid Bearer token.");
+    body.setTitle("Authentication required");
+    body.setType(URI.create("https://api.influencermatch/errors/unauthenticated"));
+    body.setInstance(URI.create(request.getRequestURI()));
+    body.setProperty("code", "UNAUTHENTICATED");
+    body.setProperty("traceId", MDC.get("traceId"));
+    body.setProperty("timestamp", Instant.now());
+
+    objectMapper.writeValue(response.getOutputStream(), body);
+  }
+}

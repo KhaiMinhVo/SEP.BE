@@ -41,7 +41,7 @@ spring:
   # ------------------------------------------------------------------------------------
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: none
     show-sql: true
     properties:
       hibernate:
@@ -95,6 +95,8 @@ application:
       expiration: ${JWT_EXPIRATION:900000} # 15 minutes
       refresh-token:
         expiration: 604800000      # 7 days in milliseconds
+    oauth-token:
+      secret-key: ${OAUTH_TOKEN_SECRET_KEY:dGhpc0lzQTI1NkJpdFNlY3JldEtleUZvck9BdXRoVG9rZW5zIQ==}
   
   vnpay:
     tmn-code: ${VNPAY_TMN_CODE:RIQUTV9F}

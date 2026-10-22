@@ -6,6 +6,7 @@ import com.influencermatch.backend.billing.service.PaymentService;
 import com.influencermatch.backend.brand.model.BrandProfile;
 import com.influencermatch.backend.brand.repository.BrandProfileRepository;
 import com.influencermatch.backend.common.dto.ApiResponse;
+import com.influencermatch.backend.security.permission.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.Enumeration;
@@ -37,11 +38,11 @@ public class PaymentController {
       HttpServletRequest httpServletRequest)
       throws Exception {
 
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.MANAGE_OWN_SUBSCRIPTION);
+    Permissions.require(
+        Permission.MANAGE_OWN_SUBSCRIPTION);
     BrandProfile brandProfile =
         brandProfileRepository
-            .findByUserId(com.influencermatch.backend.security.Permissions.actor().getId())
+            .findByUserId(Permissions.actor().getId())
             .orElseThrow(
                 () ->
                     new com.influencermatch.backend.exception.NotFoundException(

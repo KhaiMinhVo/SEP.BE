@@ -4,7 +4,7 @@ import com.influencermatch.backend.auth.dto.LoginRequest;
 import com.influencermatch.backend.auth.dto.LoginResponse;
 import com.influencermatch.backend.auth.dto.RegisterRequest;
 import com.influencermatch.backend.exception.BusinessException;
-import com.influencermatch.backend.security.JwtTokenProvider;
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
 import com.influencermatch.backend.user.enums.Role;
 import com.influencermatch.backend.user.enums.UserStatus;
 import com.influencermatch.backend.user.model.User;
@@ -45,7 +45,7 @@ class AuthServiceTest {
     private RefreshTokenService refreshTokenService;
 
     @Mock
-    private com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
+    private com.influencermatch.backend.security.permission.service.EffectivePermissionService effectivePermissions;
 
     @Mock
     private com.influencermatch.backend.auth.service.EmailVerificationService emailVerification;
@@ -59,7 +59,7 @@ class AuthServiceTest {
     void setUp() {
         testUser = createMockUser();
         lenient().when(effectivePermissions.names(any())).thenAnswer(i ->
-            com.influencermatch.backend.security.RolePermissions.names(i.getArgument(0)));
+            com.influencermatch.backend.security.permission.RolePermissions.names(i.getArgument(0)));
     }
 
     @Test

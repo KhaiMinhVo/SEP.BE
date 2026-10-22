@@ -12,7 +12,9 @@ import com.influencermatch.backend.auth.repository.*;
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.exception.RefreshTokenReplayException;
-import com.influencermatch.backend.security.JwtTokenProvider;
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
+import com.influencermatch.backend.security.permission.*;
+import com.influencermatch.backend.security.permission.service.EffectivePermissionService;
 import com.influencermatch.backend.user.enums.Role;
 import com.influencermatch.backend.user.enums.UserStatus;
 import com.influencermatch.backend.user.model.User;
@@ -38,7 +40,7 @@ public class AuthServiceImpl implements AuthService {
   private final JwtTokenProvider jwtTokenProvider;
   private final AuthenticationManager authenticationManager;
   private final RefreshTokenService refreshTokenService;
-  private final com.influencermatch.backend.security.role.EffectivePermissionService effectivePermissions;
+  private final EffectivePermissionService effectivePermissions;
 
   @Override
   @Transactional
@@ -136,8 +138,8 @@ public class AuthServiceImpl implements AuthService {
 
   @Override
   public UserProfileResponse getProfile(User currentUser) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.VIEW_OWN_PROFILE);
+    Permissions.require(
+        Permission.VIEW_OWN_PROFILE);
     return UserProfileResponse.builder()
         .id(currentUser.getId())
         .email(currentUser.getEmail())

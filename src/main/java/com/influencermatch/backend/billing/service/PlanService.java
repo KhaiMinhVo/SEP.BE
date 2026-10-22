@@ -7,6 +7,7 @@ import com.influencermatch.backend.billing.enums.*;
 import com.influencermatch.backend.billing.model.*;
 import com.influencermatch.backend.billing.repository.*;
 import com.influencermatch.backend.exception.ResourceNotFoundException;
+import com.influencermatch.backend.security.permission.*;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -27,8 +28,8 @@ public class PlanService {
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('MANAGE_PLAN')")
   public PlanDTOs.PlanResponse createPlan(PlanDTOs.PlanCreateRequest request) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.MANAGE_PLAN);
+    Permissions.require(
+        Permission.MANAGE_PLAN);
     Plan plan =
         Plan.builder()
             .planName(request.getPlanName())
@@ -54,11 +55,11 @@ public class PlanService {
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('VIEW_PLAN') or hasAuthority('MANAGE_PLAN')")
   public Page<PlanDTOs.PlanResponse> getAllPlans(Pageable pageable) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.VIEW_PLAN,
-        com.influencermatch.backend.security.Permission.MANAGE_PLAN);
-    if (!com.influencermatch.backend.security.Permissions.has(
-        com.influencermatch.backend.security.Permission.MANAGE_PLAN))
+    Permissions.require(
+        Permission.VIEW_PLAN,
+        Permission.MANAGE_PLAN);
+    if (!Permissions.has(
+        Permission.MANAGE_PLAN))
       return planRepository.findByStatus(PlanStatus.ACTIVE, pageable).map(this::toResponse);
     return planRepository.findAll(pageable).map(this::toResponse);
   }
@@ -67,12 +68,12 @@ public class PlanService {
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('VIEW_PLAN') or hasAuthority('MANAGE_PLAN')")
   public PlanDTOs.PlanResponse getPlanById(UUID id) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.VIEW_PLAN,
-        com.influencermatch.backend.security.Permission.MANAGE_PLAN);
+    Permissions.require(
+        Permission.VIEW_PLAN,
+        Permission.MANAGE_PLAN);
     Plan plan = findPlanEntityById(id);
-    if (!com.influencermatch.backend.security.Permissions.has(
-            com.influencermatch.backend.security.Permission.MANAGE_PLAN)
+    if (!Permissions.has(
+            Permission.MANAGE_PLAN)
         && plan.getStatus() != PlanStatus.ACTIVE)
       throw new ResourceNotFoundException("Plan", "id", id);
     return toResponse(plan);
@@ -81,8 +82,8 @@ public class PlanService {
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('MANAGE_PLAN')")
   public PlanDTOs.PlanResponse updatePlan(UUID id, PlanDTOs.PlanUpdateRequest request) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.MANAGE_PLAN);
+    Permissions.require(
+        Permission.MANAGE_PLAN);
     Plan plan = findPlanEntityById(id);
 
     var before = toResponse(plan);
@@ -106,8 +107,8 @@ public class PlanService {
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('MANAGE_PLAN')")
   public void deactivatePlan(UUID id) {
-    com.influencermatch.backend.security.Permissions.require(
-        com.influencermatch.backend.security.Permission.MANAGE_PLAN);
+    Permissions.require(
+        Permission.MANAGE_PLAN);
     Plan plan = findPlanEntityById(id);
     var before = toResponse(plan);
     plan.setStatus(PlanStatus.INACTIVE);

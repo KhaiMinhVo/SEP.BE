@@ -1,8 +1,9 @@
 package com.influencermatch.backend.config;
 
-import com.influencermatch.backend.security.JwtAccessDeniedHandler;
-import com.influencermatch.backend.security.JwtAuthenticationEntryPoint;
-import com.influencermatch.backend.security.JwtAuthenticationFilter;
+import com.influencermatch.backend.security.apikey.CreatorServiceKeyFilter;
+import com.influencermatch.backend.security.jwt.JwtAccessDeniedHandler;
+import com.influencermatch.backend.security.jwt.JwtAuthenticationEntryPoint;
+import com.influencermatch.backend.security.jwt.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -50,7 +51,9 @@ public class SecurityConfig {
     "/swagger-ui.html",
     "/webjars/**",
     "/billing/vnpay/return",
-    "/billing/vnpay/ipn"
+    "/billing/vnpay/ipn",
+    "/creators/claim/invitation/verify",
+    "/creators/claim/oauth/**"
   };
 
   @Bean
@@ -70,7 +73,7 @@ public class SecurityConfig {
                     new org.springframework.security.web.context.NullSecurityContextRepository()))
         .authorizeHttpRequests(a -> a.anyRequest().hasAuthority("SERVICE_INGEST_CREATOR"))
         .addFilterBefore(
-            new com.influencermatch.backend.security.CreatorServiceKeyFilter(key, mapper),
+            new CreatorServiceKeyFilter(key, mapper),
             UsernamePasswordAuthenticationFilter.class);
     return http.build();
   }

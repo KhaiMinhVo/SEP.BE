@@ -7,7 +7,7 @@ import com.influencermatch.backend.creator.enums.*;
 import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.exception.*;
-import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.permission.*;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service @RequiredArgsConstructor
 public class CreatorClaimService {
   private final CreatorRepository creators;
+  private final CreatorMasterRepository masters;
   private final CreatorClaimRepository claims;
   private final UserRepository users;
   private final AuditService audit;
@@ -87,6 +88,8 @@ public class CreatorClaimService {
     if(request.decision()==Decision.APPROVED) {
       User claimant=verifiedCreator(claim.getClaimant().getId());
       if(creator.getOwner()!=null)throw conflict("The channel already has a verified owner");
+      creator.setMaster(masters.findByUserId(claimant.getId()).orElseGet(() -> masters.save(
+          CreatorMaster.builder().user(claimant).canonicalName(claimant.getFullName()).status("ACTIVE").build())));
       creator.setOwner(claimant);creator.setSourceType(CreatorSourceType.AUTHORIZED);creator.setAuthorizedAt(LocalDateTime.now());
       claim.setStatus(CreatorClaimStatus.APPROVED);
       // Locking the channel serializes every review, including automatic rejection of competing requests.
@@ -118,7 +121,7 @@ public class CreatorClaimService {
       throw conflict("Only the active approved claim can be revoked");
     claim.setStatus(CreatorClaimStatus.REVOKED);claim.setRevokedBy(Permissions.actor());
     claim.setRevokeReason(request.reason());claim.setRevokedAt(LocalDateTime.now());
-    creator.setOwner(null);creator.setSourceType(CreatorSourceType.PUBLIC);creator.setAuthorizedAt(null);
+    creator.setOwner(null);creator.setMaster(null);creator.setSourceType(CreatorSourceType.PUBLIC);creator.setAuthorizedAt(null);
     audit.record("REVOKE_CREATOR_CLAIM","CreatorClaim",id,Map.of("status","APPROVED"),
         Map.of("status","REVOKED","creatorId",creator.getId()),request.reason());
     claims.flush();

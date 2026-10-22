@@ -20,7 +20,7 @@ import com.influencermatch.backend.creator.repository.CreatorRepository;
 import com.influencermatch.backend.relationship.enums.RelationshipStage;
 import com.influencermatch.backend.relationship.model.BrandCreatorRelationship;
 import com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository;
-import com.influencermatch.backend.security.JwtTokenProvider;
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
@@ -133,7 +133,7 @@ VALUES ('10000000-0000-0000-0000-000000000007','10000000-0000-0000-0000-00000000
           Flyway.configure()
               .dataSource(fresh.getJdbcUrl(), fresh.getUsername(), fresh.getPassword())
               .load();
-      assertThat(flyway.migrate().migrationsExecuted).isEqualTo(14);
+      assertThat(flyway.migrate().migrationsExecuted).isEqualTo(16);
       assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
     }
   }

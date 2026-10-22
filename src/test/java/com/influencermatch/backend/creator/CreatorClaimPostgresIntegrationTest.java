@@ -7,7 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.influencermatch.backend.creator.model.Creator;
 import com.influencermatch.backend.creator.repository.CreatorRepository;
-import com.influencermatch.backend.security.JwtTokenProvider;
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
@@ -106,9 +106,10 @@ class CreatorClaimPostgresIntegrationTest {
         .andExpect(jsonPath("$.data.verifiedByInfluencerMatch").value(true));
     mvc.perform(post("/creators/ingest").header("X-Service-Key", "claim-integration-key")
         .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
-            "platform", c.getPlatform(), "externalId", c.getExternalId(), "userName", "updated"))))
+            "platform", c.getPlatform(), "externalId", c.getExternalId(), "userName", "updated", "creatorType", "KOC"))))
         .andExpect(status().isOk());
     assertThat(creators.findById(c.getId()).orElseThrow().getSourceType().name()).isEqualTo("AUTHORIZED");
+    assertThat(creators.findById(c.getId()).orElseThrow().getUserName()).isEqualTo("updated");
     call(reviewer, post("/data/creator-claims/" + id + "/revoke"), "{\"reason\":\"Ownership withdrawn\"}", 200);
     assertThat(creators.findById(c.getId()).orElseThrow().getSourceType().name()).isEqualTo("PUBLIC");
     claim(other, c);

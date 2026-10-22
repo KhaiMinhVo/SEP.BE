@@ -2,6 +2,7 @@ package com.influencermatch.backend.security;
 
 import static org.assertj.core.api.Assertions.*;
 
+import com.influencermatch.backend.security.jwt.JwtTokenProvider;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import io.jsonwebtoken.Jwts;

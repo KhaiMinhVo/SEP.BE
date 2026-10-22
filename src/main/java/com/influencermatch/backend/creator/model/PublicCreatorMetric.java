@@ -63,6 +63,12 @@ public class PublicCreatorMetric {
   @Column(name = "collected_at", nullable = false)
   private LocalDateTime collectedAt;
 
+  @Column(name = "crawl_run_id", length = 64)
+  private String crawlRunId;
+
+  @Column(name = "observed_at")
+  private LocalDateTime observedAt;
+
   @Enumerated(EnumType.STRING)
   @Column(name = "freshness_status", nullable = false, length = 32)
   private MetricDataStatus freshnessStatus;

@@ -6,8 +6,10 @@ import java.util.UUID;
 public interface HybridDiscoveryCreatorProjection {
     UUID getId();
     UUID getCreatorId();
+    UUID getMasterId();
     String getUserName();
     String getDisplayName();
+    String getClaimStatus();
     String getPlatform();
     String getAvatarUrl();
     String getProfileUrl();

@@ -3,6 +3,7 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  OAUTH_PROVIDER_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Social OAuth provider is not configured"),
   CREATOR_INVITATION_INVALID(HttpStatus.BAD_REQUEST, "Creator invitation is invalid, expired or already used"),
   EMAIL_NOT_VERIFIED(HttpStatus.FORBIDDEN, "Verify your email before signing in"),
   EMAIL_ALREADY_VERIFIED(HttpStatus.CONFLICT, "Email is already verified"),
@@ -11,6 +12,10 @@ public enum ErrorCode {
   EMAIL_DELIVERY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Verification email is unavailable"),
   DATA_QUALITY_REVIEW_CONFLICT(HttpStatus.CONFLICT, "Snapshot is no longer pending quality review"),
   CREATOR_CLAIM_CONFLICT(HttpStatus.CONFLICT, "Creator claim conflict"),
+  CREATOR_ALREADY_LINKED(HttpStatus.CONFLICT, "Creator account has already been claimed and linked"),
+  IDENTITY_MISMATCH(HttpStatus.CONFLICT, "Authenticated identity does not match target creator account"),
+  INVITATION_ALREADY_PROCESSED(HttpStatus.CONFLICT, "Invitation has already been processed"),
+  INVITATION_EXPIRED(HttpStatus.CONFLICT, "Invitation has expired"),
   CREATOR_ROLE_CHANGE_CONFLICT(HttpStatus.CONFLICT, "Creator has active ownership or pending claims"),
   COLLABORATION_ALREADY_EXISTS(HttpStatus.CONFLICT, "Collaboration already exists"),
   OUTCOME_ALREADY_EXISTS(HttpStatus.CONFLICT, "Outcome already exists"),

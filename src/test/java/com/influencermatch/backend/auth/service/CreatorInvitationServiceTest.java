@@ -25,6 +25,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 @ExtendWith(MockitoExtension.class)
 class CreatorInvitationServiceTest {
   @Mock UserRepository users;
+  @Mock com.influencermatch.backend.creator.repository.CreatorMasterRepository masters;
   @Mock CreatorInvitationRepository invitations;
   @Mock CreatorInvitationDeliveryRepository deliveries;
   @Mock VerificationEmailSender sender;
@@ -34,7 +35,7 @@ class CreatorInvitationServiceTest {
   CreatorInvitationService service;
   Instant now=Instant.parse("2026-10-22T00:00:00Z");
   @BeforeEach void setup() {
-    service=new CreatorInvitationService(users,invitations,deliveries,sender,verification,encoder,audit,Clock.fixed(now,ZoneOffset.UTC),"https://frontend.example.test/");
+    service=new CreatorInvitationService(users,masters,invitations,deliveries,sender,verification,encoder,audit,Clock.fixed(now,ZoneOffset.UTC),"https://frontend.example.test/");
     var admin=User.builder().id(UUID.randomUUID()).role(Role.ADMIN).status(UserStatus.ACTIVE).build();
     SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(admin,null,admin.getAuthorities()));
   }

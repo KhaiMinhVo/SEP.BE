@@ -245,3 +245,9 @@ Email/password registration now requires SMTP email verification before login.
 Configure SMTP and `EMAIL_OTP_SECRET` using `.env.example`; registration returns 503
 when email delivery is unavailable. Existing accounts remain verified.
 See [Registration Email Verification](docs/email-verification.md) for API and frontend changes.
+
+## CreatorMaster integration
+
+Creator registration remains invitation-only with email OTP. Google Login is removed.
+See [be_vy integration notes](docs/be-vy-integration.md) for forward migrations,
+the distinction between registration and profile-claim invitations, and the development-only OAuth simulation.

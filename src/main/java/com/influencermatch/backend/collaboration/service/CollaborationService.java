@@ -11,7 +11,7 @@ import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.relationship.enums.RelationshipStage;
 import com.influencermatch.backend.relationship.model.BrandCreatorRelationship;
 import com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository;
-import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.permission.*;
 import jakarta.persistence.EntityManager;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validator;

@@ -40,7 +40,7 @@ class CreatorClaimServiceTest {
 
   @BeforeEach void setup() {
     factory = Validation.buildDefaultValidatorFactory();
-    service = new CreatorClaimService(creators, claims, users, audit, em, factory.getValidator());
+    service = new CreatorClaimService(creators, mock(com.influencermatch.backend.creator.repository.CreatorMasterRepository.class), claims, users, audit, em, factory.getValidator());
     owner = User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
     creator = Creator.builder().id(UUID.randomUUID()).build();
     login(owner);

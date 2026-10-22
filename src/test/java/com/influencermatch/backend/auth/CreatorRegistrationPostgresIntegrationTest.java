@@ -67,6 +67,7 @@ class CreatorRegistrationPostgresIntegrationTest extends PostgresApiTestSupport 
     register(token,201);resolve(token,400);register(token,400);
     var user=users.findByEmail(email).orElseThrow();assertThat(user.getRole()).isEqualTo(Role.CREATOR);assertThat(user.getFullName()).isEqualTo("Creator");
     assertThat(user.isEmailVerified()).isFalse();assertThat(encoder.matches("Password123!",user.getPasswordHash())).isTrue();
+    assertThat(jdbc.queryForObject("select count(*) from creator_master where user_id=?",Long.class,user.getId())).isEqualTo(1);
     call(null,post("/auth/login"),Map.of("email",email,"password","Password123!"),403);
     var channel=creators.saveAndFlush(Creator.builder().platform("TIKTOK").externalId(UUID.randomUUID().toString()).userName("Creator").build());
     call(user,post("/creators/"+channel.getId()+"/claim"),Map.of("evidenceUrls",List.of("https://example.test/proof"),"note","Proof"),401);
@@ -256,7 +257,7 @@ class CreatorRegistrationPostgresIntegrationTest extends PostgresApiTestSupport 
       jdbc.update("insert into "+schema+".creator(id,platform,external_id,user_name,owner_user_id,source_type,authorized_at,created_at,updated_at) values(?,'TIKTOK','legacy','legacy',?,'AUTHORIZED',now(),now(),now())",channel,id);
       jdbc.update("insert into "+schema+".email_verification_otp(user_id,code_hash,expires_at,last_sent_at) values(?,repeat('a',64),now()+interval '10 minutes',now())",id);
       jdbc.update("insert into "+schema+".auth_exchange_code(id,user_id,code_hash,expires_at,consumed_at,created_at) values(?,?,repeat('b',64),now()+interval '1 minute',now(),now())",exchange,id);
-      var current=Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema).defaultSchema(schema).load();assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+      var current=Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema).defaultSchema(schema).target("14").load();assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
       assertThat(current.validateWithResult().validationSuccessful).isTrue();
       assertThat(jdbc.queryForObject("select email_verified from "+schema+".\"user\" where id=?",Boolean.class,id)).isTrue();
       assertThat(jdbc.queryForObject("select owner_user_id from "+schema+".creator where id=?",UUID.class,channel)).isEqualTo(id);

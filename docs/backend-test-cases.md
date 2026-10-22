@@ -1,5 +1,19 @@
 # Backend Test Cases — Khải
 
+## Kết quả tích hợp be_vy — 22/10/2026
+
+- Full regression sau xử lý conflict: **506 test / 62 suite; 506 đạt, 0 thất bại, 0 lỗi, 0 bỏ qua**.
+- Giữ CreatorMaster, lời mời đăng ký qua SMTP và bắt buộc OTP; gỡ Google Login.
+- Bổ sung kiểm tra migration tiến lên giữ ownership/lời mời cũ, đăng ký tạo Master rỗng,
+  chặn callback tự tạo User hoặc bỏ qua OTP, và giới hạn OAuth mô phỏng ở dev.
+- Test thuộc `be_vy` có một số suite đặt tên Integration nhưng sử dụng Mockito; kết quả
+  trên gồm cả các suite đó và các suite API/PostgreSQL Testcontainers thật.
+- Đã xử lý lỗi tích hợp lazy ownership, phạm vi nâng cấp V14, fixture thiếu ACTIVE và
+  danh mục permission đánh dấu editable cho chức năng chưa triển khai; giữ assertion kiểm tra.
+- Không chứa YouTube thật/V15 local, Bruno, `.env`, build/log hoặc bản sửa embedding local.
+- Không chạy migration database dùng chung hay restart BE. Xem [integration notes](be-vy-integration.md).
+
+
 ## Kết quả thực thi ngày 22/10/2026 — Creator invitations, gỡ Google Login
 
 - Full regression bản cuối: **450 test / 50 suite; 450 đạt, 0 thất bại, 0 lỗi thực thi, 0 bỏ qua**.

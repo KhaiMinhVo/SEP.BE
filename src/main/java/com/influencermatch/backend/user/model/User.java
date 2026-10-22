@@ -64,7 +64,7 @@ public class User extends BaseEntity implements UserDetails {
 
   @Override
   public Collection<? extends GrantedAuthority> getAuthorities() {
-    return com.influencermatch.backend.security.RolePermissions.authorities(role);
+    return com.influencermatch.backend.security.permission.RolePermissions.authorities(role);
   }
 
   @Override

@@ -5,7 +5,8 @@ import com.influencermatch.backend.auth.model.*;
 import com.influencermatch.backend.auth.repository.*;
 import com.influencermatch.backend.audit.service.AuditService;
 import com.influencermatch.backend.exception.*;
-import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.jwt.*;
+import com.influencermatch.backend.security.permission.*;
 import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
@@ -25,6 +26,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 @Service
 public class CreatorInvitationService {
   private final UserRepository users;
+  private final com.influencermatch.backend.creator.repository.CreatorMasterRepository masters;
   private final CreatorInvitationRepository invitations;
   private final CreatorInvitationDeliveryRepository deliveries;
   private final VerificationEmailSender sender;
@@ -34,11 +36,11 @@ public class CreatorInvitationService {
   private final Clock clock;
   private final String frontend;
   private final SecureRandom random=new SecureRandom();
-  public CreatorInvitationService(UserRepository users,CreatorInvitationRepository invitations,
+  public CreatorInvitationService(UserRepository users,com.influencermatch.backend.creator.repository.CreatorMasterRepository masters,CreatorInvitationRepository invitations,
       CreatorInvitationDeliveryRepository deliveries,VerificationEmailSender sender,EmailVerificationService verification,
       PasswordEncoder encoder,AuditService audit,Clock clock,
       @Value("${application.auth.creator-invitation.frontend-base-url:http://localhost:5173}") String frontend) {
-    this.users=users;this.invitations=invitations;this.deliveries=deliveries;this.sender=sender;
+    this.users=users;this.masters=masters;this.invitations=invitations;this.deliveries=deliveries;this.sender=sender;
     this.verification=verification;this.encoder=encoder;this.audit=audit;this.clock=clock;
     var uri=java.net.URI.create(frontend);
     if(!Set.of("http","https").contains(uri.getScheme()) || uri.getHost()==null || uri.getRawQuery()!=null || uri.getRawFragment()!=null || uri.getUserInfo()!=null)
@@ -75,6 +77,8 @@ public class CreatorInvitationService {
     if(users.existsByEmail(invitation.getEmail()))throw new BusinessException(ErrorCode.EMAIL_ALREADY_EXISTS,"This email already has an account");
     User user=users.saveAndFlush(User.builder().email(invitation.getEmail()).fullName(request.fullName().trim())
         .passwordHash(encoder.encode(request.password())).role(Role.CREATOR).status(UserStatus.ACTIVE).emailVerified(false).build());
+    masters.save(com.influencermatch.backend.creator.model.CreatorMaster.builder()
+        .user(user).canonicalName(user.getFullName()).status("ACTIVE").build());
     invitation.setConsumedAt(clock.instant());verification.sendInitial(user);
   }
   private CreatorInvitation valid(String token) {

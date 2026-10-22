@@ -3,7 +3,7 @@ package com.influencermatch.backend.audit.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.influencermatch.backend.audit.model.AuditLog;
 import com.influencermatch.backend.audit.repository.AuditLogRepository;
-import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.permission.Permissions;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;

@@ -37,7 +37,7 @@ class AdminRoleGuardTest {
   @ParameterizedTest @ValueSource(booleans={true,false})
   void creatorOwnershipOrPendingClaimPreventsRoleChange(boolean owned){
     var target=TestActors.user(Role.CREATOR);when(users.findById(target.getId())).thenReturn(Optional.of(target));
-    when(creators.existsByOwnerId(target.getId())).thenReturn(owned);
+    when(creators.existsByMasterUserId(target.getId())).thenReturn(owned);
     if(!owned)when(claims.existsByClaimantIdAndStatus(target.getId(),CreatorClaimStatus.PENDING)).thenReturn(true);
     assertThatThrownBy(()->service.changeRole(target.getId(),new UpdateUserRoleRequest(Role.DATA_MANAGER,"Change")))
         .isInstanceOfSatisfying(BusinessException.class,e->assertThat(e.code()).isEqualTo(ErrorCode.CREATOR_ROLE_CHANGE_CONFLICT));

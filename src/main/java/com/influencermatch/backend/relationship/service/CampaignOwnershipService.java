@@ -3,7 +3,7 @@ package com.influencermatch.backend.relationship.service;
 import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.campaign.repository.CampaignRepository;
 import com.influencermatch.backend.exception.NotFoundException;
-import com.influencermatch.backend.security.*;
+import com.influencermatch.backend.security.permission.*;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;

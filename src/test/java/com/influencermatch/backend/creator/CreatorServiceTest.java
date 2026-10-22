@@ -4,18 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
-import com.influencermatch.backend.creator.dto.CreatorClaimDtos.RateItem;
 import com.influencermatch.backend.creator.dto.CreatorDetailResponse;
-import com.influencermatch.backend.creator.enums.CreatorClaimStatus;
 import com.influencermatch.backend.creator.enums.CreatorSourceType;
-import com.influencermatch.backend.creator.enums.RateCardContentType;
 import com.influencermatch.backend.creator.model.Creator;
-import com.influencermatch.backend.creator.model.CreatorClaim;
-import com.influencermatch.backend.creator.model.CreatorRateCard;
 import com.influencermatch.backend.creator.model.Post;
 import com.influencermatch.backend.creator.model.PublicCreatorMetric;
-import com.influencermatch.backend.creator.repository.CreatorClaimRepository;
-import com.influencermatch.backend.creator.repository.CreatorRateCardRepository;
 import com.influencermatch.backend.creator.repository.CreatorRepository;
 import com.influencermatch.backend.creator.repository.PostRepository;
 import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
@@ -44,8 +37,6 @@ class CreatorServiceTest {
   @Mock CreatorRepository creatorRepository;
   @Mock PublicCreatorMetricRepository metricRepository;
   @Mock PostRepository postRepository;
-  @Mock CreatorClaimRepository claimRepository;
-  @Mock CreatorRateCardRepository rateCardRepository;
 
   CreatorService creatorService;
   User viewer;
@@ -54,7 +45,7 @@ class CreatorServiceTest {
   @BeforeEach
   void setUp() {
     creatorService = new CreatorService(
-        creatorRepository, metricRepository, postRepository, claimRepository, rateCardRepository);
+        creatorRepository, metricRepository, postRepository);
 
     viewer = User.builder().id(UUID.randomUUID()).role(Role.BRAND).status(UserStatus.ACTIVE).build();
     creator = Creator.builder()
@@ -136,9 +127,7 @@ class CreatorServiceTest {
     assertThat(res.getCategory()).isEqualTo("OOTD");
     assertThat(res.getContentSummary()).isEqualTo("Phối đồ phong cách Hàn Quốc");
 
-    // Rate card is empty for public unclaimed creator
-    assertThat(res.getRateCard()).isNotNull();
-    assertThat(res.getRateCard().items()).isEmpty();
+    assertThat(new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(res).has("rateCard")).isFalse();
 
     // Recent posts
     assertThat(res.getRecentPosts()).hasSize(1);
@@ -146,7 +135,7 @@ class CreatorServiceTest {
   }
 
   @Test
-  void getCreatorDetailReturnsRateCardWhenAuthorized() {
+  void getCreatorDetailPreservesVerificationWithoutRateCard() {
     User owner = User.builder().id(UUID.randomUUID()).role(Role.CREATOR).build();
     creator.setOwner(owner);
     creator.setSourceType(CreatorSourceType.AUTHORIZED);
@@ -155,33 +144,10 @@ class CreatorServiceTest {
     when(metricRepository.latestForCreators(List.of(creator.getId()))).thenReturn(List.of());
     when(postRepository.findByCreatorId(creator.getId())).thenReturn(List.of());
 
-    CreatorClaim claim = CreatorClaim.builder()
-        .id(UUID.randomUUID())
-        .creator(creator)
-        .claimant(owner)
-        .status(CreatorClaimStatus.APPROVED)
-        .build();
-
-    when(claimRepository.findFirstByCreatorIdAndStatus(creator.getId(), CreatorClaimStatus.APPROVED))
-        .thenReturn(Optional.of(claim));
-
-    CreatorRateCard card = CreatorRateCard.builder()
-        .claim(claim)
-        .contentType(RateCardContentType.VIDEO)
-        .price(new BigDecimal("3000000"))
-        .currency("VND")
-        .note("60s video")
-        .build();
-
-    when(rateCardRepository.findByClaimIdOrderByContentTypeAsc(claim.getId())).thenReturn(List.of(card));
-
     CreatorDetailResponse res = creatorService.getCreatorDetail(creator.getId());
 
     assertThat(res.isVerifiedByInfluencerMatch()).isTrue();
-    assertThat(res.getRateCard()).isNotNull();
-    assertThat(res.getRateCard().items()).hasSize(1);
-    RateItem item = res.getRateCard().items().get(0);
-    assertThat(item.contentType()).isEqualTo(RateCardContentType.VIDEO);
-    assertThat(item.price()).isEqualByComparingTo(new BigDecimal("3000000"));
+    assertThat(res.getSourceType()).isEqualTo(CreatorSourceType.AUTHORIZED);
+    assertThat(new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(res).has("rateCard")).isFalse();
   }
 }

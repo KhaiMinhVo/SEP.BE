@@ -1,5 +1,19 @@
 # Backend Test Cases — Khải
 
+## Kết quả thực thi ngày 22/10/2026 — gỡ Creator Rate Card
+
+- Clean full regression: **362 test / 47 suite; 362 đạt, 0 thất bại, 0 lỗi thực thi, 0 bỏ qua**.
+- Danh sách bên dưới ánh xạ **114 nhóm test case**; một nhóm có thể chạy nhiều bộ tham số.
+- Đã gỡ test thuần nghiệp vụ giá, giữ assertion Claim/ownership/ingestion/Compare và phân quyền.
+- Thêm 12 lượt integration test cho endpoint cũ 404, response không có `rateCard`, permission
+  đã gỡ và nâng cấp V11 → V12 có/không có override cũ. Khôi phục riêng test claim kênh đã có owner.
+- Migration test giữ nguyên giá/audit lịch sử, quyền khác và version của role không bị ảnh hưởng.
+- Lượt chọn lọc ban đầu gặp lỗi Docker engine chưa chạy (33 lượt: 18 đạt, 15 lỗi khởi tạo,
+  không có assertion thất bại). Sau khi Docker hoạt động, đã chạy lại bằng clean full regression
+  trên PostgreSQL/pgvector Testcontainers riêng và đạt kết quả trên.
+- V9 không đổi; không chạy migration lên database dùng chung. Không sửa `.env`, Bruno hoặc frontend.
+- Các kết quả 357 test dưới đây là lịch sử trước khi gỡ chức năng; chưa commit/push đợt này.
+
 ## Kết quả thực thi ngày 21/10/2026
 
 - Sau bổ sung test và sửa replay: thêm **123 lượt kiểm thử** so với baseline 234;
@@ -136,7 +150,7 @@ Mỗi case bên dưới chỉ rõ class/method; dữ liệu parameterized nằm 
 | ID | Type | Preconditions / Action | Expected result | Automated test |
 |---|---|---|---|---|
 | BE-017 | Integration | Disable two BRAND permissions; inspect same token/CREATOR; send mixed valid-invalid patch | One version/audit; other role/permissions unchanged; invalid batch writes nothing | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#multiPermissionPatchIsAtomicAndIndependentAcrossRoles` |
-| BE-018 | Integration | Disable permission then reuse token for collaboration/outcome/review/claim/rate-card/claim-review/checkout | 403 before resource mutation; no new audit | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#toggledBusinessOperationsAreForbiddenBeforeAnyResourceMutation` |
+| BE-018 | Integration | Disable permission then reuse token for collaboration/outcome/review/claim/claim-review/checkout | 403 before resource mutation; no new audit | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#toggledBusinessOperationsAreForbiddenBeforeAnyResourceMutation` |
 | BE-019 | Integration | Change permission, repeat no-op, submit stale version | Correct version/audit; no-op unchanged; stale update 409 | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#versionAuditAndNoopAreConsistent` |
 | BE-020 | Integration | Database rejects permission-change audit | Override/version/audit rollback together | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#auditFailureRollsBackOverridesAndVersion` |
 | BE-021 | Integration | Two Admins update with same version | One success and one 409 | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#concurrentAdminsCannotOverwriteEachOther` |
@@ -175,14 +189,14 @@ Mỗi case bên dưới chỉ rõ class/method; dữ liệu parameterized nằm 
 | BE-044 | Integration | Skip DRAFT to ACTIVE; archive twice; edit archived | Skip/edit 409; archive 200 twice; no M3 | [CampaignPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/campaign/CampaignPostgresIntegrationTest.java)`#archiveIsIdempotentAndRejectedTransitionsDoNotWrite` |
 | BE-045 | Integration | Trigger rejects initial M3 insert | 500; remain DRAFT with no context | [CampaignPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/campaign/CampaignPostgresIntegrationTest.java)`#contextInsertFailureRollsBackReadyTransition` |
 
-### Creator Ownership Verification & Rate Card Management
+### Creator Ownership Verification
 
 | ID | Type | Preconditions / Action | Expected result | Automated test |
 |---|---|---|---|---|
-| BE-046 | Unit | Verified Creator claims missing channel | NotFound; no claim/pricing/audit writes | [CreatorClaimServiceTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimServiceTest.java)`#missingChannelNeverCreatesClaimOrDeletesPrices` |
+| BE-046 | Unit | Verified Creator claims missing channel | NotFound; no claim/audit writes | [CreatorClaimServiceTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimServiceTest.java)`#missingChannelNeverCreatesClaim` |
 | BE-047 | Unit | Reviewer reads missing claim | NotFound; no audit or claim save | [CreatorClaimServiceTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimServiceTest.java)`#missingReviewTargetNeverAudits` |
-| BE-048 | Integration | Claim/rate-card for missing channel; reviewer reads/revokes missing claim | Four 404 responses; no new audit/claim rows | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#missingChannelAndClaimReturn404WithoutAudits` |
-| BE-049 | Integration | Competing claims, approval, prices, ingestion, revoke | One owner; ingestion preserves ownership; revoke hides prices | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#completeFlowCompetingClaimsIngestionAndRevocation` |
+| BE-048 | Integration | Claim for missing channel; reviewer reads/revokes missing claim | Three 404 responses; no new audit/claim rows | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#missingChannelAndClaimReturn404WithoutAudits` |
+| BE-049 | Integration | Competing claims, approval, ingestion, revoke | One owner; ingestion preserves ownership; revoke clears ownership and verification | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#completeFlowCompetingClaimsIngestionAndRevocation` |
 | BE-050 | Integration | Another Creator/profile reader requests evidence | Evidence remains private | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#claimEvidenceIsPrivateAcrossCreatorsAndPublicProfile` |
 | BE-051 | Integration | Concurrent competing claim approvals | Exactly one approved owner | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#concurrentReviewsHaveOneWinner` |
 
@@ -203,11 +217,11 @@ Mỗi case bên dưới chỉ rõ class/method; dữ liệu parameterized nằm 
 
 | ID | Type | Preconditions / Action | Expected result | Automated test |
 |---|---|---|---|---|
-| BE-060 | Unit | Repository order differs; metrics missing; no valid ownership | Request order preserved; null metrics; empty rates; one batch read; no saves | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#batchesReadsPreservesOrderAndMissingMetricsRemainNull` |
-| BE-061 | Unit | Compare another owner's campaign | NotFound before membership/metrics/pricing queries | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#foreignCampaignIsHiddenBeforeReadingMembership` |
-| BE-062 | Unit | Duplicate IDs, then non-shortlisted IDs | Validation errors; no metrics/pricing queries or saves | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#duplicateAndMissingMembersNeverReadMetrics` |
+| BE-060 | Unit | Repository order differs; metrics missing; no valid ownership | Request order preserved; null metrics; verification false; one batch read; no saves | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#batchesReadsPreservesOrderAndMissingMetricsRemainNull` |
+| BE-061 | Unit | Compare another owner's campaign | NotFound before membership/metrics queries | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#foreignCampaignIsHiddenBeforeReadingMembership` |
+| BE-062 | Unit | Duplicate IDs, then non-shortlisted IDs | Validation errors; no metrics queries or saves | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#duplicateAndMissingMembersNeverReadMetrics` |
 | BE-063 | Unit | Empty comparison selection | Constraint violation before any repository call | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#invalidSelectionFailsBeforeAnyRepositoryAccess` |
-| BE-100 | Integration | Compare shortlist with snapshots and rates | Request order/latest snapshot; prices only for authorized owner | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#comparePreservesOrderUsesLatestAndOnlyShowsActiveOwnerRates` |
+| BE-100 | Integration | Compare shortlist with snapshots and verification | Request order/latest snapshot; verification only for authorized owner; no rateCard field | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#comparePreservesOrderLatestMetricsAndVerification` |
 | BE-101 | Integration | Cross-Brand item/relationship access | Ownership enforced without mutation | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#anotherBrandCannotReadOrMutateShortlistAndRelationships` |
 | BE-102 | Integration | Reference other campaign or Creator's item | Invalid linkage rejected | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#relationshipCannotAttachForeignOrMismatchedShortlistItem` |
 | BE-103 | Integration | Repeated/conflicting mock callbacks | Stable terminal dates/quota; one transition audit | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#terminalPaymentOutcomePreservesDatesQuotasAndSingleAudit` |
@@ -262,3 +276,13 @@ Mỗi case bên dưới chỉ rõ class/method; dữ liệu parameterized nằm 
 | BE-097 | Integration | Invalid fees, metrics, URL or review input | Reject without persisted result | [CollaborationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationPostgresIntegrationTest.java)`#validatesMoneyMetricsUrlStarsAndRequiredBoolean` |
 | BE-098 | Integration | Collaboration transaction fails | Relationship/collaboration rollback together | [CollaborationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationPostgresIntegrationTest.java)`#transactionRollbackRestoresRelationshipAndCollaboration` |
 | BE-099 | Integration | Concurrent duplicate create/outcome/review | Exactly one resource of each type | [CollaborationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationPostgresIntegrationTest.java)`#concurrentRequestsCreateExactlyOneOfEachResource` |
+
+### Retired Creator Rate Card Regression
+
+| ID | Level | Condition / action | Expected | Automated test |
+| --- | --- | --- | --- | --- |
+| BE-110 | Integration | All roles call removed GET/PUT endpoints | 404; no business writes | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#retiredEndpointsAre404WithoutBusinessWrites` |
+| BE-111 | Integration | Claim, approve, compare and revoke with legacy prices | Verification works; no rateCard JSON; legacy prices untouched | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#claimRevokeAndCompareWorkWithoutExposingOrModifyingLegacyPrices` |
+| BE-112 | Integration | Read permission catalog/auth and submit retired permission | Permission absent; update rejected | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#retiredPermissionIsAbsentAndCannotBeConfigured` |
+| BE-113 | Integration | Upgrade V11 to V12 with/without retired override | Prices/audits retained; override removed; only affected role version increases | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#upgradePreservesLegacyDataAndOnlyBumpsAffectedConfiguration` |
+| BE-114 | Integration | Claim already authorized channel | 409; existing owner retained | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#authorizedChannelRejectsNewClaims` |

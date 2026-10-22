@@ -55,7 +55,7 @@ class ComparePaymentPostgresIntegrationTest {
   @Autowired UserRepository users; @Autowired BrandProfileRepository brands; @Autowired CampaignRepository campaigns;
   @Autowired CreatorRepository creators; @Autowired PublicCreatorMetricRepository metrics;
   @Autowired ShortlistItemRepository shortlist; @Autowired CreatorClaimRepository claims;
-  @Autowired CreatorRateCardRepository cards; @Autowired PlanRepository plans;
+  @Autowired PlanRepository plans;
   @Autowired SubscriptionRepository subscriptions; @Autowired PaymentRepository payments; @Autowired JdbcTemplate jdbc;
 
   User user(Role role) { return users.saveAndFlush(User.builder().email(UUID.randomUUID()+"@compare.test")
@@ -84,7 +84,7 @@ class ComparePaymentPostgresIntegrationTest {
         .paymentGateway("VNPAY").transactionCode(UUID.randomUUID().toString()).status(PaymentStatus.PENDING).createdAt(LocalDateTime.now()).build());
   }
 
-  @Test void comparePreservesOrderUsesLatestAndOnlyShowsActiveOwnerRates() throws Exception {
+  @Test void comparePreservesOrderLatestMetricsAndVerification() throws Exception {
     var u=user(Role.BRAND); var c=campaign(brand(u)); var a=creator(); var b=creator(); add(c,a,u);add(c,b,u);
     metrics.saveAndFlush(PublicCreatorMetric.builder().creator(a).creatorType("KOC").niche("Old").followers(100L)
         .collectedAt(LocalDateTime.now().minusDays(1)).freshnessStatus(MetricDataStatus.STALE).build());
@@ -93,18 +93,18 @@ class ComparePaymentPostgresIntegrationTest {
     var owner=user(Role.CREATOR); a.setOwner(owner);a.setSourceType(CreatorSourceType.AUTHORIZED);a.setAuthorizedAt(LocalDateTime.now());creators.saveAndFlush(a);
     var claim=claims.saveAndFlush(CreatorClaim.builder().creator(a).claimant(owner).status(CreatorClaimStatus.APPROVED)
         .evidenceUrls(List.of("https://example.com/proof")).note("Proof").build());
-    cards.saveAndFlush(CreatorRateCard.builder().claim(claim).contentType(RateCardContentType.VIDEO).price(BigDecimal.TEN)
-        .currency("VND").updatedAt(LocalDateTime.now()).build());
     var data=call(u,post(compare(c)),Map.of("creatorIds",List.of(b.getId(),a.getId())),200);
     assertThat(data.path("creators").get(0).path("creatorId").asText()).isEqualTo(b.getId().toString());
     assertThat(data.path("creators").get(0).has("metrics")).isTrue();
     assertThat(data.path("creators").get(0).path("metrics").isNull()).isTrue();
     assertThat(data.path("creators").get(1).path("metrics").path("metricId").asText()).isEqualTo(latest.getId().toString());
-    assertThat(data.path("creators").get(1).path("rateCard").path("items").size()).isEqualTo(1);
+    assertThat(data.path("creators").get(1).path("verifiedByInfluencerMatch").asBoolean()).isTrue();
+    data.path("creators").forEach(item->assertThat(item.has("rateCard")).isFalse());
     claim.setStatus(CreatorClaimStatus.REVOKED);claims.saveAndFlush(claim);
     a.setOwner(null);a.setSourceType(CreatorSourceType.PUBLIC);a.setAuthorizedAt(null);creators.saveAndFlush(a);
     data=call(u,post(compare(c)),Map.of("creatorIds",List.of(a.getId(),b.getId())),200);
-    assertThat(data.path("creators").get(0).path("rateCard").path("items").isEmpty()).isTrue();
+    assertThat(data.path("creators").get(0).path("verifiedByInfluencerMatch").asBoolean()).isFalse();
+    data.path("creators").forEach(item->assertThat(item.has("rateCard")).isFalse());
   }
 
   @Test void compareValidatesOwnershipMembershipAndIds() throws Exception {
@@ -266,7 +266,7 @@ class ComparePaymentPostgresIntegrationTest {
     List<String> actual=new ArrayList<>();data.path("creators").forEach(item->{
       actual.add(item.path("creatorId").asText());
       assertThat(item.has("metrics")).isTrue();assertThat(item.path("metrics").isNull()).isTrue();
-      assertThat(item.path("rateCard").path("items").size()).isZero();
+      assertThat(item.has("rateCard")).isFalse();
     });
     assertThat(actual).containsExactlyElementsOf(ids.stream().map(UUID::toString).toList());
     var after=shortlist.findByCampaignId(c.getId(),org.springframework.data.domain.Pageable.unpaged()).getContent();

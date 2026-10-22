@@ -27,12 +27,4 @@ public class CreatorClaimController {
       @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) {
     return ApiResponse.ok(service.mine(status,page,size));
   }
-  @PutMapping("/creators/{id}/rate-card") @PreAuthorize("hasAuthority('MANAGE_OWN_RATE_CARD')")
-  @Operation(summary="Replace my channel rate card",description="Verified owner only. Empty items clears visible prices. Prices are CREATOR_DECLARED, not agreed fees or estimates. One item per VIDEO/POST/STORY/LIVESTREAM.")
-  public ApiResponse<RateResponse> replace(@PathVariable UUID id,@Valid @RequestBody RateRequest request) {
-    return ApiResponse.ok(service.replaceRateCard(id,request));
-  }
-  @GetMapping("/creators/{id}/rate-card") @PreAuthorize("hasAuthority('VIEW_CREATOR_PROFILE')")
-  @Operation(summary="Read a verified channel's declared rates",description="Returns an empty list for unverified/revoked channels.")
-  public ApiResponse<RateResponse> rates(@PathVariable UUID id) {return ApiResponse.ok(service.rateCard(id));}
 }

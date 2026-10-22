@@ -54,8 +54,7 @@ Generated search_vector cập nhật theo Niche mới trong PostgreSQL.
 Approval và audit `APPROVE_DATA_QUALITY` nằm trong cùng transaction. Audit lưu
 snapshot ID, dữ liệu trước/sau, Niche, reviewer và thời điểm duyệt. Hai người duyệt
 đồng thời chỉ một người thành công. Ingestion tiếp tục tạo snapshot chưa duyệt;
-snapshot mới có confidence thấp sẽ quay lại hàng đợi. Không thay quyền sở hữu kênh
-hoặc Rate Card. Data Manager không được truy cập các API Admin khác nhờ hai API này.
+snapshot mới có confidence thấp sẽ quay lại hàng đợi. Không thay quyền sở hữu kênh. Data Manager không được truy cập các API Admin khác nhờ hai API này.
 
 ## Migration và kiểm thử
 

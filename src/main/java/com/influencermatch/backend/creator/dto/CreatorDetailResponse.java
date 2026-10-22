@@ -1,6 +1,5 @@
 package com.influencermatch.backend.creator.dto;
 
-import com.influencermatch.backend.creator.dto.CreatorClaimDtos.RateResponse;
 import com.influencermatch.backend.creator.enums.CreatorSourceType;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -38,9 +37,6 @@ public class CreatorDetailResponse {
     private String niche;
     private String category;
     private String contentSummary;
-
-    // Declared Rate Card
-    private RateResponse rateCard;
 
     // Recent Posts
     private List<PostDto> recentPosts;

@@ -18,7 +18,6 @@ import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.validation.*;
-import java.math.BigDecimal;
 import java.util.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,7 +30,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 class CreatorClaimServiceTest {
   @Mock CreatorRepository creators;
   @Mock CreatorClaimRepository claims;
-  @Mock CreatorRateCardRepository cards;
   @Mock ExternalIdentityRepository identities;
   @Mock UserRepository users;
   @Mock AuditService audit;
@@ -43,7 +41,7 @@ class CreatorClaimServiceTest {
 
   @BeforeEach void setup() {
     factory = Validation.buildDefaultValidatorFactory();
-    service = new CreatorClaimService(creators, claims, cards, identities, users, audit, em, factory.getValidator(), Optional.empty());
+    service = new CreatorClaimService(creators, claims, identities, users, audit, em, factory.getValidator(), Optional.empty());
     owner = User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
     creator = Creator.builder().id(UUID.randomUUID()).build();
     login(owner);
@@ -85,7 +83,7 @@ class CreatorClaimServiceTest {
     assertThatThrownBy(() -> service.claim(creator.getId(), request())).isInstanceOf(ConflictException.class);
   }
 
-  @Test void approvalRejectsCompetitorAndRevocationHidesRates() {
+  @Test void approvalRejectsCompetitorAndRevocationClearsOwnership() {
     User reviewer = User.builder().id(UUID.randomUUID()).role(Role.DATA_MANAGER).status(UserStatus.ACTIVE).build();
     login(reviewer); verified(); locked();
     CreatorClaim claim = CreatorClaim.builder().id(UUID.randomUUID()).creator(creator).claimant(owner).status(CreatorClaimStatus.PENDING).build();
@@ -100,8 +98,8 @@ class CreatorClaimServiceTest {
     service.revoke(claim.getId(), new RevokeRequest("Ownership withdrawn"));
     assertThat(creator.getOwner()).isNull();
     assertThat(creator.getAuthorizedAt()).isNull();
-    assertThat(service.rateCard(creator.getId()).items()).isEmpty();
-    verifyNoInteractions(cards);
+    assertThat(creator.getSourceType()).isEqualTo(CreatorSourceType.PUBLIC);
+    assertThat(claim.getStatus()).isEqualTo(CreatorClaimStatus.REVOKED);
   }
 
   @Test void rejectedClaimNeverAuthorizesChannel() {
@@ -115,58 +113,25 @@ class CreatorClaimServiceTest {
     assertThat(creator.getOwner()).isNull();
   }
 
-  @Test void invalidRatesNeverDeleteExistingPrices() {
-    verified(); locked(); creator.setOwner(owner);
-    var claim = CreatorClaim.builder().id(UUID.randomUUID()).claimant(owner).build();
-    when(claims.findFirstByCreatorIdAndStatus(creator.getId(), CreatorClaimStatus.APPROVED)).thenReturn(Optional.of(claim));
-    var item = new RateItem(RateCardContentType.VIDEO, BigDecimal.ONE, "VND", null);
-    assertThatThrownBy(() -> service.replaceRateCard(creator.getId(), new RateRequest(List.of(item, item))))
-        .isInstanceOf(com.influencermatch.backend.exception.ValidationException.class);
-    assertThatThrownBy(() -> service.replaceRateCard(creator.getId(), new RateRequest(List.of(
-        new RateItem(RateCardContentType.VIDEO, BigDecimal.ONE, "ZZZ", null)))))
-        .isInstanceOf(com.influencermatch.backend.exception.ValidationException.class);
-    verifyNoInteractions(cards);
-  }
 
-  @Test void negativePriceRejectedBeforeOwnershipLookup() {
-    assertThatThrownBy(() -> service.replaceRateCard(creator.getId(), new RateRequest(List.of(
-        new RateItem(RateCardContentType.VIDEO, BigDecimal.ONE.negate(), "VND", null)))))
-        .isInstanceOf(ConstraintViolationException.class);
-    verifyNoInteractions(cards, creators, users);
-  }
-
-  @Test void ownerCanReplaceAndClearRatesWithAudit() {
-    verified(); locked(); creator.setOwner(owner);
-    var claim = CreatorClaim.builder().id(UUID.randomUUID()).claimant(owner).build();
-    when(claims.findFirstByCreatorIdAndStatus(creator.getId(), CreatorClaimStatus.APPROVED)).thenReturn(Optional.of(claim));
-    List<CreatorRateCard> stored = new ArrayList<>();
-    when(cards.findByClaimIdOrderByContentTypeAsc(claim.getId())).thenAnswer(i -> List.copyOf(stored));
-    doAnswer(i -> { stored.clear(); return null; }).when(cards).deleteByClaimId(claim.getId());
-    when(cards.save(any())).thenAnswer(i -> { CreatorRateCard card = i.getArgument(0); stored.add(card); return card; });
-    var item = new RateItem(RateCardContentType.VIDEO, new BigDecimal("1500000"), "vnd", "My price");
-    assertThat(service.replaceRateCard(creator.getId(), new RateRequest(List.of(item))).items()).containsExactly(item);
-    assertThat(service.replaceRateCard(creator.getId(), new RateRequest(List.of())).items()).isEmpty();
-    verify(audit, times(2)).record(eq("UPDATE_CREATOR_RATE_CARD"), eq("Creator"), eq(creator.getId()),
-        any(RateResponse.class), any(RateResponse.class), anyString());
-  }
   @Test void devMockIdentityIsNotAcceptedWhenMockServiceIsDisabled() {
     when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
     lenient().when(identities.findByUserIdAndProvider(owner.getId(),ExternalIdentityProvider.DEV_MOCK))
         .thenReturn(Optional.of(ExternalIdentity.builder().provider(ExternalIdentityProvider.DEV_MOCK).user(owner).build()));
     assertThatThrownBy(()->service.claim(creator.getId(),request())).isInstanceOf(ForbiddenException.class);
     verify(identities,never()).findByUserIdAndProvider(owner.getId(),ExternalIdentityProvider.DEV_MOCK);
-    verifyNoInteractions(claims,cards,audit);
+    verifyNoInteractions(claims,audit);
   }
 
-  @Test void missingChannelNeverCreatesClaimOrDeletesPrices() {
+  @Test void missingChannelNeverCreatesClaim() {
     verified();
     assertThatThrownBy(()->service.claim(UUID.randomUUID(),request())).isInstanceOf(NotFoundException.class);
-    verifyNoInteractions(claims,cards,audit);
+    verifyNoInteractions(claims,audit);
   }
   @Test void missingReviewTargetNeverAudits() {
     login(User.builder().id(UUID.randomUUID()).role(Role.DATA_MANAGER).status(UserStatus.ACTIVE).build());
     assertThatThrownBy(()->service.detail(UUID.randomUUID())).isInstanceOf(NotFoundException.class);
-    verifyNoInteractions(cards,audit);verify(claims,never()).save(any());
+    verifyNoInteractions(audit);verify(claims,never()).save(any());
   }
 
 }

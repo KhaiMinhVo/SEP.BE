@@ -286,7 +286,6 @@ class RolePermissionPostgresIntegrationTest {
           Map.of("overallRating",5,"brandFitRating",5,"wouldCollaborateAgain",true)),
       Arguments.of(Role.CREATOR,Permission.CLAIM_CREATOR_PROFILE,"POST","/creators/{id}/claim",
           Map.of("evidenceUrls",List.of("https://example.test/proof"),"note","Test")),
-      Arguments.of(Role.CREATOR,Permission.MANAGE_OWN_RATE_CARD,"PUT","/creators/{id}/rate-card",Map.of("items",List.of())),
       Arguments.of(Role.DATA_MANAGER,Permission.REVIEW_CREATOR_CLAIM,"PATCH","/data/creator-claims/{id}/review",
           Map.of("decision","APPROVED","reason","Verified")),
       Arguments.of(Role.BRAND,Permission.MANAGE_OWN_SUBSCRIPTION,"POST","/billing/subscribe",Map.of("planId",UUID.randomUUID())));

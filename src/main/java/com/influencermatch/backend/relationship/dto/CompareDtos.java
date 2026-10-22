@@ -1,7 +1,6 @@
 package com.influencermatch.backend.relationship.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.influencermatch.backend.creator.dto.CreatorClaimDtos.RateResponse;
 import com.influencermatch.backend.creator.enums.*;
 import com.influencermatch.backend.relationship.enums.ShortlistPriority;
 import jakarta.validation.constraints.*;
@@ -17,7 +16,7 @@ public final class CompareDtos {
       String profileUrl, String avatarUrl, String location, String creatorType,
       ShortlistPriority priority, String note, CreatorSourceType sourceType,
       boolean verifiedByInfluencerMatch, LocalDateTime authorizedAt,
-      @JsonInclude(JsonInclude.Include.ALWAYS) Metrics metrics, RateResponse rateCard) {}
+      @JsonInclude(JsonInclude.Include.ALWAYS) Metrics metrics) {}
   public record Metrics(UUID metricId, String niche, Long followers, BigDecimal avgViews,
       BigDecimal avgLikes, BigDecimal avgComments, BigDecimal avgShares, BigDecimal engagementRate,
       BigDecimal dataConfidence, MetricDataStatus freshnessStatus, LocalDateTime collectedAt) {}

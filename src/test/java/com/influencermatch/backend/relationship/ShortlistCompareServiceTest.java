@@ -24,9 +24,8 @@ class ShortlistCompareServiceTest {
   final CampaignRepository campaigns=mock(CampaignRepository.class);
   final ShortlistItemRepository shortlist=mock(ShortlistItemRepository.class);
   final PublicCreatorMetricRepository metrics=mock(PublicCreatorMetricRepository.class);
-  final CreatorRateCardRepository cards=mock(CreatorRateCardRepository.class);
   final ValidatorFactory factory=Validation.buildDefaultValidatorFactory();
-  final ShortlistCompareService service=new ShortlistCompareService(campaigns,shortlist,metrics,cards,factory.getValidator());
+  final ShortlistCompareService service=new ShortlistCompareService(campaigns,shortlist,metrics,factory.getValidator());
   final com.influencermatch.backend.user.model.User owner=TestActors.user(Role.BRAND);
   @BeforeEach void login(){TestActors.authenticate(owner);}
   @AfterEach void clear(){SecurityContextHolder.clearContext();factory.close();}
@@ -39,24 +38,24 @@ class ShortlistCompareServiceTest {
     when(shortlist.findByCampaignIdAndCreatorIdIn(c.getId(),ids)).thenReturn(List.of(ShortlistItem.builder().creator(a).note("A").build(),ShortlistItem.builder().creator(b).note("B").build()));
     var result=service.compare(c.getId(),new Request(ids));
     assertThat(result.creators()).extracting(i->i.creatorId()).containsExactly(b.getId(),a.getId());
-    assertThat(result.creators()).allSatisfy(i->{assertThat(i.metrics()).isNull();assertThat(i.rateCard().items()).isEmpty();assertThat(i.verifiedByInfluencerMatch()).isFalse();});
-    verify(metrics,times(1)).latestForCreators(ids);verify(cards,times(1)).visibleForCreators(ids);
+    assertThat(result.creators()).allSatisfy(i->{assertThat(i.metrics()).isNull();assertThat(i.verifiedByInfluencerMatch()).isFalse();});
+    verify(metrics,times(1)).latestForCreators(ids);
     verify(shortlist,never()).save(any());verify(campaigns,never()).save(any());
   }
   @Test void foreignCampaignIsHiddenBeforeReadingMembership(){
     var c=campaign();c.getBrandProfile().setUser(TestActors.user(Role.BRAND));
     assertThatThrownBy(()->service.compare(c.getId(),new Request(List.of(UUID.randomUUID(),UUID.randomUUID())))).isInstanceOf(NotFoundException.class);
-    verifyNoInteractions(shortlist,metrics,cards);
+    verifyNoInteractions(shortlist,metrics);
   }
   @Test void duplicateAndMissingMembersNeverReadMetrics(){
     var c=campaign();var id=UUID.randomUUID();
     assertThatThrownBy(()->service.compare(c.getId(),new Request(List.of(id,id)))).isInstanceOf(com.influencermatch.backend.exception.ValidationException.class);
     verifyNoInteractions(shortlist);
     assertThatThrownBy(()->service.compare(c.getId(),new Request(List.of(id,UUID.randomUUID())))).isInstanceOf(com.influencermatch.backend.exception.ValidationException.class);
-    verifyNoInteractions(metrics,cards);verify(shortlist,never()).save(any());
+    verifyNoInteractions(metrics);verify(shortlist,never()).save(any());
   }
   @Test void invalidSelectionFailsBeforeAnyRepositoryAccess(){
     assertThatThrownBy(()->service.compare(UUID.randomUUID(),new Request(List.of()))).isInstanceOf(ConstraintViolationException.class);
-    verifyNoInteractions(campaigns,shortlist,metrics,cards);
+    verifyNoInteractions(campaigns,shortlist,metrics);
   }
 }

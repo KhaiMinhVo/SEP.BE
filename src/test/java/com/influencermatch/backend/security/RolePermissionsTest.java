@@ -81,14 +81,14 @@ class RolePermissionsTest {
   }
 
   @Test
-  void fixedMatrixHasExactly47PermissionsAndNoWildcard() {
-    assertThat(Permission.values()).hasSize(47);
+  void fixedMatrixHasExactly46PermissionsAndNoWildcard() {
+    assertThat(Permission.values()).hasSize(46);
     assertThat(RolePermissions.forRole(Role.BRAND)).hasSize(25);
     assertThat(RolePermissions.forRole(Role.DATA_MANAGER)).hasSize(13);
     assertThat(RolePermissions.forRole(Role.ADMIN)).hasSize(23);
     assertThat(RolePermissions.names(Role.CREATOR)).containsExactlyInAnyOrder(
         "VIEW_OWN_PROFILE","VIEW_OWN_NOTIFICATION","MANAGE_OWN_NOTIFICATION","VIEW_CREATOR_PROFILE",
-        "CLAIM_CREATOR_PROFILE","VIEW_OWN_CREATOR_CLAIM","MANAGE_OWN_RATE_CARD");
+        "CLAIM_CREATOR_PROFILE","VIEW_OWN_CREATOR_CLAIM");
     Set<Permission> all = EnumSet.noneOf(Permission.class);
     for (Role role : Role.values()) {
       all.addAll(RolePermissions.forRole(role));

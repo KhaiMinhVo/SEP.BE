@@ -23,16 +23,15 @@ backend trả số liệu cho UI hiển thị song song, không chấm điểm h
 Response `data` gồm `campaignId`, `creators` theo đúng thứ tự request. Mỗi phần tử gồm
 `creatorId`, `platform`, `userName`, `displayName`, `profileUrl`, `avatarUrl`, `location`,
 `creatorType`, `priority`, `note`, `sourceType`, `verifiedByInfluencerMatch`, `authorizedAt`,
-`metrics` và `rateCard`.
+`metrics`.
 
 `metrics` là snapshot mới nhất theo collectedAt rồi UUID giảm dần; gồm metricId, niche,
 followers, avgViews/avgLikes/avgComments/avgShares, engagementRate, dataConfidence,
 freshnessStatus và collectedAt. Chưa có snapshot thì `metrics: null`; trường thiếu
 không được biến thành 0. Frontend nên hiển thị “Chưa có dữ liệu” cho các giá trị thiếu.
 
-`rateCard` gồm creatorId, source=`CREATOR_DECLARED` và items (contentType, price,
-currency, note). Chỉ trả giá từ claim APPROVED khớp owner của kênh AUTHORIZED.
-Giá do Creator khai báo, không tự quy đổi tiền tệ; ownership đã thu hồi trả items rỗng.
+Response không còn trường `rateCard`; frontend cần bỏ phần binding/hiển thị bảng giá.
+Thông tin xác minh ownership vẫn được trả như trước.
 
 HTTP 400 cho ID trùng, số lượng sai hoặc Creator ngoài shortlist; 404 khi campaign
 không tồn tại/thuộc Brand khác; 401 khi chưa đăng nhập, 403 khi thiếu quyền

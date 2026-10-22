@@ -63,14 +63,11 @@ class CreatorClaimPostgresIntegrationTest {
     var other=json.readTree(call(null,post("/auth/dev/creator-login"),null,200).getResponse().getContentAsString()).path("data");
     assertThat(other.path("user").path("id").asText()).isNotEqualTo(owner.getId().toString());
     var c=channel();String id=claim(owner,c);
-    call(owner,put("/creators/"+c.getId()+"/rate-card"),RATE,403);
     call(user(Role.DATA_MANAGER,false),patch("/data/creator-claims/"+id+"/review"),
         "{\"decision\":\"APPROVED\",\"reason\":\"Development fixture\"}",200);
-    call(owner,put("/creators/"+c.getId()+"/rate-card"),RATE,200);
   }
 
   private static final String EVIDENCE = "{\"evidenceUrls\":[\"https://example.com/proof\"],\"note\":\"My channel\"}";
-  private static final String RATE = "{\"items\":[{\"contentType\":\"VIDEO\",\"price\":1500000,\"currency\":\"VND\"}]}";
 
   private User user(Role role, boolean verified) {
     String email = UUID.randomUUID() + "@example.test";
@@ -104,7 +101,6 @@ class CreatorClaimPostgresIntegrationTest {
     assertThat(owner.getAuthorities()).extracting(a -> a.getAuthority()).contains("ROLE_CREATOR");
     String id = claim(owner, c);
     String competing = claim(other, c);
-    call(owner, put("/creators/" + c.getId() + "/rate-card"), RATE, 403);
     call(owner, patch("/data/creator-claims/" + id + "/review"), "{\"decision\":\"APPROVED\",\"reason\":\"Verified\"}", 403);
     call(reviewer, patch("/data/creator-claims/" + id + "/review"), "{\"decision\":\"APPROVED\",\"reason\":\"Verified\"}", 200);
     var competitor = call(reviewer, get("/data/creator-claims/" + competing), null, 200);
@@ -113,20 +109,12 @@ class CreatorClaimPostgresIntegrationTest {
     mvc.perform(get("/creators/" + c.getId()).header("Authorization", "Bearer " + jwt.generateToken(owner)))
         .andExpect(jsonPath("$.data.sourceType").value("AUTHORIZED"))
         .andExpect(jsonPath("$.data.verifiedByInfluencerMatch").value(true));
-    call(other, put("/creators/" + c.getId() + "/rate-card"), RATE, 403);
-    call(owner, put("/creators/" + c.getId() + "/rate-card"), RATE, 200);
     mvc.perform(post("/creators/ingest").header("X-Service-Key", "claim-integration-key")
         .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
             "platform", c.getPlatform(), "externalId", c.getExternalId(), "userName", "updated"))))
         .andExpect(status().isOk());
     assertThat(creators.findById(c.getId()).orElseThrow().getSourceType().name()).isEqualTo("AUTHORIZED");
-    mvc.perform(get("/creators/" + c.getId() + "/rate-card").header("Authorization", "Bearer " + jwt.generateToken(owner)))
-        .andExpect(jsonPath("$.data.items[0].price").value(1500000));
-    call(owner, put("/creators/" + c.getId() + "/rate-card"), "{\"items\":[]}", 200);
-    call(owner, put("/creators/" + c.getId() + "/rate-card"), RATE, 200);
     call(reviewer, post("/data/creator-claims/" + id + "/revoke"), "{\"reason\":\"Ownership withdrawn\"}", 200);
-    mvc.perform(get("/creators/" + c.getId() + "/rate-card").header("Authorization", "Bearer " + jwt.generateToken(owner)))
-        .andExpect(jsonPath("$.data.items").isEmpty());
     assertThat(creators.findById(c.getId()).orElseThrow().getSourceType().name()).isEqualTo("PUBLIC");
     claim(other, c);
   }
@@ -144,22 +132,7 @@ class CreatorClaimPostgresIntegrationTest {
     call(owner, post(path), EVIDENCE, 409);
   }
 
-  @Test void invalidRatesDoNotReplaceExistingPrices() throws Exception {
-    var owner = user(Role.CREATOR, true);
-    var c = channel();
-    String id = claim(owner, c);
-    call(user(Role.ADMIN, false), patch("/data/creator-claims/" + id + "/review"),
-        "{\"decision\":\"APPROVED\",\"reason\":\"Verified\"}", 200);
-    String path = "/creators/" + c.getId() + "/rate-card";
-    call(owner, put(path), RATE, 200);
-    call(owner, put(path), RATE.replace("1500000", "-1"), 400);
-    call(owner, put(path), RATE.replace("VND", "ZZZ"), 400);
-    String item = "{\"contentType\":\"VIDEO\",\"price\":1,\"currency\":\"VND\"}";
-    call(owner, put(path), "{\"items\":[" + item + "," + item + "]}", 400);
-    mvc.perform(get(path).header("Authorization", "Bearer " + jwt.generateToken(owner)))
-        .andExpect(jsonPath("$.data.items[0].price").value(1500000));
-    call(user(Role.CREATOR, true), post("/creators/" + c.getId() + "/claim"), EVIDENCE, 409);
-  }
+
 
   @Test void concurrentReviewsHaveOneWinner() throws Exception {
     var c = channel();
@@ -224,32 +197,24 @@ class CreatorClaimPostgresIntegrationTest {
     assertThat(claimRepository.findById(UUID.fromString(resubmitted)).orElseThrow().getStatus().name()).isEqualTo("PENDING");
   }
 
-  @org.junit.jupiter.params.ParameterizedTest
-  @org.junit.jupiter.params.provider.CsvSource({"0,200", "1.001,400", "100000000000000000,400"})
-  void rateCardPrecisionAndZeroLeaveValidRatesIntact(String price,int expected) throws Exception {
-    var owner=user(Role.CREATOR,true);var c=channel();String id=claim(owner,c);
-    call(user(Role.ADMIN,false),patch("/data/creator-claims/"+id+"/review"),"{\"decision\":\"APPROVED\",\"reason\":\"Verified\"}",200);
-    String path="/creators/"+c.getId()+"/rate-card";
-    call(owner,put(path),RATE,200);
-    int before=jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action='UPDATE_CREATOR_RATE_CARD' AND entity_id=?",Integer.class,c.getId());
-    call(owner,put(path),RATE.replace("1500000",price),expected);
-    var result=json.readTree(call(owner,get(path),null,200).getResponse().getContentAsString()).path("data");
-    assertThat(result.path("items").get(0).path("price").decimalValue()).isEqualByComparingTo(expected==200?price:"1500000");
-    assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action='UPDATE_CREATOR_RATE_CARD' AND entity_id=?",Integer.class,c.getId()))
-        .isEqualTo(before+(expected==200?1:0));
-    call(owner,put(path),"{\"items\":[]}",200);
-    assertThat(json.readTree(call(owner,get(path),null,200).getResponse().getContentAsString()).path("data").path("items").size()).isZero();
-  }
+
 
   @Test void missingChannelAndClaimReturn404WithoutAudits() throws Exception {
     var owner=user(Role.CREATOR,true);var reviewer=user(Role.DATA_MANAGER,false);var id=UUID.randomUUID();
     long count=jdbc.queryForObject("select count(*) from audit_log",Long.class);
     call(owner,post("/creators/"+id+"/claim"),EVIDENCE,404);
-    call(owner,put("/creators/"+id+"/rate-card"),RATE,404);
     call(reviewer,get("/data/creator-claims/"+id),null,404);
     call(reviewer,post("/data/creator-claims/"+id+"/revoke"),json.writeValueAsString(Map.of("reason","Missing claim")),404);
     assertThat(jdbc.queryForObject("select count(*) from audit_log",Long.class)).isEqualTo(count);
     assertThat(jdbc.queryForObject("select count(*) from creator_claim where claimant_id=?",Long.class,owner.getId())).isZero();
+  }
+
+  @Test void authorizedChannelRejectsNewClaims() throws Exception {
+    var owner=user(Role.CREATOR,true);var channel=channel();String id=claim(owner,channel);
+    call(user(Role.ADMIN,false),patch("/data/creator-claims/"+id+"/review"),
+        json.writeValueAsString(Map.of("decision","APPROVED","reason","Verified")),200);
+    call(user(Role.CREATOR,true),post("/creators/"+channel.getId()+"/claim"),EVIDENCE,409);
+    assertThat(creators.findById(channel.getId()).orElseThrow().getOwner().getId()).isEqualTo(owner.getId());
   }
 
 }

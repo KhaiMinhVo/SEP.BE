@@ -12,7 +12,7 @@ public final class PermissionCatalog {
 
   static {
     add("Authentication", Permission.VIEW_OWN_PROFILE, "View own profile");
-    add("Creators", Permission.VIEW_CREATOR_PROFILE, "View creator profile and rate card");
+    add("Creators", Permission.VIEW_CREATOR_PROFILE, "View creator profile");
     add("Brand Profile", Permission.CREATE_BRAND_PROFILE, "Create brand profile");
     add("Brand Profile", Permission.UPDATE_BRAND_PROFILE, "Update brand profile");
     add("Brand Profile", Permission.VIEW_OWN_BRAND_DATA, "View own brand profile");
@@ -29,7 +29,6 @@ public final class PermissionCatalog {
     add("Creator Ownership", Permission.CLAIM_CREATOR_PROFILE, "Submit ownership claim");
     add("Creator Ownership", Permission.VIEW_OWN_CREATOR_CLAIM, "View own ownership claims");
     add("Creator Ownership", Permission.REVIEW_CREATOR_CLAIM, "Review and revoke ownership claims");
-    add("Creator Pricing", Permission.MANAGE_OWN_RATE_CARD, "Manage own rate card");
     add("Data Quality", Permission.REVIEW_CREATOR_CLASSIFICATION, "Review data quality and niche");
     add("Billing", Permission.VIEW_PLAN, "View subscription plans");
     add("Billing", Permission.MANAGE_OWN_SUBSCRIPTION, "Manage own subscription and checkout");

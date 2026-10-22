@@ -49,6 +49,7 @@ public final class RolePermissions {
     if (role == Role.ADMIN || role == Role.DATA_MANAGER)
       permissions.addAll(
           EnumSet.of(
+              Permission.INVITE_CREATOR,
               Permission.VIEW_DATA_MONITORING,
               Permission.VIEW_COLLECTION_JOB,
               Permission.RETRY_COLLECTION_JOB,

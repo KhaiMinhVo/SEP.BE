@@ -1,3 +1,7 @@
+> Schema update: V15 removes auth_exchange_code, creator_rate_card and duplicate metric profile fields; Creator retains the current URL/location. Historical schema references below are not the final schema. See [schema-cleanup-v15.md](schema-cleanup-v15.md).
+
+> Historical design checklist. Current authentication is invitation + password + email OTP, not Google Login. CreatorMaster is created on Creator registration. Claim callbacks require an authenticated verified matching Creator and never create users. Provider proof is dev-only simulation; checked historical items do not establish real platform integration. Current flow: [registration-and-email-otp.md](registration-and-email-otp.md).
+
 # CREATOR MASTER IDENTITY MANAGEMENT
 ## CLAIM-BASED IDENTITY & OAUTH ACCOUNT LINKING – CODEBASE AUDIT & ARCHITECTURE IMPLEMENTATION CHECKLIST
 

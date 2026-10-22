@@ -76,6 +76,13 @@ class CreatorClaimOAuthIntegrationTest {
 
   private User mockBrandUser;
 
+  private User authenticated(User user) {
+    user.setStatus(UserStatus.ACTIVE);
+    org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+      new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(user,null,user.getAuthorities()));
+    return user;
+  }
+  @org.junit.jupiter.api.AfterEach void clearSecurity() { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
   @BeforeEach
   void setUp() {
     ingestionService =
@@ -308,8 +315,9 @@ class CreatorClaimOAuthIntegrationTest {
             .role(Role.CREATOR)
             .build();
 
+    invitation.setInvitedEmail(kocUser.getEmail());
     assertThatThrownBy(() ->
-        claimResolutionService.resolveClaim("TIKTOK", "auth_code_wrong", rawToken, kocUser))
+        claimResolutionService.resolveClaim("TIKTOK", "auth_code_wrong", rawToken, authenticated(kocUser)))
         .isInstanceOf(ConflictException.class)
         .matches(ex -> ((ConflictException) ex).code() == ErrorCode.IDENTITY_MISMATCH);
 
@@ -376,8 +384,9 @@ class CreatorClaimOAuthIntegrationTest {
           return m;
         });
 
+    invitation.setInvitedEmail(kocUser.getEmail());
     OAuthCallbackResponse response =
-        claimResolutionService.resolveClaim("TIKTOK", "valid_auth_code", rawToken, kocUser);
+        claimResolutionService.resolveClaim("TIKTOK", "valid_auth_code", rawToken, authenticated(kocUser));
 
     assertThat(response).isNotNull();
     assertThat(response.getMasterId()).isNotNull();
@@ -429,7 +438,7 @@ class CreatorClaimOAuthIntegrationTest {
 
     // Second concurrent session must be rejected cleanly
     assertThatThrownBy(() ->
-        claimResolutionService.resolveClaim("TIKTOK", "code_two", rawToken, secondKocUser))
+        claimResolutionService.resolveClaim("TIKTOK", "code_two", rawToken, authenticated(secondKocUser)))
         .isInstanceOf(ConflictException.class)
         .hasMessageContaining("Invitation has already been ACCEPTED");
 
@@ -483,7 +492,8 @@ class CreatorClaimOAuthIntegrationTest {
       return m;
     });
 
-    claimResolutionService.resolveClaim("TIKTOK", "code_shortlist", rawToken, kocUser);
+    invitation.setInvitedEmail(kocUser.getEmail());
+    claimResolutionService.resolveClaim("TIKTOK", "code_shortlist", rawToken, authenticated(kocUser));
 
     // Verify dual references update method was executed for Shortlist and Relationship
     verify(shortlistItemRepository).updateMasterForCreator(eq(creatorId), any(CreatorMaster.class));

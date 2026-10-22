@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service @RequiredArgsConstructor
 public class CreatorClaimService {
   private final CreatorRepository creators;
+  private final CreatorMasterRepository masters;
   private final CreatorClaimRepository claims;
   private final ExternalIdentityRepository identities;
   private final UserRepository users;
@@ -91,7 +92,9 @@ public class CreatorClaimService {
     if(request.decision()==Decision.APPROVED) {
       User claimant=verifiedCreator(claim.getClaimant().getId());
       if(creator.getOwner()!=null)throw conflict("The channel already has a verified owner");
-      creator.setOwner(claimant);creator.setSourceType(CreatorSourceType.AUTHORIZED);creator.setAuthorizedAt(LocalDateTime.now());
+      CreatorMaster master=masters.findByUserId(claimant.getId()).orElseGet(()->masters.save(
+          CreatorMaster.builder().user(claimant).canonicalName(claimant.getFullName()==null?"Creator":claimant.getFullName()).status("ACTIVE").build()));
+      creator.setMaster(master);creator.setSourceType(CreatorSourceType.AUTHORIZED);creator.setAuthorizedAt(LocalDateTime.now());
       claim.setStatus(CreatorClaimStatus.APPROVED);
       // Locking the channel serializes every review, including automatic rejection of competing requests.
       for(CreatorClaim other:claims.findByCreatorIdAndStatus(creator.getId(),CreatorClaimStatus.PENDING)) {
@@ -133,12 +136,9 @@ public class CreatorClaimService {
     User user=users.findById(id).orElseThrow(()->conflict("Claimant no longer exists"));
     if(user.getRole()!=Role.CREATOR || user.getStatus()!=UserStatus.ACTIVE)
       throw conflict("Claimant must be an active Creator");
-    boolean googleVerified=identities.findByUserIdAndProvider(id,ExternalIdentityProvider.GOOGLE)
-        .filter(i->i.isEmailVerified()).isPresent();
-    boolean devMock=devCreatorLogin.isPresent()
-        && identities.findByUserIdAndProvider(id,ExternalIdentityProvider.DEV_MOCK).isPresent();
-    if(!googleVerified && !devMock)
-      throw new ForbiddenException("A verified Google identity is required");
+    if (identities.findByUserIdAndProvider(id, ExternalIdentityProvider.DEV_MOCK).isPresent() && devCreatorLogin.isEmpty())
+      throw new ForbiddenException("Development mock Creator login is disabled");
+    if(!user.isEmailVerified()) throw new ForbiddenException("A verified email is required");
     return user;
   }
   private Creator lockedCreator(UUID id) {

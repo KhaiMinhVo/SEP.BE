@@ -39,7 +39,7 @@ docker compose ps
 docker compose logs -f api
 ```
 
-Compose sẽ tự khởi động PostgreSQL, chờ database healthy, chạy API và áp dụng Flyway V1–V8. Không cần cài Maven hoặc Java trên máy.
+Compose sẽ tự khởi động PostgreSQL, chờ database healthy, chạy API và áp dụng các migration Flyway hiện có. Không cần cài Maven hoặc Java trên máy.
 
 Các địa chỉ sau phải truy cập được:
 
@@ -160,27 +160,14 @@ docker compose logs --tail 200 api
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
-- `GET /api/v1/auth/google`
-- `POST /api/v1/auth/google/exchange`
+- `POST /api/v1/auth/verify-email`
+- `POST /api/v1/auth/resend-verification`
+- `POST /api/v1/data/creator-invitations`
+- `POST /api/v1/auth/creator/register`
 
-## Google OAuth2 login
+## Registration and email OTP
 
-1. Create an OAuth 2.0 Web Client in Google Cloud Console.
-2. Add `http://localhost:8080/api/v1/login/oauth2/code/google` as an authorized redirect URI.
-3. Configure `GOOGLE_OAUTH_ENABLED=true`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_FRONTEND_CALLBACK_URL` in `.env`.
-4. Open `http://localhost:8080/api/v1/auth/google` in a browser.
-5. Exchange the one-time callback code through `POST /api/v1/auth/google/exchange` using `{ "code": "..." }`.
-
-Google login supports `BRAND` via `/auth/google` and `CREATOR` via `/auth/google/creator`.
-A first Brand login does not create a Brand Profile. Existing accounts cannot change
-role through Google login. Access and refresh tokens behave the same as password login.
-
-On `develop`, migration `V3__google_oauth2_login.sql` upgrades the V1/V2 snake_case schema.
-The older `khai` V1-V10 migration history is not interchangeable with this schema.
-Use a separate development database when switching between those histories; do not delete shared data or repair Flyway checksums to bypass the mismatch.
-The frontend callback must exchange the code once within 60 seconds and handle the returned login response.
-
-Public registration luôn tạo role `BRAND`; `/admin/**` yêu cầu role `ADMIN`.
+Brand registration is public; Creator registration requires an ADMIN/DATA_MANAGER email invitation. Both verify OTP before password login. Google Login is removed. See [registration and SMTP guide](docs/registration-and-email-otp.md).
 
 ## RBAC và phạm vi triển khai
 
@@ -189,7 +176,7 @@ mặc định nằm trong `security/Permission.java`, `security/RolePermissions.
 Admin có thể bật/tắt chức năng sẵn có của ba role còn lại; không cấp chéo role.
 Quyền Admin giữ cố định. Quyền hiệu lực được nạp một lần mỗi request, không cache
 liên request; token hiện tại nhận cấu hình mới từ request tiếp theo sau khi lưu.
-Login/refresh/Google exchange/mock login trả `user.permissions`; `/auth/me` trả `permissions`.
+Login/refresh/mock login trả `user.permissions`; `/auth/me` trả `permissions`.
 API và ma trận chức năng: [Role Permission Management](docs/role-permissions.md).
 
 Các API hiện có đã được bảo vệ:
@@ -219,7 +206,7 @@ Migration V4 thêm `auth_version`, constraint role và một bản ghi khóa chu
 Mỗi thay đổi role/status thực sự tăng version, revoke refresh token và ghi audit trong cùng transaction.
 JWT kiểm tra role/status/version hiện tại từ database. JWT cũ thiếu claim coi là version 0;
 sau khi version tăng, mở khóa không làm token cũ hợp lệ lại. Thao tác không đổi giá trị không tăng version.
-OAuth session chỉ lưu handshake Google, không dùng làm đăng nhập cho API JWT.
+Các API sử dụng JWT stateless; Google Login đã được gỡ.
 
 ### Ingestion service key
 
@@ -246,3 +233,5 @@ Không thể xem các permission đã khai báo là chức năng đã hoạt đ�
 Creator Rate Card endpoints have been removed. Creator profile and shortlist compare responses
 no longer contain `rateCard`. Claim/ownership verification is unchanged. V12 preserves legacy
 prices and audits while retiring the permission override. See [Creator Claim](docs/creator-claim.md).
+
+Schema cleanup V15 removes retired exchange/Rate Card tables and duplicate metric profile fields. Review [data impact and deployment notes](docs/schema-cleanup-v15.md) before applying to a deployment database.

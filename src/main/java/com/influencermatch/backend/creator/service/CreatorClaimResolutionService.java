@@ -48,6 +48,12 @@ public class CreatorClaimResolutionService {
   public OAuthCallbackResponse resolveClaim(
       String platform, String code, String rawToken, User explicitUser) {
 
+    Permissions.require(com.influencermatch.backend.security.permission.Permission.CLAIM_CREATOR_PROFILE);
+    User claimantUser = Permissions.actor();
+    if (explicitUser == null || !explicitUser.getId().equals(claimantUser.getId())
+        || claimantUser.getRole() != Role.CREATOR || claimantUser.getStatus() != UserStatus.ACTIVE
+        || !claimantUser.isEmailVerified())
+      throw new com.influencermatch.backend.exception.ForbiddenException("An authenticated verified Creator is required");
     // 1. Verify invitation token first
     String tokenHash = CreatorInvitationService.hashToken(rawToken.trim());
     CreatorInvitation invitation = creatorInvitationRepository.findByTokenHash(tokenHash)
@@ -65,6 +71,8 @@ public class CreatorClaimResolutionService {
       throw new ConflictException(ErrorCode.INVITATION_EXPIRED, "Invitation has expired");
     }
 
+    if (!claimantUser.getEmail().equalsIgnoreCase(invitation.getInvitedEmail()))
+      throw new com.influencermatch.backend.exception.ForbiddenException("Invitation belongs to another email");
     UUID targetCreatorId = invitation.getTargetCreator().getId();
 
     // 2. Lock target Creator account (PESSIMISTIC_WRITE)
@@ -103,23 +111,6 @@ public class CreatorClaimResolutionService {
       throw new ConflictException(
           ErrorCode.IDENTITY_MISMATCH,
           "Proof of control failed: Authenticated account does not match target creator");
-    }
-
-    // 4. Resolve Claimant User
-    User claimantUser = explicitUser != null ? explicitUser : Permissions.actorOrNull();
-    if (claimantUser == null) {
-      claimantUser = userRepository.findByEmail(invitation.getInvitedEmail())
-          .orElseGet(() -> {
-            User newUser = User.builder()
-                .email(invitation.getInvitedEmail())
-                .fullName(creator.getDisplayName() != null ? creator.getDisplayName() : creator.getUserName())
-                .role(Role.CREATOR)
-                .status(UserStatus.ACTIVE)
-                .authVersion(1L)
-                .passwordHash("$2a$10$A/bxwOtUf1iUtnhbppaG5uBmF/iK7f100XS/H/Y.VpjKyRqiEUh52")
-                .build();
-            return userRepository.save(newUser);
-          });
     }
 
     // 5. Find or create CreatorMaster M1 for claimantUser

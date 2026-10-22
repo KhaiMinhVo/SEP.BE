@@ -42,8 +42,17 @@ class CreatorClaimResolutionServiceTest {
 
   private CreatorClaimResolutionService resolutionService;
 
+  User actor() {
+    return (User) org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+  }
+  void login(User user) {
+    org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+      new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(user,null,user.getAuthorities()));
+  }
+  @org.junit.jupiter.api.AfterEach void clear() { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
   @BeforeEach
   void setUp() {
+    login(User.builder().id(UUID.randomUUID()).email("koc@influencermatch.com").role(Role.CREATOR).status(UserStatus.ACTIVE).build());
     creatorRepository = mock(CreatorRepository.class);
     creatorMasterRepository = mock(CreatorMasterRepository.class);
     creatorInvitationRepository = mock(CreatorInvitationRepository.class);
@@ -90,8 +99,8 @@ class CreatorClaimResolutionServiceTest {
     CreatorInvitation invitation = CreatorInvitation.builder()
         .id(UUID.randomUUID())
         .targetCreator(creator)
-        .tokenHash(tokenHash)
         .invitedEmail("koc@influencermatch.com")
+        .tokenHash(tokenHash)
         .status("PENDING")
         .expiresAt(LocalDateTime.now().plusDays(5))
         .build();
@@ -106,7 +115,7 @@ class CreatorClaimResolutionServiceTest {
 
     when(creatorInvitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(invitation));
     when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
-    when(userRepository.findByEmail("koc@influencermatch.com")).thenReturn(Optional.of(claimantUser));
+    login(claimantUser);
 
     // Proof client matches external id
     when(oAuthProofClient.exchangeAndVerify(eq("YOUTUBE"), eq("auth_code_xyz"), eq("UC_GENUINE_123"), eq("tech_pro")))
@@ -134,6 +143,7 @@ class CreatorClaimResolutionServiceTest {
     OAuthCallbackResponse response = resolutionService.resolveClaim(
         "YOUTUBE", "auth_code_xyz", rawToken, claimantUser);
 
+    verify(userRepository, never()).save(any());
     assertThat(response.getStatus()).isEqualTo("AUTHORIZED");
     assertThat(response.getCreatorId()).isEqualTo(creatorId);
     assertThat(response.getMasterId()).isNotNull();
@@ -184,6 +194,7 @@ class CreatorClaimResolutionServiceTest {
     CreatorInvitation invitation = CreatorInvitation.builder()
         .id(UUID.randomUUID())
         .targetCreator(creator)
+        .invitedEmail("koc@influencermatch.com")
         .tokenHash(tokenHash)
         .status("PENDING")
         .expiresAt(LocalDateTime.now().plusDays(5))
@@ -200,7 +211,7 @@ class CreatorClaimResolutionServiceTest {
             .build());
 
     assertThatThrownBy(() -> resolutionService.resolveClaim(
-        "YOUTUBE", "code_fake", rawToken, null))
+        "YOUTUBE", "code_fake", rawToken, actor()))
         .isInstanceOf(ConflictException.class)
         .satisfies(e -> assertThat(((ConflictException) e).code()).isEqualTo(ErrorCode.IDENTITY_MISMATCH));
 
@@ -225,6 +236,7 @@ class CreatorClaimResolutionServiceTest {
     CreatorInvitation invitation = CreatorInvitation.builder()
         .id(UUID.randomUUID())
         .targetCreator(creator)
+        .invitedEmail("koc@influencermatch.com")
         .tokenHash(tokenHash)
         .status("PENDING")
         .expiresAt(LocalDateTime.now().plusDays(5))
@@ -234,10 +246,32 @@ class CreatorClaimResolutionServiceTest {
     when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
 
     assertThatThrownBy(() -> resolutionService.resolveClaim(
-        "TIKTOK", "code_123", rawToken, null))
+        "TIKTOK", "code_123", rawToken, actor()))
         .isInstanceOf(ConflictException.class)
         .satisfies(e -> assertThat(((ConflictException) e).code()).isEqualTo(ErrorCode.CREATOR_ALREADY_LINKED));
 
     verify(oAuthProofClient, never()).exchangeAndVerify(any(), any(), any(), any());
   }
+  @Test void anonymousCallbackCannotCreateAnAccount() {
+    org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    assertThatThrownBy(()->resolutionService.resolveClaim("TIKTOK","code","token",null))
+        .isInstanceOf(com.influencermatch.backend.exception.BusinessException.class);
+    verifyNoInteractions(userRepository,creatorInvitationRepository,creatorRepository,oAuthProofClient);
+  }
+  @Test void unverifiedCreatorCannotUseCallback() {
+    var user=actor();user.setEmailVerified(false);
+    assertThatThrownBy(()->resolutionService.resolveClaim("TIKTOK","code","token",user))
+        .isInstanceOf(com.influencermatch.backend.exception.ForbiddenException.class);
+    verifyNoInteractions(userRepository,creatorInvitationRepository,oAuthProofClient);
+  }
+  @Test void callbackCannotConsumeInvitationSentToAnotherEmail() {
+    var invitation=CreatorInvitation.builder().id(UUID.randomUUID()).invitedEmail("other@example.test")
+        .status("PENDING").expiresAt(LocalDateTime.now().plusDays(1)).build();
+    when(creatorInvitationRepository.findByTokenHash(anyString())).thenReturn(Optional.of(invitation));
+    assertThatThrownBy(()->resolutionService.resolveClaim("TIKTOK","code","token",actor()))
+        .isInstanceOf(com.influencermatch.backend.exception.ForbiddenException.class);
+    verify(userRepository,never()).save(any());verifyNoInteractions(creatorMasterRepository,creatorRepository,oAuthProofClient);
+    assertThat(invitation.getStatus()).isEqualTo("PENDING");
+  }
+
 }

@@ -1,12 +1,32 @@
 # Backend Test Cases — Khải
 
+## Current verification — schema cleanup V15 (2026-10-23)
+
+- Targeted regression: **100/100 tests passed**.
+- Final full regression: **527/527 passed, 63 suites, 0 failures, 0 errors, 0 skipped**, Java 21 and `mvn -q test`.
+- Added 12 PostgreSQL integration invocations for V15: nine backfill parameter sets, retained-data upgrade, fresh schema and ingestion/filter/Discovery/profile/Compare behavior.
+- New migration V15 drops the retired tables/columns; prior V1–V14 migration files remain unchanged. Historical V12/V14 tests are pinned to their historical schema versions.
+- Only disposable PostgreSQL/pgvector containers were migrated. No real email, shared database migration, backend restart, .env/Bruno changes, commit or push.
+- Data impact and deployment notes: [schema-cleanup-v15.md](schema-cleanup-v15.md). SCHEMA-001–SCHEMA-005 map the current checks below; earlier test counts are historical.
+
+
+## Previous verification — invitation registration and OTP (2026-10-23)
+
+- Final full regression: **515 tests / 62 suites; 515 passed, 0 failures, 0 errors, 0 skipped** (`mvn -q test`, Java 21).
+- PostgreSQL/pgvector Testcontainers covered V13/V14, rollback, persisted wrong attempts, invitation concurrency, verification concurrency and legacy password setup. SMTP/clock were mocked; no real mail or shared database was used.
+- Google Login-only suites were retired; their replacement checks assert removed endpoints and legacy password setup. Existing session, permission, Claim/ownership, Compare, Billing and Collaboration assertions remain, with fixtures adapted to Vy's persisted CreatorMaster and migration numbering.
+- Regression caught and fixed verification being overwritten by concurrent Admin role changes (`User` dynamic updates), transient Master assignment in manual Claim approval, and catalog entries incorrectly marked editable when unimplemented.
+- V1–V12 were not modified. New migration files were tested only in containers. No `.env`/Bruno edits, shared database migrations, BE restart, commit or push were performed.
+- Current flow/configuration: [registration-and-email-otp.md](registration-and-email-otp.md). REG-001–REG-025 below map the added/updated behavior to executable tests. Older results below are historical.
+
+
 ## Kết quả thực thi ngày 22/10/2026 — gỡ Creator Rate Card
 
 - Clean full regression: **362 test / 47 suite; 362 đạt, 0 thất bại, 0 lỗi thực thi, 0 bỏ qua**.
 - Danh sách bên dưới ánh xạ **114 nhóm test case**; một nhóm có thể chạy nhiều bộ tham số.
 - Đã gỡ test thuần nghiệp vụ giá, giữ assertion Claim/ownership/ingestion/Compare và phân quyền.
 - Thêm 12 lượt integration test cho endpoint cũ 404, response không có `rateCard`, permission
-  đã gỡ và nâng cấp V11 → V12 có/không có override cũ. Khôi phục riêng test claim kênh đã có owner.
+  đã gỡ và nâng cấp Vy V10 → V12 có/không có override cũ. Khôi phục riêng test claim kênh đã có owner.
 - Migration test giữ nguyên giá/audit lịch sử, quyền khác và version của role không bị ảnh hưởng.
 - Lượt chọn lọc ban đầu gặp lỗi Docker engine chưa chạy (33 lượt: 18 đạt, 15 lỗi khởi tạo,
   không có assertion thất bại). Sau khi Docker hoạt động, đã chạy lại bằng clean full regression
@@ -59,7 +79,7 @@ Không cần chạy BE riêng hoặc chỉnh `.env`.
 
 ```powershell
 # Unit theo domain
-mvn '-Dtest=BrandServiceTest,CampaignServiceTest,DataQualityServiceTest,ShortlistCompareServiceTest,PaymentSettlementServiceTest,PaymentCallbackServiceTest,MockPaymentServiceTest,SubscriptionServiceTest,AuditServiceTest,AdminRoleGuardTest,AuthServiceTest,RefreshTokenServiceTest,GoogleAuthServiceTest,CreatorClaimServiceTest' test
+mvn '-Dtest=BrandServiceTest,CampaignServiceTest,DataQualityServiceTest,ShortlistCompareServiceTest,PaymentSettlementServiceTest,PaymentCallbackServiceTest,MockPaymentServiceTest,SubscriptionServiceTest,AuditServiceTest,AdminRoleGuardTest,AuthServiceTest,RefreshTokenServiceTest,CreatorClaimServiceTest' test
 
 # Integration mới và các suite đã mở rộng
 mvn '-Dtest=BrandPostgresIntegrationTest,CampaignPostgresIntegrationTest,AuditLogPostgresIntegrationTest,AuthSessionPostgresIntegrationTest,SubscriptionPostgresIntegrationTest,CreatorClaimPostgresIntegrationTest,RolePermissionPostgresIntegrationTest' test
@@ -113,7 +133,7 @@ bổ sung về transaction/concurrency. HTTP contract và schema database không
 Tên chức năng và mô tả case dùng tiếng Anh để tiện ánh xạ code và báo cáo nhóm.
 Mỗi case bên dưới chỉ rõ class/method; dữ liệu parameterized nằm ngay trong source.
 
-### Authentication & Google OAuth
+### Authentication & Session Management
 
 | ID | Type | Preconditions / Action | Expected result | Automated test |
 |---|---|---|---|---|
@@ -122,16 +142,13 @@ Mỗi case bên dưới chỉ rõ class/method; dữ liệu parameterized nằm 
 | BE-003 | Unit | Rotate token expired at fixed past timestamp | Reject; no new token or revocation of other sessions | [RefreshTokenServiceTest](../src/test/java/com/influencermatch/backend/auth/service/RefreshTokenServiceTest.java)`#expiredTokenDoesNotCreateOrRevokeOtherSessions` |
 | BE-004 | Unit | Rotate/revoke unknown token; revoke already revoked token | Reject rotation; revoke is idempotent and preserves timestamp | [RefreshTokenServiceTest](../src/test/java/com/influencermatch/backend/auth/service/RefreshTokenServiceTest.java)`#unknownTokenAndIdempotentRevokeDoNotWrite` |
 | BE-005 | Unit | Principal role differs from database role | Reject before refresh-token write | [RefreshTokenServiceTest](../src/test/java/com/influencermatch/backend/auth/service/RefreshTokenServiceTest.java)`#changedRoleCannotIssueTokenFromStalePrincipal` |
-| BE-006 | Unit | Existing Google subject logs in with changed provider email | Only provider email changes; account email/password/name preserved | [GoogleAuthServiceTest](../src/test/java/com/influencermatch/backend/auth/service/GoogleAuthServiceTest.java)`#linkedGoogleEmailChangePreservesAccountEmailPasswordAndName` |
-| BE-007 | Unit | New subject attempts to replace existing Google link | GOOGLE_AUTHENTICATION_FAILED; no identity/exchange-code writes | [GoogleAuthServiceTest](../src/test/java/com/influencermatch/backend/auth/service/GoogleAuthServiceTest.java)`#secondGoogleIdentityCannotReplaceExistingLink` |
-| BE-008 | Integration | Register mixed-case email with injected ADMIN role; repeat | BRAND, encoded password, trimmed name; duplicate 409; no Brand Profile | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#registrationNormalizesCaseAndIgnoresInjectedRole` |
+| BE-008 | Integration | Register mixed-case email with injected ADMIN role; repeat | Injected role 400; valid request creates unverified BRAND with encoded password and trimmed name; duplicate 409; no Brand Profile | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#registrationNormalizesCaseAndRejectsInjectedRole` |
 | BE-009 | Integration | Wrong password, then uppercase email with valid password | 401 creates no session; valid login token can call /auth/me | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#wrongPasswordDoesNotIssueSessionAndLoginNormalizesEmail` |
 | BE-010 | Integration | Login then mark user LOCKED/DISABLED | Login, refresh and old access token rejected; no extra refresh row | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#inactiveAccountsCannotLoginOrRefresh` |
 | BE-011 | Integration | Expire stored token at fixed past time; also use unknown token | 401 UNAUTHENTICATED; no new refresh rows | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#expiredAndUnknownRefreshTokensCannotCreateSessions` |
 | BE-012 | Integration | Rotate valid token, inspect DB, logout replacement, retry | Old revoked and linked to new token; logout 204; refresh 401 | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#rotationLinksOldTokenAndLogoutRevokesReplacement` |
 | BE-013 | Integration | Two sessions; rotate first; replay first token | 401 and zero active refresh tokens for that account; other account unaffected | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#replayedRotatedTokenRevokesAllOtherSessionsEvenWhenRequestIsRejected` |
 | BE-014 | Integration | Malformed Authorization header or Bearer JWT | 401 | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#invalidAuthorizationIs401` |
-| BE-107 | Integration | Google account exchanges code and retries | JWT works; exchange code consumed only once | [GoogleOAuthPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/GoogleOAuthPostgresIntegrationTest.java)`#googleOnlyUserCanExchangeOnceAndUseJwt` |
 | BE-108 | Integration | Rotate successfully inside caller transaction, then force caller failure | Original token remains active/unreplaced; no replacement row; original can refresh afterward | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#successfulRotationStillRollsBackWithItsCallerTransaction` |
 | BE-109 | Integration | Two concurrent refresh requests use the same token | One 200, one 401; all refresh tokens of that account revoked durably; completes without deadlock | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#concurrentRefreshReplayCommitsRevocationWithoutDeadlock` |
 
@@ -282,7 +299,48 @@ Mỗi case bên dưới chỉ rõ class/method; dữ liệu parameterized nằm 
 | ID | Level | Condition / action | Expected | Automated test |
 | --- | --- | --- | --- | --- |
 | BE-110 | Integration | All roles call removed GET/PUT endpoints | 404; no business writes | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#retiredEndpointsAre404WithoutBusinessWrites` |
-| BE-111 | Integration | Claim, approve, compare and revoke with legacy prices | Verification works; no rateCard JSON; legacy prices untouched | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#claimRevokeAndCompareWorkWithoutExposingOrModifyingLegacyPrices` |
+| BE-111 | Integration | Claim, approve, compare and revoke without Rate Card storage | Verification works; no rateCard JSON; retired table absent | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#claimRevokeAndCompareWorkWithoutRateCardStorage` |
 | BE-112 | Integration | Read permission catalog/auth and submit retired permission | Permission absent; update rejected | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#retiredPermissionIsAbsentAndCannotBeConfigured` |
-| BE-113 | Integration | Upgrade V11 to V12 with/without retired override | Prices/audits retained; override removed; only affected role version increases | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#upgradePreservesLegacyDataAndOnlyBumpsAffectedConfiguration` |
+| BE-113 | Integration | Upgrade Vy V10 to V12 with/without retired override | Prices/audits retained; override removed; only affected role version increases | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#upgradePreservesLegacyDataAndOnlyBumpsAffectedConfiguration` |
 | BE-114 | Integration | Claim already authorized channel | 409; existing owner retained | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#authorizedChannelRejectsNewClaims` |
+
+
+## Registration invitations and OTP — current implementation
+
+BE-006, BE-007 and BE-107 were retired with Google Login. Historical counts above describe previous revisions, not a new execution. Tests named `CreatorClaimOAuthIntegrationTest` use Mockito; actual database integration is in the Postgres suites.
+
+Each entry below specifies a condition/action, expected result, and executable mapping. SMTP and time are mocked; PostgreSQL suites use disposable pgvector containers.
+
+- **REG-001 · Registration · Unit:** valid Brand request → unverified BRAND, BCrypt hash, initial verification call; `AuthServiceTest#registerTrimsEmailAndNameAndNeverPersistsPlainPassword`.
+- **REG-002 · OTP · Unit:** issue `000042` → retain six digits, store keyed hash with ten-minute expiry; `EmailVerificationServiceTest#initialDeliveryKeepsLeadingZerosAndOnlyStoresKeyedHash`.
+- **REG-003 · OTP · Unit:** incorrect code at attempts 0–4 → increment counter, fifth returns rate limit; `EmailVerificationServiceTest#wrongAttemptIsCountedAndFifthLocksCode`.
+- **REG-004 · OTP policy · Unit:** expiry, consumed code, cooldown and purpose separation → reject without granting verification; `OtpChallengePolicyTest`, `EmailVerificationServiceTest`.
+- **REG-005 · Invitation · Unit:** eligible email → 48-hour link sent, token omitted from response/audit; `CreatorRegistrationInvitationServiceTest#invitationNormalizesEmailStoresHashAndAuditsOnlyMetadata`.
+- **REG-006 · Invitation · Unit:** existing account, exhausted budget or invalid token → no account creation or replacement; `CreatorRegistrationInvitationServiceTest#existingAccountIsNeverConvertedOrEmailed`, `#rateLimitNeverReplacesToken`, `#invalidInvitationNeverCreatesAccount`.
+- **REG-007 · SMTP · Unit:** missing settings or JavaMailSender failure → 503; invitation/OTP messages use mocked transport; `SmtpVerificationEmailSenderTest`.
+- **REG-008 · Brand registration · PostgreSQL integration:** register, attempt login/JWT before verification, verify and login → 403/401 before OTP, successful session afterward, no tokens in registration; `EmailVerificationPostgresIntegrationTest#registrationMustBeVerifiedBeforeLoginAndTokensAreNeverLeaked`.
+- **REG-009 · OTP · PostgreSQL integration:** wrong code repeatedly → persisted attempts even on HTTP error, correct code blocked after five failures; `EmailVerificationPostgresIntegrationTest#failedAttemptsCommitAndFifthAttemptLocksEvenTheCorrectCode`.
+- **REG-010 · OTP resend · PostgreSQL integration:** cooldown, resend replacement, rolling hour budget and exact expiry → enforce boundaries without sleeps; `EmailVerificationPostgresIntegrationTest#resendCooldownAndReplacementInvalidateOldCode`, `#fiveEmailsPerRollingHourIncludesRegistration`, `#codeExpiresAtTenMinutesAndCanBeReplacedWithoutSleep`.
+- **REG-011 · Email rollback · PostgreSQL integration:** configuration/send/database failure → account or replacement OTP rolled back; `EmailVerificationPostgresIntegrationTest#registrationFailureRollsBackAccountAndCode`, `#smtpFailureDuringResendRollsBackHashCountersAndDelivery`, `#verificationDatabaseFailureRollsBackConsumptionAndAccountFlag`.
+- **REG-012 · Verification concurrency · PostgreSQL integration:** two verifies → one consumes code; concurrent Admin role change → verification and role both retained; `EmailVerificationPostgresIntegrationTest#concurrentVerificationConsumesCodeOnlyOnce`, `#concurrentAdminRoleChangeCannotOverwriteSuccessfulVerification`.
+- **REG-013 · Access control · PostgreSQL integration:** Admin role/status changes and crafted refresh cannot bypass pending email verification; `EmailVerificationPostgresIntegrationTest#pendingAccountCannotBeActivatedByAdminStatusOrRole`, `#existingAccountsRemainVerifiedButRefreshCannotBypassVerification`.
+- **REG-014 · Creator registration · PostgreSQL integration:** invite → resolve → register → OTP → login → manual Claim → approve; no ownership before approval and no Google identity required; `CreatorRegistrationPostgresIntegrationTest#creatorInvitationRegistrationOtpLoginAndClaimCompleteWithoutGoogle`.
+- **REG-015 · Invitation RBAC · PostgreSQL integration:** ADMIN/DATA_MANAGER allowed, BRAND/CREATOR denied; disabled dynamic permission denied; `CreatorRegistrationPostgresIntegrationTest#adminsAndDataManagersCanInviteWithoutTokensInResponse`, `#otherRolesCannotInvite` and invitation permission regression in the same suite.
+- **REG-016 · Invitation lifecycle · PostgreSQL integration:** bad, expired, consumed or replaced tokens and client email/role injection → reject without account mutation; `CreatorRegistrationPostgresIntegrationTest` token/payload parameterized cases.
+- **REG-017 · Invitation rollback/concurrency · PostgreSQL integration:** audit/SMTP failure leaves token usable; simultaneous registration creates one account; `CreatorRegistrationPostgresIntegrationTest#registrationSmtpFailureLeavesInvitationUsableAndNoAccount`, `#concurrentRegistrationConsumesInvitationOnce` and invitation audit rollback case.
+- **REG-018 · Password setup · PostgreSQL integration:** eligible historical Google account sets first password → authVersion increments, refresh revoked, no new session; other accounts receive generic request response; `CreatorRegistrationPostgresIntegrationTest#legacyGoogleAccountSetsPasswordAndRevokesOldSessions`, `#ineligiblePasswordSetupIsGenericAndDoesNotSend`.
+- **REG-019 · Password setup · PostgreSQL integration:** wrong attempts persist, purpose/expiry/budget enforced, DB failure rolls back password/token updates; `CreatorRegistrationPostgresIntegrationTest#passwordWrongAttemptsPersistAndResendResetsWithNewPurposeBoundCode`, `#passwordCodeCannotBeUsedForRegistrationAndExpiresAtTenMinutes`, `#passwordSetupSharesHourlyDeliveryBudget` and password rollback case.
+- **REG-020 · Migration · PostgreSQL integration:** V12→V13 retains old verified accounts; V13→V14 retains identity, Master ownership and OTP; `EmailVerificationPostgresIntegrationTest#v13UpgradeGrandfathersExistingAccountsAndAddsVerificationStorage`, `CreatorRegistrationPostgresIntegrationTest#v14UpgradePreservesAccountsIdentitiesOwnershipAndExistingOtp`.
+- **REG-021 · Google retirement · MockMvc/PostgreSQL integration:** authenticated old login/exchange paths → 404; `AuthControllerTest#googleLoginAndExchangeAreRemoved`, `CreatorRegistrationPostgresIntegrationTest#removedGoogleEndpointsAre404ForAuthenticatedUsers`.
+- **REG-022 · Claim security · Unit:** anonymous, unverified or wrong invitation email → reject without creating users/Masters or consuming the invitation; `CreatorClaimResolutionServiceTest#anonymousCallbackCannotCreateAnAccount`, `#unverifiedCreatorCannotUseCallback`, `#callbackCannotConsumeInvitationSentToAnotherEmail`.
+- **REG-023 · Provider simulation · Unit:** disabled flag, prod, dev+prod, test or no active profile → 503; explicit dev only → simulation available; `OAuthProofClientConfigurationTest`.
+- **REG-024 · Claim boundary · PostgreSQL integration:** callback without JWT → 401; Brand → 403; Creator start with mock disabled → 503 and no Master created; `CreatorRegistrationPostgresIntegrationTest#claimCallbackRequiresSessionAndCannotBootstrapAccount`.
+- **REG-025 · Regression fixtures · PostgreSQL integration:** retain manual review/revoke, compare, retired Rate Card preservation, RBAC, Collaboration and session assertions using persisted CreatorMaster; associated existing domain suites.
+
+## Schema cleanup V15
+
+- **SCHEMA-001 · PostgreSQL integration:** V14 upgrade with null/whitespace, existing values, independent latest values, UUID ties, no snapshots, blank history or only one missing field → backfill only the missing Creator fields and retain all remaining metric data/search_vector; `RetiredSchemaPostgresIntegrationTest#backfillOnlyMissingFieldsFromLatestNonblankSnapshot`.
+- **SCHEMA-002 · PostgreSQL integration:** populated V14 auth, OTP, identities, both invitations, Master/Claim, audits and monetary agreements → V15 removes only retired data; retained rows match exactly; `RetiredSchemaPostgresIntegrationTest#upgradeRemovesOnlyRetiredDataAndPreservesAuthOwnershipInvitationsAuditAndFees`.
+- **SCHEMA-003 · PostgreSQL integration:** empty schema migrates to V15 → retired tables/columns absent and current auth/ownership tables present; `RetiredSchemaPostgresIntegrationTest#freshSchemaHasOnlyTheCurrentTablesAndColumns`.
+- **SCHEMA-004 · PostgreSQL API integration:** ingest/update current profile fields, filter old/new location, read profile, Campaign Discovery and Compare → unchanged wire names and current Creator values; `RetiredSchemaPostgresIntegrationTest#ingestionAndProfileComparisonUseCreatorFieldsAndLocationFilterJoinsCreator`.
+- **SCHEMA-005 · Regression:** Rate Card endpoint/profile/Compare tests use current schema; V12 preservation tests stop at V12, V14 identity/exchange preservation tests stop at V14. Auth, OTP, Claim, Billing, ownership and collaboration suites remain active.

@@ -17,20 +17,23 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/creators/claim/oauth")
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
 @RequiredArgsConstructor
 @Tag(name = "Creator Claim OAuth")
 public class CreatorClaimOAuthController {
 
   private final CreatorClaimResolutionService claimResolutionService;
   private final CreatorInvitationService invitationService;
+  private final com.influencermatch.backend.creator.client.OAuthProofClient proofClient;
 
   @GetMapping("/{platform}/start")
-  @Operation(summary = "Start OAuth Proof of Control flow (Public)")
+  @Operation(summary = "Start OAuth Proof of Control flow (authenticated Creator)")
   public ResponseEntity<Void> startOAuth(
       @PathVariable("platform") String platform,
       @RequestParam("token") String token,
       @RequestParam(value = "redirect", defaultValue = "true") boolean redirect) {
 
+    proofClient.requireConfigured();
     // First ensure token is valid before initiating redirect
     invitationService.verifyInvitationToken(token);
 
@@ -44,7 +47,7 @@ public class CreatorClaimOAuthController {
   }
 
   @GetMapping("/{platform}/callback")
-  @Operation(summary = "OAuth callback for profile claim proof of control (Public GET redirect)")
+  @Operation(summary = "OAuth callback for profile claim proof of control (authenticated Creator redirect)")
   public ApiResponse<OAuthCallbackResponse> handleOAuthCallback(
       @PathVariable("platform") String platform,
       @RequestParam("code") String code,

@@ -15,6 +15,13 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
   Optional<User> findByEmail(String email);
 
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @org.springframework.data.jpa.repository.Query("select u from User u where u.email=:email")
+  Optional<User> findLockedByEmail(@org.springframework.data.repository.query.Param("email") String email);
+
+  @org.springframework.data.jpa.repository.Query(value="select pg_advisory_xact_lock(hashtextextended(cast(:email as text), 391))", nativeQuery=true)
+  void lockRegistrationEmail(@org.springframework.data.repository.query.Param("email") String email);
+
   boolean existsByEmail(String email);
 
   long countByRoleAndStatus(Role role, com.influencermatch.backend.user.enums.UserStatus status);

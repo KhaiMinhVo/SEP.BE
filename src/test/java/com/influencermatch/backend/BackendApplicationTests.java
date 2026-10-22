@@ -27,24 +27,16 @@ import org.springframework.test.web.servlet.MockMvc;
  * <p>Integration suite backed by PostgreSQL Testcontainers so JSONB, arrays, Flyway, constraints
  * and optimistic locking use the same database semantics as production.
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
-@TestPropertySource(
-    properties = {
-      "spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL",
-      "spring.datasource.driver-class-name=org.h2.Driver",
-      "spring.datasource.username=sa",
-      "spring.datasource.password=",
-      "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect",
-      "spring.jpa.hibernate.ddl-auto=create-drop",
-      "spring.jpa.properties.hibernate.default_schema=PUBLIC",
-      "spring.flyway.enabled=false",
-      "application.security.jwt.secret-key=404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970",
-      "application.security.jwt.expiration=86400000",
-      "application.security.jwt.refresh-token.expiration=604800000"
-    })
-class BackendApplicationTests {
+@org.springframework.test.context.TestPropertySource(properties="application.auth.email-verification.secret=test-email-otp-secret-at-least-32-characters")
+class BackendApplicationTests extends com.influencermatch.backend.support.PostgresApiTestSupport {
+  @org.springframework.boot.test.mock.mockito.MockBean com.influencermatch.backend.auth.service.VerificationEmailSender sender;
+  private void verifyEmail(String email) throws Exception {
+    var otp=org.mockito.ArgumentCaptor.forClass(String.class);
+    org.mockito.Mockito.verify(sender,org.mockito.Mockito.atLeastOnce()).send(org.mockito.ArgumentMatchers.eq(email),otp.capture());
+    mvc.perform(post("/auth/verify-email").contentType(MediaType.APPLICATION_JSON)
+        .content(objectMapper.writeValueAsBytes(java.util.Map.of("email",email,"otp",otp.getValue())))).andExpect(status().isOk());
+  }
+
 
   @Autowired MockMvc mvc;
   @Autowired UserRepository users;
@@ -117,10 +109,11 @@ class BackendApplicationTests {
                     "{\"email\":\""
                         + brandEmail
                         + "\",\"password\":\"Password123!\",\"fullName\":\"PoC"
-                        + " Brand\",\"role\":\"ADMIN\"}"))
+                        + " Brand\"}"))
         .andExpect(status().isCreated());
     assertThat(users.findByEmail(brandEmail)).get().extracting("role").isEqualTo(Role.BRAND);
 
+    verifyEmail(brandEmail);
     JsonNode brandLogin =
         json(
             mvc.perform(
@@ -432,6 +425,7 @@ class BackendApplicationTests {
                         + fullName
                         + "\"}"))
         .andExpect(status().isCreated());
+    verifyEmail(email);
     String body =
         mvc.perform(
                 post("/auth/login")

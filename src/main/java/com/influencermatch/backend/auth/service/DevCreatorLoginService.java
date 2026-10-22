@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 @ConditionalOnProperty(name="application.auth.creator-mock.enabled",havingValue="true")
 public class DevCreatorLoginService {
   private final UserRepository users;
+  private final com.influencermatch.backend.creator.repository.CreatorMasterRepository masters;
   private final ExternalIdentityRepository identities;
   private final JwtTokenProvider jwt;
   private final RefreshTokenService refreshTokens;
@@ -34,6 +35,7 @@ public class DevCreatorLoginService {
     User user=users.saveAndFlush(User.builder().email("creator-"+subject+"@creator-mock.invalid")
         .fullName("Development Mock Creator").role(Role.CREATOR).status(UserStatus.ACTIVE)
         .lastLoginAt(LocalDateTime.now()).build());
+    masters.save(com.influencermatch.backend.creator.model.CreatorMaster.builder().user(user).canonicalName(user.getFullName()).status("ACTIVE").build());
     identities.save(ExternalIdentity.builder().user(user).provider(ExternalIdentityProvider.DEV_MOCK)
         .providerSubject(subject).providerEmail(user.getEmail()).emailVerified(false).build());
     String access=jwt.generateToken(user);

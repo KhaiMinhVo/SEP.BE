@@ -66,7 +66,7 @@ public class OpenApiConfig {
             Enables Brand/SME users to discover creators, manage campaigns,
             track performance, and handle end-to-end collaboration workflows.
 
-            **Security**: Register, login, refresh and Google handshake/exchange are public.
+            **Security**: Brand registration, invited Creator registration, OTP verification, password setup, login and refresh are public. Google Login is removed. Registration requires SMTP; channel ownership is a separate Claim flow.
             `/auth/me` and logout require JWT. Permissions come from the current database role;
             role/status changes invalidate existing JWT and refresh tokens immediately.
             BRAND owns its business resources. ADMIN can read support data, not write Brand

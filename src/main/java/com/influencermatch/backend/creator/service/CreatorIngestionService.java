@@ -117,7 +117,6 @@ public class CreatorIngestionService {
     metric.setAvgShares(request.getAvgShares());
     metric.setEngagementRate(request.getEngagementRate());
     metric.setNiche(request.getNiche());
-    metric.setLocation(request.getLocation());
     metric.setContentSummary(request.getContentSummary());
     metric.setCollectedAt(LocalDateTime.now());
     metric.setCrawlRunId(request.getCrawlRunId());
@@ -127,12 +126,6 @@ public class CreatorIngestionService {
     metric.setDataConfidence(request.getDataConfidence());
     metric.setContact(request.getContact());
     metric.setCategory(request.getCategory());
-
-    // Optional urlProfile on metric (often redundant with creator.profileUrl, but keeping for DB
-    // schema matching)
-    if (request.getProfileUrl() != null) {
-      metric.setUrlProfile(request.getProfileUrl());
-    }
 
     metric = metricRepository.save(metric);
 

@@ -131,25 +131,41 @@ Brand đăng ký tài khoản $\rightarrow$ Khởi tạo `BrandProfile` $\righta
 ## 🧠 FLOW 3: AI Recommendation using Four-Memory Framework (Đề xuất KOC & Tiến hóa Bối cảnh)
 
 ### 1. Luồng nghiệp vụ trọn vẹn
-Brand bấm *"Đề xuất KOC bằng AI"* $\rightarrow$ Kiểm tra & trừ quota AI $\rightarrow$ Nạp 4 tầng bộ nhớ $\rightarrow$ AI Reranker tính điểm tương thích kèm lý giải (Reasoning) $\rightarrow$ Brand Chấp nhận (vào Shortlist) hoặc Bác bỏ (nhập lý do) $\rightarrow$ Cập nhật phản hồi vào `CampaignContext` (tăng version ngữ cảnh).
+Brand bấm *"Đề xuất KOC bằng AI"* (Top $K = 10$) $\rightarrow$ Hệ thống kích hoạt **Quota Guard** ([SubscriptionService](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/billing/service/SubscriptionService.java)) kiểm tra `usedRecommendationQuota < plan.aiRecommendationQuota` $\rightarrow$ Nạp và tổng hợp dữ liệu từ **Hệ thống 4 Tầng Bộ nhớ (Four-Memory Framework: M1, M2, M3, M4)** $\rightarrow$ Gửi Payload sang Python AI Microservice (`POST /api/v1/ai/recommend`) $\rightarrow$ AI Reranker tính toán độ tương thích đa chiều kết hợp Explainable AI (`explanation_service.py`) $\rightarrow$ Trả về danh sách KOC tiềm năng kèm **Thẻ lý giải thông minh (Reasoning Card)** $\rightarrow$ Brand tương tác phản hồi:
+* Nếu **Chấp nhận (Accept)**: KOC tự động được nạp vào Shortlist chiến dịch (Flow 4).
+* Nếu **Từ chối (Reject)** kèm lý do (ví dụ: *"giá quá cao"*, *"sai phong cách"*): Kích hoạt cơ chế **Negative Constraints Adaptation**, tự động ghi nhận trần ngân sách hoặc loại trừ KOC vào `CampaignContext` (**M3**) và nâng cấp phiên bản ngữ cảnh (`contextVersion++`).
 
-### 2. Biến đổi trạng thái thực thể chính
-* `Subscription`: `used_ai_quota` $+ 1$
-* `ShortlistItem`: Tạo mới bản ghi KOC được Brand lựa chọn vào Shortlist
-* `CampaignContext`: `version += 1`, cập nhật ma trận phản hồi (feedback matrix)
+### 2. Định nghĩa Chuẩn mực Hệ thống 4 Tầng Bộ nhớ (Four-Memory Framework)
+* **M1: Historical Campaign Evidence Memory (Bộ nhớ Bằng chứng Lịch sử)**:
+  * Nguồn: Bảng `historical_campaign`, `campaign_outcome`, `creator_review`.
+  * Nội dung: Bằng chứng thực chiến từ các chiến dịch đã hoàn thành: chi phí hợp tác thực tế (`agreed_fee`), KPI thực tế (Views, Clicks, Orders, ROI), điểm đánh giá chất lượng của Brand (`brandFitRating`), và ý định tái hợp tác (`would_collaborate_again`).
+* **M2: Public Creator Intelligence Memory (Bộ nhớ Trí tuệ KOC Công khai)**:
+  * Nguồn: Bảng `creator`, `public_creator_metric`, `post`, pgvector `embedding`.
+  * Nội dung: Hồ sơ công khai cào từ MXH: Followers, Avg Views, Avg Likes, Avg Comments, Engagement Rate, Niche, Category, Creator Type (`KOL`/`KOC`), tính tươi mới (`freshness_status`), độ tự tin (`data_confidence`), và vector 768 chiều.
+* **M3: Current Campaign Context Memory (Bộ nhớ Bối cảnh Chiến dịch Hiện tại)**:
+  * Nguồn: Bảng `campaign`, `campaign_context` (quản lý đa phiên bản `context_version`).
+  * Nội dung: Mục tiêu chiến dịch, sản phẩm/dịch vụ, tệp khách hàng, ràng buộc cứng (`platforms`, `niches`, `followerMin/Max`, `budgetMin/Max`), và **ma trận phản hồi tương tác (Negative Constraints / Feedback history)**.
+* **M4: Brand Context Memory (Bộ nhớ Bối cảnh Thương hiệu)**:
+  * Nguồn: Bảng `brand_profile`, `brand_context`, `brand_pattern`.
+  * Nội dung: Định vị thương hiệu, tone & voice, giá trị cốt lõi (`profileContext`), các mẫu thành công học được (`learnedPatterns`: ví dụ "Brand hợp KOC Skincare treatment hơn Makeup", "KOC chi phí < 15M cho ROI cao nhất"), các liên kết bằng chứng (`evidenceRefs`).
 
-### 3. Chi tiết Function & Phân bổ Repository
+### 3. Biến đổi trạng thái thực thể chính
+* `Subscription`: `used_ai_quota += 1` (Chặn `409 QUOTA_EXCEEDED` nếu vượt hạn mức gói).
+* `ShortlistItem`: Tự động tạo mới bản ghi KOC được Brand chấp nhận vào Shortlist (`ShortlistPriority = HIGH`).
+* `CampaignContext` (**M3**): Tăng `context_version += 1`, cập nhật ma trận phản hồi (Negative Constraints) và cập nhật `updated_at = NOW()`.
 
-| STT | Function / Endpoint | Actor liên quan | Repo | Input / Output | Trạng thái | Mô tả kỹ thuật & Đề xuất hành động |
+### 4. Chi tiết Function & Phân bổ Repository (Khớp 100% Mã nguồn Hiện tại)
+
+| STT | Function / Endpoint | Actor liên quan | Repo | Input / Output | Trạng thái | Mô tả kỹ thuật chi tiết mã nguồn |
 | :---: | :--- | :---: | :---: | :--- | :---: | :--- |
-| **3.1** | `SubscriptionService.checkAndDeductQuota()` | Quota Guard | `SEP_BE` | **In**: `AI_RECOMMENDATION`<br>**Out**: `void / 403` | 🟢 **ĐÃ LÀM** | Trừ hạn mức AI trong Subscription của Brand trước khi gọi model. |
-| **3.2** | `BrandContextRepository` & `CampaignContextRepository` | Backend Engine | `SEP_BE` | **In**: `brandId, campaignId`<br>**Out**: Context entities | 🟢 **ĐÃ LÀM** | Truy xuất **Bộ nhớ 4 (`BrandContext` - M4)** và **Bộ nhớ 3 (`CampaignContext` - M3)**. |
-| **3.3** | `HistoricalCampaignRepository` & `BrandPatternRepository` | Backend Engine | `SEP_BE` | **In**: `brandId, niche`<br>**Out**: Pattern entities | 🟢 **ĐÃ CÓ SCHEMA** | Đã có Flyway table cho **Bộ nhớ 1 (`HistoricalCampaign` - M1)** và **Bộ nhớ 4 (`BrandPattern` - M4)**. |
-| **3.4** | `POST /campaigns/{id}/ai-recommendations` | Brand User | `SEP_BE` | **In**: `campaignId, topK = 10`<br>**Out**: `List<RecommendedDto>` | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Viết Service gom 4 bộ nhớ thành 1 JSON payload gửi sang AI Microservice. |
-| **3.5** | `POST /api/v1/ai/recommend`<br>(`app/ai/ai_router.py`) | AI Reranker | `AI` | **In**: 4-Memory JSON<br>**Out**: Ranked KOCs + Reasoning | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Viết thuật toán Reranker (Bi-Encoder kết hợp trọng số Pattern) và sinh text lý giải độ phù hợp. |
-| **3.6** | *AI Explainable Reasoning Card* | Brand User | `AI` & `BE` | **In**: KOC Features<br>**Out**: `reasoning: String` | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Hiển thị thẻ lý giải: *"KOC phù hợp 92% vì cùng ngách Skincare và từng đạt ROI > 2.5 trong quá khứ"*. |
-| **3.7** | `POST /campaigns/{id}/ai-recommendations/feedback` | Brand User | `SEP_BE` | **In**: `creatorId, status, note`<br>**Out**: `ApiResponse.ok()` | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Nhận phản hồi Brand, tự thêm KOC vào Shortlist (nếu Accept), nâng cấp version ngữ cảnh. |
-| **3.8** | *Negative Constraints Adaptation* | Machine Learning | `SEP_BE` | **In**: `feedbackNote: "giá cao"` | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Tự động ghi nhận trần ngân sách hoặc loại trừ KOC bị từ chối vào `CampaignContext`. |
+| **3.1** | `checkAndDeductAiQuota()`<br>([SubscriptionService](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/billing/service/SubscriptionService.java)) | Quota Guard | `SEP_BE` | **In**: `brandProfileId`<br>**Out**: `void / 409 QUOTA_EXCEEDED` | 🟢 **ĐÃ CÓ LOGIC GỐC** | Tương tự hạn mức Campaign: Kiểm tra `usedRecommendationQuota < plan.aiRecommendationQuota`, tăng nguyên tử `usedRecommendationQuota += 1`, chặn `409` nếu hết quota. |
+| **3.2** | `BrandContextRepository` & `CampaignContextRepository` | Backend Core | `SEP_BE` | **In**: `brandId, campaignId`<br>**Out**: `BrandContext` (M4), `CampaignContext` (M3) | 🟢 **ĐÃ LÀM** | [BrandContextRepository.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/repository/BrandContextRepository.java) truy xuất M4 (profileContext, learnedPatterns); [CampaignContextRepository.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/repository/CampaignContextRepository.java) truy xuất M3 phiên bản mới nhất (`active = true`). |
+| **3.3** | `HistoricalCampaign` & `BrandPattern` Schema | Backend Core | `SEP_BE` | **DB Schema** | 🟢 **ĐÃ CÓ SCHEMA** | Đã sẵn sàng trong Flyway `V1__init_schema.sql` và `V8__claim_based_identity_foundation.sql`: bảng `historical_campaign` (**M1**) và `brand_pattern` (**M4**). |
+| **3.4** | `POST /campaigns/{id}/ai-recommendations` | Brand User | `SEP_BE` | **In**: `campaignId, topK = 10`<br>**Out**: `List<AiRecommendedCreatorDto>` | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Xây dựng Service gom 4 bộ nhớ thành 1 JSON Context Payload gửi sang Python AI Microservice qua HTTP Client. |
+| **3.5** | `POST /api/v1/ai/recommend`<br>(`app/api/routers/ai_router.py`) | AI Reranker | `AI` | **In**: 4-Memory Context JSON<br>**Out**: Ranked KOCs + Reasoning | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Thuật toán Reranker tính điểm tương thích tổng hợp: $\text{FinalScore} = w_{sem} \cdot \text{Semantic} + w_{niche} \cdot \text{NicheMatch} + w_{perf} \cdot \text{HistoricalM1} + w_{brand} \cdot \text{BrandPatternM4}$. |
+| **3.6** | `generate_explanation()`<br>(`app/ai/services/explanation_service.py`) | AI Engine | `AI` | **In**: `ExplanationInput`<br>**Out**: `ExplanationOutput` | 🟢 **ĐÃ LÀM** | Đã có sẵn mã nguồn trong `explanation_service.py`: Chấm điểm 4 tiêu chí (`engagementScore`, `followerScore`, `semanticMatchScore`, `nicheMatchScore`), sinh tóm tắt 1 câu, danh sách lý do cụ thể và `scoreBreakdown`. |
+| **3.7** | `POST /campaigns/{id}/ai-recommendations/feedback` | Brand User | `SEP_BE` | **In**: `creatorId, action (ACCEPT/REJECT), reasonNote`<br>**Out**: `ApiResponse.ok()` | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Khi Brand bấm **Accept**: Tự động gọi [ShortlistService.addCreatorToShortlist](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/service/ShortlistService.java). Khi Brand bấm **Reject**: Nạp lý do vào quy trình Negative Constraints Adaptation. |
+| **3.8** | *Negative Constraints Adaptation* | Machine Learning | `SEP_BE` | **In**: `reasonNote` ("giá cao", "sai phong cách")<br>**Out**: Cập nhật M3 | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Tự động ghi nhận danh sách KOC bị loại trừ (`excludedCreatorIds`) hoặc điều chỉnh trần ngân sách vào `CampaignContext.contextData`, nâng `context_version++` để các lần đề xuất sau không lặp lại lỗi. |
 
 ---
 

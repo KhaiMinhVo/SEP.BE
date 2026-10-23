@@ -90,15 +90,16 @@ class CreatorClaimOAuthIntegrationTest {
             creatorRepository, metricRepository, postRepository, entityManager);
 
     invitationService =
-        new CreatorInvitationService(
+        com.influencermatch.backend.support.CreatorServiceFixtures.wire(new CreatorInvitationService(
             creatorRepository,
             invitationRepository,
             brandProfileRepository,
             campaignRepository,
-            userRepository);
+            userRepository));
 
+    org.mockito.Mockito.lenient().when(userRepository.findLockedByEmail(org.mockito.ArgumentMatchers.anyString())).thenAnswer(i->Optional.of((User)org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getPrincipal()));
     claimResolutionService =
-        new CreatorClaimResolutionService(
+        com.influencermatch.backend.support.CreatorServiceFixtures.wire(new CreatorClaimResolutionService(
             creatorRepository,
             creatorMasterRepository,
             invitationRepository,
@@ -109,7 +110,7 @@ class CreatorClaimOAuthIntegrationTest {
             relationshipRepository,
             userRepository,
             encryptionService,
-            oAuthProofClient);
+            oAuthProofClient));
 
     when(encryptionService.encrypt(anyString())).thenAnswer(inv -> "enc_" + inv.getArgument(0));
     when(encryptionService.decrypt(anyString()))
@@ -241,8 +242,8 @@ class CreatorClaimOAuthIntegrationTest {
 
     BrandProfile brand = BrandProfile.builder().id(brandId).businessName("Beauty Brand").build();
 
-    when(creatorRepository.findById(creatorId)).thenReturn(Optional.of(creator));
-    when(brandProfileRepository.findById(brandId)).thenReturn(Optional.of(brand));
+    when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
+    when(brandProfileRepository.findByUserId(mockBrandUser.getId())).thenReturn(Optional.of(brand));
     when(invitationRepository.existsByTargetCreatorIdAndStatus(creatorId, "PENDING")).thenReturn(false);
     when(invitationRepository.save(any(CreatorInvitation.class)))
         .thenAnswer(inv -> {
@@ -296,6 +297,7 @@ class CreatorClaimOAuthIntegrationTest {
             .build();
 
     when(invitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(invitation));
+    org.mockito.Mockito.lenient().when(invitationRepository.findLockedById(invitation.getId())).thenReturn(Optional.of(invitation));
     when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(targetCreator));
 
     when(oAuthProofClient.exchangeAndVerify(eq("TIKTOK"), eq("auth_code_wrong"), any(), any()))
@@ -364,6 +366,7 @@ class CreatorClaimOAuthIntegrationTest {
             .build();
 
     when(invitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(invitation));
+    org.mockito.Mockito.lenient().when(invitationRepository.findLockedById(invitation.getId())).thenReturn(Optional.of(invitation));
     when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(targetCreator));
     when(creatorMasterRepository.findByUserId(kocUserId)).thenReturn(Optional.empty());
 
@@ -433,8 +436,11 @@ class CreatorClaimOAuthIntegrationTest {
             .build();
 
     when(invitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(alreadyAcceptedInvitation));
+    org.mockito.Mockito.lenient().when(invitationRepository.findLockedById(alreadyAcceptedInvitation.getId())).thenReturn(Optional.of(alreadyAcceptedInvitation));
 
-    User secondKocUser = User.builder().id(UUID.randomUUID()).role(Role.CREATOR).build();
+    User secondKocUser = User.builder().id(UUID.randomUUID()).email("second@example.test").role(Role.CREATOR).build();
+    alreadyAcceptedInvitation.setInvitedEmail(secondKocUser.getEmail());
+    when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(targetCreator));
 
     // Second concurrent session must be rejected cleanly
     assertThatThrownBy(() ->
@@ -475,6 +481,7 @@ class CreatorClaimOAuthIntegrationTest {
     User kocUser = User.builder().id(kocUserId).email("shortlist@koc.com").fullName("Shortlist KOC").role(Role.CREATOR).build();
 
     when(invitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(invitation));
+    org.mockito.Mockito.lenient().when(invitationRepository.findLockedById(invitation.getId())).thenReturn(Optional.of(invitation));
     when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
     when(creatorMasterRepository.findByUserId(kocUserId)).thenReturn(Optional.empty());
     when(oAuthProofClient.exchangeAndVerify(eq("TIKTOK"), anyString(), any(), any()))
@@ -539,6 +546,7 @@ class CreatorClaimOAuthIntegrationTest {
             .build();
 
     when(invitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(acceptedInvitation));
+    org.mockito.Mockito.lenient().when(invitationRepository.findLockedById(acceptedInvitation.getId())).thenReturn(Optional.of(acceptedInvitation));
     when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(alreadyClaimedCreator));
     when(creatorMasterRepository.findByUserId(kocUserId)).thenReturn(Optional.of(existingMaster));
 

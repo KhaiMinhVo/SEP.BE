@@ -60,3 +60,5 @@ Hồ sơ Creator và Compare không còn trường `rateCard`; frontend cần b�
 Migration V12 chỉ dọn override `MANAGE_OWN_RATE_CARD` và tăng version của role bị ảnh hưởng.
 Từ V15, bảng `creator_rate_card` và giá cũ đã được xóa; audit lịch sử vẫn giữ. Xem [dọn schema V15](schema-cleanup-v15.md).
 Claim, tick xác minh, Agreed Fee trong Collaboration và phí Relationship vẫn giữ nguyên.
+
+Brand channel-claim invitations, duplicate/ownership blocking and SMTP behavior: [MVP invitation flow](claim-invitations-mvp.md). Brand claim links do not register Creator accounts.

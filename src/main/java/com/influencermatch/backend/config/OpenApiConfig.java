@@ -73,6 +73,7 @@ public class OpenApiConfig {
             profiles or campaigns. DATA_MANAGER cannot access private Brand or billing data.
             Ingestion uses X-Service-Key instead of JWT. VNPay callbacks require a valid gateway
             signature, matching merchant and transaction amount; they do not use user permissions.
+            Brand channel invitations queue encrypted email jobs before async SMTP; HTTP 200 means QUEUED. Owner Brands can inspect delivery/retry FAILED jobs. Duplicate/owned accounts return 409. Ownership transfer resolution is unavailable in MVP.
             Notification, Recommendation and CRM permissions are declarations, not new APIs.
             """)
         .contact(

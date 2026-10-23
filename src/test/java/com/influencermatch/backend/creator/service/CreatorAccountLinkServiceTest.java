@@ -46,6 +46,13 @@ class CreatorAccountLinkServiceTest {
   private User mockUser;
   private CreatorMaster mockMaster;
 
+  private UUID authenticated(UUID id) {
+    var actor=userRepository.findById(id).orElseThrow();actor.setStatus(UserStatus.ACTIVE);actor.setEmailVerified(true);
+    org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+        new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(actor,null,actor.getAuthorities()));
+    return id;
+  }
+  @org.junit.jupiter.api.AfterEach void clearAuthentication(){org.springframework.security.core.context.SecurityContextHolder.clearContext();}
   @BeforeEach
   void setUp() {
     creatorRepository = mock(CreatorRepository.class);
@@ -60,7 +67,7 @@ class CreatorAccountLinkServiceTest {
     tokenEncryptionService = mock(OAuthTokenEncryptionService.class);
     oAuthProofClient = mock(OAuthProofClient.class);
 
-    linkService = new CreatorAccountLinkService(
+    linkService = com.influencermatch.backend.support.CreatorServiceFixtures.wire(new CreatorAccountLinkService(
         creatorRepository,
         creatorMasterRepository,
         conflictRepository,
@@ -72,7 +79,7 @@ class CreatorAccountLinkServiceTest {
         userRepository,
         tokenEncryptionService,
         oAuthProofClient
-    );
+    ));
 
     userId = UUID.randomUUID();
     mockUser = User.builder()
@@ -119,13 +126,13 @@ class CreatorAccountLinkServiceTest {
             .tokenExpiresAt(LocalDateTime.now().plusHours(2))
             .build());
 
-    when(creatorRepository.findByPlatformAndExternalId("TIKTOK", providerUserId))
+    when(creatorRepository.findLockedByPlatformAndExternalId("TIKTOK", providerUserId))
         .thenReturn(Optional.of(crawledCreator));
     when(creatorRepository.findLockedById(crawledCreator.getId()))
         .thenReturn(Optional.of(crawledCreator));
     when(creatorRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
-    ConnectAccountResponse response = linkService.linkAdditionalAccount(userId, platform, authCode);
+    ConnectAccountResponse response = linkService.linkAdditionalAccount(authenticated(userId), platform, authCode);
 
     assertThat(response.getStatus()).isEqualTo("LINKED");
     assertThat(response.getAccountId()).isEqualTo(crawledCreator.getId());
@@ -159,7 +166,7 @@ class CreatorAccountLinkServiceTest {
             .build());
 
     // Account not in DB
-    when(creatorRepository.findByPlatformAndExternalId("YOUTUBE", providerUserId))
+    when(creatorRepository.findLockedByPlatformAndExternalId("YOUTUBE", providerUserId))
         .thenReturn(Optional.empty());
 
     when(creatorRepository.save(any())).thenAnswer(i -> {
@@ -168,7 +175,7 @@ class CreatorAccountLinkServiceTest {
       return c;
     });
 
-    ConnectAccountResponse response = linkService.linkAdditionalAccount(userId, platform, authCode);
+    ConnectAccountResponse response = linkService.linkAdditionalAccount(authenticated(userId), platform, authCode);
 
     assertThat(response.getStatus()).isEqualTo("CREATED_AND_LINKED");
     assertThat(response.getMasterId()).isEqualTo(mockMaster.getId());
@@ -206,10 +213,10 @@ class CreatorAccountLinkServiceTest {
             .tokenExpiresAt(LocalDateTime.now().plusHours(2))
             .build());
 
-    when(creatorRepository.findByPlatformAndExternalId("TIKTOK", providerUserId))
+    when(creatorRepository.findLockedByPlatformAndExternalId("TIKTOK", providerUserId))
         .thenReturn(Optional.of(alreadyLinked));
 
-    ConnectAccountResponse response = linkService.linkAdditionalAccount(userId, platform, authCode);
+    ConnectAccountResponse response = linkService.linkAdditionalAccount(authenticated(userId), platform, authCode);
 
     assertThat(response.getStatus()).isEqualTo("ALREADY_LINKED");
     verify(creatorRepository, never()).save(any());
@@ -242,31 +249,15 @@ class CreatorAccountLinkServiceTest {
             .providerUsername("victim_creator")
             .build());
 
-    when(creatorRepository.findByPlatformAndExternalId("TIKTOK", providerUserId))
+    when(creatorRepository.findLockedByPlatformAndExternalId("TIKTOK", providerUserId))
         .thenReturn(Optional.of(alreadyClaimedByOther));
 
-    when(conflictRepository.save(any())).thenAnswer(i -> {
-      CreatorIdentityConflict c = i.getArgument(0);
-      c.setId(UUID.randomUUID());
-      return c;
-    });
-
-    ConnectAccountResponse response = linkService.linkAdditionalAccount(userId, platform, authCode);
-
-    assertThat(response.getStatus()).isEqualTo("CONFLICT_PENDING_REVIEW");
-    assertThat(response.getMessage()).contains("Data Manager");
-
-    // Must NOT alter the existing master!
+    assertThatThrownBy(()->linkService.linkAdditionalAccount(authenticated(userId),platform,authCode))
+        .isInstanceOfSatisfying(com.influencermatch.backend.exception.CreatorOwnershipConflictException.class,
+          e->assertThat(e.code()).isEqualTo(com.influencermatch.backend.exception.ErrorCode.CREATOR_ALREADY_LINKED));
     assertThat(alreadyClaimedByOther.getMaster()).isEqualTo(otherMaster);
-    verify(creatorRepository, never()).save(any());
+    verify(creatorRepository,never()).save(any());verifyNoInteractions(conflictRepository,accountVerificationRepository);
 
-    // Conflict record must be created with status PENDING_MANAGER
-    ArgumentCaptor<CreatorIdentityConflict> captor = ArgumentCaptor.forClass(CreatorIdentityConflict.class);
-    verify(conflictRepository).save(captor.capture());
-    CreatorIdentityConflict conflict = captor.getValue();
-    assertThat(conflict.getStatus()).isEqualTo("PENDING_MANAGER");
-    assertThat(conflict.getSourceAccount()).isEqualTo(alreadyClaimedByOther);
-    assertThat(conflict.getTargetMaster()).isEqualTo(mockMaster);
   }
 
   @Test

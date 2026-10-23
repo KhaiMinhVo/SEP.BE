@@ -235,3 +235,7 @@ no longer contain `rateCard`. Claim/ownership verification is unchanged. V12 pre
 prices and audits while retiring the permission override. See [Creator Claim](docs/creator-claim.md).
 
 Schema cleanup V15 removes retired exchange/Rate Card tables and duplicate metric profile fields. Review [data impact and deployment notes](docs/schema-cleanup-v15.md) before applying to a deployment database.
+
+Brand channel-claim invitations, duplicate/ownership blocking and SMTP behavior: [MVP invitation flow](docs/claim-invitations-mvp.md). Brand claim links do not register Creator accounts.
+
+Claim email now uses [durable outbox + async delivery](docs/claim-email-outbox.md), with status/retry APIs. Configure `EMAIL_OUTBOX_ENCRYPTION_KEY` before enabling invitations; V16 adds delivery tables without backfilling old invitations. Registration invitation and OTP emails remain synchronous.

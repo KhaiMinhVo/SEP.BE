@@ -39,7 +39,7 @@ EMAIL_OTP_SECRET=replace-with-at-least-32-random-characters
 CREATOR_INVITATION_FRONTEND_BASE_URL=http://localhost:5173
 ```
 
-Use an app password for Gmail SMTP. Connection/read/write timeouts are five seconds. Keep secrets outside Git. Real `.env` is not modified by this change. No outbox or async worker is introduced.
+Use an app password for Gmail SMTP. Connection/read/write timeouts are five seconds. Keep secrets outside Git. Real `.env` is not modified. Registration invitations and OTP remain synchronous; the separate Brand claim invitation flow now uses an [encrypted outbox and async worker](claim-email-outbox.md).
 
 ## Legacy accounts and channel claims
 
@@ -54,3 +54,5 @@ Manual Claim and review/revoke remain. A claimant must be ACTIVE CREATOR with ve
 V13 adds email verification and OTP delivery storage; V14 adds separate `creator_registration_invitation` tables and password-setup OTP. Vy's `creator_invitation` table is the distinct channel-claim invitation and is preserved. V1–V14 migration files remain unchanged. V15 subsequently removes historical `auth_exchange_code` and retired Rate Card storage, while retaining identities, OTP, invitations and ownership; see [V15 cleanup](schema-cleanup-v15.md).
 
 Run tests with Java 21, Maven and Docker. PostgreSQL tests use disposable pgvector Testcontainers and mocked SMTP/clock; they do not use the configured shared database. See `backend-test-cases.md` for the actual run result.
+
+Brand channel-claim invitations, duplicate/ownership blocking and SMTP behavior: [MVP invitation flow](claim-invitations-mvp.md). Brand claim links do not register Creator accounts.

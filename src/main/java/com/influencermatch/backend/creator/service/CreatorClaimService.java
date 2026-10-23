@@ -26,6 +26,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service @RequiredArgsConstructor
 public class CreatorClaimService {
+  @org.springframework.beans.factory.annotation.Autowired private CreatorConflictAudit conflicts;
+  @org.springframework.beans.factory.annotation.Autowired private CreatorInvitationRepository invitations;
+  @org.springframework.beans.factory.annotation.Autowired private java.time.Clock clock;
   private final CreatorRepository creators;
   private final CreatorMasterRepository masters;
   private final CreatorClaimRepository claims;
@@ -36,13 +39,16 @@ public class CreatorClaimService {
   private final Validator validator;
   private final Optional<com.influencermatch.backend.auth.service.DevCreatorLoginService> devCreatorLogin;
 
-  @Transactional @PreAuthorize("hasAuthority('CLAIM_CREATOR_PROFILE')")
+  @Transactional(noRollbackFor=CreatorOwnershipConflictException.class) @PreAuthorize("hasAuthority('CLAIM_CREATOR_PROFILE')")
   public ClaimResponse claim(UUID creatorId,ClaimRequest request) {
     Permissions.require(Permission.CLAIM_CREATOR_PROFILE); validate(request);
     users.lockRoleChanges();
     User claimant=verifiedCreator(Permissions.actor().getId());
     Creator creator=lockedCreator(creatorId);
-    if(creator.getOwner()!=null)throw conflict("This channel already has a verified owner");
+    if(creator.getMaster()!=null||creator.getSourceType()==CreatorSourceType.AUTHORIZED)throw conflicts.reject(creatorId,null,ErrorCode.CREATOR_ALREADY_LINKED,"Channel already has an owner");
+    var invitation=invitations.findFirstByTargetCreatorIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(creatorId,"PENDING",LocalDateTime.now(clock));
+    if(invitation.isPresent()&&!claimant.getEmail().equalsIgnoreCase(invitation.get().getInvitedEmail()))
+      throw new ForbiddenException("Invitation belongs to another email");
     if(claims.existsByCreatorIdAndClaimantIdAndStatus(creatorId,claimant.getId(),CreatorClaimStatus.PENDING))
       throw conflict("You already have a pending claim for this channel");
     CreatorClaim claim=claims.saveAndFlush(CreatorClaim.builder().creator(creator).claimant(claimant)
@@ -80,7 +86,7 @@ public class CreatorClaimService {
   @Transactional(readOnly=true) @PreAuthorize("hasAuthority('REVIEW_CREATOR_CLAIM')")
   public ClaimResponse detail(UUID id) { Permissions.require(Permission.REVIEW_CREATOR_CLAIM);return response(findClaim(id)); }
 
-  @Transactional @PreAuthorize("hasAuthority('REVIEW_CREATOR_CLAIM')")
+  @Transactional(noRollbackFor=CreatorOwnershipConflictException.class) @PreAuthorize("hasAuthority('REVIEW_CREATOR_CLAIM')")
   public ClaimResponse review(UUID id,ReviewRequest request) {
     Permissions.require(Permission.REVIEW_CREATOR_CLAIM);validate(request);
     users.lockRoleChanges();
@@ -91,10 +97,12 @@ public class CreatorClaimService {
     User reviewer=Permissions.actor();
     if(request.decision()==Decision.APPROVED) {
       User claimant=verifiedCreator(claim.getClaimant().getId());
-      if(creator.getOwner()!=null)throw conflict("The channel already has a verified owner");
+      if(creator.getMaster()!=null||creator.getSourceType()==CreatorSourceType.AUTHORIZED)throw conflicts.reject(creator.getId(),null,ErrorCode.CREATOR_ALREADY_LINKED,"Channel already has an owner");
       CreatorMaster master=masters.findByUserId(claimant.getId()).orElseGet(()->masters.save(
           CreatorMaster.builder().user(claimant).canonicalName(claimant.getFullName()==null?"Creator":claimant.getFullName()).status("ACTIVE").build()));
-      creator.setMaster(master);creator.setSourceType(CreatorSourceType.AUTHORIZED);creator.setAuthorizedAt(LocalDateTime.now());
+      creator.setMaster(master);
+      invitations.findFirstByTargetCreatorIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(creator.getId(),"PENDING",LocalDateTime.now(clock))
+          .filter(i->claimant.getEmail().equalsIgnoreCase(i.getInvitedEmail())).ifPresent(i->i.setStatus("ACCEPTED"));creator.setSourceType(CreatorSourceType.AUTHORIZED);creator.setAuthorizedAt(LocalDateTime.now());
       claim.setStatus(CreatorClaimStatus.APPROVED);
       // Locking the channel serializes every review, including automatic rejection of competing requests.
       for(CreatorClaim other:claims.findByCreatorIdAndStatus(creator.getId(),CreatorClaimStatus.PENDING)) {
@@ -113,7 +121,7 @@ public class CreatorClaimService {
     return response(claim);
   }
 
-  @Transactional @PreAuthorize("hasAuthority('REVIEW_CREATOR_CLAIM')")
+  @Transactional(noRollbackFor=CreatorOwnershipConflictException.class) @PreAuthorize("hasAuthority('REVIEW_CREATOR_CLAIM')")
   public ClaimResponse revoke(UUID id,RevokeRequest request) {
     Permissions.require(Permission.REVIEW_CREATOR_CLAIM);validate(request);
     users.lockRoleChanges();

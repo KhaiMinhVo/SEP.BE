@@ -50,5 +50,13 @@ class SmtpVerificationEmailSenderTest {
     var msg=ArgumentCaptor.forClass(SimpleMailMessage.class);verify(mail).send(msg.capture());
     assertThat(msg.getValue().getSubject()).contains("Set your account password");assertThat(msg.getValue().getText()).contains("password setup","000042","10 minutes");
   }
+  @Test void claimInvitationHasSevenDayLimitAndDoesNotImplyRegistration() {
+    when(provider.getIfAvailable()).thenReturn(mail);when(provider.getObject()).thenReturn(mail);
+    new SmtpVerificationEmailSender(provider,true,"smtp.test","from@example.test",secret)
+        .sendCreatorClaimInvitation("to@example.test","https://frontend.example.test/claim-profile?token=random");
+    var msg=ArgumentCaptor.forClass(SimpleMailMessage.class);verify(mail).send(msg.capture());
+    assertThat(msg.getValue().getSubject()).contains("Channel claim");
+    assertThat(msg.getValue().getText()).contains("7 days","/claim-profile?token=random","does not register","Admin/Data Manager","Resending does not extend its expiry");
+  }
 
 }

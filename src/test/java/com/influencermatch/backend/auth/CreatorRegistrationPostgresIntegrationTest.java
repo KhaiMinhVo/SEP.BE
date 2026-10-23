@@ -36,7 +36,7 @@ class CreatorRegistrationPostgresIntegrationTest extends PostgresApiTestSupport 
   Instant now=Instant.parse("2026-10-22T00:00:00Z");
   String email;
   @BeforeEach void setup() {
-    email=UUID.randomUUID()+"@invitations.test";when(clock.instant()).thenReturn(now);doReturn("000042").when(crypto).generate();
+    email=UUID.randomUUID()+"@invitations.test";when(clock.instant()).thenReturn(now);when(clock.getZone()).thenReturn(ZoneOffset.UTC);doReturn("000042").when(crypto).generate();
     jdbc.update("delete from role_permission_override where permission='INVITE_CREATOR'");
   }
   String invite() throws Exception {return invite(account(Role.DATA_MANAGER));}

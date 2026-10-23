@@ -3,6 +3,9 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  CLAIM_EMAIL_NOT_RETRYABLE(HttpStatus.CONFLICT, "Claim email cannot be retried"),
+  CLAIM_EMAIL_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Claim email retry limit exceeded"),
+  CREATOR_INVITATION_PENDING(HttpStatus.CONFLICT, "A pending invitation already exists"),
   SOCIAL_PROOF_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Social provider verification unavailable"),
   EMAIL_NOT_VERIFIED(HttpStatus.FORBIDDEN, "Email is not verified"),
   EMAIL_ALREADY_VERIFIED(HttpStatus.CONFLICT, "Email is already verified"),

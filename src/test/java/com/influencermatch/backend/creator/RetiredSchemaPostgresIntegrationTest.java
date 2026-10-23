@@ -65,13 +65,13 @@ class RetiredSchemaPostgresIntegrationTest extends PostgresApiTestSupport {
         }
       }
       var before=jdbc.queryForList("select (to_jsonb(m)-'url_profile'-'location')::text from "+s+".public_creator_metric m order by id",String.class);
-      assertThat(flyway(s,null).migrate().migrationsExecuted).isEqualTo(1);absent(s);
+      assertThat(flyway(s,"15").migrate().migrationsExecuted).isEqualTo(1);absent(s);
       String expectedUrl=(mode.equals("existing")||mode.equals("url-only"))?initialUrl:mode.equals("no-snapshots")||mode.equals("blank-history")?initialUrl:mode.equals("independent")?"https://newest.test":"https://new.test";
       String expectedLocation=(mode.equals("existing")||mode.equals("location-only"))?initialLocation:mode.equals("no-snapshots")||mode.equals("blank-history")?initialLocation:"New";
       var result=jdbc.queryForMap("select profile_url,location from "+s+".creator where id=?",c);
       assertThat(result.get("profile_url")).isEqualTo(expectedUrl);assertThat(result.get("location")).isEqualTo(expectedLocation);
       assertThat(jdbc.queryForList("select to_jsonb(m)::text from "+s+".public_creator_metric m order by id",String.class)).isEqualTo(before);
-      assertThat(flyway(s,null).validateWithResult().validationSuccessful).isTrue();
+      assertThat(flyway(s,"15").validateWithResult().validationSuccessful).isTrue();
     } finally {jdbc.execute("drop schema "+s+" cascade");}
   }
   @Test void upgradeRemovesOnlyRetiredDataAndPreservesAuthOwnershipInvitationsAuditAndFees() {
@@ -106,7 +106,7 @@ class RetiredSchemaPostgresIntegrationTest extends PostgresApiTestSupport {
       var protectedTables=List.of("\"user\"","creator_master","creator","external_identity","email_verification_otp","email_verification_delivery","password_setup_otp","creator_registration_invitation","creator_registration_invitation_delivery","creator_invitation","creator_claim","creator_identity_audit","audit_log","brand_profile","campaign","relationship","collaboration");
       Map<String,List<String>> before=new LinkedHashMap<>();for(String table:protectedTables)before.put(table,rows(s,table));
       var metricsBefore=jdbc.queryForList("select (to_jsonb(m)-'url_profile'-'location')::text from "+s+".public_creator_metric m order by id",String.class);
-      assertThat(flyway(s,null).migrate().migrationsExecuted).isEqualTo(1);absent(s);
+      assertThat(flyway(s,"15").migrate().migrationsExecuted).isEqualTo(1);absent(s);
       for(String table:protectedTables)assertThat(rows(s,table)).as(table).isEqualTo(before.get(table));
       assertThat(jdbc.queryForList("select to_jsonb(m)::text from "+s+".public_creator_metric m order by id",String.class)).isEqualTo(metricsBefore);
     } finally {jdbc.execute("drop schema "+s+" cascade");}
@@ -114,10 +114,10 @@ class RetiredSchemaPostgresIntegrationTest extends PostgresApiTestSupport {
   @Test void freshSchemaHasOnlyTheCurrentTablesAndColumns() {
     String s=schema();
     try {
-      assertThat(flyway(s,null).migrate().migrationsExecuted).isEqualTo(14);absent(s);
-      for(String table:List.of("external_identity","creator_invitation","creator_registration_invitation","email_verification_otp","email_verification_delivery","password_setup_otp","creator_master","creator_claim"))
+      assertThat(flyway(s,null).migrate().migrationsExecuted).isEqualTo(15);absent(s);
+      for(String table:List.of("external_identity","creator_invitation","creator_registration_invitation","email_verification_otp","email_verification_delivery","password_setup_otp","creator_master","creator_claim","claim_email_outbox","claim_email_retry"))
         assertThat(jdbc.queryForObject("select to_regclass(?)::text",String.class,s+"."+table)).isNotNull();
-      assertThat(flyway(s,null).info().current().getVersion().toString()).isEqualTo("15");
+      assertThat(flyway(s,null).info().current().getVersion().toString()).isEqualTo("16");
     } finally {jdbc.execute("drop schema "+s+" cascade");}
   }
   @Test void ingestionAndProfileComparisonUseCreatorFieldsAndLocationFilterJoinsCreator() throws Exception {

@@ -10,7 +10,7 @@ server:
   error:
     include-message: never          # Never expose internal error messages to clients
     include-binding-errors: never
-    include-stacktrace: never
+    include-stacktrace: never          # Never expose internal error messages to clients
 
 spring:
   mail:
@@ -80,6 +80,9 @@ spring:
 #  JWT Security
 # ------------------------------------------------------------------------------------
 application:
+  claim-email:
+    encryption-key: ${EMAIL_OUTBOX_ENCRYPTION_KEY:}
+    dispatch-enabled: ${CLAIM_EMAIL_DISPATCH_ENABLED:true}
   auth:
     email-verification:
       enabled: ${EMAIL_VERIFICATION_ENABLED:false}

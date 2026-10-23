@@ -42,7 +42,7 @@ class CreatorClaimServiceTest {
 
   @BeforeEach void setup() {
     factory = Validation.buildDefaultValidatorFactory();
-    service = new CreatorClaimService(creators, masters, claims, identities, users, audit, em, factory.getValidator(), Optional.empty());
+    service = com.influencermatch.backend.support.CreatorServiceFixtures.wire(new CreatorClaimService(creators, masters, claims, identities, users, audit, em, factory.getValidator(), Optional.empty()));
     owner = User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
     creator = Creator.builder().id(UUID.randomUUID()).build();
     lenient().when(masters.save(any())).thenAnswer(i->i.getArgument(0));

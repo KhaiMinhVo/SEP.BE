@@ -29,6 +29,10 @@ public class SmtpVerificationEmailSender implements VerificationEmailSender {
   @Override public void sendCreatorInvitation(String email,String link) {
     deliver(email,"InfluencerMatch - Creator invitation","You are invited to register as a Creator.\n"+link+"\nThis link expires in 48 hours and can only be used once.");
   }
+  @Override public void sendCreatorClaimInvitation(String email,String link) {
+    deliver(email,"InfluencerMatch - Channel claim invitation","You are invited to claim a channel.\n"+link+
+        "\nThis link expires 7 days after the invitation was created. Resending does not extend its expiry. Sign in with a verified Creator account using this email. If you do not have an account, ask Admin/Data Manager for a registration invitation. This link does not register an account or grant ownership.");
+  }
   @Override public void sendPasswordSetup(String email,String otp) {
     deliver(email,"InfluencerMatch - Set your account password","Your password setup code is: "+otp+"\nThis code expires in 10 minutes. Do not share this code.");
   }

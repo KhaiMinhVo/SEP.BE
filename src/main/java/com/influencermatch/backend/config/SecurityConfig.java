@@ -108,6 +108,7 @@ public class SecurityConfig {
                 if (devCreatorLogin.getIfAvailable() != null) {
                   auth.requestMatchers(org.springframework.http.HttpMethod.POST, "/auth/dev/creator-login").permitAll();
                 }
+                auth.requestMatchers(org.springframework.http.HttpMethod.POST,"/admin/creator-conflicts/*/resolve").authenticated();
                 auth.requestMatchers(PUBLIC_ENDPOINTS)
                     .permitAll()
                     .requestMatchers(org.springframework.http.HttpMethod.GET, "/admin/data-quality/pending")

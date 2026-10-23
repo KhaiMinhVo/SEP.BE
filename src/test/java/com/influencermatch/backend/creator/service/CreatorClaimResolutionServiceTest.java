@@ -65,7 +65,8 @@ class CreatorClaimResolutionServiceTest {
     tokenEncryptionService = mock(OAuthTokenEncryptionService.class);
     oAuthProofClient = mock(OAuthProofClient.class);
 
-    resolutionService = new CreatorClaimResolutionService(
+    org.mockito.Mockito.lenient().when(userRepository.findLockedByEmail(org.mockito.ArgumentMatchers.anyString())).thenAnswer(i->Optional.of((User)org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getPrincipal()));
+    resolutionService = com.influencermatch.backend.support.CreatorServiceFixtures.wire(new CreatorClaimResolutionService(
         creatorRepository,
         creatorMasterRepository,
         creatorInvitationRepository,
@@ -77,7 +78,7 @@ class CreatorClaimResolutionServiceTest {
         userRepository,
         tokenEncryptionService,
         oAuthProofClient
-    );
+    ));
   }
 
   @Test
@@ -114,6 +115,7 @@ class CreatorClaimResolutionServiceTest {
         .build();
 
     when(creatorInvitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(invitation));
+    org.mockito.Mockito.lenient().when(creatorInvitationRepository.findLockedById(invitation.getId())).thenReturn(Optional.of(invitation));
     when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
     login(claimantUser);
 
@@ -201,6 +203,7 @@ class CreatorClaimResolutionServiceTest {
         .build();
 
     when(creatorInvitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(invitation));
+    org.mockito.Mockito.lenient().when(creatorInvitationRepository.findLockedById(invitation.getId())).thenReturn(Optional.of(invitation));
     when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
 
     // Proof client returns DIFFERENT channel id
@@ -243,6 +246,7 @@ class CreatorClaimResolutionServiceTest {
         .build();
 
     when(creatorInvitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(invitation));
+    org.mockito.Mockito.lenient().when(creatorInvitationRepository.findLockedById(invitation.getId())).thenReturn(Optional.of(invitation));
     when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
 
     assertThatThrownBy(() -> resolutionService.resolveClaim(
@@ -268,10 +272,51 @@ class CreatorClaimResolutionServiceTest {
     var invitation=CreatorInvitation.builder().id(UUID.randomUUID()).invitedEmail("other@example.test")
         .status("PENDING").expiresAt(LocalDateTime.now().plusDays(1)).build();
     when(creatorInvitationRepository.findByTokenHash(anyString())).thenReturn(Optional.of(invitation));
+    org.mockito.Mockito.lenient().when(creatorInvitationRepository.findLockedById(invitation.getId())).thenReturn(Optional.of(invitation));
     assertThatThrownBy(()->resolutionService.resolveClaim("TIKTOK","code","token",actor()))
         .isInstanceOf(com.influencermatch.backend.exception.ForbiddenException.class);
     verify(userRepository,never()).save(any());verifyNoInteractions(creatorMasterRepository,creatorRepository,oAuthProofClient);
     assertThat(invitation.getStatus()).isEqualTo("PENDING");
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings={"email","platform","status","expiry","userDisabled","userUnverified","userRole"})
+  void rechecksRefreshedStateUnderLocksBeforeAnyBusinessWrites(String change) {
+    User user=actor();
+    var channel=Creator.builder().id(UUID.randomUUID()).platform("TIKTOK").externalId("tt-locked")
+        .userName("target").sourceType(CreatorSourceType.PUBLIC).build();
+    var invitation=CreatorInvitation.builder().id(UUID.randomUUID()).targetCreator(channel).invitedEmail(user.getEmail())
+        .status("PENDING").expiresAt(LocalDateTime.now().plusDays(1)).build();
+    when(creatorInvitationRepository.findByTokenHash(anyString())).thenReturn(Optional.of(invitation));
+    when(creatorInvitationRepository.findLockedById(invitation.getId())).thenReturn(Optional.of(invitation));
+    when(creatorRepository.findLockedById(channel.getId())).thenReturn(Optional.of(channel));
+    var entityManager=(jakarta.persistence.EntityManager)org.springframework.test.util.ReflectionTestUtils.getField(resolutionService,"em");
+    doAnswer(call->{
+      Object refreshed=call.getArgument(0);
+      if(refreshed==user) {
+        if(change.equals("userDisabled"))user.setStatus(UserStatus.DISABLED);
+        if(change.equals("userUnverified"))user.setEmailVerified(false);
+        if(change.equals("userRole"))user.setRole(Role.BRAND);
+      }
+      if(refreshed==invitation) {
+        if(change.equals("email"))invitation.setInvitedEmail("another@example.test");
+        if(change.equals("status"))invitation.setStatus("ACCEPTED");
+        if(change.equals("expiry"))invitation.setExpiresAt(LocalDateTime.now().minusDays(1));
+      }
+      if(refreshed==channel && change.equals("platform"))channel.setPlatform("FACEBOOK");
+      return null;
+    }).when(entityManager).refresh(any());
+    assertThatThrownBy(()->resolutionService.resolveClaim("TIKTOK","code","token",user))
+        .isInstanceOf(com.influencermatch.backend.exception.BusinessException.class);
+    verifyNoInteractions(oAuthProofClient,creatorMasterRepository,accountVerificationRepository,
+        providerIdentityRepository,identityAuditRepository,shortlistItemRepository,relationshipRepository);
+    verify(creatorRepository,never()).save(any());verify(creatorInvitationRepository,never()).save(any());
+    var order=inOrder(userRepository,entityManager,creatorRepository,creatorInvitationRepository);
+    order.verify(userRepository).findLockedByEmail(anyString());order.verify(entityManager).refresh(user);
+    if(!change.startsWith("user")) {
+      order.verify(creatorRepository).findLockedById(channel.getId());order.verify(entityManager).refresh(channel);
+      order.verify(creatorInvitationRepository).findLockedById(invitation.getId());order.verify(entityManager).refresh(invitation);
+    }
   }
 
 }

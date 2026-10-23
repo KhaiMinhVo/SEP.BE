@@ -1,6 +1,35 @@
 # Backend Test Cases — Khải
 
-## Current verification — schema cleanup V15 (2026-10-23)
+## Current verification — Claim Email Outbox + Async (2026-10-23)
+
+- New outbox suites: **23/23 passed** across five suites. Migration/schema/SMTP follow-up: **58/58 passed** across four distinct suites.
+- Final full regression: **589/589 passed, 69 suites; 0 failures, 0 errors, 0 skipped**, Java 21, Maven `test` with `-Dlogging.level.org.hibernate.SQL=OFF` to suppress SQL debug output only.
+- Added 23 invocations over the 566-test baseline: 14 PostgreSQL outbox cases, one PostgreSQL after-commit case, one PostgreSQL missing-key case, four cipher unit cases and three async/logging cases.
+- SMTP/provider remain mocked; PostgreSQL/pgvector Testcontainers exercise actual transaction, lease, unique constraint, migration and lock behavior. No real Gmail delivery was attempted. Production code uses existing JavaMailSender.
+- Initial targeted checks exposed two test-fixture problems (mock EntityManagerFactory missing in the standalone async context and an AUTHORIZED fixture without its required Master/time); fixtures were corrected. First full run identified 13 stale migration-count assertions: V14→V15 tests now pin V15, fresh-schema counts/version include V16. All preservation assertions remain active, and no tests were disabled or skipped.
+- V16 adds only claim email outbox/retry tables. No `.env`/Bruno edits, shared database access/migration, BE restart, commit or push. Registration invitation and OTP SMTP behavior is unchanged.
+- API/SMTP/frontend instructions: [claim-email-outbox.md](claim-email-outbox.md). Executable mappings: MAIL-001–MAIL-013 below. Earlier results are historical.
+
+## Previous verification — Creator Claim Concurrency (2026-10-23)
+
+- Targeted regression: **69/69 passed**, five suites, zero failures/errors/skips.
+- Full regression: **566/566 passed, 64 suites; 0 failures, 0 errors, 0 skipped**, Java 21, Maven `test`.
+- Added 11 test invocations: four PostgreSQL cases (two-channel concurrent claims, two expiry boundaries, used invitation) and seven unit cases for state refreshed under locks. Existing race/replay and audit rollback assertions were strengthened, not removed.
+- The invitation/conflict PostgreSQL suite now has **31 passing invocations**. Clock, SMTP and provider are mocked; transaction, row locks and rollback run on disposable PostgreSQL/pgvector Testcontainers. Mockito unit cases verify ordering and guards only.
+- Initial sandbox execution could not access the Docker named pipe; rerun with local Docker access completed successfully. Final targeted/full results above contain no environment errors or skipped tests.
+- No API/schema changes, `.env`/Bruno edits, shared database access, real mail, BE restart, commit or push. Executable mappings: CONC-001–CONC-006 below.
+
+## Previous verification — Claim Invitation & Conflict MVP (2026-10-23)
+
+- Final full regression: **555/555 passed, 64 suites; 0 failures, 0 errors, 0 skipped**, Java 21 and `mvn -q test`.
+- Added **27 PostgreSQL invitation/conflict invocations** and one SMTP message unit case. Provider, email and Clock are mocked; locks and rollback use real disposable pgvector/PostgreSQL containers.
+- Checks include global pending blocks, ownership/campaign/RBAC checks, concurrent invitations/callbacks, replay/expiry, durable 409 audits, SMTP/audit rollback, manual Claim matching email and retired transfer API 404.
+- Earlier runs identified expired-status/fixture expectations and an incomplete mocked Clock zone; fixtures were aligned with the read-only verify contract and configured JPA UTC behavior. No assertions were disabled or tests skipped.
+- V1–V15 unchanged, no new schema migration. No real mail, shared database access/migration, `.env`/Bruno edits, BE restart, commit or push. Earlier results below are historical.
+- API/frontend instructions: [claim-invitations-mvp.md](claim-invitations-mvp.md). Executable mappings: INV-001–INV-016 below.
+
+
+## Previous verification — schema cleanup V15 (2026-10-23)
 
 - Targeted regression: **100/100 tests passed**.
 - Final full regression: **527/527 passed, 63 suites, 0 failures, 0 errors, 0 skipped**, Java 21 and `mvn -q test`.
@@ -343,4 +372,59 @@ Each entry below specifies a condition/action, expected result, and executable m
 - **SCHEMA-002 · PostgreSQL integration:** populated V14 auth, OTP, identities, both invitations, Master/Claim, audits and monetary agreements → V15 removes only retired data; retained rows match exactly; `RetiredSchemaPostgresIntegrationTest#upgradeRemovesOnlyRetiredDataAndPreservesAuthOwnershipInvitationsAuditAndFees`.
 - **SCHEMA-003 · PostgreSQL integration:** empty schema migrates to V15 → retired tables/columns absent and current auth/ownership tables present; `RetiredSchemaPostgresIntegrationTest#freshSchemaHasOnlyTheCurrentTablesAndColumns`.
 - **SCHEMA-004 · PostgreSQL API integration:** ingest/update current profile fields, filter old/new location, read profile, Campaign Discovery and Compare → unchanged wire names and current Creator values; `RetiredSchemaPostgresIntegrationTest#ingestionAndProfileComparisonUseCreatorFieldsAndLocationFilterJoinsCreator`.
-- **SCHEMA-005 · Regression:** Rate Card endpoint/profile/Compare tests use current schema; V12 preservation tests stop at V12, V14 identity/exchange preservation tests stop at V14. Auth, OTP, Claim, Billing, ownership and collaboration suites remain active.
+- **SCHEMA-005 · Regression:** Rate Card endpoint/profile/Compare tests use current schema; V12 preservation tests stop at V12, V14 identity/exchange preservation tests stop at V14. V14→V15 cleanup/backfill tests explicitly stop at V15; fresh schema tests include V16 and both outbox tables. Auth, OTP, Claim, Billing, ownership and collaboration suites remain active.
+
+
+## Claim Invitation & Conflict MVP
+
+The claim invitation domain is distinct from Creator registration invitations. Real SMTP transport is exercised only through mocks; provider verification remains dev simulation. No new migration is required.
+
+- **INV-001 · PostgreSQL API:** Brand with own profile/campaign sends seven-day link; HTTP 200 omits rawToken, stores only hash, verify returns public channel data without mutation. `ClaimInvitationPostgresIntegrationTest#sendsRealTransportContractWithoutTokenOrRegistrationSideEffects`.
+- **INV-002 · PostgreSQL API:** unknown email receives claim invitation but cannot register using that token. `ClaimInvitationPostgresIntegrationTest#unknownRecipientGetsClaimInvitationButCannotRegisterFromIt`.
+- **INV-003 · PostgreSQL API:** both invite endpoints reject owned account with 409 and persisted audit; no invitation/email writes or other-owner disclosure. `ClaimInvitationPostgresIntegrationTest#ownedChannelReturns409AndDurableAudit`.
+- **INV-004 · PostgreSQL API:** pending invitation from any Brand/email blocks replacement and keeps original token usable. `ClaimInvitationPostgresIntegrationTest#duplicatePendingIsGlobalAndDoesNotReplaceOrSend`.
+- **INV-005 · PostgreSQL API:** exact expiration or earlier rejects verify but permits a new send, using JPA timestamps and deterministic Clock. `ClaimInvitationPostgresIntegrationTest#expiredAtBoundaryDoesNotBlockNewInvitation`.
+- **INV-006 · PostgreSQL API:** role, campaign/profile ownership and disabled dynamic permission deny before SMTP. `ClaimInvitationPostgresIntegrationTest#onlyBrandMayInvite`, `#brandMustOwnProfileCampaignAndEffectivePermission`.
+- **INV-007 · PostgreSQL concurrency:** simultaneous Brands → one invitation/send, one 409 and rejection audit. `ClaimInvitationPostgresIntegrationTest#simultaneousInvitationsOnlySendOnce`.
+- **INV-008 · PostgreSQL transaction:** missing SMTP configuration → 503 and rollback; SMTP failure after commit → invitation remains PENDING and outbox schedules retry. `ClaimInvitationPostgresIntegrationTest#configurationFailureRollsBackButSmtpFailureAfterCommitKeepsInvitation`.
+- **INV-009 · PostgreSQL concurrency:** two callbacks and later replay → one accepted claim/Master/verification/success audit; other attempts 409 without provider re-exchange. `ClaimInvitationPostgresIntegrationTest#twoCallbacksConsumeInvitationAndCreateMasterOnce`.
+- **INV-010 · PostgreSQL API:** wrong email, expired/used token or newly owned account cannot claim and do not reach provider/write tokens. `ClaimInvitationPostgresIntegrationTest#wrongEmailExpiredAndUsedInvitationNeverReachProvider`, `#ownershipAppearingAfterInviteBlocksCallbackAndManualClaimWithAudit`.
+- **INV-011 · PostgreSQL API:** link channel owned by another Master → 409 + durable rejection audit, no conflict queue; same-owner link still refreshes proof. `ClaimInvitationPostgresIntegrationTest#linkingOtherOwnersChannelReturns409WithoutConflictQueueOrTokens`, `#repeatedSameOwnerLinkRetainsOwnershipAndDoesNotCreateConflict`.
+- **INV-012 · PostgreSQL API:** active invitation restricts manual evidence to matching email; review consumes invitation and revoke remains functional. `ClaimInvitationPostgresIntegrationTest#invitationEmailIsEnforcedForManualEvidenceAndReviewConsumesMatchingInvitation`.
+- **INV-013 · PostgreSQL rollback:** rejection audit failure → 500 and no business writes; successful callback audit failure rolls back Master/owner/verification/invitation consumption. `ClaimInvitationPostgresIntegrationTest#auditFailureRollsBackRejectionWithoutChangingBusinessData`, `#callbackAuditFailureRollsBackInvitationOwnerVerificationAndMaster`.
+- **INV-014 · PostgreSQL API:** all authenticated roles get 404 on retired transfer endpoint; historical conflict data is retained. `ClaimInvitationPostgresIntegrationTest#retiredTransferEndpointIs404ForAuthenticatedAccounts`.
+- **INV-015 · Log/SMTP contract:** invitation link/token absent from invitation service logs; seven-day email explains separate registration. `ClaimInvitationPostgresIntegrationTest#invitationTokenIsNotWrittenToApplicationLogs`, `SmtpVerificationEmailSenderTest#claimInvitationHasSevenDayLimitAndDoesNotImplyRegistration`.
+- **INV-016 · Unit regression:** keep creator/account/proof/SMTP assertions, adapt invitation transport and pre-lock fixtures; verify expiry read does not mutate status. `CreatorInvitationServiceTest`, `CreatorClaimResolutionServiceTest`, `CreatorClaimOAuthIntegrationTest`, `CreatorAccountLinkServiceTest`, `CreatorAccountLinkIntegrationTest`, `CreatorClaimServiceTest`.
+
+Mockito suites named Integration above do not validate database locks; INV-007/009 use actual concurrent HTTP requests and PostgreSQL locks. Historical direct-service tests of conflict resolution do not expose a transfer HTTP endpoint in MVP.
+
+## Creator Claim Concurrency hardening
+
+- **CONC-001 · PostgreSQL concurrency:** two callbacks on one invitation return one 200 and one 409 `INVITATION_ALREADY_PROCESSED`, with one Master/verification/success audit and one provider exchange; subsequent replay preserves full persisted claim rows, including encrypted tokens and timestamps. `ClaimInvitationPostgresIntegrationTest#twoCallbacksConsumeInvitationAndCreateMasterOnce`.
+- **CONC-002 · PostgreSQL concurrency:** same Creator claims two different channels simultaneously; both return 200, share exactly one Master, and each has one accepted invitation/verification/success audit. `ClaimInvitationPostgresIntegrationTest#simultaneousDifferentChannelsReuseOneMasterForSameCreator`.
+- **CONC-003 · PostgreSQL API, parameterized:** expiration at the fixed Clock or one second earlier returns 409 `INVITATION_EXPIRED`; all claim state is unchanged and provider is never called. `ClaimInvitationPostgresIntegrationTest#expiredCallbackPreservesAllClaimData`.
+- **CONC-004 · PostgreSQL API:** previously used invitation returns 409 `INVITATION_ALREADY_PROCESSED`, without provider calls or persisted changes. `ClaimInvitationPostgresIntegrationTest#usedInvitationPreservesAllClaimDataWithoutReachingProvider`.
+- **CONC-005 · PostgreSQL rollback:** audit failure preserves full pre-callback state, including absent Master/verification/provider identity, and leaves invitation reusable after the failure is removed. `ClaimInvitationPostgresIntegrationTest#callbackAuditFailureRollsBackInvitationOwnerVerificationAndMaster`.
+- **CONC-006 · Mockito unit, parameterized:** refreshed User role/status/email verification or invitation email/platform/status/expiry must be rechecked before writes; verifies User → Account → Invitation lock/refresh ordering. This is a logic test, not proof of database concurrency. `CreatorClaimResolutionServiceTest#rechecksRefreshedStateUnderLocksBeforeAnyBusinessWrites`.
+
+Concurrent PostgreSQL cases synchronize request workers with ready/start latches and bounded timeouts, without sleep. Email/provider remain mocked and no shared database is used.
+
+## Claim Email Outbox + Async
+
+- **MAIL-001 · Unit:** AES-GCM roundtrip, random nonce, tampered payload/wrong key rejection, strict Base64 32-byte key and safe 503; `ClaimEmailCipherTest#authenticatedEncryptionUsesFreshNonceAndPreservesPayload`, `#invalidKeyReturns503WithoutSensitiveDetails`.
+- **MAIL-002 · Unit/Spring async:** actual dedicated 2-thread/100-capacity executor, no SMTP transaction, queue rejection recovered by later sweep, safe failure logging; `ClaimEmailAsyncTest#workerRunsOnDedicatedBoundedExecutorAndDoesNotHoldTransaction`, `#rejectedExecutorLeavesPersistedJobsForLaterSweep`, `#smtpFailureLogsOnlyJobIdAndRecordsRetryWithoutSensitiveDetails`.
+- **MAIL-003 · PostgreSQL transaction:** listener submits only AFTER_COMMIT, not while creating records; rollback discards job/event. Worker mocked at the dispatch boundary. `ClaimEmailAfterCommitPostgresIntegrationTest#dispatchOccursOnlyAfterCommitAndRollbackDiscardsJobAndEvent`.
+- **MAIL-004 · PostgreSQL configuration/API:** missing key returns 503 before invitation creation; `ClaimEmailConfigurationPostgresIntegrationTest#missingEncryptionKeyReturns503BeforeAnyInvitationIsCreated`.
+- **MAIL-005 · PostgreSQL worker:** committed queued job recoverable by due query; encrypted recipient/link hash match; SMTP outside transaction; success erases payload, repeat worker does not resend, status omits secrets. `ClaimEmailOutboxPostgresIntegrationTest#queuedJobHasOnlyCiphertextAndSendsWithoutTransactionThenClearsPayload`.
+- **MAIL-006 · PostgreSQL retry:** exact 15/30/60/120 backoff, no premature sends, FAILED keeps PENDING invitation, duplicate invite remains blocked; manual retry respects cooldown and preserves token/email/expiry, eventual success erases payload. `ClaimEmailOutboxPostgresIntegrationTest#failureBackoffAndManualRetryPreserveTokenAndExpiry`.
+- **MAIL-007 · PostgreSQL concurrency:** two retry requests enqueue once; two workers while one SMTP send is in flight perform one attempt. `ClaimEmailOutboxPostgresIntegrationTest#concurrentWorkersSendOnceAndConcurrentManualRetriesEnqueueOnce`.
+- **MAIL-008 · PostgreSQL recovery:** expired lease replaces token, old worker cannot finalize replacement, five crashed reservations exhaust the cycle. `ClaimEmailOutboxPostgresIntegrationTest#expiredLeaseCanBeRecoveredAndOldWorkerCannotCompleteNewLease`, `#fiveCrashedReservationsExhaustCycleWithoutUnboundedRecoveryAttempts`.
+- **MAIL-009 · PostgreSQL guards, parameterized:** expired/consumed/replaced invitation, owned channel and expired FAILED job cause cancellation/expiry without SMTP and erase payload. `ClaimEmailOutboxPostgresIntegrationTest#invalidJobsAreCancelledWithoutSmtpAndPayloadIsErased`.
+- **MAIL-010 · PostgreSQL constraint/rollback:** outbox insertion failure rolls back invitation; duplicate job for same invitation violates unique constraint. `ClaimEmailOutboxPostgresIntegrationTest#duplicateOutboxIsRejectedAndInsertFailureRollsBackInvitation`.
+- **MAIL-011 · PostgreSQL RBAC/API:** anonymous, non-Brand, foreign Brand, missing invitation and disabled permission denied; historical invitation NOT_TRACKED and not retryable. `ClaimEmailOutboxPostgresIntegrationTest#statusAndRetryRequireOwningBrandAndPermissionAndHistoricalRowsAreNotTracked`.
+- **MAIL-012 · PostgreSQL rolling rate limit:** five manual retries in preceding hour block the sixth; expired entry frees a slot without resetting total attempts. `ClaimEmailOutboxPostgresIntegrationTest#manualRetryUsesRollingHourAndDoesNotChangeInvitation`.
+- **MAIL-013 · PostgreSQL migration:** V15 historical invitation/account survives V16 byte-for-byte, no historical jobs are invented. Fresh schema is migrated/validated by all current PostgreSQL suites. `ClaimEmailOutboxPostgresIntegrationTest#upgradeFromV15PreservesHistoricalInvitationsWithoutInventingEmailJobs`.
+
+Migration fixtures retain all preservation assertions: cleanup tests pin V15 rather than inadvertently executing V16; fresh-schema tests expect 15 migration files through V16 (V11 is absent) and current version 16. SMTP message regression also confirms a resend does not extend invitation expiry.
+
+SMTP/provider stay mocked. PostgreSQL locks, lease persistence, constraints and transaction boundaries are real. Clocks and latches replace sleeps; tests do not send Gmail or use the shared database. Registration and OTP retain synchronous SMTP rollback regression.

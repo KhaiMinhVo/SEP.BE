@@ -36,55 +36,95 @@ HỆ THỐNG INFLUENCERMATCH AI (7 MAIN WORKFLOWS)
 ## 🚀 FLOW 1: Brand & Campaign Setup (Khởi tạo Thương hiệu & Chiến dịch Ngữ cảnh)
 
 ### 1. Luồng nghiệp vụ trọn vẹn
-Brand đăng ký tài khoản $\rightarrow$ Khởi tạo `BrandProfile` $\rightarrow$ Tự động sinh `BrandContext` (Memory 1) $\rightarrow$ Tạo chiến dịch mới $\rightarrow$ Thẩm định hạn mức gói cước $\rightarrow$ Kích hoạt `Campaign` $\rightarrow$ Tự động sinh `CampaignContext` v1 (Memory 2).
+Brand đăng ký tài khoản $\rightarrow$ Khởi tạo `BrandProfile` $\rightarrow$ Tự động sinh `BrandContext` (Bộ nhớ bối cảnh M4 v1) $\rightarrow$ Cập nhật hồ sơ (qua `PUT /brands/me` tự động ẩn ID hoặc `PUT /brands/{id}` của Admin) $\rightarrow$ Tự động đồng bộ `BrandContext` và tăng `contextVersion` $\rightarrow$ Tạo chiến dịch mới $\rightarrow$ Thẩm định hạn mức chiến dịch qua Quota Guard (`SubscriptionService.checkAndDeductCampaignQuota`) $\rightarrow$ Lưu chiến dịch ở `DRAFT` $\rightarrow$ Thẩm định logic thời gian/ngân sách $\rightarrow$ Chuyển trạng thái sang `READY_FOR_DISCOVERY` / `ACTIVE` $\rightarrow$ Tự động sinh `CampaignContext` v1 (Bộ nhớ bối cảnh M3).
 
 ### 2. Biến đổi trạng thái thực thể chính
 * `BrandProfile`: Tạo mới $\rightarrow$ `ACTIVE`
-* `BrandContext`: Tạo mới $\rightarrow$ `INITIALIZED`
-* `Subscription`: `used_campaign_quota` $+ 1$
-* `Campaign`: `DRAFT` $\rightarrow$ `ACTIVE`
-* `CampaignContext`: Tạo mới $\rightarrow$ `version = 1, active = true`
-
-### 3. Chi tiết Function & Phân bổ Repository
-
-| STT | Function / Endpoint | Actor liên quan | Repo | Input / Output | Trạng thái | Mô tả kỹ thuật & Đề xuất hành động |
-| **1.1** | `POST /brands`<br>([BrandController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/controller/BrandController.java)) | Brand User | `SEP_BE` | **In**: `BrandRequest`<br>**Out**: `BrandResponse` | 🟢 **ĐÃ LÀM** | Tạo `BrandProfile` và tự động kích hoạt **Bộ nhớ 4 (`BrandContext` - M4)** phiên bản 1 (`contextVersion = 1`). |
-| **1.2** | `GET /brands/me`<br>([BrandController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/controller/BrandController.java)) | Brand User | `SEP_BE` | **In**: Bearer Token<br>**Out**: `BrandResponse` | 🟢 **ĐÃ LÀM** | Xem thông tin hồ sơ Brand kèm dữ liệu bối cảnh **M4** đang lưu trữ. |
-| **1.3** | `PUT /brands/{id}` & `PUT /brands/me`<br>([BrandController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/controller/BrandController.java)) | Brand User, Admin | `SEP_BE` | **In**: `BrandRequest`<br>**Out**: `BrandResponse` | 🟢 **ĐÃ LÀM** | Hỗ trợ cả 2 cổng: `PUT /brands/me` (Brand tự cập nhật ẩn ID) & `PUT /brands/{id}` (Admin cập nhật). Tự động cập nhật **M4**, tăng `contextVersion` và lưu tường minh xuống DB. |
-| **1.4** | `POST /brands/{brandId}/campaigns`<br>([CampaignController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/controller/CampaignController.java)) | Brand User, Quota Guard | `SEP_BE` | **In**: `CampaignRequest`<br>**Out**: `CampaignResponse` | 🟢 **ĐÃ LÀM** | Tích hợp **Quota Guard** (`SubscriptionService.checkAndDeductCampaignQuota`): Chặn nếu vượt hạn mức chiến dịch (`ErrorCode.QUOTA_EXCEEDED`), lưu campaign mới ở `DRAFT`. |
-| **1.5** | `GET /campaigns/{id}`<br>([CampaignController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/controller/CampaignController.java)) | Brand User | `SEP_BE` | **In**: `campaignId`<br>**Out**: `CampaignResponse` | 🟢 **ĐÃ LÀM** | Xem chi tiết chiến dịch, nạp bối cảnh vào các màn hình Discovery và AI. |
-| **1.6** | `PATCH /campaigns/{id}/status`<br>([CampaignController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/controller/CampaignController.java)) | Brand User | `SEP_BE` | **In**: `{"status": "READY_FOR_DISCOVERY"}`<br>**Out**: `CampaignResponse` | 🟢 **ĐÃ LÀM** | Chuyển đổi trạng thái chiến dịch: `DRAFT` $\rightarrow$ `READY_FOR_DISCOVERY` $\rightarrow$ `ACTIVE` $\rightarrow$ `COMPLETED`. Tự động sinh **M3 (`CampaignContext`)** phiên bản 1. |
-| **1.7** | *Campaign Validation Guard*<br>([CampaignService](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/service/CampaignService.java)) | Hệ thống | `SEP_BE` | **In**: DTO Validation | 🟢 **ĐÃ LÀM** | Ràng buộc logic: `startDate <= endDate`, `budgetMin <= budgetMax` và `followerMin <= followerMax`. |
-
----
-
-## 🔎 FLOW 2: Creator Discovery & Public Intelligence (Thu thập, Làm sạch & Khám phá KOC)
-
-### 1. Luồng nghiệp vụ trọn vẹn
-Bot cào tự động quét mạng xã hội $\rightarrow$ AI đọc nội dung phân loại thực thể $\rightarrow$ Loại bỏ Shop bán hàng, cơ quan nhà nước, tài khoản cá nhân $\rightarrow$ Sinh Vector BKAI 768 chiều & tóm tắt AI sạch $\rightarrow$ Ingestion nạp vào Data Pool $\rightarrow$ Data Manager kiểm duyệt dữ liệu tự tin thấp $\rightarrow$ Brand tìm kiếm Discovery theo Hybrid Search (Vector + FTS) và xuất báo cáo.
-
-### 2. Biến đổi trạng thái thực thể chính
-* `Creator`: Tạo mới $\rightarrow$ `source_type = 'PUBLIC'`, `master_id = NULL`
-* `PublicCreatorMetric`: Tạo mới $\rightarrow$ `FRESH` (sau review cập nhật `quality_reviewed_at = NOW()`)
-* `Post`: Lưu trữ danh sách 5-10 bài viết gần nhất phục vụ tra cứu ngữ cảnh
+* `BrandContext` (**M4**): Tạo mới $\rightarrow$ `contextVersion = 1` $\rightarrow$ Mỗi lần cập nhật hồ sơ: `contextVersion += 1, updated_at = NOW()`
+* `Subscription`: `used_campaign_quota += 1` (Chặn `409 QUOTA_EXCEEDED` nếu vượt `plan.campaignQuota`)
+* `Campaign`: `DRAFT` $\rightarrow$ `READY_FOR_DISCOVERY` $\rightarrow$ `ACTIVE` $\rightarrow$ `COMPLETED` $\rightarrow$ `ARCHIVED`
+* `CampaignContext` (**M3**): Tự động tạo mới khi chiến dịch sẵn sàng $\rightarrow$ `version = 1, active = true`
 
 ### 3. Chi tiết Function & Phân bổ Repository
 
 | STT | Function / Endpoint | Actor liên quan | Repo | Input / Output | Trạng thái | Mô tả kỹ thuật & Đề xuất hành động |
 | :---: | :--- | :---: | :---: | :--- | :---: | :--- |
-| **2.1** | `TikTokCrawler._crawl_tiktok_profile_sync()`<br>(`app/crawlers/tiktok_crawler.py`) | Crawler Engine | `AI` | **In**: `username`<br>**Out**: `IngestPayload` | 🟢 **ĐÃ LÀM** | Cào Followers, Bio, Recent Posts; bỏ qua nếu `< 7000` followers hoặc tài khoản rỗng. |
-| **2.2** | `FacebookCrawler` & `InstagramCrawler`<br>(`app/crawlers/`) | Crawler Engine | `AI` | **In**: `username/url`<br>**Out**: `IngestPayload` | 🟢 **ĐÃ LÀM** | Cào dữ liệu fanpage FB và profile IG; đánh dấu `isStableExternalId = False` với FB. |
-| **2.3** | `AIAnalyzer.process_ai_enrichment()`<br>(`app/ai/analyzer.py`) | AI Engine | `AI` | **In**: Bio, Captions<br>**Out**: `AIEnrichment` | 🟢 **ĐÃ LÀM** | Đã mở rộng từ khóa nhận diện `BRAND` (cơ quan nhà nước, báo chí, đài truyền hình, xưởng may). |
-| **2.4** | `EmbeddingService.get_search_embedding()`<br>(`app/ai/services/embedding_service.py`) | AI Engine | `AI` | **In**: Text KOC<br>**Out**: `vector(768)` | 🟢 **ĐÃ LÀM** | Mô hình BKAI Bi-Encoder sinh vector 768 chiều phục vụ tìm kiếm ngữ nghĩa. |
-| **2.5** | `JavaMapper.from_ingest_payload()`<br>(`app/mappers/java_mapper.py`) | Data Mapper | `AI` | **In**: `IngestPayload`<br>**Out**: Java JSON | 🟢 **ĐÃ LÀM** | Đã map `contentSummary` AI sạch sẽ (không lấy bio rác), format chuẩn `observedAt`. |
-| **2.6** | `Celery Worker Tasks`<br>(`app/workers/tasks.py`) | Celery Worker | `AI` | **In**: Celery Queue<br>**Out**: Task Result | 🟢 **ĐÃ LÀM** | **Chốt chặn nghiêm ngặt**: Chỉ gửi `KOL` và `KOC`; hủy không gửi nếu là `BRAND` hoặc `USER`. |
-| **2.7** | `POST /creators/ingest`<br>([CreatorIngestionService](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/service/CreatorIngestionService.java)) | Ingestion Guard | `SEP_BE` | **In**: `CreatorIngestionRequest`<br>**Out**: `status: SUCCESS` | 🟢 **ĐÃ LÀM** | Advisory Lock, Gatekeeper chặn non-KOL/KOC, nạp `source_type = 'PUBLIC', master_id = NULL`. |
-| **2.8** | `GET /admin/data-quality/pending`<br>([AdminDataQualityController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/AdminDataQualityController.java)) | Data Manager | `SEP_BE` | **In**: `page, size`<br>**Out**: `Page<QualityItem>` | 🟢 **ĐÃ LÀM** | Hàng đợi cho Data Manager duyệt các KOC có độ tự tin phân loại thấp (`confidence < 0.7`). |
-| **2.9** | `PUT /admin/data-quality/{id}/approve`<br>([AdminDataQualityController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/AdminDataQualityController.java)) | Data Manager | `SEP_BE` | **In**: `{"niche": "..."}`<br>**Out**: `QualityItem` | 🟢 **ĐÃ LÀM** | Đính chính Niche, gán `quality_reviewed_by` và ghi Audit Log. |
-| **2.10** | `GET /campaigns/{id}/discovery`<br>([CreatorDiscoveryService](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/discovery/service/CreatorDiscoveryService.java)) | Brand User | `SEP_BE` | **In**: `campaignId, keyword`<br>**Out**: `Page<DiscoveryCard>` | 🟢 **ĐÃ LÀM** | Hybrid Search (0.6 Semantic + 0.4 FTS), gom nhóm distinct theo Master M1. |
-| **2.11** | *Bộ lọc nâng cao trên Discovery* | Brand User | `SEP_BE` | **In**: `claimStatus, location, tier` | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Bổ sung param: `claimStatus` (`PUBLIC` / `LINKED`), vị trí địa lý, phân cấp Nano/Micro/Macro. |
-| **2.12** | `GET /campaigns/{id}/discovery/export` | Brand User | `SEP_BE` | **In**: `campaignId, format=EXCEL`<br>**Out**: File Byte Array | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Xuất danh sách KOC tiềm năng ra file Excel/CSV kèm metrics và Rate Card để trình duyệt ngân sách. |
-| **2.13** | `POST /api/v1/crawl/on-demand`<br>(`main.py`) | KOC / System | `AI` | **In**: `{"platform": "TIKTOK", "username": "..."}` | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Cào tức thì khi KOC liên kết kênh mới tinh ở Case 2 (không cần chờ bot quét định kỳ). |
+| **1.1** | `POST /brands`<br>([BrandController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/controller/BrandController.java)) | Brand User | `SEP_BE` | **In**: `BrandRequest`<br>**Out**: `BrandResponse` | 🟢 **ĐÃ LÀM** | Tạo `BrandProfile` liên kết `User` hiện tại; tự động kích hoạt **Bộ nhớ 4 (`BrandContext` - M4)** phiên bản 1 (`contextVersion = 1`). |
+| **1.2** | `GET /brands/me`<br>([BrandController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/controller/BrandController.java)) | Brand User | `SEP_BE` | **In**: Bearer Token<br>**Out**: `BrandResponse` | 🟢 **ĐÃ LÀM** | Xem thông tin hồ sơ Brand cá nhân dựa trên danh tính JWT (ẩn hoàn toàn UUID trên URL); kèm bối cảnh **M4** đang lưu trữ. |
+| **1.3** | `PUT /brands/{id}` & `PUT /brands/me`<br>([BrandController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/controller/BrandController.java)) | Brand User, Admin | `SEP_BE` | **In**: `BrandRequest`<br>**Out**: `BrandResponse` | 🟢 **ĐÃ LÀM** | Hỗ trợ 2 cổng: `PUT /brands/me` (Brand tự cập nhật ẩn ID) & `PUT /brands/{id}` (Admin cập nhật). Tự động đồng bộ `profileContext` vào **M4**, tăng `contextVersion` và lưu tường minh xuống DB. |
+| **1.4** | `POST /brands/{brandId}/campaigns`<br>([CampaignController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/controller/CampaignController.java)) | Brand User, Quota Guard | `SEP_BE` | **In**: `CampaignRequest`<br>**Out**: `CampaignResponse` | 🟢 **ĐÃ LÀM** | Tích hợp **Quota Guard** (`SubscriptionService.checkAndDeductCampaignQuota`): Chặn nếu vượt hạn mức chiến dịch (`ErrorCode.QUOTA_EXCEEDED`), lưu campaign mới ở `DRAFT`. |
+| **1.5** | `GET /campaigns/{id}`<br>([CampaignController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/controller/CampaignController.java)) | Brand User | `SEP_BE` | **In**: `campaignId`<br>**Out**: `CampaignResponse` | 🟢 **ĐÃ LÀM** | Xem chi tiết chiến dịch, thẩm định quyền sở hữu (`brandProfile.user.id == actor.id`), nạp bối cảnh vào các màn hình Discovery và AI. |
+| **1.6** | `PATCH /campaigns/{id}/status`<br>([CampaignController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/controller/CampaignController.java)) | Brand User | `SEP_BE` | **In**: `{"status": "READY_FOR_DISCOVERY"}`<br>**Out**: `CampaignResponse` | 🟢 **ĐÃ LÀM** | Chuyển đổi trạng thái chiến dịch: `DRAFT` $\rightarrow$ `READY_FOR_DISCOVERY` $\rightarrow$ `ACTIVE` $\rightarrow$ `COMPLETED`. Tự động sinh **M3 (`CampaignContext`)** phiên bản 1 (`active = true`). |
+| **1.7** | *Campaign Validation Guard*<br>([CampaignService](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/service/CampaignService.java)) | Hệ thống | `SEP_BE` | **In**: DTO Validation | 🟢 **ĐÃ LÀM** | Ràng buộc logic nghiệp vụ: `startDate <= endDate`, `budgetMin <= budgetMax` và `followerMin <= followerMax`. |
+
+---
+
+## 🔎 FLOW 2: Creator Discovery & Public Intelligence (Thu thập, Làm sạch & Khám phá KOC)
+
+### 1. Luồng nghiệp vụ trọn vẹn (Kiến trúc Two-Phase v2.0)
+```
+[Nấc 0: Search-Card Filter] Bóc tách DOM kết quả tìm kiếm (Loại bỏ < 7,000 followers, bio sỉ lẻ)
+      │ ──> Chi phí: 0 Network Request
+      ▼
+[Phase 1: Preflight SSR Check (1.5s - 3s)] Fetcher siêu nhẹ bóc tách metadata + 5 bài preview
+      │ ──> [Rule Engine BR-01 -> BR-06]
+      │        ├── BR-01: Hard Reject (Shop bán hàng, xưởng may, cơ quan nhà nước, báo đài) ──> DỪNG NGAY
+      │        ├── BR-02 -> BR-05: KOC & KOL Hard Accept Rules (3/5 review, 2/5 opinion, chuyên môn)
+      │        └── BR-06: Selective Review ──> Chuyển Data Manager Vòng 1 (review_router.py)
+      ▼
+[Phase 2: Candidate Staging & Redis Lock] Quản lý hàng đợi chống trùng lặp (SET NX EX 300)
+      │
+      ▼
+[Phase 3: Worker Deep Crawl Gate] CHẶN CỬA BẮT BUỘC: Chỉ cào sâu khi đã qua Preflight / Manager duyệt
+      │ ──> Celery Queue riêng biệt (preflight_queue vs deep_crawl_queue)
+      │ ──> Deep Crawl Playwright Stealth lấy đầy đủ chỉ số & 5-10 bài gần nhất
+      ▼
+[Phase 4: Post-Validation Guard] Thẩm định sau cào sâu (chống lọt lưới bẫy catalog shop)
+      │ ──> Mô hình BKAI Bi-Encoder sinh Vector 768 chiều & Content Summary AI sạch
+      ▼ (Gửi sang Java Backend qua HTTP POST kèm header bí mật X-Service-Key)
+[Phase 5: Java Core Ingestion & Data Quality (SEP_BE)]
+      ├── POST /creators/ingest: Advisory Lock, Gatekeeper (KOL/KOC & >= 5k), bảo vệ master_id/rates
+      ├── GET /admin/data-quality/pending: Data Manager Vòng 2 duyệt Niche snapshot M2 (confidence < 0.7)
+      ├── PUT /admin/data-quality/{id}/approve: Khóa bi quan chống Deadlock, duyệt Niche, ghi Audit Log
+      └── GET /campaigns/{id}/discovery: 4-Stage Hybrid Search (0.6 Semantic + 0.4 FTS + Master Deduplication)
+```
+
+### 2. Biến đổi trạng thái thực thể chính
+* `candidate_staging` (Python Staging DB): `DISCOVERED` $\rightarrow$ `PREFLIGHT_RUNNING` $\rightarrow$ `PREFLIGHT_DONE` $\rightarrow$ `DEEP_CRAWL_QUEUED` $\rightarrow$ `INGESTED` (hoặc `AUTO_REJECT`).
+* `Creator`: Tạo mới $\rightarrow$ `source_type = 'PUBLIC'`, `master_id = NULL`, `is_stable_id` (TikTok = `true`, FB slug = `false`), cập nhật pgvector `embedding = vector(768)`.
+* `PublicCreatorMetric` (**M2**): Tạo mới snapshot $\rightarrow$ `freshness_status = 'FRESH'`, `data_confidence = 0.95`. Khi Data Manager phê duyệt Vòng 2: `quality_reviewed_by = admin_id, quality_reviewed_at = NOW()`.
+* `Post`: Xóa và làm mới snapshot 5-10 bài viết gần nhất phục vụ tra cứu ngữ cảnh.
+
+### 3. Chi tiết Function & Phân bổ Repository (Khớp 100% Mã nguồn Hiện tại)
+
+#### 3.1. Phân hệ Preflight, Rule Engine & Crawler (`creator-discovery` v2.0)
+
+| STT | Function / Endpoint | Thành phần | File Source Code | Input / Output | Trạng thái | Mô tả kỹ thuật chi tiết mã nguồn |
+| :---: | :--- | :---: | :--- | :--- | :---: | :--- |
+| **2.1** | `Tier-0 Search Filter`<br>& `fetch_preflight()` | Crawler Engine | `app/crawlers/search_extractor.py`<br>`app/crawlers/preflight_fetcher.py` | **In**: `username / url`<br>**Out**: `PreflightData` | 🟢 **ĐÃ LÀM** | **Nấc 0**: Lọc ngay trên DOM search ($< 7,000$ followers hoặc bio sỉ lẻ) với chi phí 0 request mạng. **Preflight**: Bóc tách thẻ SSR `<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__">` trong 1.5–3.0s (nhanh gấp 19 lần cào sâu), lấy bio, bio link, followers và 5 bài preview đầu tiên mà không cuộn trang. |
+| **2.2** | `RuleEngine.evaluate_candidate()` | AI Rule Engine | `app/ai/rules/rule_engine.py`<br>`app/ai/rules/signal_extractor.py` | **In**: `CandidateEvidence`<br>**Out**: `RuleDecisionResult` | 🟢 **ĐÃ LÀM** | **Quy chuẩn 6 Business Rules (BR-01 $\rightarrow$ BR-06)**:<br>• `BR-01`: Hard Reject shop sỉ lẻ, tổng kho, cơ quan nhà nước, báo đài, spam catalog.<br>• `BR-02`: Creator Identity Gate (xác thực nhân vật chủ đạo/trải nghiệm riêng).<br>• `BR-03`: KOC Hard Accept ($\ge 3/5$ bài review, $\ge 2/5$ bài nêu ưu/nhược điểm, bio affiliate).<br>• `BR-04`: KOL Hard Accept (chuyên môn sâu kiểm chứng hoặc vai trò ảnh hưởng nhất quán).<br>• `BR-05`: Conflict Resolver (độc lập, không dẫm chân).<br>• `BR-06`: Selective Review Gate ($< 15\%$ đưa vào duyệt). Sinh `reason_codes` minh bạch. |
+| **2.3** | `CandidateStagingRepository`<br>& `deduplicator.py` | Staging & Concurrency | `app/core/candidate_staging.py`<br>`app/core/deduplicator.py` | **In**: `platform, username`<br>**Out**: Staging Record / Lock | 🟢 **ĐÃ LÀM** | Lưu trữ bảng `candidate_staging` (SQLite WAL mode + hỗ trợ PostgreSQL). Phân phối khóa nguyên tử Redis `SET NX EX 300` chống 2 worker cào trùng, kèm cơ chế cooldown 7 ngày cho tài khoản đã bị reject. |
+| **2.4** | `Two-Phase Celery Pipeline`<br>& `Worker Deep Crawl Gate` | Celery Dispatcher | `app/workers/celery_app.py`<br>`app/workers/tasks.py` | **In**: Celery Task Queue<br>**Out**: Crawl Result | 🟢 **ĐÃ LÀM** | Tách 2 hàng đợi: `preflight_queue` (nhẹ) và `deep_crawl_queue` (nặng). Cài đặt **Worker Gate** ngay đầu `process_tiktok_profile`: Từ chối cào sâu (`BLOCKED`) nếu chưa có quyết định `AUTO_ACCEPT_*` hoặc `MANAGER_APPROVED`. Điều hướng `discovery_bot.py`, `crawl_router.py` và Excel Import qua Preflight. |
+| **2.5** | `validate_post_crawl()`<br>(Post-Validation Guard) | AI Guard | `app/ai/rules/post_validator.py` | **In**: Full `IngestPayload`<br>**Out**: `ValidationResult` | 🟢 **ĐÃ LÀM** | Thẩm định sau khi cào sâu 5–10 bài: Kiểm tra `externalId`, tối thiểu 3 bài hợp lệ, và phát hiện bẫy catalog shop ($\ge 60\%$ bài bán hàng + 0 review). Cách ly ngay (`QUARANTINE_POST_VALIDATION_FAILED`), ngăn không gửi sang Java. |
+| **2.6** | `Selective Review API`<br>(Data Manager Vòng 1) | Admin API | `app/api/routers/review_router.py` | **In**: Action `APPROVE / REJECT`<br>**Out**: Enqueue Result | 🟢 **ĐÃ LÀM** | `GET /api/v1/candidates/review/pending`: Xem danh sách chờ duyệt kèm bằng chứng.<br>`POST /api/v1/candidates/review/{id}/action`: Phê duyệt kích hoạt duy nhất 1 Deep Crawl Task, ghi nhận Audit Log người duyệt. |
+| **2.7** | `EmbeddingService` & `JavaMapper` | AI Vector & Mapper | `app/ai/services/embedding_service.py`<br>`app/mappers/java_mapper.py` | **In**: Payload sạch<br>**Out**: Java Ingestion JSON | 🟢 **ĐÃ LÀM** | Mô hình `bkai-foundation-models/vietnamese-bi-encoder` sinh vector 768 chiều từ chuỗi ngữ cảnh chuẩn hóa. `JavaMapper` đóng cứng `sourceType = 'PUBLIC'`, `masterId = None` để bảo toàn tuyệt đối luồng Claim/OAuth bên Java. |
+
+#### 3.2. Phân hệ Data Ingestion, Data Quality & Discovery Pipeline (`SEP_BE`)
+
+| STT | Function / Endpoint | Actor / Thành phần | File Source Code | Input / Output | Trạng thái | Mô tả kỹ thuật chi tiết mã nguồn |
+| :---: | :--- | :---: | :--- | :--- | :---: | :--- |
+| **2.8** | `POST /creators/ingest`<br>([CreatorIngestionController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/CreatorIngestionController.java)) | Ingestion Guard | [CreatorIngestionService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/service/CreatorIngestionService.java) | **In**: `CreatorIngestionRequest`<br>**Out**: `CreatorIngestionResponse` | 🟢 **ĐÃ LÀM** | **Bảo mật**: `@PreAuthorize("hasAuthority('SERVICE_INGEST_CREATOR')")` (header `X-Service-Key`).<br>**Gatekeeper**: Chặn nếu non-KOL/KOC hoặc `followers < 5000`.<br>**Advisory Lock**: `creatorRepository.acquireIdentityLock(platform + ":" + externalId)` chống race condition.<br>**Upsert**: Nạp mới `sourceType = PUBLIC, master = null`. Idempotency check theo `crawlRunId`. Cập nhật `Post` snapshot và lưu pgvector 768 chiều. Bảo vệ tuyệt đối không ghi đè quyền sở hữu hoặc rate-card. |
+| **2.9** | `GET /admin/data-quality/pending`<br>([DataQualityController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/DataQualityController.java)) | Data Manager (Vòng 2) | [DataQualityService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/service/DataQualityService.java) | **In**: `page, size`<br>**Out**: `PageResponse<QualityItem>` | 🟢 **ĐÃ LÀM** | Quyền `REVIEW_CREATOR_CLASSIFICATION`. Thực thi SQL Correlated Anti-Join lọc snapshot mới nhất trong **M2** có độ tự tin thấp (`data_confidence < 0.7`) và chưa qua review để Data Manager duyệt bối cảnh ngành nghề. |
+| **2.10** | `PUT /admin/data-quality/{id}/approve`<br>([DataQualityController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/DataQualityController.java)) | Data Manager (Vòng 2) | [DataQualityService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/service/DataQualityService.java) | **In**: `{"niche": "..."}`<br>**Out**: `QualityItem` | 🟢 **ĐÃ LÀM** | Khóa bi quan chống Deadlock (`Creator` trước $\rightarrow$ `Metric` sau). Cho phép đính chính `niche` (hoặc giữ nguyên), gán `quality_reviewed_by = actor`, `quality_reviewed_at = NOW()`, ghi **Audit Log** hệ thống (`APPROVE_DATA_QUALITY`). |
+| **2.11** | `GET /campaigns/{id}/discovery`<br>([CreatorDiscoveryController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/discovery/controller/CreatorDiscoveryController.java)) | Brand User | [CreatorDiscoveryService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/discovery/service/CreatorDiscoveryService.java)<br>[PublicCreatorMetricRepository.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/repository/PublicCreatorMetricRepository.java) | **In**: `campaignId, keyword, niche, minFollowers, maxFollowers`<br>**Out**: `Page<Map<String, Object>>` | 🟢 **ĐÃ LÀM** | **4-Stage Hybrid Discovery Pipeline**:<br>1. **Khung cứng M3**: Platforms, Niches, FollowerMin/Max, BudgetMin/Max.<br>2. **Dual Smart Search**: Gọi AI Vector 768-d (tự lấy bối cảnh Campaign nếu không nhập keyword) + **Circuit Breaker** (tự trượt về 100% Lexical FTS nếu AI sập).<br>3. **Rank Fusion & Master Deduplication**: Công thức $\text{HybridScore} = 0.6 \text{ Semantic} + 0.4 \text{ FTS}$. Khử trùng lặp `DISTINCT ON (COALESCE(c.master_id, c.id))` để KOC đa kênh chỉ hiển thị 1 thẻ đại diện kèm `claimStatus`.<br>4. **Tự chữa lành**: Nới lỏng $+20\%, +50\%$ Follower nếu kết quả $< 5$, giữ nguyên Niche. |
+
+#### 3.3. Các tính năng mở rộng đề xuất cho Flow 2 (Roadmap tiếp theo)
+
+| STT | Tính năng đề xuất | Actor | Repo | Input / Output | Trạng thái | Đề xuất giải pháp kỹ thuật |
+| :---: | :--- | :---: | :---: | :--- | :---: | :--- |
+| **2.12** | *Bộ lọc nâng cao trên Discovery* | Brand User | `SEP_BE` | **In**: `claimStatus, location, tier` | 🔴 **CHƯA LÀM** | Bổ sung vào [DiscoverySearchRequest.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/discovery/dto/DiscoverySearchRequest.java): lọc theo `claimStatus` (`LINKED_PROFILE` để tìm KOC đã xác thực), vị trí địa lý, và KOC Tiers (Nano: 5k-20k, Micro: 20k-100k, Macro: 100k-500k, Mega: >500k). |
+| **2.13** | `GET /campaigns/{id}/discovery/export` | Brand User | `SEP_BE` | **In**: `campaignId, format=EXCEL`<br>**Out**: File Byte Array | 🔴 **CHƯA LÀM** | Sử dụng Apache POI xuất danh sách KOC tiềm năng từ Discovery ra file Excel kèm ảnh avatar, followers, avgViews, engagement rate và Rate Card để Brand xuất trình sếp duyệt ngân sách. |
+| **2.14** | `POST /api/v1/crawl/on-demand` | KOC / System | `AI` | **In**: `{"platform": "TIKTOK", "username": "..."}` | 🔴 **CHƯA LÀM** | Endpoint cào tức thì phục vụ trường hợp KOC liên kết kênh mới tinh ở Flow 4 (Case 2: kênh chưa có trong Data Pool) để nạp dữ liệu ngay lập tức mà không phải chờ bot quét định kỳ. |
 
 ---
 

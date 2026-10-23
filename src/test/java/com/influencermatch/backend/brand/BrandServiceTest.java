@@ -65,6 +65,15 @@ class BrandServiceTest {
     assertThat(result.m4Version()).isEqualTo(2);assertThat(c.getProfileContext().path("businessName").asText()).isEqualTo("Acme");
     assertThat(c.getLearnedPatterns().get(0).asText()).isEqualTo("learned");assertThat(c.getEvidenceRefs().get(0).asText()).isEqualTo("evidence");
   }
+  @Test void updateMeFindsProfileByUserAndUpdates() {
+    var p=profile();var c=context(p);
+    when(profiles.findByUserId(owner.getId())).thenReturn(Optional.of(p));
+    when(profiles.findById(p.getId())).thenReturn(Optional.of(p));
+    when(contexts.findByBrandProfileId(p.getId())).thenReturn(Optional.of(c));
+    var result=service.updateMe(request(null),auth);
+    assertThat(result.m4Version()).isEqualTo(2);
+    assertThat(p.getBusinessName()).isEqualTo("Acme");
+  }
   @Test void foreignBrandCannotReadOrUpdate() {
     var p=profile();p.setUser(TestActors.user(Role.BRAND));when(profiles.findById(p.getId())).thenReturn(Optional.of(p));
     assertThatThrownBy(()->service.get(p.getId(),auth)).isInstanceOf(ForbiddenException.class);

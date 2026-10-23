@@ -12,14 +12,17 @@ import com.influencermatch.backend.security.permission.*;
 import java.time.LocalDate;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SubscriptionService {
   private final SubscriptionRepository subscriptionRepository;
   private final PlanService planService;
+  private final PlanRepository planRepository;
   private final BrandProfileRepository brandProfileRepository;
   private final AuditService audit;
   private final jakarta.persistence.EntityManager entityManager;
@@ -101,6 +104,39 @@ public class SubscriptionService {
           before,
           toResponse(sub),
           "Administrative cancellation");
+  }
+
+  /**
+   * Quota Guard: Thẩm định hạn mức chiến dịch trước khi cho phép tạo mới.
+   */
+  @Transactional
+  public void checkAndDeductCampaignQuota(UUID brandProfileId) {
+    Subscription sub =
+        subscriptionRepository.findByBrandProfileId(brandProfileId).stream()
+            .filter(
+                s ->
+                    s.getStatus() == SubscriptionStatus.ACTIVE
+                        && !s.getExpirationDate().isBefore(LocalDate.now()))
+            .findFirst()
+            .orElse(null);
+
+    if (sub == null) {
+      if (planRepository.count() == 0) {
+        log.warn("No billing plans configured in system; bypassing quota guard for brand {}", brandProfileId);
+        return;
+      }
+      throw new ForbiddenException("No active subscription found. Please subscribe to create campaigns.");
+    }
+
+    int quotaLimit = sub.getPlan().getCampaignQuota();
+    if (sub.getUsedCampaignQuota() >= quotaLimit) {
+      throw new ConflictException(
+          ErrorCode.QUOTA_EXCEEDED,
+          "Campaign quota exceeded (" + sub.getUsedCampaignQuota() + "/" + quotaLimit + "). Please upgrade your plan.");
+    }
+
+    sub.setUsedCampaignQuota(sub.getUsedCampaignQuota() + 1);
+    subscriptionRepository.save(sub);
   }
 
   private void requireOwnerOrAdmin(BrandProfile brand) {

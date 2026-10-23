@@ -48,6 +48,8 @@ public enum ErrorCode {
   INVALID_CAMPAIGN_RANGE(HttpStatus.BAD_REQUEST, "Invalid campaign range"),
   USER_NOT_BRAND(HttpStatus.BAD_REQUEST, "User is not a brand account"),
   OPTIMISTIC_CONFLICT(HttpStatus.CONFLICT, "Concurrent update conflict"),
+  QUOTA_EXCEEDED(HttpStatus.CONFLICT, "Campaign quota exceeded for current subscription plan"),
+  SUBSCRIPTION_REQUIRED(HttpStatus.FORBIDDEN, "Active subscription required"),
   METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "Method not allowed"),
   UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported media type"),
   AI_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI service is unavailable"),

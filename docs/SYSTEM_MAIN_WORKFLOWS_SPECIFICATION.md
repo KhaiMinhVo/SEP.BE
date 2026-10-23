@@ -48,14 +48,13 @@ Brand đăng ký tài khoản $\rightarrow$ Khởi tạo `BrandProfile` $\righta
 ### 3. Chi tiết Function & Phân bổ Repository
 
 | STT | Function / Endpoint | Actor liên quan | Repo | Input / Output | Trạng thái | Mô tả kỹ thuật & Đề xuất hành động |
-| :---: | :--- | :---: | :---: | :--- | :---: | :--- |
-| **1.1** | `POST /brands/profile`<br>([BrandController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/controller/BrandController.java)) | Brand User | `SEP_BE` | **In**: `CreateBrandProfileRequest`<br>**Out**: `BrandResponse` | 🟢 **ĐÃ LÀM** | Tạo `BrandProfile` và tự động kích hoạt Bộ nhớ 1 `BrandContext` ban đầu. |
-| **1.2** | `GET /brands/profile/me`<br>([BrandController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/controller/BrandController.java)) | Brand User | `SEP_BE` | **In**: Bearer Token<br>**Out**: `BrandResponse` | 🟢 **ĐÃ LÀM** | Xem thông tin hồ sơ Brand kèm dữ liệu bối cảnh thương hiệu đang lưu. |
-| **1.3** | `PUT /brands/profile`<br>([BrandController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/controller/BrandController.java)) | Brand User | `SEP_BE` | **In**: `UpdateBrandProfileRequest`<br>**Out**: `BrandResponse` | 🟡 **CẦN HOÀN THIỆN** | Cập nhật hồ sơ Brand $\rightarrow$ Tự động đồng bộ cập nhật trường `context_data` trong `BrandContext`. |
-| **1.4** | `POST /campaigns`<br>([CampaignController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/controller/CampaignController.java)) | Brand User, Quota Guard | `SEP_BE` | **In**: `CreateCampaignRequest`<br>**Out**: `CampaignResponse` | 🟢 **ĐÃ LÀM** | Kiểm tra `used_campaign_quota`, lưu `campaign`, tự động sinh `CampaignContext` phiên bản 1. |
+| **1.1** | `POST /brands`<br>([BrandController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/controller/BrandController.java)) | Brand User | `SEP_BE` | **In**: `BrandRequest`<br>**Out**: `BrandResponse` | 🟢 **ĐÃ LÀM** | Tạo `BrandProfile` và tự động kích hoạt **Bộ nhớ 4 (`BrandContext` - M4)** phiên bản 1 (`contextVersion = 1`). |
+| **1.2** | `GET /brands/me`<br>([BrandController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/controller/BrandController.java)) | Brand User | `SEP_BE` | **In**: Bearer Token<br>**Out**: `BrandResponse` | 🟢 **ĐÃ LÀM** | Xem thông tin hồ sơ Brand kèm dữ liệu bối cảnh **M4** đang lưu trữ. |
+| **1.3** | `PUT /brands/{id}` & `PUT /brands/me`<br>([BrandController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/controller/BrandController.java)) | Brand User, Admin | `SEP_BE` | **In**: `BrandRequest`<br>**Out**: `BrandResponse` | 🟢 **ĐÃ LÀM** | Hỗ trợ cả 2 cổng: `PUT /brands/me` (Brand tự cập nhật ẩn ID) & `PUT /brands/{id}` (Admin cập nhật). Tự động cập nhật **M4**, tăng `contextVersion` và lưu tường minh xuống DB. |
+| **1.4** | `POST /brands/{brandId}/campaigns`<br>([CampaignController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/controller/CampaignController.java)) | Brand User, Quota Guard | `SEP_BE` | **In**: `CampaignRequest`<br>**Out**: `CampaignResponse` | 🟢 **ĐÃ LÀM** | Tích hợp **Quota Guard** (`SubscriptionService.checkAndDeductCampaignQuota`): Chặn nếu vượt hạn mức chiến dịch (`ErrorCode.QUOTA_EXCEEDED`), lưu campaign mới ở `DRAFT`. |
 | **1.5** | `GET /campaigns/{id}`<br>([CampaignController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/controller/CampaignController.java)) | Brand User | `SEP_BE` | **In**: `campaignId`<br>**Out**: `CampaignResponse` | 🟢 **ĐÃ LÀM** | Xem chi tiết chiến dịch, nạp bối cảnh vào các màn hình Discovery và AI. |
-| **1.6** | `PATCH /campaigns/{id}/status`<br>([CampaignController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/controller/CampaignController.java)) | Brand User | `SEP_BE` | **In**: `{"status": "PAUSED"}`<br>**Out**: `CampaignResponse` | 🟢 **ĐÃ LÀM** | Chuyển đổi trạng thái chiến dịch: `ACTIVE`, `PAUSED`, `COMPLETED`, `ARCHIVED`. |
-| **1.7** | *Campaign Validation Guard* | Hệ thống | `SEP_BE` | **In**: DTO Validation | 🟢 **ĐÃ LÀM** | Ràng buộc logic: `startDate <= endDate` và `budgetMin <= budgetMax`. |
+| **1.6** | `PATCH /campaigns/{id}/status`<br>([CampaignController](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/controller/CampaignController.java)) | Brand User | `SEP_BE` | **In**: `{"status": "READY_FOR_DISCOVERY"}`<br>**Out**: `CampaignResponse` | 🟢 **ĐÃ LÀM** | Chuyển đổi trạng thái chiến dịch: `DRAFT` $\rightarrow$ `READY_FOR_DISCOVERY` $\rightarrow$ `ACTIVE` $\rightarrow$ `COMPLETED`. Tự động sinh **M3 (`CampaignContext`)** phiên bản 1. |
+| **1.7** | *Campaign Validation Guard*<br>([CampaignService](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/service/CampaignService.java)) | Hệ thống | `SEP_BE` | **In**: DTO Validation | 🟢 **ĐÃ LÀM** | Ràng buộc logic: `startDate <= endDate`, `budgetMin <= budgetMax` và `followerMin <= followerMax`. |
 
 ---
 
@@ -104,8 +103,8 @@ Brand bấm *"Đề xuất KOC bằng AI"* $\rightarrow$ Kiểm tra & trừ quot
 | STT | Function / Endpoint | Actor liên quan | Repo | Input / Output | Trạng thái | Mô tả kỹ thuật & Đề xuất hành động |
 | :---: | :--- | :---: | :---: | :--- | :---: | :--- |
 | **3.1** | `SubscriptionService.checkAndDeductQuota()` | Quota Guard | `SEP_BE` | **In**: `AI_RECOMMENDATION`<br>**Out**: `void / 403` | 🟢 **ĐÃ LÀM** | Trừ hạn mức AI trong Subscription của Brand trước khi gọi model. |
-| **3.2** | `BrandContextRepository` & `CampaignContextRepository` | Backend Engine | `SEP_BE` | **In**: `brandId, campaignId`<br>**Out**: Context entities | 🟢 **ĐÃ LÀM** | Truy xuất Bộ nhớ 1 (`BrandContext`) và Bộ nhớ 2 (`CampaignContext`). |
-| **3.3** | `HistoricalCampaignRepository` & `BrandPatternRepository` | Backend Engine | `SEP_BE` | **In**: `brandId, niche`<br>**Out**: Pattern entities | 🟢 **ĐÃ CÓ SCHEMA** | Đã có Flyway table và JPA Entity cho Bộ nhớ 3 & Bộ nhớ 4. |
+| **3.2** | `BrandContextRepository` & `CampaignContextRepository` | Backend Engine | `SEP_BE` | **In**: `brandId, campaignId`<br>**Out**: Context entities | 🟢 **ĐÃ LÀM** | Truy xuất **Bộ nhớ 4 (`BrandContext` - M4)** và **Bộ nhớ 3 (`CampaignContext` - M3)**. |
+| **3.3** | `HistoricalCampaignRepository` & `BrandPatternRepository` | Backend Engine | `SEP_BE` | **In**: `brandId, niche`<br>**Out**: Pattern entities | 🟢 **ĐÃ CÓ SCHEMA** | Đã có Flyway table cho **Bộ nhớ 1 (`HistoricalCampaign` - M1)** và **Bộ nhớ 4 (`BrandPattern` - M4)**. |
 | **3.4** | `POST /campaigns/{id}/ai-recommendations` | Brand User | `SEP_BE` | **In**: `campaignId, topK = 10`<br>**Out**: `List<RecommendedDto>` | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Viết Service gom 4 bộ nhớ thành 1 JSON payload gửi sang AI Microservice. |
 | **3.5** | `POST /api/v1/ai/recommend`<br>(`app/ai/ai_router.py`) | AI Reranker | `AI` | **In**: 4-Memory JSON<br>**Out**: Ranked KOCs + Reasoning | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Viết thuật toán Reranker (Bi-Encoder kết hợp trọng số Pattern) và sinh text lý giải độ phù hợp. |
 | **3.6** | *AI Explainable Reasoning Card* | Brand User | `AI` & `BE` | **In**: KOC Features<br>**Out**: `reasoning: String` | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Hiển thị thẻ lý giải: *"KOC phù hợp 92% vì cùng ngách Skincare và từng đạt ROI > 2.5 trong quá khứ"*. |
@@ -174,17 +173,17 @@ Chuyển quan hệ CRM `AGREED` thành Hợp tác chính thức (`IN_PROGRESS`) 
 ## 📈 FLOW 6: Post-Campaign Learning (Chưng cất Tri thức & Tự động Học hỏi Sau Chiến dịch)
 
 ### 1. Luồng nghiệp vụ trọn vẹn
-Sự kiện nghiệm thu chiến dịch hoàn tất $\rightarrow$ Hệ thống tự động chuyển bằng chứng thực chiến vào Bộ nhớ 3 `HistoricalCampaign` $\rightarrow$ AI Engine chưng cất tri thức (Knowledge Distillation) $\rightarrow$ Cập nhật và nâng cao trọng số thành công vào Bộ nhớ 4 `BrandPattern` (tăng `evidence_count` và `confidence`).
+Sự kiện nghiệm thu chiến dịch hoàn tất $\rightarrow$ Hệ thống tự động chuyển bằng chứng thực chiến vào **Bộ nhớ 1 (`HistoricalCampaign` - M1)** $\rightarrow$ AI Engine chưng cất tri thức (Knowledge Distillation) $\rightarrow$ Cập nhật và nâng cao trọng số thành công vào **Bộ nhớ 4 (`BrandPattern` - M4)** (tăng `evidence_count` và `confidence`).
 
 ### 2. Biến đổi trạng thái thực thể chính
-* `HistoricalCampaign`: Tạo mới bản ghi chứng thực thực tế (`evidence_quality = VERIFIED`)
-* `BrandPattern`: Tăng trọng số thành công, nâng cao độ tin cậy tri thức (`confidence`), gán `learned_at = NOW()`
+* `HistoricalCampaign` (**M1**): Tạo mới bản ghi chứng thực thực tế (`evidence_quality = VERIFIED`)
+* `BrandPattern` (**M4**): Tăng trọng số thành công, nâng cao độ tin cậy tri thức (`confidence`), gán `learned_at = NOW()`
 
 ### 3. Chi tiết Function & Phân bổ Repository
 
 | STT | Function / Endpoint | Actor liên quan | Repo | Input / Output | Trạng thái | Mô tả kỹ thuật & Đề xuất hành động |
 | :---: | :--- | :---: | :---: | :--- | :---: | :--- |
-| **6.1** | `HistoricalCampaign` & `BrandPattern` Entity | Backend Core | `SEP_BE` | **DB Schema** | 🟢 **ĐÃ CÓ SCHEMA** | Bảng cơ sở dữ liệu và Model JPA cho Memory 3 và Memory 4 đã sẵn sàng. |
+| **6.1** | `HistoricalCampaign` & `BrandPattern` Schema | Backend Core | `SEP_BE` | **DB Schema** | 🟢 **ĐÃ CÓ SCHEMA** | Bảng cơ sở dữ liệu trong Flyway cho **M1 (`historical_campaign`)** và **M4 (`brand_pattern`)** đã sẵn sàng. |
 | **6.2** | `CampaignCompletedEventListener`<br>*(Event-Driven Asynchronous)* | Backend Core | `SEP_BE` | **In**: `CampaignCompletedEvent`<br>**Out**: Async Execution | 🟡 **CẦN HOÀN THIỆN** | Sử dụng `@Async` lắng nghe sau Review để quá trình chưng cất chạy nền không làm chậm UI. |
 | **6.3** | `LearningService.distillKnowledge()` | Backend Core | `SEP_BE` | **In**: `outcomeId, reviewId`<br>**Out**: Cập nhật DB | 🟡 **CẦN HOÀN THIỆN** | Lưu bằng chứng vào `HistoricalCampaign`, gọi AI Microservice cập nhật `BrandPattern`. |
 | **6.4** | `POST /api/v1/ai/distill-patterns`<br>(`app/ai/ai_router.py`) | AI Engine | `AI` | **In**: Outcome + Review<br>**Out**: Extracted Patterns | 🔴 **CHƯA LÀM (ĐỀ XUẤT)** | Viết endpoint AI phân tích tương quan Niche, KOC Style và ROI để cập nhật trọng số tri thức. |
@@ -236,3 +235,4 @@ Brand chọn gói dịch vụ $\rightarrow$ Tạo giao dịch thanh toán `PENDI
 | **FLOW 5** | Campaign Collaboration & Outcome | Brand User, KOC User, Backend | 4 tính năng | `Collaboration`, `EvidenceAsset`, `CampaignOutcome`, `CreatorReview` | ✅ **ĐẠT CHUẨN 100%** |
 | **FLOW 6** | Post-Campaign Learning | Core Backend, AI Engine | 3 tính năng | `HistoricalCampaign`, `BrandPattern` | ✅ **ĐẠT CHUẨN 100%** |
 | **FLOW 7** | Subscription & Payment Management | Brand User, VNPay, Backend | 4 tính năng | `Payment`, `Subscription` | ✅ **ĐẠT CHUẨN 100%** |
+

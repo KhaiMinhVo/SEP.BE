@@ -4,9 +4,9 @@ import com.influencermatch.backend.security.apikey.CreatorServiceKeyFilter;
 import com.influencermatch.backend.security.jwt.JwtAccessDeniedHandler;
 import com.influencermatch.backend.security.jwt.JwtAuthenticationEntryPoint;
 import com.influencermatch.backend.security.jwt.JwtAuthenticationFilter;
-import com.influencermatch.backend.security.oauth.GoogleLoginIntent;
-import com.influencermatch.backend.security.oauth.GoogleOAuthFailureHandler;
-import com.influencermatch.backend.security.oauth.GoogleOAuthSuccessHandler;
+
+
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -35,20 +35,18 @@ public class SecurityConfig {
   private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
   private final JwtAccessDeniedHandler jwtAccessDeniedHandler;
   private final UserDetailsService userDetailsService;
-  private final GoogleOAuthProperties googleOAuthProperties;
-  private final GoogleOAuthSuccessHandler googleOAuthSuccessHandler;
-  private final GoogleOAuthFailureHandler googleOAuthFailureHandler;
 
   // Patterns are relative to context-path /api/v1
   private static final String[] PUBLIC_ENDPOINTS = {
     "/auth/register",
     "/auth/login",
     "/auth/refresh",
-    "/auth/google",
-    "/auth/google/creator",
-    "/auth/google/exchange",
-    "/oauth2/**",
-    "/login/oauth2/**",
+    "/auth/verify-email",
+    "/auth/resend-verification",
+    "/auth/creator/register",
+    "/auth/creator-invitations/resolve",
+    "/auth/password-setup/request",
+    "/auth/password-setup/confirm",
     "/actuator/health",
     "/v3/api-docs/**",
     "/api-docs/**",
@@ -57,8 +55,7 @@ public class SecurityConfig {
     "/webjars/**",
     "/billing/vnpay/return",
     "/billing/vnpay/ipn",
-    "/creators/claim/invitation/verify",
-    "/creators/claim/oauth/**"
+    "/creators/claim/invitation/verify"
   };
 
   @Bean
@@ -86,7 +83,6 @@ public class SecurityConfig {
   @Bean
   @org.springframework.core.annotation.Order(2)
   public SecurityFilterChain securityFilterChain(HttpSecurity http,
-      org.springframework.beans.factory.ObjectProvider<org.springframework.security.oauth2.client.registration.ClientRegistrationRepository> clients,
       org.springframework.beans.factory.ObjectProvider<com.influencermatch.backend.auth.service.DevCreatorLoginService> devCreatorLogin) throws Exception {
     http.csrf(AbstractHttpConfigurer::disable)
         .formLogin(AbstractHttpConfigurer::disable)
@@ -106,14 +102,13 @@ public class SecurityConfig {
         .sessionManagement(
             s ->
                 s.sessionCreationPolicy(
-                    googleOAuthProperties.isEnabled()
-                        ? SessionCreationPolicy.IF_REQUIRED
-                        : SessionCreationPolicy.STATELESS))
+                    SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(
             auth -> {
                 if (devCreatorLogin.getIfAvailable() != null) {
                   auth.requestMatchers(org.springframework.http.HttpMethod.POST, "/auth/dev/creator-login").permitAll();
                 }
+                auth.requestMatchers(org.springframework.http.HttpMethod.POST,"/admin/creator-conflicts/*/resolve").authenticated();
                 auth.requestMatchers(PUBLIC_ENDPOINTS)
                     .permitAll()
                     .requestMatchers(org.springframework.http.HttpMethod.GET, "/admin/data-quality/pending")
@@ -128,16 +123,6 @@ public class SecurityConfig {
                     .authenticated(); })
         .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
-    if (googleOAuthProperties.isEnabled()) {
-      http.oauth2Login(
-          oauth ->
-              oauth
-                  .authorizationEndpoint(endpoint -> endpoint
-                      .authorizationRequestResolver(new GoogleLoginIntent.Resolver(clients.getObject()))
-                      .authorizationRequestRepository(new GoogleLoginIntent.Repository()))
-                  .successHandler(googleOAuthSuccessHandler)
-                  .failureHandler(googleOAuthFailureHandler));
-    }
     return http.build();
   }
 

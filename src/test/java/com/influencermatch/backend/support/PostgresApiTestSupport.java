@@ -24,6 +24,8 @@ import org.testcontainers.utility.DockerImageName;
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=validate", "spring.flyway.enabled=true",
     "application.bootstrap-admin.enabled=false", "application.oauth2.google.enabled=false",
     "application.auth.creator-mock.enabled=false", "application.payment.mock.enabled=false",
+    "application.claim-email.dispatch-enabled=false",
+    "application.claim-email.encryption-key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
     "spring.jpa.show-sql=false"})
 @ActiveProfiles("dev") @AutoConfigureMockMvc
 public abstract class PostgresApiTestSupport {

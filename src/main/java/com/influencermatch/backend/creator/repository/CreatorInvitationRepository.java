@@ -12,6 +12,13 @@ import org.springframework.stereotype.Repository;
 public interface CreatorInvitationRepository
     extends JpaRepository<CreatorInvitation, UUID>, JpaSpecificationExecutor<CreatorInvitation> {
 
+  Optional<CreatorInvitation> findFirstByTargetCreatorIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
+      UUID creatorId,String status,java.time.LocalDateTime now);
+
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @org.springframework.data.jpa.repository.Query("select i from CreatorInvitation i where i.id=:id")
+  Optional<CreatorInvitation> findLockedById(@org.springframework.data.repository.query.Param("id") UUID id);
+
   Optional<CreatorInvitation> findByTokenHash(String tokenHash);
 
   boolean existsByTargetCreatorIdAndStatus(UUID creatorId, String status);

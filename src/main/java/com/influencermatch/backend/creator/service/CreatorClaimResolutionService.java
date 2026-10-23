@@ -29,6 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class CreatorClaimResolutionService {
 
+  @org.springframework.beans.factory.annotation.Autowired private CreatorConflictAudit conflicts;
+  @org.springframework.beans.factory.annotation.Autowired private java.time.Clock clock;
+  @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager em;
   private final CreatorRepository creatorRepository;
   private final CreatorMasterRepository creatorMasterRepository;
   private final CreatorInvitationRepository creatorInvitationRepository;
@@ -44,38 +47,52 @@ public class CreatorClaimResolutionService {
   /**
    * Resolves the OAuth callback for profile claim atomically.
    */
-  @Transactional
+  @Transactional(noRollbackFor=com.influencermatch.backend.exception.CreatorOwnershipConflictException.class)
   public OAuthCallbackResponse resolveClaim(
       String platform, String code, String rawToken, User explicitUser) {
 
+    Permissions.require(com.influencermatch.backend.security.permission.Permission.CLAIM_CREATOR_PROFILE);
+    User claimantUser = Permissions.actor();
+    if (explicitUser == null || !explicitUser.getId().equals(claimantUser.getId())
+        || claimantUser.getRole() != Role.CREATOR || claimantUser.getStatus() != UserStatus.ACTIVE
+        || !claimantUser.isEmailVerified())
+      throw new com.influencermatch.backend.exception.ForbiddenException("An authenticated verified Creator is required");
     // 1. Verify invitation token first
+    if(rawToken==null||rawToken.isBlank()||code==null||code.isBlank())
+      throw new com.influencermatch.backend.exception.ValidationException("Token and authorization code are required");
     String tokenHash = CreatorInvitationService.hashToken(rawToken.trim());
     CreatorInvitation invitation = creatorInvitationRepository.findByTokenHash(tokenHash)
         .orElseThrow(() -> new ResourceNotFoundException("Invitation", "token", "Invalid invitation token"));
 
-    if (!"PENDING".equalsIgnoreCase(invitation.getStatus())) {
-      throw new ConflictException(
-          ErrorCode.INVITATION_ALREADY_PROCESSED,
-          "Invitation has already been " + invitation.getStatus());
-    }
-
-    if (invitation.getExpiresAt().isBefore(LocalDateTime.now())) {
-      invitation.setStatus("EXPIRED");
-      creatorInvitationRepository.save(invitation);
-      throw new ConflictException(ErrorCode.INVITATION_EXPIRED, "Invitation has expired");
-    }
-
-    UUID targetCreatorId = invitation.getTargetCreator().getId();
-
-    // 2. Lock target Creator account (PESSIMISTIC_WRITE)
-    Creator creator = creatorRepository.findLockedById(targetCreatorId)
-        .orElseThrow(() -> new ResourceNotFoundException("Creator", "id", targetCreatorId));
-
-    if (creator.getMaster() != null || creator.getSourceType() == CreatorSourceType.AUTHORIZED) {
-      throw new ConflictException(
-          ErrorCode.CREATOR_ALREADY_LINKED,
-          "Creator account has already been claimed and linked to a Master");
-    }
+    if(!claimantUser.getEmail().equalsIgnoreCase(invitation.getInvitedEmail()))
+      throw new com.influencermatch.backend.exception.ForbiddenException("Invitation belongs to another email");
+    if(!invitation.getTargetCreator().getPlatform().equalsIgnoreCase(platform))
+      throw new com.influencermatch.backend.exception.ValidationException("Invitation platform does not match");
+    UUID targetCreatorId=invitation.getTargetCreator().getId();
+    // Serialize Master creation across different channels claimed by the same User.
+    User lockedClaimant=userRepository.findLockedByEmail(claimantUser.getEmail())
+        .orElseThrow(()->new com.influencermatch.backend.exception.ForbiddenException("An active verified Creator is required"));
+    em.refresh(lockedClaimant);
+    if(!lockedClaimant.getId().equals(claimantUser.getId()) || !lockedClaimant.isEmailVerified()
+        || lockedClaimant.getRole()!=Role.CREATOR || lockedClaimant.getStatus()!=UserStatus.ACTIVE)
+      throw new com.influencermatch.backend.exception.ForbiddenException("An active verified Creator is required");
+    claimantUser=lockedClaimant;
+    Creator creator=creatorRepository.findLockedById(targetCreatorId)
+        .orElseThrow(()->new ResourceNotFoundException("Creator","id",targetCreatorId));
+    em.refresh(creator);
+    invitation=creatorInvitationRepository.findLockedById(invitation.getId())
+        .orElseThrow(()->new ResourceNotFoundException("Invitation","id","Missing invitation"));
+    em.refresh(invitation);
+    if(!claimantUser.getEmail().equalsIgnoreCase(invitation.getInvitedEmail()))
+      throw new com.influencermatch.backend.exception.ForbiddenException("Invitation belongs to another email");
+    if(!creator.getId().equals(invitation.getTargetCreator().getId()) || !creator.getPlatform().equalsIgnoreCase(platform))
+      throw new com.influencermatch.backend.exception.ValidationException("Invitation platform does not match");
+    if(!"PENDING".equalsIgnoreCase(invitation.getStatus()))
+      throw new ConflictException(ErrorCode.INVITATION_ALREADY_PROCESSED,"Invitation has already been "+invitation.getStatus());
+    if(!invitation.getExpiresAt().isAfter(LocalDateTime.now(clock)))
+      throw new ConflictException(ErrorCode.INVITATION_EXPIRED,"Invitation has expired");
+    if(creator.getMaster()!=null||creator.getSourceType()==CreatorSourceType.AUTHORIZED)
+      throw conflicts.reject(targetCreatorId,invitation.getId(),ErrorCode.CREATOR_ALREADY_LINKED,"Channel already has an owner");
 
     // 3. Exchange code and verify Proof of Control with external OAuth Provider
     OAuthProofClient.ProofResult proof = oAuthProofClient.exchangeAndVerify(
@@ -105,23 +122,6 @@ public class CreatorClaimResolutionService {
           "Proof of control failed: Authenticated account does not match target creator");
     }
 
-    // 4. Resolve Claimant User
-    User claimantUser = explicitUser != null ? explicitUser : Permissions.actorOrNull();
-    if (claimantUser == null) {
-      claimantUser = userRepository.findByEmail(invitation.getInvitedEmail())
-          .orElseGet(() -> {
-            User newUser = User.builder()
-                .email(invitation.getInvitedEmail())
-                .fullName(creator.getDisplayName() != null ? creator.getDisplayName() : creator.getUserName())
-                .role(Role.CREATOR)
-                .status(UserStatus.ACTIVE)
-                .authVersion(1L)
-                .passwordHash("$2a$10$A/bxwOtUf1iUtnhbppaG5uBmF/iK7f100XS/H/Y.VpjKyRqiEUh52")
-                .build();
-            return userRepository.save(newUser);
-          });
-    }
-
     // 5. Find or create CreatorMaster M1 for claimantUser
     User finalClaimant = claimantUser;
     CreatorMaster master = creatorMasterRepository.findByUserId(claimantUser.getId())
@@ -140,7 +140,7 @@ public class CreatorClaimResolutionService {
     // 6. Update Creator: link to Master, set AUTHORIZED
     creator.setMaster(master);
     creator.setSourceType(CreatorSourceType.AUTHORIZED);
-    creator.setAuthorizedAt(LocalDateTime.now());
+    creator.setAuthorizedAt(LocalDateTime.now(clock));
     creatorRepository.save(creator);
 
     // 7. Encrypt tokens and save CreatorAccountVerification
@@ -156,7 +156,7 @@ public class CreatorClaimResolutionService {
         .refreshTokenEncrypted(encryptedRefresh)
         .tokenExpiresAt(proof.getTokenExpiresAt())
         .status("ACTIVE")
-        .verifiedAt(LocalDateTime.now())
+        .verifiedAt(LocalDateTime.now(clock))
         .build();
     accountVerificationRepository.save(verification);
 

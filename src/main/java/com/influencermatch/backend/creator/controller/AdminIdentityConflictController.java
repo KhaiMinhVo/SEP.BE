@@ -30,7 +30,7 @@ public class AdminIdentityConflictController {
 
   @GetMapping
   @PreAuthorize("hasAuthority('REVIEW_CREATOR_CLAIM') or hasAuthority('RESOLVE_CREATOR_DUPLICATE')")
-  @Operation(summary = "List creator account identity conflicts for Data Manager review")
+  @Operation(summary = "Read historical creator identity conflicts; transfer resolution is unavailable in MVP")
   public ApiResponse<PageResponse<ConflictDetailDto>> listConflicts(
       @RequestParam(value = "status", required = false) String status,
       @RequestParam(value = "page", defaultValue = "0") int page,
@@ -41,17 +41,4 @@ public class AdminIdentityConflictController {
     return ApiResponse.ok(PageResponse.from(result));
   }
 
-  @PostMapping("/{id}/resolve")
-  @PreAuthorize("hasAuthority('REVIEW_CREATOR_CLAIM') or hasAuthority('RESOLVE_CREATOR_DUPLICATE')")
-  @Operation(summary = "Resolve a channel ownership conflict (APPROVE_TRANSFER or REJECT)")
-  public ApiResponse<ConflictDetailDto> resolveConflict(
-      @PathVariable("id") UUID conflictId,
-      @Valid @RequestBody ResolveConflictRequest request) {
-
-    User actor = Permissions.actor();
-    ConflictDetailDto resolved = conflictService.resolveConflict(
-        conflictId, request.getDecision(), request.getNotes(), actor);
-
-    return ApiResponse.ok(resolved);
-  }
 }

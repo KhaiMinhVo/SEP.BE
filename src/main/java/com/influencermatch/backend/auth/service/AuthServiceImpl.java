@@ -35,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuthServiceImpl implements AuthService {
 
   private final UserRepository userRepository;
+  private final EmailVerificationService verification;
   private final PasswordEncoder passwordEncoder;
   private final JwtTokenProvider jwtTokenProvider;
   private final AuthenticationManager authenticationManager;
@@ -44,7 +45,9 @@ public class AuthServiceImpl implements AuthService {
   @Override
   @Transactional
   public void register(RegisterRequest request) {
-    String normalizedEmail = request.getEmail().trim().toLowerCase();
+    verification.requireConfigured();
+    String normalizedEmail = request.getEmail().trim().toLowerCase(java.util.Locale.ROOT);
+    userRepository.lockRegistrationEmail(normalizedEmail);
 
     if (userRepository.existsByEmail(normalizedEmail)) {
       throw new BusinessException(
@@ -56,11 +59,12 @@ public class AuthServiceImpl implements AuthService {
             .email(normalizedEmail)
             .passwordHash(passwordEncoder.encode(request.getPassword()))
             .fullName(request.getFullName().trim())
-            .role(Role.BRAND) // new users default to BRAND
+            .role(Role.BRAND).emailVerified(false) // new users must verify email
             .status(UserStatus.ACTIVE)
             .build();
 
-    userRepository.save(user);
+    userRepository.saveAndFlush(user);
+    verification.sendInitial(user);
     log.info("Registered new user: email='{}'", normalizedEmail);
   }
 
@@ -74,6 +78,7 @@ public class AuthServiceImpl implements AuthService {
                 request.getEmail().trim().toLowerCase(), request.getPassword()));
 
     User user = (User) authentication.getPrincipal();
+    if (!user.isEmailVerified()) throw new BusinessException(ErrorCode.EMAIL_NOT_VERIFIED, "Verify your email before login");
     user.setLastLoginAt(LocalDateTime.now());
     userRepository.save(user);
     String accessToken = jwtTokenProvider.generateToken(user);

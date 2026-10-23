@@ -197,7 +197,7 @@ public class CampaignService {
                         .followers(metric.getFollowers())
                         .engagementRate(metric.getEngagementRate())
                         .niche(metric.getNiche())
-                        .location(metric.getLocation())
+                        .location(metric.getCreator().getLocation())
                         .contentSummary(metric.getContentSummary())
                         .displayName(metric.getCreator().getDisplayName())
                         .avatarUrl(metric.getCreator().getAvatarUrl())

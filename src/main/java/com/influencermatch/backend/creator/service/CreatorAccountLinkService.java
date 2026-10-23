@@ -27,6 +27,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class CreatorAccountLinkService {
 
+  @org.springframework.beans.factory.annotation.Autowired private CreatorConflictAudit conflicts;
+  @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager em;
   private final CreatorRepository creatorRepository;
   private final CreatorMasterRepository creatorMasterRepository;
   private final CreatorIdentityConflictRepository conflictRepository;
@@ -43,13 +45,18 @@ public class CreatorAccountLinkService {
    * Links an additional social media channel (channel 2+) to the KOC's CreatorMaster.
    * Handles 4 distinct linking scenarios.
    */
-  @Transactional
+  @Transactional(noRollbackFor=com.influencermatch.backend.exception.CreatorOwnershipConflictException.class)
   public ConnectAccountResponse linkAdditionalAccount(
       UUID userId, String platform, String authorizationCode) {
 
     User currentUser = userRepository.findById(userId)
         .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
+    com.influencermatch.backend.security.permission.Permissions.require(com.influencermatch.backend.security.permission.Permission.CLAIM_CREATOR_PROFILE);
+    if(!currentUser.getId().equals(com.influencermatch.backend.security.permission.Permissions.actor().getId())
+        ||currentUser.getRole()!=com.influencermatch.backend.user.enums.Role.CREATOR
+        ||currentUser.getStatus()!=com.influencermatch.backend.user.enums.UserStatus.ACTIVE||!currentUser.isEmailVerified())
+      throw new com.influencermatch.backend.exception.ForbiddenException("An active verified Creator is required");
     CreatorMaster master = creatorMasterRepository.findByUserId(userId)
         .orElseThrow(() -> new ResourceNotFoundException("CreatorMaster", "userId", userId));
 
@@ -61,8 +68,9 @@ public class CreatorAccountLinkService {
     String providerUsername = proof.getProviderUsername();
     String normalizedPlatform = platform.toUpperCase();
 
+    creatorRepository.acquireIdentityLock(normalizedPlatform+":"+providerUserId);
     // 2. Check if this account already exists in DB
-    Optional<Creator> existingOpt = creatorRepository.findByPlatformAndExternalId(
+    Optional<Creator> existingOpt = creatorRepository.findLockedByPlatformAndExternalId(
         normalizedPlatform, providerUserId);
 
     // CASE 2: Tài khoản hoàn toàn mới chưa từng cào
@@ -107,6 +115,7 @@ public class CreatorAccountLinkService {
     }
 
     Creator existing = existingOpt.get();
+    em.refresh(existing);
 
     // CASE 3: Tài khoản đã thuộc chính Master M1 này
     if (existing.getMaster() != null && existing.getMaster().getId().equals(master.getId())) {
@@ -132,49 +141,13 @@ public class CreatorAccountLinkService {
           .build();
     }
 
-    // CASE 4: Tài khoản đã thuộc Master M2 khác (XUNG ĐỘT)
-    if (existing.getMaster() != null && !existing.getMaster().getId().equals(master.getId())) {
-      log.warn("Case 4: Conflict detected! Channel {}/{} belongs to masterId={} but requested by masterId={}",
-          normalizedPlatform, providerUserId, existing.getMaster().getId(), master.getId());
-
-      CreatorIdentityConflict conflict = CreatorIdentityConflict.builder()
-          .conflictType("ACCOUNT_ALREADY_LINKED")
-          .sourceAccount(existing)
-          .targetMaster(master)
-          .conflictDetails(Map.of(
-              "requestingUserId", userId.toString(),
-              "currentMasterId", existing.getMaster().getId().toString(),
-              "platform", normalizedPlatform,
-              "externalId", providerUserId,
-              "providerUsername", providerUsername
-          ))
-          .status("PENDING_MANAGER")
-          .build();
-      conflictRepository.save(conflict);
-
-      audit(master, existing, currentUser, "LINK_CONFLICT_DETECTED", Map.of(
-          "platform", normalizedPlatform,
-          "externalId", providerUserId,
-          "currentMasterId", existing.getMaster().getId().toString(),
-          "conflictType", "ACCOUNT_ALREADY_LINKED"
-      ));
-
-      return ConnectAccountResponse.builder()
-          .accountId(existing.getId())
-          .masterId(master.getId())
-          .platform(normalizedPlatform)
-          .externalId(providerUserId)
-          .userName(existing.getUserName())
-          .status("CONFLICT_PENDING_REVIEW")
-          .message("This channel is currently linked to another creator profile. A transfer request has been submitted to Data Manager for review.")
-          .build();
-    }
+    if(existing.getMaster()!=null || existing.getSourceType()==CreatorSourceType.AUTHORIZED)
+      throw conflicts.reject(existing.getId(),null,com.influencermatch.backend.exception.ErrorCode.CREATOR_ALREADY_LINKED,"Channel belongs to another Creator");
 
     // CASE 1: Tài khoản đã có trong DB qua crawler (master_id = NULL)
     log.info("Case 1: Linking unattached crawled channel {}/{} to masterId={}",
         normalizedPlatform, providerUserId, master.getId());
 
-    existing = creatorRepository.findLockedById(existing.getId()).orElse(existing);
     existing.setMaster(master);
     existing.setSourceType(CreatorSourceType.AUTHORIZED);
     existing.setAuthorizedAt(LocalDateTime.now());

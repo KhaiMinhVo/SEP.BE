@@ -47,6 +47,8 @@ class AuthServiceTest {
     @Mock
     private com.influencermatch.backend.security.permission.service.EffectivePermissionService effectivePermissions;
 
+    @Mock private EmailVerificationService verification;
+
     @InjectMocks
     private AuthServiceImpl authService;
 
@@ -71,7 +73,7 @@ class AuthServiceTest {
         authService.register(request);
 
         // THEN
-        verify(userRepository, times(1)).save(any(User.class));
+        verify(userRepository, times(1)).saveAndFlush(any(User.class));
     }
 
     @Test
@@ -170,7 +172,7 @@ class AuthServiceTest {
         var req=RegisterRequest.builder().email("  CASE@EXAMPLE.TEST  ").password("Password123!").fullName("  Test  ").build();
         when(passwordEncoder.encode(req.getPassword())).thenReturn("encoded");
         authService.register(req);
-        var saved=org.mockito.ArgumentCaptor.forClass(User.class);verify(userRepository).save(saved.capture());
+        var saved=org.mockito.ArgumentCaptor.forClass(User.class);verify(userRepository).saveAndFlush(saved.capture());
         assertThat(saved.getValue().getEmail()).isEqualTo("case@example.test");
         assertThat(saved.getValue().getFullName()).isEqualTo("Test");assertThat(saved.getValue().getRole()).isEqualTo(Role.BRAND);
         assertThat(saved.getValue().getPasswordHash()).isEqualTo("encoded");

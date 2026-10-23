@@ -40,6 +40,7 @@ class RolePermissionsTest {
             "VIEW_OWN_BILLING");
     assertThat(RolePermissions.names(Role.DATA_MANAGER))
         .containsExactlyInAnyOrder(
+            "INVITE_CREATOR",
             "REVIEW_CREATOR_CLAIM",
             "VIEW_OWN_PROFILE",
             "VIEW_OWN_NOTIFICATION",
@@ -55,6 +56,7 @@ class RolePermissionsTest {
             "VIEW_DATA_OPERATION_LOG");
     assertThat(RolePermissions.names(Role.ADMIN))
         .containsExactlyInAnyOrder(
+            "INVITE_CREATOR",
             "REVIEW_CREATOR_CLAIM",
             "VIEW_OWN_PROFILE",
             "VIEW_OWN_NOTIFICATION",
@@ -81,11 +83,11 @@ class RolePermissionsTest {
   }
 
   @Test
-  void fixedMatrixHasExactly46PermissionsAndNoWildcard() {
-    assertThat(Permission.values()).hasSize(46);
+  void fixedMatrixHasExactly47PermissionsAndNoWildcard() {
+    assertThat(Permission.values()).hasSize(47);
     assertThat(RolePermissions.forRole(Role.BRAND)).hasSize(25);
-    assertThat(RolePermissions.forRole(Role.DATA_MANAGER)).hasSize(13);
-    assertThat(RolePermissions.forRole(Role.ADMIN)).hasSize(23);
+    assertThat(RolePermissions.forRole(Role.DATA_MANAGER)).hasSize(14);
+    assertThat(RolePermissions.forRole(Role.ADMIN)).hasSize(24);
     assertThat(RolePermissions.names(Role.CREATOR)).containsExactlyInAnyOrder(
         "VIEW_OWN_PROFILE","VIEW_OWN_NOTIFICATION","MANAGE_OWN_NOTIFICATION","VIEW_CREATOR_PROFILE",
         "CLAIM_CREATOR_PROFILE","VIEW_OWN_CREATOR_CLAIM");
@@ -114,7 +116,7 @@ class RolePermissionsTest {
             Permission.VIEW_CREATOR_PROFILE);
     Set<Permission> operations = EnumSet.copyOf(RolePermissions.forRole(Role.DATA_MANAGER));
     operations.removeAll(common);
-    assertThat(operations).hasSize(9).isSubsetOf(RolePermissions.forRole(Role.ADMIN));
+    assertThat(operations).hasSize(10).isSubsetOf(RolePermissions.forRole(Role.ADMIN));
     assertThat(RolePermissions.forRole(Role.ADMIN))
         .doesNotContain(
             Permission.CREATE_CAMPAIGN,

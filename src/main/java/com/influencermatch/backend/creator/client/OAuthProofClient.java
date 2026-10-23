@@ -10,6 +10,17 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class OAuthProofClient {
+  private final boolean enabled;
+  public OAuthProofClient(org.springframework.core.env.Environment environment,
+      @org.springframework.beans.factory.annotation.Value("${application.auth.social-proof-mock.enabled:false}") boolean enabled) {
+    this.enabled=enabled && environment.acceptsProfiles(org.springframework.core.env.Profiles.of("dev & !prod"));
+  }
+
+
+  public void requireConfigured() {
+    if (!enabled) throw new com.influencermatch.backend.exception.BusinessException(
+        com.influencermatch.backend.exception.ErrorCode.SOCIAL_PROOF_UNAVAILABLE, "Real provider verification is not configured");
+  }
 
   @Data
   @Builder
@@ -26,6 +37,7 @@ public class OAuthProofClient {
 
   public ProofResult exchangeAndVerify(
       String platform, String code, String expectedExternalId, String expectedUserName) {
+    requireConfigured();
     if (code != null && code.startsWith("sim-mismatch")) {
       return ProofResult.builder()
           .providerUserId("mismatched_external_id")

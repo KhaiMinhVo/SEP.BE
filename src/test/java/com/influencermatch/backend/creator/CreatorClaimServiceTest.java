@@ -29,6 +29,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 @ExtendWith(MockitoExtension.class)
 class CreatorClaimServiceTest {
   @Mock CreatorRepository creators;
+  @Mock CreatorMasterRepository masters;
   @Mock CreatorClaimRepository claims;
   @Mock ExternalIdentityRepository identities;
   @Mock UserRepository users;
@@ -41,9 +42,10 @@ class CreatorClaimServiceTest {
 
   @BeforeEach void setup() {
     factory = Validation.buildDefaultValidatorFactory();
-    service = new CreatorClaimService(creators, claims, identities, users, audit, em, factory.getValidator(), Optional.empty());
+    service = com.influencermatch.backend.support.CreatorServiceFixtures.wire(new CreatorClaimService(creators, masters, claims, identities, users, audit, em, factory.getValidator(), Optional.empty()));
     owner = User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
     creator = Creator.builder().id(UUID.randomUUID()).build();
+    lenient().when(masters.save(any())).thenAnswer(i->i.getArgument(0));
     login(owner);
   }
   @AfterEach void cleanup() { SecurityContextHolder.clearContext(); factory.close(); }
@@ -52,8 +54,7 @@ class CreatorClaimServiceTest {
   }
   void verified() {
     when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
-    when(identities.findByUserIdAndProvider(owner.getId(), ExternalIdentityProvider.GOOGLE))
-        .thenReturn(Optional.of(ExternalIdentity.builder().emailVerified(true).build()));
+    owner.setEmailVerified(true);
   }
   void locked() { when(creators.findLockedById(creator.getId())).thenReturn(Optional.of(creator)); }
   ClaimRequest request() { return new ClaimRequest(List.of("https://example.test/proof"), "My channel"); }
@@ -71,7 +72,8 @@ class CreatorClaimServiceTest {
         eq(Map.of("status", "PENDING", "creatorId", creator.getId(), "claimantId", owner.getId())), anyString());
   }
 
-  @Test void unverifiedIdentityCannotClaim() {
+  @Test void unverifiedEmailCannotClaim() {
+    owner.setEmailVerified(false);
     when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
     assertThatThrownBy(() -> service.claim(creator.getId(), request())).isInstanceOf(ForbiddenException.class);
     verify(claims, never()).saveAndFlush(any());
@@ -119,7 +121,7 @@ class CreatorClaimServiceTest {
     lenient().when(identities.findByUserIdAndProvider(owner.getId(),ExternalIdentityProvider.DEV_MOCK))
         .thenReturn(Optional.of(ExternalIdentity.builder().provider(ExternalIdentityProvider.DEV_MOCK).user(owner).build()));
     assertThatThrownBy(()->service.claim(creator.getId(),request())).isInstanceOf(ForbiddenException.class);
-    verify(identities,never()).findByUserIdAndProvider(owner.getId(),ExternalIdentityProvider.DEV_MOCK);
+    verify(identities).findByUserIdAndProvider(owner.getId(),ExternalIdentityProvider.DEV_MOCK);
     verifyNoInteractions(claims,audit);
   }
 

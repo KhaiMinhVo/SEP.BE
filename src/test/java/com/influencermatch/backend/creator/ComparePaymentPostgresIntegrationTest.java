@@ -53,7 +53,8 @@ class ComparePaymentPostgresIntegrationTest {
   }
   @Autowired MockMvc mvc; @Autowired ObjectMapper json; @Autowired JwtTokenProvider jwt;
   @Autowired UserRepository users; @Autowired BrandProfileRepository brands; @Autowired CampaignRepository campaigns;
-  @Autowired CreatorRepository creators; @Autowired PublicCreatorMetricRepository metrics;
+  @Autowired CreatorRepository creators;
+  @Autowired com.influencermatch.backend.creator.repository.CreatorMasterRepository masters; @Autowired PublicCreatorMetricRepository metrics;
   @Autowired ShortlistItemRepository shortlist; @Autowired CreatorClaimRepository claims;
   @Autowired PlanRepository plans;
   @Autowired SubscriptionRepository subscriptions; @Autowired PaymentRepository payments; @Autowired JdbcTemplate jdbc;
@@ -90,7 +91,7 @@ class ComparePaymentPostgresIntegrationTest {
         .collectedAt(LocalDateTime.now().minusDays(1)).freshnessStatus(MetricDataStatus.STALE).build());
     var latest=metrics.saveAndFlush(PublicCreatorMetric.builder().creator(a).creatorType("KOL").niche("Beauty").followers(200L)
         .collectedAt(LocalDateTime.now()).freshnessStatus(MetricDataStatus.FRESH).build());
-    var owner=user(Role.CREATOR); a.setOwner(owner);a.setSourceType(CreatorSourceType.AUTHORIZED);a.setAuthorizedAt(LocalDateTime.now());creators.saveAndFlush(a);
+    var owner=user(Role.CREATOR); var master=masters.saveAndFlush(com.influencermatch.backend.creator.model.CreatorMaster.builder().user(owner).canonicalName("Creator").status("ACTIVE").build()); a.setMaster(master);a.setSourceType(CreatorSourceType.AUTHORIZED);a.setAuthorizedAt(LocalDateTime.now());creators.saveAndFlush(a);
     var claim=claims.saveAndFlush(CreatorClaim.builder().creator(a).claimant(owner).status(CreatorClaimStatus.APPROVED)
         .evidenceUrls(List.of("https://example.com/proof")).note("Proof").build());
     var data=call(u,post(compare(c)),Map.of("creatorIds",List.of(b.getId(),a.getId())),200);

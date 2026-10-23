@@ -27,7 +27,7 @@ public class CreatorPortalAccountController {
   private final CreatorAccountLinkService accountLinkService;
 
   @PostMapping("/connect/{platform}/start")
-  @PreAuthorize("hasAuthority('VIEW_OWN_PROFILE') or hasAuthority('CLAIM_CREATOR_PROFILE')")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
   @Operation(summary = "Initiate connection flow for an additional social media channel")
   public ApiResponse<Map<String, String>> startConnect(
       @PathVariable("platform") String platform) {
@@ -42,7 +42,7 @@ public class CreatorPortalAccountController {
   }
 
   @PostMapping("/connect/{platform}/callback")
-  @PreAuthorize("hasAuthority('VIEW_OWN_PROFILE') or hasAuthority('CLAIM_CREATOR_PROFILE')")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
   @Operation(summary = "Complete connection of additional channel using OAuth code")
   public ApiResponse<ConnectAccountResponse> handleConnectCallback(
       @PathVariable("platform") String platform,
@@ -56,7 +56,7 @@ public class CreatorPortalAccountController {
   }
 
   @GetMapping
-  @PreAuthorize("hasAuthority('VIEW_OWN_PROFILE') or hasAuthority('CLAIM_CREATOR_PROFILE')")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
   @Operation(summary = "List all social media accounts linked to current creator's master profile")
   public ApiResponse<List<LinkedAccountDto>> getLinkedAccounts() {
     User actor = Permissions.actor();

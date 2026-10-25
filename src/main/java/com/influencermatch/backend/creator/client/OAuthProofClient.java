@@ -1,25 +1,71 @@
 package com.influencermatch.backend.creator.client;
 
+import com.influencermatch.backend.creator.client.provider.GoogleYouTubeTestingProofProvider;
+import com.influencermatch.backend.creator.client.provider.OAuthSandboxProperties;
+import com.influencermatch.backend.creator.client.provider.SimulatedFallbackProofProvider;
+import com.influencermatch.backend.creator.client.provider.TikTokSandboxProofProvider;
+import com.influencermatch.backend.exception.BusinessException;
+import com.influencermatch.backend.exception.ErrorCode;
 import java.time.LocalDateTime;
 import java.util.Map;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 
+@Slf4j
 @Component
 public class OAuthProofClient {
-  private final boolean enabled;
-  public OAuthProofClient(org.springframework.core.env.Environment environment,
-      @org.springframework.beans.factory.annotation.Value("${application.auth.social-proof-mock.enabled:false}") boolean enabled) {
-    this.enabled=enabled && environment.acceptsProfiles(org.springframework.core.env.Profiles.of("dev & !prod"));
+
+  private final Environment environment;
+  private final boolean mockEnabled;
+  private final OAuthSandboxProperties properties;
+  private final TikTokSandboxProofProvider tikTokProvider;
+  private final GoogleYouTubeTestingProofProvider googleProvider;
+  private final SimulatedFallbackProofProvider fallbackProvider;
+
+  @Autowired
+  public OAuthProofClient(
+      Environment environment,
+      @Value("${application.auth.social-proof-mock.enabled:false}") boolean mockEnabled,
+      OAuthSandboxProperties properties,
+      TikTokSandboxProofProvider tikTokProvider,
+      GoogleYouTubeTestingProofProvider googleProvider,
+      SimulatedFallbackProofProvider fallbackProvider) {
+    this.environment = environment;
+    this.mockEnabled = mockEnabled;
+    this.properties = properties != null ? properties : new OAuthSandboxProperties();
+    this.tikTokProvider = tikTokProvider;
+    this.googleProvider = googleProvider;
+    this.fallbackProvider = fallbackProvider != null ? fallbackProvider : new SimulatedFallbackProofProvider();
   }
 
+  /**
+   * Backwards-compatible constructor for existing tests and non-injected environments.
+   */
+  public OAuthProofClient(Environment environment, boolean mockEnabled) {
+    this(environment, mockEnabled, new OAuthSandboxProperties(), null, null, new SimulatedFallbackProofProvider());
+  }
+
+  public boolean isOfficialSandboxMode() {
+    return properties != null && properties.isOfficialSandboxMode();
+  }
 
   public void requireConfigured() {
-    if (!enabled) throw new com.influencermatch.backend.exception.BusinessException(
-        com.influencermatch.backend.exception.ErrorCode.SOCIAL_PROOF_UNAVAILABLE, "Real provider verification is not configured");
+    if (isOfficialSandboxMode()) {
+      return;
+    }
+    boolean devMock = mockEnabled && environment.acceptsProfiles(Profiles.of("dev & !prod"));
+    if (!devMock) {
+      throw new BusinessException(
+          ErrorCode.SOCIAL_PROOF_UNAVAILABLE, "Real provider verification is not configured");
+    }
   }
 
   @Data
@@ -35,40 +81,53 @@ public class OAuthProofClient {
     private Map<String, Object> rawProfileData;
   }
 
+  /**
+   * Generates authorization redirect URL for official provider sandbox or fallback mock.
+   */
+  public String buildAuthorizationUrl(String platform, String state) {
+    requireConfigured();
+    String normPlatform = platform != null ? platform.toUpperCase() : "";
+
+    if (isOfficialSandboxMode()) {
+      if ("TIKTOK".equals(normPlatform) && tikTokProvider != null && tikTokProvider.isConfigured()) {
+        log.info("Directing client to Official TikTok Developer Sandbox consent screen");
+        return tikTokProvider.buildAuthorizationUrl(state);
+      }
+      if (("YOUTUBE".equals(normPlatform) || "GOOGLE".equals(normPlatform))
+          && googleProvider != null && googleProvider.isConfigured()) {
+        log.info("Directing client to Google OAuth Testing consent screen");
+        return googleProvider.buildAuthorizationUrl(state);
+      }
+    }
+
+    log.info("Directing client to Simulated OAuth Fallback for platform: {}", normPlatform);
+    return fallbackProvider.buildAuthorizationUrl(platform, state);
+  }
+
+  /**
+   * Exchanges authorization code with the provider and verifies account identity.
+   */
   public ProofResult exchangeAndVerify(
       String platform, String code, String expectedExternalId, String expectedUserName) {
     requireConfigured();
-    if (code != null && code.startsWith("sim-mismatch")) {
-      return ProofResult.builder()
-          .providerUserId("mismatched_external_id")
-          .providerUsername("mismatched_user")
-          .accessToken("sim_access_token_invalid")
-          .refreshToken("sim_refresh_token_invalid")
-          .tokenExpiresAt(LocalDateTime.now().plusHours(1))
-          .rawProfileData(Map.of("simulated", true, "channelId", "mismatched_external_id"))
-          .build();
+    String normPlatform = platform != null ? platform.toUpperCase() : "";
+
+    // Explicit simulation codes always route to SimulatedFallbackProofProvider
+    if (code != null && (code.startsWith("sim:") || code.startsWith("sim-mismatch") || "sim-auth-code".equals(code))) {
+      return fallbackProvider.exchangeAndVerify(platform, code, expectedExternalId, expectedUserName);
     }
 
-    String resolvedUserId = expectedExternalId != null ? expectedExternalId : "provider_id_" + code;
-    String resolvedUsername = expectedUserName != null ? expectedUserName : "provider_user_" + code;
-
-    if (code != null && code.startsWith("sim:")) {
-      String[] parts = code.split(":");
-      if (parts.length >= 2 && !parts[1].isBlank()) {
-        resolvedUserId = parts[1].trim();
+    if (isOfficialSandboxMode()) {
+      if ("TIKTOK".equals(normPlatform) && tikTokProvider != null && tikTokProvider.isConfigured()) {
+        return tikTokProvider.exchangeAndVerify(code, expectedExternalId, expectedUserName);
       }
-      if (parts.length >= 3 && !parts[2].isBlank()) {
-        resolvedUsername = parts[2].trim();
+      if (("YOUTUBE".equals(normPlatform) || "GOOGLE".equals(normPlatform))
+          && googleProvider != null && googleProvider.isConfigured()) {
+        return googleProvider.exchangeAndVerify(code, expectedExternalId, expectedUserName);
       }
     }
 
-    return ProofResult.builder()
-        .providerUserId(resolvedUserId)
-        .providerUsername(resolvedUsername)
-        .accessToken("access_token_" + code)
-        .refreshToken("refresh_token_" + code)
-        .tokenExpiresAt(LocalDateTime.now().plusHours(2))
-        .rawProfileData(Map.of("platform", platform, "externalId", resolvedUserId, "userName", resolvedUsername))
-        .build();
+    return fallbackProvider.exchangeAndVerify(platform, code, expectedExternalId, expectedUserName);
   }
 }
+

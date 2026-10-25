@@ -17,6 +17,10 @@ public interface ShortlistItemRepository extends JpaRepository<ShortlistItem, UU
     java.util.List<ShortlistItem> findByCampaignIdAndCreatorIdIn(UUID campaignId, java.util.Collection<UUID> creatorIds);
     Page<ShortlistItem> findByCampaignId(UUID campaignId, Pageable pageable);
     boolean existsByCampaignIdAndCreatorId(UUID campaignId, UUID creatorId);
+    Optional<ShortlistItem> findByCampaignIdAndCreatorId(UUID campaignId, UUID creatorId);
+    long countByCampaignId(UUID campaignId);
+    long countByCampaignIdAndStatus(UUID campaignId, com.influencermatch.backend.relationship.enums.ShortlistStatus status);
+    long countByCampaignIdAndStatusNot(UUID campaignId, com.influencermatch.backend.relationship.enums.ShortlistStatus status);
     Optional<ShortlistItem> findByIdAndUserId(UUID id, UUID userId);
 
     @org.springframework.data.jpa.repository.Modifying

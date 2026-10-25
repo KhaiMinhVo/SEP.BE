@@ -79,7 +79,8 @@ class AiRecommendationServicePhase2Test {
         brandPatternRepository,
         shortlistItemRepository,
         recommendationRunRepository,
-        aiServiceClient
+        aiServiceClient,
+        new com.fasterxml.jackson.databind.ObjectMapper()
     );
 
     brandUser = TestActors.user(Role.BRAND);

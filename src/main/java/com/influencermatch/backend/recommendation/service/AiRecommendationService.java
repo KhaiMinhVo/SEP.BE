@@ -1,6 +1,9 @@
 package com.influencermatch.backend.recommendation.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.influencermatch.backend.billing.service.SubscriptionService;
 import com.influencermatch.backend.brand.model.BrandPattern;
 import com.influencermatch.backend.brand.repository.BrandPatternRepository;
@@ -24,6 +27,7 @@ import com.influencermatch.backend.relationship.service.CampaignOwnershipService
 import com.influencermatch.backend.security.permission.Permission;
 import com.influencermatch.backend.security.permission.Permissions;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +49,7 @@ public class AiRecommendationService {
   private final ShortlistItemRepository shortlistItemRepository;
   private final RecommendationRunRepository recommendationRunRepository;
   private final AiServiceClient aiServiceClient;
+  private final ObjectMapper objectMapper;
 
   private static final UUID DUMMY_UUID = UUID.fromString("00000000-0000-0000-0000-000000000000");
 
@@ -353,6 +358,163 @@ public class AiRecommendationService {
         .summary(response.getSummary())
         .reasons(response.getReasons())
         .explanationAvailable(response.isExplanationAvailable())
+        .build();
+  }
+
+  /**
+   * Phase 4: Feedback Loop & Tiến hóa bối cảnh M3 (Negative Constraints).
+   * Brand từ chối hoặc phản hồi về KOC -> Bổ sung vào excludedCreatorIds, lưu feedbackHistory,
+   * tiến hóa phiên bản CampaignContext (v_N + 1), cập nhật M4 BrandPattern.
+   * QUY TẮC AN TOÀN: Tuyệt đối không thay đổi ngân sách hoặc lĩnh vực của Campaign!
+   */
+  @Transactional
+  public RecommendationFeedbackResponse processFeedback(
+      UUID campaignId, RecommendationFeedbackRequest request) {
+    Permissions.require(Permission.RUN_RECOMMENDATION);
+    Campaign campaign = ownership.requireOwned(campaignId);
+
+    String action = request.getAction() != null ? request.getAction().trim().toUpperCase() : "REJECT";
+    UUID creatorId = request.getCreatorId();
+
+    List<CampaignContext> contexts =
+        campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId);
+
+    int prevVersion = 1;
+    CampaignContext activeContext = null;
+    ObjectNode dataNode;
+
+    if (!contexts.isEmpty()) {
+      activeContext = contexts.get(0);
+      prevVersion = activeContext.getContextVersion();
+      JsonNode existingData = activeContext.getContextData();
+      if (existingData instanceof ObjectNode) {
+        dataNode = (ObjectNode) existingData.deepCopy();
+      } else if (existingData != null) {
+        dataNode = (ObjectNode) objectMapper.valueToTree(existingData);
+      } else {
+        dataNode = objectMapper.createObjectNode();
+      }
+    } else {
+      dataNode = objectMapper.createObjectNode();
+      dataNode.put("budgetMin", campaign.getBudgetMin());
+      dataNode.put("budgetMax", campaign.getBudgetMax());
+      if (campaign.getPlatforms() != null) {
+        dataNode.set("platforms", objectMapper.valueToTree(campaign.getPlatforms()));
+      }
+      if (campaign.getNiches() != null) {
+        dataNode.set("niches", objectMapper.valueToTree(campaign.getNiches()));
+      }
+    }
+
+    // Đảm bảo mảng excludedCreatorIds tồn tại
+    ArrayNode excludedArray;
+    if (dataNode.has("excludedCreatorIds") && dataNode.get("excludedCreatorIds").isArray()) {
+      excludedArray = (ArrayNode) dataNode.get("excludedCreatorIds");
+    } else {
+      excludedArray = objectMapper.createArrayNode();
+      dataNode.set("excludedCreatorIds", excludedArray);
+    }
+
+    // Đảm bảo mảng feedbackHistory tồn tại
+    ArrayNode feedbackArray;
+    if (dataNode.has("feedbackHistory") && dataNode.get("feedbackHistory").isArray()) {
+      feedbackArray = (ArrayNode) dataNode.get("feedbackHistory");
+    } else {
+      feedbackArray = objectMapper.createArrayNode();
+      dataNode.set("feedbackHistory", feedbackArray);
+    }
+
+    // 1. Ghi nhận sở thích mềm vào feedbackHistory để M4 phân tích
+    ObjectNode feedbackEntry = objectMapper.createObjectNode();
+    feedbackEntry.put("creatorId", creatorId.toString());
+    feedbackEntry.put("action", action);
+    if (request.getReasonCode() != null) {
+      feedbackEntry.put("reasonCode", request.getReasonCode());
+    }
+    if (request.getReasonNote() != null) {
+      feedbackEntry.put("reasonNote", request.getReasonNote());
+    }
+    feedbackEntry.put("timestamp", LocalDateTime.now().toString());
+    feedbackArray.add(feedbackEntry);
+
+    // 2. Nếu REJECT: Bổ sung creatorId vào excludedCreatorIds nếu chưa có (Idempotent)
+    if ("REJECT".equalsIgnoreCase(action)) {
+      boolean alreadyPresent = false;
+      for (JsonNode node : excludedArray) {
+        if (creatorId.toString().equalsIgnoreCase(node.asText())) {
+          alreadyPresent = true;
+          break;
+        }
+      }
+      if (!alreadyPresent) {
+        excludedArray.add(creatorId.toString());
+      }
+    }
+
+    // 3. Quy tắc an toàn: Tuyệt đối KHÔNG thay đổi campaign.budgetMax, budgetMin, hay niches
+    // Campaign entity trên database hoàn toàn giữ nguyên giá trị ban đầu.
+
+    // 4. Tiến hóa phiên bản: Lưu trữ bản ghi cũ (active = false), tạo bản ghi mới (contextVersion = v_N + 1)
+    if (activeContext != null) {
+      activeContext.setActive(false);
+      activeContext.setArchivedAt(LocalDateTime.now());
+      campaignContextRepository.save(activeContext);
+    }
+
+    int nextVersion = (activeContext != null) ? prevVersion + 1 : 1;
+    CampaignContext newContext = CampaignContext.builder()
+        .campaign(campaign)
+        .contextVersion(nextVersion)
+        .contextData(dataNode)
+        .active(true)
+        .build();
+    campaignContextRepository.save(newContext);
+
+    // 5. Ghi nhận mô thức dài hạn M4 (BrandPattern)
+    if (campaign.getBrandProfile() != null && request.getReasonCode() != null) {
+      try {
+        UUID brandProfileId = campaign.getBrandProfile().getId();
+        BrandPattern pattern = brandPatternRepository
+            .findByBrandProfileIdAndPatternType(brandProfileId, "REJECTION_FEEDBACK")
+            .orElseGet(() -> BrandPattern.builder()
+                .brandProfile(campaign.getBrandProfile())
+                .patternType("REJECTION_FEEDBACK")
+                .confidence(BigDecimal.valueOf(0.5))
+                .evidenceCount(0)
+                .learnedAt(LocalDateTime.now())
+                .build());
+
+        pattern.setEvidenceCount(pattern.getEvidenceCount() + 1);
+        pattern.setConfidence(BigDecimal.valueOf(Math.min(1.0, 0.5 + 0.05 * pattern.getEvidenceCount())));
+        pattern.setLearnedAt(LocalDateTime.now());
+
+        ObjectNode patternValue = (pattern.getPatternValue() instanceof ObjectNode)
+            ? (ObjectNode) pattern.getPatternValue()
+            : objectMapper.createObjectNode();
+        int count = patternValue.has(request.getReasonCode()) ? patternValue.get(request.getReasonCode()).asInt() : 0;
+        patternValue.put(request.getReasonCode(), count + 1);
+        pattern.setPatternValue(patternValue);
+
+        brandPatternRepository.save(pattern);
+      } catch (Exception ex) {
+        log.warn("Could not update M4 BrandPattern for brand: {}", ex.getMessage());
+      }
+    }
+
+    log.info("Feedback processed for campaign {}: creator {}, action {}, new context version {}",
+        campaignId, creatorId, action, nextVersion);
+
+    return RecommendationFeedbackResponse.builder()
+        .campaignId(campaignId)
+        .creatorId(creatorId)
+        .action(action)
+        .reasonCode(request.getReasonCode())
+        .previousContextVersion(prevVersion)
+        .newContextVersion(nextVersion)
+        .totalExcludedCount(excludedArray.size())
+        .message(action.equals("REJECT")
+            ? "Đã loại trừ ứng viên khỏi các lượt gợi ý sau. Bối cảnh M3 tiến hóa lên v" + nextVersion
+            : "Đã ghi nhận phản hồi. Bối cảnh M3 cập nhật lên v" + nextVersion)
         .build();
   }
 

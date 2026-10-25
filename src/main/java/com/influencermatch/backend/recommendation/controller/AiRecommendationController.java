@@ -3,12 +3,13 @@ package com.influencermatch.backend.recommendation.controller;
 import com.influencermatch.backend.campaign.model.RecommendationRun;
 import com.influencermatch.backend.campaign.repository.RecommendationRunRepository;
 import com.influencermatch.backend.common.dto.ApiResponse;
-import com.influencermatch.backend.recommendation.dto.RecommendationResponseDto;
+import com.influencermatch.backend.recommendation.dto.*;
 import com.influencermatch.backend.recommendation.service.AiRecommendationService;
 import com.influencermatch.backend.relationship.service.CampaignOwnershipService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -49,5 +50,18 @@ public class AiRecommendationController {
     List<RecommendationRun> runs =
         recommendationRunRepository.findByCampaignIdOrderByCreatedAtDesc(campaignId);
     return ResponseEntity.ok(ApiResponse.ok(runs));
+  }
+
+  @PostMapping("/feedback")
+  @PreAuthorize("hasAuthority('RUN_RECOMMENDATION')")
+  @Operation(
+      summary = "Submit feedback on recommended candidate (e.g. REJECT with reasonCode)",
+      security = @SecurityRequirement(name = "BearerAuth"))
+  public ResponseEntity<ApiResponse<RecommendationFeedbackResponse>> processFeedback(
+      @PathVariable UUID campaignId,
+      @Valid @RequestBody RecommendationFeedbackRequest request) {
+    RecommendationFeedbackResponse response =
+        recommendationService.processFeedback(campaignId, request);
+    return ResponseEntity.ok(ApiResponse.ok("Feedback processed successfully", response));
   }
 }

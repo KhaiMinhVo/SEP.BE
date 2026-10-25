@@ -37,6 +37,8 @@ class ShortlistCartPhase1Test {
   private CreatorRepository creatorRepository;
   private UserRepository userRepository;
   private RecommendationRunRepository recommendationRunRepository;
+  private com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository publicCreatorMetricRepository;
+  private com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository relationshipRepository;
   private ShortlistServiceImpl shortlistService;
 
   private User brandUser;
@@ -52,13 +54,17 @@ class ShortlistCartPhase1Test {
     creatorRepository = mock(CreatorRepository.class);
     userRepository = mock(UserRepository.class);
     recommendationRunRepository = mock(RecommendationRunRepository.class);
+    publicCreatorMetricRepository = mock(com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository.class);
+    relationshipRepository = mock(com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository.class);
 
     shortlistService = new ShortlistServiceImpl(
         shortlistItemRepository,
         ownership,
         creatorRepository,
         userRepository,
-        recommendationRunRepository
+        recommendationRunRepository,
+        publicCreatorMetricRepository,
+        relationshipRepository
     );
 
     brandUser = TestActors.user(Role.BRAND);
@@ -171,14 +177,14 @@ class ShortlistCartPhase1Test {
         .addedAt(LocalDateTime.now())
         .build();
 
-    when(shortlistItemRepository.findByIdAndCampaignIdAndUserId(shortlistItemId, campaignId, brandUser.getId()))
+    when(shortlistItemRepository.findByIdAndCampaignId(shortlistItemId, campaignId))
         .thenReturn(Optional.of(item));
 
     shortlistService.removeCreatorFromShortlist(campaignId, shortlistItemId);
 
     assertThat(item.getStatus()).isEqualTo(ShortlistStatus.REMOVED);
     verify(shortlistItemRepository).save(item);
-    verify(shortlistItemRepository, never()).delete(any());
+    verify(shortlistItemRepository, never()).delete(any(ShortlistItem.class));
   }
 
   @Test

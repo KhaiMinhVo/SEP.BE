@@ -250,9 +250,9 @@ Xây dựng 10 kịch bản kiểm thử mẫu mực (`TEST-F4-01` $\rightarrow$
 - [x] Refactor `OAuthProofClient` thành factory/strategy điều hướng theo `application.oauth.mode`.
 
 ### Phase 2: Official OAuth Flow & Proof-of-Control Resolution
-- [ ] Cập nhật `startOAuth` trong [CreatorClaimOAuthController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/CreatorClaimOAuthController.java) trả về HTTP 302 Redirect chuyển hướng nền tảng thật.
-- [ ] Cập nhật `handleOAuthCallback` tiếp nhận `code` và `state` thật.
-- [ ] Tinh chỉnh [CreatorClaimResolutionService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/service/CreatorClaimResolutionService.java): gán `verificationMethod = "OAUTH_OFFICIAL_SANDBOX"`, đối soát username TikTok (@) và YouTube Channel ID (UC...).
+- [x] Cập nhật `startOAuth` trong [CreatorClaimOAuthController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/CreatorClaimOAuthController.java) trả về HTTP 302 Redirect chuyển hướng nền tảng thật.
+- [x] Cập nhật `handleOAuthCallback` tiếp nhận `code` và `state` thật.
+- [x] Tinh chỉnh [CreatorClaimResolutionService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/service/CreatorClaimResolutionService.java): gán `verificationMethod = "OAUTH_OFFICIAL_SANDBOX"`, đối soát username TikTok (@) và YouTube Channel ID (UC...).
 
 ### Phase 3: Admin Identity Conflict Resolution Endpoint
 - [ ] Mở endpoint `POST /admin/creator-conflicts/{id}/resolve` trong [AdminIdentityConflictController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/AdminIdentityConflictController.java).

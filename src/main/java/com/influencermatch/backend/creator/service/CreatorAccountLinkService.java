@@ -206,10 +206,22 @@ public class CreatorAccountLinkService {
     String encryptedAccess = tokenEncryptionService.encrypt(proof.getAccessToken());
     String encryptedRefresh = tokenEncryptionService.encrypt(proof.getRefreshToken());
 
+    String verificationMethod = "OAUTH_AUTHORIZATION";
+    if (proof.getRawProfileData() != null) {
+      Object envObj = proof.getRawProfileData().get("verificationEnvironment");
+      if ("OFFICIAL_SANDBOX".equals(envObj)) {
+        verificationMethod = "OAUTH_OFFICIAL_SANDBOX";
+      } else if ("TESTING_MODE".equals(envObj)) {
+        verificationMethod = "OAUTH_TESTING_GOOGLE";
+      } else if ("SIMULATION".equals(envObj)) {
+        verificationMethod = "OAUTH_SIMULATED_MOCK";
+      }
+    }
+
     CreatorAccountVerification verification = CreatorAccountVerification.builder()
         .creator(creator)
         .verifiedByUser(user)
-        .verificationMethod("OAUTH_AUTHORIZATION")
+        .verificationMethod(verificationMethod)
         .grantedScopes("openid,profile,offline_access")
         .accessTokenEncrypted(encryptedAccess)
         .refreshTokenEncrypted(encryptedRefresh)

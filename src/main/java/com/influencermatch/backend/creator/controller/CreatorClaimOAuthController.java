@@ -37,9 +37,8 @@ public class CreatorClaimOAuthController {
     // First ensure token is valid before initiating redirect
     invitationService.verifyInvitationToken(token);
 
-    // Build platform authorization URL carrying raw token in state
-    String encodedState = URLEncoder.encode(token, StandardCharsets.UTF_8);
-    String redirectUri = "/api/v1/creators/claim/oauth/" + platform.toLowerCase() + "/callback?code=sim-auth-code&state=" + encodedState;
+    // Build platform authorization URL via OAuthProofClient (routes to official sandbox or mock fallback)
+    String redirectUri = proofClient.buildAuthorizationUrl(platform, token);
 
     return ResponseEntity.status(HttpStatus.FOUND)
         .header(HttpHeaders.LOCATION, redirectUri)

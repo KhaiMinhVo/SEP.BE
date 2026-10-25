@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 public class CreatorPortalAccountController {
 
   private final CreatorAccountLinkService accountLinkService;
+  private final com.influencermatch.backend.creator.client.OAuthProofClient proofClient;
 
   @PostMapping("/connect/{platform}/start")
   @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
@@ -33,7 +34,7 @@ public class CreatorPortalAccountController {
       @PathVariable("platform") String platform) {
 
     User actor = Permissions.actor();
-    String startUri = "/api/v1/creators/portal/accounts/connect/" + platform.toLowerCase() + "/callback?state=" + actor.getId();
+    String startUri = proofClient.buildAuthorizationUrl(platform, actor.getId().toString());
     return ApiResponse.ok(Map.of(
         "platform", platform.toUpperCase(),
         "startUri", startUri,

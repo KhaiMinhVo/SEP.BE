@@ -1,393 +1,303 @@
-# 🧠 FLOW 3: AI RECOMMENDATION, FOUR-MEMORY RANKING & SHORTLIST CART SPECIFICATION
-## InfluencerMatch AI – Core Intelligence & Collaboration Pipeline
+# 🧠 FLOW 3: AI RECOMMENDATION, FOUR-MEMORY RANKING & CAMPAIGN SHORTLIST MANAGEMENT
+## InfluencerMatch AI – Production Architecture & Phased Implementation Specification
 
-> **Tài liệu đặc tả kỹ thuật, công thức định lượng & checklist triển khai chi tiết**  
+> **Tài liệu đặc tả kỹ thuật, phân kỳ triển khai (Phased Roadmap) & quy tắc nghiệp vụ**  
 > **Repository áp dụng:** `D:\SEP_BE` (Core Backend) & `D:\creator-discovery` (AI Microservice)  
-> **Phiên bản:** v3.0 (Production-Grade Four-Memory Architecture & Idempotent Shortlist Cart)  
-> **Mục tiêu cốt lõi:** Kết nối trí tuệ nhân tạo (Explainable AI) với hệ thống quản trị quan hệ KOC (CRM) qua chu trình khép kín: Đề xuất $\rightarrow$ Giỏ hàng ứng viên $\rightarrow$ Đàm phán $\rightarrow$ Hợp tác $\rightarrow$ Đúc kết tri thức.
+> **Phiên bản:** v4.0 (Phased Delivery Architecture, Four-Memory Composite Ranking & Complete Shortlist Management)  
+> **Mục tiêu cốt lõi:** Kết nối trí tuệ nhân tạo (Explainable AI) với hệ thống quản trị quan hệ KOC (CRM) theo quy trình 6 giai đoạn khép kín, phân chia theo các Phase triển khai cụ thể, đảm bảo mã nguồn hiện tại được tái sử dụng tối đa.
 
 ---
 
 ## 📑 MỤC LỤC
-1. [Workflow Nghiệp Vụ Tổng Thể 6 Giai Đoạn](#1-workflow-nghiệp-vụ-tổng-thể-6-giai-đoạn)
-2. [Hệ Thống Chấm Điểm Đề Xuất Chiến Dịch (Scoring Formulas)](#2-hệ-thống-chấm-điểm-đề-xuất-chiến-dịch)
-3. [Kiến Trúc Four-Memory Composite Ranking](#3-kiến-trúc-four-memory-composite-ranking)
-4. [Cơ Chế Shortlist Cart ("Add to Cart" UX)](#4-cơ-chế-shortlist-cart-add-to-cart-ux)
-5. [Feedback Loop & Tiến Hóa Bối Cảnh (Negative Constraints)](#5-feedback-loop--tiến-hóa-bối-cảnh)
-6. [Hệ Thống Sơ Đồ Thiết Kế SRS/SDD (Mermaid Diagrams)](#6-hệ-thống-sơ-đồ-thiết-kế-srssdd)
-7. [Checklist Triển Khai Chi Tiết 8 Tầng Kỹ Thuật](#7-checklist-triển-khai-chi-tiết-8-tầng-kỹ-thuật)
-8. [Ma Trận Kiểm Thử Tự Động (Testing Suite)](#8-ma-trận-kiểm-thử-tự-động)
-9. [Phân Công Trách Nhiệm Dự Án (RACI Matrix)](#9-phân-công-trách-nhiệm-dự-án)
+1. [Báo Cáo Đối Soát Mã Nguồn Shortlist Hiện Tại](#1-báo-cáo-đối-soát-mã-nguồn-shortlist-hiện-tại)
+2. [Workflow Nghiệp Vụ Tổng Thể 6 Giai Đoạn](#2-workflow-nghiệp-vụ-tổng-thể-6-giai-đoạn)
+3. [PHASE 1: Nền Tảng Dữ Liệu & Ràng Buộc Cốt Lõi (P0)](#phase-1-nền-tảng-dữ-liệu--ràng-buộc-cốt-lõi-p0)
+4. [PHASE 2: Four-Memory Ranking & Hybrid Candidate Retrieval (P0)](#phase-2-four-memory-ranking--hybrid-candidate-retrieval-p0)
+5. [PHASE 3: Campaign Shortlist Management & Cart Engine (SL-01 → SL-04) (P1)](#phase-3-campaign-shortlist-management--cart-engine-sl-01--sl-04-p1)
+6. [PHASE 4: Feedback Loop & Tiến Hóa Bối Cảnh M3 (Negative Constraints) (P1)](#phase-4-feedback-loop--tiến-hóa-bối-cảnh-m3-negative-constraints-p1)
+7. [PHASE 5: Tinh Chỉnh Python AI Microservice (creator-discovery) (P1)](#phase-5-tinh-chỉnh-python-ai-microservice-creator-discovery-p1)
+8. [PHASE 6: Ma Trận Kiểm Thử Tự Động & Tiêu Chí Nghiệm Thu (P0/P1)](#phase-6-ma-trận-kiểm-thử-tự-động--tiêu-chí-nghiệm-thu-p0p1)
+9. [Phân Công Trách Nhiệm Dự Án (RACI Matrix)](#9-phân-công-trách-nhiệm-dự-án-raci-matrix)
 
 ---
 
-## 1. WORKFLOW NGHIỆP VỤ TỔNG THỂ 6 GIAI ĐOẠN
+## 1. BÁO CÁO ĐỐI SOÁT MÃ NGUỒN SHORTLIST HIỆN TẠI
 
-Quy trình nghiệp vụ xuyên suốt từ lúc Brand đưa ra Brief cho đến khi chiến dịch kết thúc và hệ thống học hỏi kinh nghiệm:
+Kiểm tra trực tiếp mã nguồn trong `D:\SEP_BE`: **HỆ THỐNG HOÀN TOÀN CÓ THỂ TRIỂN KHAI SHORTLIST THEO HƯỚNG NÀY VÌ ĐÃ CÓ SẴN 80% NỀN TẢNG!**
+
+* **Entity [ShortlistItem.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/model/ShortlistItem.java)**:
+  * Đã có sẵn ràng buộc chống trùng độc nhất: `ux_shortlist_campaign_creator` trên cặp `(campaign_id, creator_id)`.
+  * Đã có sẵn trường `master_id` (Flyway `V8`) để liên kết với `CreatorMaster`.
+  * Đã có sẵn Enum [ShortlistPriority.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/enums/ShortlistPriority.java) với 3 mức: `HIGH`, `MEDIUM`, `LOW`.
+* **Repository [ShortlistItemRepository.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/repository/ShortlistItemRepository.java)**:
+  * Đã có sẵn: `existsByCampaignIdAndCreatorId(campaignId, creatorId)`.
+  * Đã có sẵn: `findByCampaignIdAndCreatorIdIn(campaignId, creatorIds)`.
+* **Dịch vụ So sánh [ShortlistCompareService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/service/ShortlistCompareService.java)**:
+  * **ĐÃ CÀI ĐẶT SẴN $100\%$ tính năng Compare 2–5 Creator (Flow SL-03)**: Kiểm tra danh sách hợp lệ, truy vấn metrics mới nhất (`metrics.latestForCreators(ids)`), so sánh Followers, Views, Likes, ER, Niche, Location, Verified Status mà không cần chạy lại AI Recommendation.
+* **Controller [ShortlistController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/controller/ShortlistController.java)**:
+  * Đã có sẵn các endpoint: `@PostMapping` (Add), `@GetMapping` (List), `@DeleteMapping` (Remove), `@PostMapping("/compare")` (Compare).
+* **Những điểm cần tinh chỉnh để đạt 100% hướng mới**:
+  1. Xóa việc ném lỗi `RESOURCE_ALREADY_EXISTS` (HTTP 409) trong [ShortlistServiceImpl.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/service/ShortlistServiceImpl.java#L39-L41); chuyển sang cơ chế Idempotent trả về `ALREADY_EXISTS` kèm `totalShortlistCount`.
+  2. Bổ sung trường `status` (`SAVED`, `READY_TO_CONTACT`, `REMOVED`) và `source` (`AI_RECOMMENDATION`, `MANUAL_DISCOVERY`) vào `ShortlistItem`.
+  3. Bổ sung Contact Readiness Check trước khi chuyển sang Outreach.
+
+---
+
+## 2. WORKFLOW NGHIỆP VỤ TỔNG THỂ 6 GIAI ĐOẠN
 
 ```
-[1. AI Recommendation] (Match Score & Reasoning Card)
+[1. AI Recommendation] (Match Score & XAI Reasoning Card)
           │
           ▼
-[2. Add to Shortlist] (Candidate Cart - Brand lưu ứng viên tiềm năng)
+[2. Add to Shortlist] (FLOW SL-01: Candidate Cart - 1-Click lưu ứng viên)
           │
           ▼
-[3. Review & Compare] (So sánh side-by-side, chọn Platform Account)
+[3. View & Manage Shortlist] (FLOW SL-02: Phân loại Priority, Note, Lọc & Sắp xếp)
           │
           ▼
-[4. Contact Selected] (Outreach Invitation - Xác minh Contact Readiness)
+[4. Review & Compare] (FLOW SL-03: So sánh 2-5 KOC, Đánh dấu READY_TO_CONTACT)
           │
           ▼
-[5. CRM / Negotiation] (Thương lượng giá, Deliverables, chốt Agreed Fee)
+[5. Contact Selection & Preview] (FLOW SL-04: Kiểm tra Readiness, Xác nhận Outreach)
           │
           ▼
-[6. Collaboration & Learning] (Triển khai, nghiệm thu KPI, đúc kết M1 & M4)
+[6. CRM / Negotiation & Collaboration] (Đàm phán Agreed Fee, Hợp tác, Đúc kết M1/M4)
 ```
 
-### Phân định ranh giới 3 thực thể nghiệp vụ độc lập:
-* **`ShortlistItem`**: Brand đang cân nhắc ai (lưu trữ nội bộ, KOC chưa hề biết).
-* **`Relationship`**: Brand đang liên hệ và thương lượng với ai (phễu CRM từ `SHORTLISTED` $\rightarrow$ `CONTACTED` $\rightarrow$ `INTERESTED` $\rightarrow$ `AGREED`).
-* **`Collaboration`**: Hợp đồng thực tế hai bên đã thống nhất điều kiện (deliverables, deadline, thanh toán).
+### Nguyên tắc phân tách trách nhiệm tối thượng:
+* **Shortlist = Candidate Selection & Decision Support**: Brand đang lưu ai để cân nhắc (hoàn toàn nội bộ, KOC chưa hề biết).
+* **Outreach = Contact & Invitation**: Lời mời trao đổi đầu tiên (KOC nhận thông báo và có quyền từ chối/đồng ý).
+* **Negotiation = Agreement Discussion**: Quá trình thương lượng chi phí, deliverables, timeline (phễu `relationship`).
+* **Collaboration = Execution & Outcome**: Hợp đồng thực thi công việc và nghiệm thu KPI (bảng `collaboration` $\rightarrow$ sinh bằng chứng M1).
 
 ---
 
-## 2. HỆ THỐNG CHẤM ĐIỂM ĐỀ XUẤT CHIẾN DỊCH
+## 3. PHASE 1: NỀN TẢNG DỮ LIỆU & RÀNG BUỘC CỐT LÕI (P0)
 
-Toàn bộ các chỉ số định lượng được chuẩn hóa trên thang điểm $[0.0, 100.0]$.
+*Mục tiêu: Đảm bảo toàn vẹn dữ liệu, sửa triệt để các lỗi cú pháp SQL và cơ chế bảo vệ hạn mức Quota.*
 
-### 2.1. Điểm Quy Mô Phân Khúc (`followerScore` dùng hàm $\log_{10}$)
-Khắc phục hiện tượng phạt dốc rớt về 0 bằng cơ chế phạt phi đối xứng (Asymmetric Penalty):
-* **Trường hợp có khoảng mục tiêu $[\text{TargetMin}, \text{TargetMax}]$**:
-  * Đạt chuẩn ($\text{TargetMin} \le \text{Followers} \le \text{TargetMax}$):
-    $$\text{followerScore} = 100.0$$
-  * Thiếu hụt ($\text{Followers} < \text{TargetMin}$):
-    $$\text{followerScore} = \max\left(0.0, 100.0 - [\log_{10}(\text{TargetMin}) - \log_{10}(\text{Followers})] \times 50\right)$$
-  * Vượt mức ($\text{Followers} > \text{TargetMax}$): Phạt nhẹ vì KOC lớn vẫn mang lại độ phủ tốt:
-    $$\text{followerScore} = \max\left(60.0, 100.0 - [\log_{10}(\text{Followers}) - \log_{10}(\text{TargetMax})] \times 30\right)$$
-* **Trường hợp có 1 mục tiêu cố định ($\text{Target}$)**:
-  * Khớp chuẩn: $100.0$ điểm.
-  * Thiếu hụt: $\max(0.0, 100.0 - [\log_{10}(\text{Target}) - \log_{10}(\text{Followers})] \times 50)$.
-  * Vượt mức: $\max(50.0, 100.0 - [\log_{10}(\text{Followers}) - \log_{10}(\text{Target})] \times 30)$.
-* **Trường hợp không đặt mục tiêu (Điểm sàn theo Tier)**:
-  * Micro ($10\text{k} - 100\text{k}$): **$95.0$** | Mega ($> 1\text{M}$): **$90.0$** | Macro ($100\text{k} - 1\text{M}$): **$85.0$** | Nano ($< 10\text{k}$): **$75.0$**.
-  * Nếu Brief nhắc trực tiếp tên Tier $\rightarrow$ Thưởng **$100.0$** điểm.
-* *An toàn số học*: Bắt buộc bọc `fl = max(1, followers)` để tránh lỗi $\log_{10}(0)$.
+### Nhiệm vụ 1.1: Sửa Native Query pgvector chuẩn xác trên cột `c.embedding`
+* **Vấn đề đã khắc phục**: File [`V4__creator_hybrid_search_vector.sql`](file:///d:/SEP_BE/src/main/resources/db/migration/V4__creator_hybrid_search_vector.sql) quy định:
+  * `public_creator_metric.search_vector`: kiểu `tsvector` phục vụ Full-Text Search.
+  * `creator.embedding`: kiểu `vector(768)` phục vụ pgvector Cosine Distance (`<=>`).
+* **Triển khai trong [PublicCreatorMetricRepository.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/repository/PublicCreatorMetricRepository.java)**:
+  ```sql
+  SELECT c.id, c.master_id, c.platform, c.display_name, c.user_name, c.avatar_url,
+         m.followers, m.avg_views, m.avg_likes, m.engagement_rate, m.niche, m.category, m.creator_type,
+         (1 - (c.embedding <=> CAST(:briefVector AS vector))) AS semantic_score
+  FROM creator c
+  JOIN public_creator_metric m ON c.id = m.creator_id
+  WHERE (:excludedIds IS NULL OR c.id NOT IN (:excludedIds))
+    AND (:platforms IS NULL OR c.platform IN (:platforms))
+    AND (:followerMin IS NULL OR m.followers >= :followerMin)
+    AND (:followerMax IS NULL OR m.followers <= :followerMax)
+    AND m.id = (
+        SELECT m2.id FROM public_creator_metric m2 
+        WHERE m2.creator_id = c.id 
+        ORDER BY m2.observed_at DESC NULLS LAST LIMIT 1
+    )
+  ORDER BY c.embedding <=> CAST(:briefVector AS vector) ASC
+  LIMIT 50;
+  ```
 
-### 2.2. Điểm Tương Tác (`engagementScore`)
-Tách biệt bản chất phân phối nội dung giữa Video ngắn và MXH truyền thống:
-* **Nhóm Video ngắn (TikTok, Reels, Shorts)**:
-  $$\text{ER}_{\text{views}} = \frac{\text{avgLikes} + \text{avgComments} + \text{avgShares}}{\text{avgViews}} \times 100\%$$
-  $$\text{engagementScore} = \min\left(100.0, \frac{\text{ER}_{\text{views}}}{5.0\%} \times 100\right)$$
-  *(Lấy mốc $5.0\%$ làm chuẩn ngành; nếu $\text{avgViews} \le 0$, tự động fallback sang tính theo Followers)*.
-* **Nhóm Truyền thống (Facebook, Instagram, YouTube)**:
-  $$\text{ER}_{\text{followers}} = \frac{\text{avgLikes} + \text{avgComments} + \text{avgShares}}{\text{Followers}} \times 100\%$$
-  $$\text{engagementScore} = \min\left(100.0, \frac{\text{ER}_{\text{followers}}}{\text{Benchmark}_{\text{Tier}}} \times 100\right)$$
-  *(Benchmark Tier: Nano $4.5\%$, Micro $3.0\%$, Macro $2.0\%$, Mega $1.2\%$)*.
+### Nhiệm vụ 1.2: Cài đặt Two-Phase Quota Reservation trong [SubscriptionService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/billing/service/SubscriptionService.java)
+* **Khóa dòng Atomic**:
+  ```java
+  @Modifying
+  @Query("UPDATE Subscription s SET s.usedRecommendationQuota = s.usedRecommendationQuota + 1 " +
+         "WHERE s.id = :id AND s.usedRecommendationQuota < s.plan.recommendationQuota")
+  int reserveQuotaAtomically(@Param("id") UUID subscriptionId);
+  ```
+* **Cơ chế Rollback (Hoàn trả)**: Nếu bước gọi Python AI hoặc bước lưu DB gặp lỗi, tự động giải phóng quota:
+  ```java
+  @Modifying
+  @Query("UPDATE Subscription s SET s.usedRecommendationQuota = s.usedRecommendationQuota - 1 " +
+         "WHERE s.id = :id AND s.usedRecommendationQuota > 0")
+  void releaseQuotaReservation(@Param("id") UUID subscriptionId);
+  ```
 
-### 2.3. Điểm Tương Đồng Ngữ Nghĩa (`semanticMatchScore` với Min-Max Rescaling)
-Khắc phục hiện tượng bão hòa Cosine (Score Saturation) của vector BKAI Bi-Encoder 768 chiều tiếng Việt:
-$$\text{semanticMatchScore} = \text{round}\left(\frac{\text{Cosine} - 0.30}{0.85 - 0.30} \times 100, 1\right)$$
-* $\text{Cosine} \le 0.30 \rightarrow \text{Score} = 0.0$ điểm.
-* $\text{Cosine} \ge 0.85 \rightarrow \text{Score} = 100.0$ điểm.
-* Ví dụ: $\text{Cosine} = 0.75 \rightarrow 81.8$ điểm; $\text{Cosine} = 0.65 \rightarrow 63.6$ điểm; $\text{Cosine} = 0.55 \rightarrow 45.5$ điểm.
-
-### 2.4. Điểm Khớp Lĩnh Vực / Danh Mục (`nicheMatchScore`)
-* **Exact Niche Match**: Trùng ngách trực tiếp trong Brief $\rightarrow$ **$100.0$ điểm**.
-* **Top Tag Match**: Trùng hashtag nổi bật của KOC trong Brief $\rightarrow$ **$90.0$ điểm**.
-* **Category Match**: Trùng danh mục tổng trong Brief $\rightarrow$ **$85.0$ điểm**.
-* **Semantic Related Match** ($\text{Cosine} \ge 0.65$): $\text{Cosine} \times 100$.
-* **Partial Semantic Match** ($0.40 \le \text{Cosine} < 0.65$): $\text{Cosine} \times 100$.
-* **Out-of-niche** ($\text{Cosine} < 0.40$): $\max(20.0, \text{Cosine} \times 100)$ (Sàn bảo vệ $20.0$).
+### Nhiệm vụ 1.3: Tạo JPA Entity & Repository cho M1 & M4
+* Tạo `HistoricalCampaign.java` (gắn `@ManyToOne` với `CampaignOutcome` và `Creator`) + `HistoricalCampaignRepository.java`.
+* Tạo `BrandPattern.java` + `BrandPatternRepository.java`.
+* Tạo Flyway `V9__recommendation_run.sql` lưu vết mỗi lần chạy AI Recommendation (`recommendation_run`).
 
 ---
 
-## 3. KIẾN TRÚC FOUR-MEMORY COMPOSITE RANKING
+## 4. PHASE 2: FOUR-MEMORY RANKING & HYBRID CANDIDATE RETRIEVAL (P0)
 
-Java Backend (`SEP_BE`) là **Single Source of Truth** duy nhất quyết định điểm số và thứ hạng cuối cùng:
+*Mục tiêu: Xây dựng đầu não xếp hạng KOC thực chất, kết hợp đa tầng bộ nhớ và loại bỏ trùng lặp đa kênh.*
 
-### 3.1. Công thức Xếp Hạng Đa Tầng (Composite Match Score)
+### Nhiệm vụ 2.1: Four-Memory Feature Scorer trong `AiRecommendationService.java`
+Java Backend là **Single Source of Truth** duy nhất quyết định điểm xếp hạng:
 $$\text{FinalScore} = 0.50 \times \text{Score}_{M2} + 0.30 \times \text{Score}_{M1} + 0.20 \times \text{Score}_{M4}$$
 
-* **$\text{Score}_{M2}$ (Public Creator Match)**:
-  $$\text{Score}_{M2} = 0.20 \times \text{followerScore} + 0.25 \times \text{engagementScore} + 0.30 \times \text{semanticMatchScore} + 0.25 \times \text{nicheMatchScore}$$
-* **$\text{Score}_{M1}$ (Historical Reliability)**:
-  * Đọc từ bảng `historical_campaign`, `campaign_outcome`, `creator_review`.
-  * Tính dựa trên: Điểm đánh giá chất lượng của Brand (`brand_fit_rating` / 5.0), ý định hợp tác tiếp (`would_collaborate_again = true`), và ROI thực tế.
-  * KOC mới chưa có lịch sử nhận điểm trung tính **$50.0$ điểm** (không bị phạt oan).
-* **$\text{Score}_{M4}$ (Brand Preference Match)**:
-  * Đọc từ bảng `brand_pattern`.
-  * So khớp mức ER thực tế với `preferred_engagement_rate`, mức thù lao ước tính với `average_agreed_fee`. Nếu nằm trong dải tối ưu của Brand $\rightarrow$ Đạt điểm cao.
+1. **Điểm $M_2$ (Public Creator Fit)**:
+   $$\text{Score}_{M2} = 0.20 \times \text{followerScore} + 0.25 \times \text{engagementScore} + 0.30 \times \text{semanticMatchScore} + 0.25 \times \text{nicheMatchScore}$$
+   * `followerScore`: Áp dụng hàm $\log_{10}$ phi đối xứng (phạt 50đ/bậc khi thiếu, phạt nhẹ 30đ/bậc khi thừa, sàn 60đ).
+   * `engagementScore`: Chuẩn hóa $5.0\%$ cho video ngắn (`avgLikes/avgViews`); đối chiếu Tier Benchmark cho MXH truyền thống.
+   * `semanticMatchScore`: Min-Max Rescaling dải Cosine $[0.30, 0.85] \rightarrow [0.0, 100.0]$.
+   * `nicheMatchScore`: So khớp 6 cấp độ động (Exact Niche $100$đ, Tag $90$đ, Category $85$đ, Semantic).
+2. **Điểm $M_1$ (Historical Reliability)**:
+   * Tính từ `campaign_outcome.roi`, `creator_review.brand_fit_rating`, và `would_collaborate_again`.
+   * KOC mới chưa có lịch sử nhận điểm trung tính **$50.0$ điểm** (không bị phạt).
+3. **Điểm $M_4$ (Brand Preference Match)**:
+   * So khớp mức ER thực tế với `preferred_engagement_rate`, thù lao ước tính với `average_agreed_fee` trong `BrandPattern`.
 
-### 3.2. Master-aware Grouping (Khử Trùng Lặp KOC Đa Kênh)
-* Dữ liệu ứng viên được nhóm theo: `COALESCE(c.master_id, c.id)`.
-* Nếu 1 KOC có cả kênh TikTok (100k followers) và kênh Instagram (80k followers) cùng lọt vào danh sách lọc thô, hệ thống **chỉ chọn ra kênh có điểm tương thích cao nhất** để đưa vào danh sách đề xuất Top 10, tránh việc 1 người chiếm nhiều slot.
+### Nhiệm vụ 2.2: Master-aware Grouping (Khử trùng lặp KOC)
+* Gom 50 ứng viên thô theo `COALESCE(c.master_id, c.id)`.
+* Nếu 1 KOC có cả kênh TikTok và Instagram cùng điểm cao, chỉ giữ lại kênh phù hợp nhất làm đại diện trong Top 10.
 
----
-
-## 4. CƠ CHẾ SHORTLIST CART ("ADD TO CART" UX)
-
-Xây dựng trải nghiệm chọn KOC mượt mà như giỏ hàng thương mại điện tử:
-
-* **1-Click Thao Tác Nhanh**: Bấm *"Thêm vào Shortlist"*, hệ thống phản hồi ngay Toast: *"Đã thêm Trang Đào vào Giỏ Shortlist"* và cập nhật huy hiệu số lượng trên Navbar: `Giỏ ứng viên (6)`.
-* **Idempotent Ở Database (Chống lỗi 409)**:
-  * Nếu KOC đã có trong Shortlist của Campaign $\rightarrow$ Không ném ngoại lệ `RESOURCE_ALREADY_EXISTS`.
-  * Giữ nguyên `note` cá nhân Brand đã viết trước đó, cập nhật `priority` nếu có truyền vào.
-  * Trả về HTTP 200: `{ "action": "ALREADY_EXISTS", "totalShortlistCount": 6 }`.
-* **Ghi Nhớ Bối Cảnh Đề Xuất**:
-  * Mỗi lần thêm vào Shortlist đều lưu vết `recommendation_run_id` để Brand có thể xem lại KOC này được AI chấm bao nhiêu điểm ở thời điểm đó.
-* **Quick Undo / Remove from Cart**:
-  * Cho phép bấm icon thùng rác/bỏ chọn ngay trên thẻ KOC để xóa khỏi giỏ và trả về `totalShortlistCount` mới.
+### Nhiệm vụ 2.3: Tích hợp XAI Engine (`POST /api/v1/ai/explain`)
+* Gọi sang Python AI Microservice để nhận Reasoning Card (1 câu `summary`, danh sách `reasons` tự nhiên, `scoreBreakdown`).
+* Cài đặt Fallback Circuit Breaker: nếu Python timeout $\rightarrow$ trả về thẻ mặc định với cờ `explanationAvailable = false`, **không tạo bằng chứng giả mạo**.
 
 ---
 
-## 5. FEEDBACK LOOP & TIẾN HÓA BỐI CẢNH (NEGATIVE CONSTRAINTS)
+## 5. PHASE 3: CAMPAIGN SHORTLIST MANAGEMENT & CART ENGINE (SL-01 → SL-04) (P1)
 
-### 5.1. Chính Sách Xử Lý Khi Brand REJECT KOC
-* **Hành động bắt buộc**: Bổ sung `creatorId` vào mảng JSON `excludedCreatorIds` trong `CampaignContext.contextData`. Lần bấm đề xuất tiếp theo sẽ tự động loại trừ KOC này qua câu query: `WHERE c.id NOT IN (:excludedIds)`.
-* **Ghi nhận tín hiệu mềm**: Lưu `reasonCode` (`PRICE_TOO_HIGH`, `OUT_OF_NICHE`, `STYLE_MISMATCH`) vào `feedbackHistory` để M4 phân tích xu hướng dài hạn.
-* **Quy tắc bảo vệ**: **TUYỆT ĐỐI KHÔNG tự động hạ `budgetMax` hay xóa `niches` của chiến dịch!** Việc Brand chê 1 KOC đắt không có nghĩa là muốn giảm ngân sách của toàn bộ chiến dịch. Muốn đổi ràng buộc cứng, Brand phải chủ động chỉnh sửa trong bộ lọc Campaign.
+*Mục tiêu: Hiện thực hóa trải nghiệm lưu, quản lý và so sánh ứng viên mượt mà như giỏ hàng thương mại điện tử.*
 
-### 5.2. Tiến Hóa Phiên Bản Ngữ Cảnh An Toàn
-* Chuyển trạng thái bản ghi cũ: `active = false`.
-* Tạo bản ghi mới: `CampaignContext` với `contextVersion = oldVersion + 1`, `active = true`, `updatedAt = NOW()`.
-* Áp dụng khóa lạc quan (Optimistic Locking) trên `CampaignContext` chống ghi đè khi nhiều thành viên cùng đánh giá KOC trong một chiến dịch.
-
----
-
-## 6. HỆ THỐNG SƠ ĐỒ THIẾT KẾ SRS/SDD
-
-### 6.1. Sơ đồ Tổng quan Hệ thống (System Overview)
-```mermaid
-graph TB
-    subgraph External_APIs["Dịch Vụ Bên Ngoài"]
-        TikTok["TikTok Open API"]
-        Meta["Meta Graph API"]
-        Gemini["Google Gemini LLM"]
-    end
-
-    subgraph Client_App["Frontend (React Vite)"]
-        UI_Rec["Màn hình AI Recommendation"]
-        UI_Cart["Drawer Giỏ hàng Shortlist"]
-        UI_CRM["Pipeline CRM & Negotiation"]
-    end
-
-    subgraph Core_BE["Core Backend (SEP_BE - Spring Boot)"]
-        QuotaGuard["Quota Guard (Atomic Lock)"]
-        RecService["AiRecommendationService (Orchestrator)"]
-        ShortlistMgr["Shortlist Cart Service"]
-        CrmMgr["Relationship & CRM Service"]
-        AiClient["AiServiceClient (HTTP)"]
-    end
-
-    subgraph AI_Engine["AI Microservice (creator-discovery - FastAPI)"]
-        XAI_Service["XAI Scoring Service (explanation_service.py)"]
-        BiEncoder["BKAI Bi-Encoder 768-d"]
-    end
-
-    subgraph Storage["PostgreSQL 16 & pgvector"]
-        DB_Relational[("PostgreSQL
-        - campaign_context (M3)
-        - historical_campaign (M1)
-        - brand_pattern (M4)
-        - shortlist_item, relationship")]
-        DB_Vector[("pgvector (HNSW Index)
-        - creator.embedding (768-d)")]
-    end
-
-    UI_Rec -->|POST /ai-recommendations| QuotaGuard
-    QuotaGuard --> RecService
-    RecService --> DB_Relational
-    RecService --> DB_Vector
-    RecService -->|POST /api/v1/ai/embed| BiEncoder
-    RecService -->|POST /api/v1/ai/explain| XAI_Service
-    UI_Rec -->|POST /shortlist/items| ShortlistMgr
-    ShortlistMgr --> DB_Relational
-    UI_CRM --> CrmMgr
-    CrmMgr --> DB_Relational
+```
+                 SHORTLIST STATUS STATE MACHINE
+                 
+                 ┌────────────────────────────────┐
+                 │                                │
+                 ▼                                │
+              [SAVED] ◄──────────────────┐        │
+                 │                       │        │
+                 │ (Mark Ready)          │ (Undo) │ (Re-add)
+                 ▼                       │        │
+          [READY_TO_CONTACT] ────────────┘        │
+                 │                                │
+                 │ (Delete / Remove)              │
+                 ▼                                │
+             [REMOVED] ───────────────────────────┘
 ```
 
-### 6.2. Sơ đồ Thực thể Dữ liệu Four-Memory (Logical ERD)
-```mermaid
-erDiagram
-    BRAND_PROFILE ||--o| BRAND_CONTEXT : "has (M4 Context)"
-    BRAND_PROFILE ||--o{ BRAND_PATTERN : "learns (M4 Pattern)"
-    BRAND_PROFILE ||--o{ CAMPAIGN : "owns"
-    BRAND_PROFILE ||--o{ SUBSCRIPTION : "subscribes"
-
-    CAMPAIGN ||--o{ CAMPAIGN_CONTEXT : "evolves (M3 Context)"
-    CAMPAIGN ||--o{ RECOMMENDATION_RUN : "executes"
-    CAMPAIGN ||--o{ SHORTLIST_ITEM : "contains"
-    CAMPAIGN ||--o{ RELATIONSHIP : "negotiates"
-    CAMPAIGN ||--o{ COLLABORATION : "contracts"
-
-    CREATOR ||--o| PUBLIC_CREATOR_METRIC : "has metrics (M2)"
-    CREATOR ||--o{ SHORTLIST_ITEM : "selected as"
-    CREATOR ||--o{ RELATIONSHIP : "engages in"
-    CREATOR ||--o{ HISTORICAL_CAMPAIGN : "participated in (M1)"
-    CREATOR_MASTER ||--o{ CREATOR : "owns channels"
-
-    RELATIONSHIP ||--o| COLLABORATION : "formalizes"
-    COLLABORATION ||--o| CAMPAIGN_OUTCOME : "produces"
-    CAMPAIGN_OUTCOME ||--o{ HISTORICAL_CAMPAIGN : "evidenced by"
-
-    CREATOR {
-        uuid id PK
-        uuid master_id FK
-        string platform
-        string display_name
-        vector_768 embedding "HNSW Index Cosine"
+### 5.1. FLOW SL-01: ADD TO SHORTLIST (1-Click Candidate Cart)
+* **API**: `POST /campaigns/{campaignId}/shortlist/items`
+* **Request Body**:
+  ```json
+  {
+    "creatorAccountId": "e5b8f6c4-...",
+    "recommendationRunId": "a1b2c3d4-...",
+    "source": "AI_RECOMMENDATION",
+    "priority": "HIGH"
+  }
+  ```
+* **Xử lý Idempotent (Chống lỗi 409)**:
+  * Kiểm tra qua `shortlistItemRepository.existsByCampaignIdAndCreatorId`.
+  * **Nếu đã tồn tại**: Giữ nguyên `note` thủ công của Brand, cập nhật `priority` nếu có, trả về:
+    ```json
+    {
+      "action": "ALREADY_EXISTS",
+      "shortlistItemId": "item-uuid",
+      "status": "SAVED",
+      "isInShortlist": true,
+      "totalShortlistCount": 6,
+      "message": "Ứng viên đã có sẵn trong Shortlist"
     }
-
-    PUBLIC_CREATOR_METRIC {
-        uuid id PK
-        uuid creator_id FK
-        bigint followers
-        numeric avg_views
-        numeric avg_likes
-        numeric engagement_rate
-        string niche
-        string category
-        tsvector search_vector "GIN Index FTS"
-        timestamp observed_at
+    ```
+  * **Nếu chưa có**: Tạo mới `ShortlistItem` (status = `SAVED`), gắn `creator_id`, `master_id`, `recommendation_run_id`, trả về:
+    ```json
+    {
+      "action": "ADDED",
+      "shortlistItemId": "item-uuid",
+      "status": "SAVED",
+      "isInShortlist": true,
+      "totalShortlistCount": 7,
+      "message": "Đã thêm Trang Đào vào Shortlist"
     }
+    ```
 
-    SHORTLIST_ITEM {
-        uuid id PK
-        uuid campaign_id FK
-        uuid creator_id FK
-        uuid master_id FK
-        uuid recommendation_run_id FK
-        string priority
-        text note
-        timestamp added_at
-    }
+### 5.2. FLOW SL-02: VIEW & MANAGE SHORTLIST
+* **API**: 
+  * `GET /campaigns/{campaignId}/shortlist`: Lấy danh sách kèm phân trang, hỗ trợ filter theo `priority`, `platform`, `niche`, `status`.
+  * `PATCH /campaigns/{campaignId}/shortlist/items/{itemId}`: Sửa `priority`, cập nhật `brandNote`, hoặc đổi `status` (`SAVED` $\leftrightarrow$ `READY_TO_CONTACT`).
+  * `DELETE /campaigns/{campaignId}/shortlist/items/{itemId}`: Xóa khỏi Shortlist đang hoạt động (chuyển sang `REMOVED`).
+* **Business Rule**: Nếu ứng viên đã có lịch sử Outreach hoặc Collaboration trong bảng `relationship`, việc Remove khỏi Shortlist **tuyệt đối không được xóa lịch sử CRM**.
 
-    RELATIONSHIP {
-        uuid id PK
-        uuid campaign_id FK
-        uuid creator_id FK
-        uuid shortlist_item_id FK
-        string stage "SHORTLISTED, CONTACTED, INTERESTED, AGREED"
-        numeric quoted_fee
-        numeric agreed_fee
-        text notes
-    }
-```
+### 5.3. FLOW SL-03: REVIEW & COMPARE CREATORS (Tận dụng `ShortlistCompareService`)
+* **API**: `POST /campaigns/{campaignId}/shortlist/compare`
+* **Request**: `{ "creatorIds": ["id1", "id2", "id3"] }` (chọn từ 2 đến 5 KOC).
+* **Xử lý**: 
+  * Mã nguồn [ShortlistCompareService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/service/ShortlistCompareService.java) hiện tại đã hoạt động hoàn hảo.
+  * Trả về bảng so sánh chi tiết: Followers, Views, Likes, ER, Niche, Location, Verified Status, Priority, Note.
+  * **Quy tắc**: Thao tác Compare là quyết định nội bộ của Brand, **không tự động gọi AI Recommendation và không trừ Quota**.
 
-### 6.3. Sơ đồ Tuần tự Chi tiết (Sequence Diagram)
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Brand as Brand Marketer
-    participant BE as Core Backend (SEP_BE)
-    participant DB as PostgreSQL & pgvector
-    participant AI as AI Engine (creator-discovery)
+### 5.4. FLOW SL-04: CONTACT SELECTION & READINESS PREVIEW
+* **Trigger**: Brand chọn các KOC ở trạng thái `READY_TO_CONTACT` và bấm *"Liên hệ ứng viên đã chọn"*.
+* **Kiểm tra Contact Readiness**:
+  
+  | Trường hợp KOC | Kênh liên hệ xác định | Trạng thái hiển thị | Hành động khả dụng |
+  | :--- | :--- | :---: | :--- |
+  | **Đã Claim kênh**, có Creator Portal | Kênh Notification / Portal nội bộ | `READY` | Gửi Collaboration Invitation trực tiếp |
+  | **Chưa Claim**, có Email Booking hợp lệ | Email Outbox hệ thống | `READY` | Gửi Email mời trao đổi chiến dịch |
+  | **Chưa Claim**, chỉ có Profile Social URL | Chưa tích hợp gửi tin nhắn tự động | `MANUAL_CONTACT` | Cung cấp link để Brand liên hệ thủ công |
+  | **Không có thông tin liên hệ** | Không tìm thấy email hay SĐT | `UNAVAILABLE` | Cảnh báo Brand tìm ứng viên thay thế |
+  | **Đang có lời mời hoạt động** | Đã gửi lời mời trước đó | `ALREADY_CONTACTED` | Chặn gửi trùng lặp |
 
-    Brand->>BE: POST /campaigns/{id}/ai-recommendations
-    BE->>DB: Atomic Update: UPDATE subscription SET used_ai_quota += 1
-    alt Hết Quota
-        BE-->>Brand: HTTP 409 QUOTA_EXCEEDED
-    else Còn Quota
-        BE->>DB: Nạp M3 (Brief, excludedCreatorIds) + M4 (BrandPattern)
-        BE->>AI: POST /api/v1/ai/embed (Brief -> 768-d Vector)
-        AI-->>BE: BriefVector [768 floats]
-        BE->>DB: HNSW Cosine Query trên c.embedding (Lọc excludedIds) -> Top 50 KOC
-        DB-->>BE: 50 Raw Candidates
-        BE->>DB: Nạp M1 (HistoricalCampaign, Outcome, Review)
-        Note over BE: Tính Composite Score: 0.50*M2 + 0.30*M1 + 0.20*M4<br>Master-aware Grouping theo master_id -> Chọn Top 10 KOC
-        loop Với từng KOC trong Top 10
-            BE->>AI: POST /api/v1/ai/explain (Metrics, Brief, Platform, Target)
-            AI-->>BE: Reasoning Card (Summary, Reasons, 4 Score Breakdown)
-        end
-        BE->>DB: Lưu RecommendationRun
-        BE-->>Brand: Danh sách Top 10 KOC kèm Reasoning Card
-    end
-
-    opt Brand Bấm "Thêm vào Shortlist" (Add to Cart)
-        Brand->>BE: POST /campaigns/{id}/shortlist/items (creatorId, priority)
-        BE->>DB: Kiểm tra existsByCampaignIdAndCreatorId
-        alt Đã tồn tại trong giỏ
-            BE->>DB: Cập nhật priority (giữ nguyên note thủ công)
-            BE-->>Brand: HTTP 200 { action: "ALREADY_EXISTS", totalShortlistCount: N }
-        else Chưa có trong giỏ
-            BE->>DB: INSERT shortlist_item (creatorId, masterId, runId)
-            BE-->>Brand: HTTP 200 { action: "ADDED", totalShortlistCount: N + 1 }
-        end
-    end
-
-    opt Brand Bấm "Bác bỏ" (Reject KOC)
-        Brand->>BE: POST /campaigns/{id}/ai-recommendations/feedback (REJECT, creatorId, reasonCode)
-        BE->>DB: Bổ sung creatorId vào excludedCreatorIds trong context_data
-        BE->>DB: Lưu CampaignContext mới (version = v_N + 1, active = true)
-        BE-->>Brand: HTTP 200 { message: "Ngữ cảnh đã tiến hóa, không lặp lại KOC này" }
-    end
-```
+* **Quy tắc**: Tách biệt rõ **Creator Claim Invitation** (mời nhận kênh qua OAuth) và **Collaboration Invitation** (mời hợp tác chiến dịch).
 
 ---
 
-## 7. CHECKLIST TRIỂN KHAI CHI TIẾT 8 TẦNG KỸ THUẬT
+## 6. PHASE 4: FEEDBACK LOOP & TIẾN HÓA BỐI CẢNH M3 (NEGATIVE CONSTRAINTS) (P1)
 
-### 🔴 Ưu tiên P0: Sửa lỗi kiến trúc & bảo vệ toàn vẹn dữ liệu
-- [ ] **P0.1. Sửa câu Native Query pgvector chuẩn xác trong [PublicCreatorMetricRepository.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/repository/PublicCreatorMetricRepository.java)**:
-  - Bắt buộc trỏ vào cột **`c.embedding`** (bảng `creator`), KHÔNG trỏ vào `m.search_vector`.
-  - Bổ sung mệnh đề loại trừ: `WHERE (:excludedIds IS NULL OR c.id NOT IN (:excludedIds))`.
-  - Lọc lấy bản ghi metrics mới nhất qua subquery `observed_at DESC LIMIT 1`.
-- [ ] **P0.2. Cài đặt Two-Phase Quota Reservation trong [SubscriptionService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/billing/service/SubscriptionService.java)**:
-  - Tạo atomic update: `UPDATE subscription SET usedRecommendationQuota = usedRecommendationQuota + 1 WHERE id = :id AND usedRecommendationQuota < quotaLimit`.
-  - Cài đặt hàm `releaseQuotaReservation(UUID subId)` để hoàn quota nếu AI Engine lỗi.
-- [ ] **P0.3. Xây dựng Four-Memory Feature Scorer trong `AiRecommendationService.java`**:
-  - Tích hợp điểm $M_2$ (Semantic, Follower $\log_{10}$, ER chuẩn $5.0\%$, Niche dynamic).
-  - Tích hợp điểm $M_1$ (Historical Reliability từ `HistoricalCampaign`).
-  - Tích hợp điểm $M_4$ (Brand Preference Match từ `BrandPattern`).
-  - Đảm bảo Java Backend là nơi duy nhất quyết định `finalMatchScore` và thứ hạng Top 10.
-- [ ] **P0.4. Tạo JPA Entity & Repository cho M1 & M4**:
-  - Tạo `HistoricalCampaign.java` (`@ManyToOne` với `CampaignOutcome`) và `HistoricalCampaignRepository.java`.
-  - Tạo `BrandPattern.java` và `BrandPatternRepository.java`.
+*Mục tiêu: Giúp AI học từ quyết định từ chối của Brand mà không làm hỏng các ràng buộc chiến dịch.*
 
-### 🟡 Ưu tiên P1: Hoàn thiện Shortlist Cart & Feedback Loop
-- [ ] **P1.1. Xóa bỏ hoàn toàn lỗi 409 trong [ShortlistServiceImpl.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/service/ShortlistServiceImpl.java)**:
-  - Nếu KOC đã có trong Shortlist $\rightarrow$ Trả về `ALREADY_EXISTS` và `totalShortlistCount`, giữ nguyên note thủ công của Brand.
-  - Lưu kèm `master_id` và `recommendation_run_id` vào `ShortlistItem`.
-- [ ] **P1.2. Master-aware Grouping trong `AiRecommendationService.java`**:
-  - Nhóm 50 ứng viên thô theo `COALESCE(c.master_id, c.id)`. Mỗi Master KOC chỉ chọn ra 1 kênh có điểm số cao nhất.
-- [ ] **P1.3. Cài đặt Endpoint Feedback và Negative Constraints Adaptation**:
-  - `POST /campaigns/{id}/ai-recommendations/feedback`.
-  - Khi Reject: CHỈ thêm `creatorId` vào `excludedCreatorIds` trong `CampaignContext` ($v_N \rightarrow v_{N+1}$).
-  - **Tuyệt đối không tự ý sửa `budgetMax` hay xóa `niches`** của chiến dịch.
-- [ ] **P1.4. Tích hợp HTTP Client `AiServiceClient.explainRecommendation`**:
-  - Kết nối với FastAPI `POST /api/v1/ai/explain`.
-  - Bổ sung Circuit Breaker fallback với cờ `explanationAvailable = false` khi Python timeout.
-
-### 🟢 Ưu tiên P2: Nâng cấp trải nghiệm người dùng & Tối ưu hóa
-- [ ] **P2.1. API đếm nhanh giỏ hàng**:
-  - `GET /campaigns/{id}/shortlist/count` phục vụ cập nhật badge trên Navbar.
-- [ ] **P2.2. API Quick Undo**:
-  - `DELETE /campaigns/{id}/shortlist/creators/{creatorId}` cho phép bỏ chọn ngay trên thẻ KOC.
-- [ ] **P2.3. Tinh chỉnh Python AI Microservice (`creator-discovery`)**:
-  - Đảm bảo `_calculate_follower_score()` chạy đúng công thức $\log_{10}$ phi đối xứng.
-  - Đảm bảo `_calculate_engagement_score()` chuẩn hóa video ngắn theo mốc $5.0\%$.
-  - Đảm bảo `_calculate_semantic_score()` áp dụng Min-Max Rescaling dải $[0.30, 0.85]$.
+* **API**: `POST /campaigns/{campaignId}/ai-recommendations/feedback`
+* **Request Body**:
+  ```json
+  {
+    "creatorId": "3fa85f64-...",
+    "action": "REJECT",
+    "reasonCode": "PRICE_TOO_HIGH",
+    "reasonNote": "KOC báo giá 30 triệu, vượt mức chi trả"
+  }
+  ```
+* **Chính sách xử lý khi Brand REJECT KOC**:
+  1. **Hành động cốt lõi**: Bổ sung `creatorId` vào mảng JSON `excludedCreatorIds` trong `CampaignContext.contextData`.
+  2. **Ghi nhận sở thích mềm**: Lưu `reasonCode` vào `feedbackHistory` để M4 phân tích xu hướng dài hạn.
+  3. **Quy tắc an toàn**: **TUYỆT ĐỐI KHÔNG tự động hạ `budgetMax` hay xóa `niches` của Campaign!** (Brand chê 1 KOC đắt không có nghĩa là muốn giảm ngân sách của toàn bộ chiến dịch).
+  4. **Tiến hóa phiên bản**: Đánh dấu bản ghi cũ `active = false`, tạo bản ghi mới `contextVersion = v_N + 1`, `active = true`, `updatedAt = NOW()`.
 
 ---
 
-## 8. MA TRẬN KIỂM THỬ TỰ ĐỘNG
+## 7. PHASE 5: TINH CHỈNH PYTHON AI MICROSERVICE (`creator-discovery`) (P1)
 
-| Mã Test | Kịch bản kiểm thử (Test Scenario) | Kết quả kỳ vọng |
-| :---: | :--- | :--- |
-| **TEST-01** | Bắn đồng thời 2 request khi chỉ còn 1 lượt Quota | Chỉ 1 request thành công, request thứ hai nhận HTTP 409 `QUOTA_EXCEEDED`. |
-| **TEST-02** | Python AI Service bị timeout hoặc tắt server | Backend tự động giải phóng Quota tạm giữ, không làm mất lượt của Brand. |
-| **TEST-03** | Chạy truy vấn Vector Search trên Database | SQL chạy thành công trên cột `c.embedding`, không bị lỗi kiểu dữ liệu `tsvector`. |
-| **TEST-04** | Một KOC có cả kênh TikTok và Instagram điểm cao | Danh sách Top 10 chỉ hiển thị 1 kênh đại diện tốt nhất của KOC đó. |
-| **TEST-05** | Bấm *"Thêm vào Shortlist"* 2 lần liên tiếp trên 1 KOC | Trả về `ALREADY_EXISTS`, không bị lỗi 409, giữ nguyên ghi chú cá nhân của Brand. |
-| **TEST-06** | Brand Reject KOC với lý do `PRICE_TOO_HIGH` | KOC được đưa vào `excludedCreatorIds`, lần chạy sau không xuất hiện, ngân sách Campaign giữ nguyên. |
+*Mục tiêu: Đảm bảo các công thức toán học chạy ổn định và nhất quán với Java Client.*
+
+* [ ] Cập nhật DTO `ExplainRequest` trong [`ai_router.py`](file:///d:/creator-discovery/app/api/routers/ai_router.py): Nhận thêm `minFollowers`, `maxFollowers`, `targetFollowers`, `platform`, `avgViews`, `avgLikes`.
+* [ ] Kiểm chuẩn hàm `_calculate_follower_score()` trong [`explanation_service.py`](file:///d:/creator-discovery/app/ai/services/explanation_service.py): Chạy đúng công thức $\log_{10}$ phi đối xứng, chặn sàn $60$đ khi vượt max, $0$đ khi thiếu hụt.
+* [ ] Kiểm chuẩn hàm `_calculate_engagement_score()`: Tự động chia cho chuẩn $5.0\%$ đối với TikTok, Reels, Shorts; chia cho Benchmark Tier đối với MXH truyền thống.
+* [ ] Kiểm chuẩn hàm `_calculate_semantic_score()`: Áp dụng Min-Max Rescaling dải $[0.30, 0.85] \rightarrow [0.0, 100.0]$.
+
+---
+
+## 8. PHASE 6: MA TRẬN KIỂM THỬ TỰ ĐỘNG & TIÊU CHÍ NGHIỆM THU (P0/P1)
+
+*Bộ kiểm thử bắt buộc phải pass 100% trước khi nghiệm thu từng Phase:*
+
+| Mã Test | Phase | Kịch bản kiểm thử (Test Scenario) | Kết quả kỳ vọng |
+| :---: | :---: | :--- | :--- |
+| **TEST-01** | Phase 1 | Bắn đồng thời 2 request khi tài khoản chỉ còn 1 lượt Quota | Chỉ 1 request thành công, request thứ hai nhận HTTP 409 `QUOTA_EXCEEDED`. |
+| **TEST-02** | Phase 1 | Python AI Service bị timeout hoặc tắt server | Backend tự động rollback giải phóng Quota tạm giữ, không làm mất lượt của Brand. |
+| **TEST-03** | Phase 1 | Chạy truy vấn Vector Search trên Database | SQL chạy thành công trên cột `c.embedding`, không bị lỗi kiểu dữ liệu `tsvector`. |
+| **TEST-04** | Phase 2 | Một KOC có cả kênh TikTok và Instagram điểm cao | Danh sách Top 10 chỉ hiển thị 1 kênh đại diện tốt nhất của KOC đó. |
+| **TEST-05** | Phase 2 | KOC chưa từng có lịch sử hợp tác trong quá khứ | Điểm M1 tự động gán trung tính $50.0$ điểm, không bị phạt điểm oan. |
+| **TEST-06** | Phase 3 | Bấm *"Thêm vào Shortlist"* 2 lần liên tiếp trên 1 KOC | Trả về `ALREADY_EXISTS`, không bị lỗi 409, giữ nguyên ghi chú cá nhân của Brand. |
+| **TEST-07** | Phase 3 | Xóa KOC khỏi Shortlist khi KOC đã có bản ghi trong CRM | KOC chuyển `status = REMOVED`, nhưng lịch sử đàm phán trong `relationship` vẫn được bảo toàn. |
+| **TEST-08** | Phase 3 | Chọn 3 KOC và bấm So sánh (Compare) | Trả về bảng so sánh đầy đủ chỉ số, không bị trừ thêm Quota AI. |
+| **TEST-09** | Phase 3 | Bấm Liên hệ KOC chưa Claim nhưng có email booking | Hệ thống nhận diện trạng thái `READY` và chuẩn bị Email Outbox. |
+| **TEST-10** | Phase 4 | Brand Reject KOC với lý do `PRICE_TOO_HIGH` | KOC được đưa vào `excludedCreatorIds`, lần chạy sau không xuất hiện, ngân sách Campaign giữ nguyên. |
 
 ---
 
 ## 9. PHÂN CÔNG TRÁCH NHIỆM DỰ ÁN (RACI MATRIX)
 
-| Thành viên | Vai trò | Trách nhiệm chính trong Flow 3 | Module bàn giao |
+| Thành viên | Vai trò | Trách nhiệm chính theo Phase | Module bàn giao |
 | :--- | :--- | :--- | :--- |
-| **Khải** | Backend Lead | • Sửa query pgvector `c.embedding`<br>• Viết Quota Reservation & Rollback<br>• Xây dựng Four-Memory Ranking Engine<br>• Cài đặt Shortlist Cart Idempotent & Feedback Endpoint | `SubscriptionService.java`<br>`PublicCreatorMetricRepository.java`<br>`AiRecommendationService.java`<br>`ShortlistServiceImpl.java` |
-| **Vy** | AI Lead | • Kiểm chuẩn 4 công thức toán học trong `explanation_service.py`<br>• Khớp nối DTO API `/api/v1/ai/explain` với Java Client<br>• Viết logic Fallback khi service AI quá tải | `explanation_service.py`<br>`ai_router.py` |
-| **Văn** | Frontend Lead | • Xây dựng UI Thẻ đề xuất KOC kèm Reasoning Card Modal<br>• Cài đặt nút 1-Click *"Thêm vào Shortlist"* kèm Toast thông báo<br>• Xây dựng Drawer *"Giỏ hàng KOC"* và Huy hiệu đếm số lượng | `RecommendationView.tsx`<br>`ShortlistCartDrawer.tsx`<br>`ReasoningCardModal.tsx` |
-| **Ngọc** | Data Lead | • Đảm bảo Crawler cào đủ `avgViews`, `avgLikes` vào `public_creator_metric`<br>• Giám sát việc sinh vector 768 chiều vào cột `creator.embedding` | `java_mapper.py`<br>`tiktok_crawler.py` |
+| **Khải** | Backend Lead | • **Phase 1**: Sửa query pgvector `c.embedding`, Two-Phase Quota Reservation.<br>• **Phase 2**: Four-Memory Ranking Scorer & Master Grouping.<br>• **Phase 3**: Tinh chỉnh Idempotent Shortlist Cart & Contact Readiness.<br>• **Phase 4**: Feedback Loop Endpoint & Negative Constraints Adaptation. | `SubscriptionService.java`<br>`PublicCreatorMetricRepository.java`<br>`AiRecommendationService.java`<br>`ShortlistServiceImpl.java`<br>`ShortlistController.java` |
+| **Vy** | AI Lead | • **Phase 2**: Kiểm chuẩn Circuit Breaker và DTO contract giữa Java & Python.<br>• **Phase 5**: Tinh chỉnh 4 công thức toán học ($\log_{10}$, ER $5\%$, Min-Max Rescaling) trong `explanation_service.py`. | `explanation_service.py`<br>`ai_router.py`<br>`AiServiceClient.java` |
+| **Văn** | Frontend Lead | • **Phase 2**: UI Thẻ đề xuất KOC kèm Reasoning Card Modal.<br>• **Phase 3**: Nút 1-Click *"Thêm vào Shortlist"* với Toast mượt mà, Drawer *"Giỏ hàng KOC"*, Giao diện Compare 2-5 KOC và Contact Preview Modal. | `RecommendationView.tsx`<br>`ShortlistCartDrawer.tsx`<br>`ShortlistCompareModal.tsx`<br>`ContactPreviewModal.tsx` |
+| **Ngọc** | Data Lead | • **Phase 1**: Đảm bảo Crawler cào đủ `avgViews`, `avgLikes` vào `public_creator_metric`.<br>• **Phase 2**: Giám sát việc sinh vector 768 chiều vào cột `creator.embedding`. | `java_mapper.py`<br>`tiktok_crawler.py` |

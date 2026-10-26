@@ -255,8 +255,8 @@ Xây dựng 10 kịch bản kiểm thử mẫu mực (`TEST-F4-01` $\rightarrow$
 - [x] Tinh chỉnh [CreatorClaimResolutionService.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/service/CreatorClaimResolutionService.java): gán `verificationMethod = "OAUTH_OFFICIAL_SANDBOX"`, đối soát username TikTok (@) và YouTube Channel ID (UC...).
 
 ### Phase 3: Admin Identity Conflict Resolution Endpoint
-- [ ] Mở endpoint `POST /admin/creator-conflicts/{id}/resolve` trong [AdminIdentityConflictController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/AdminIdentityConflictController.java).
-- [ ] Kết nối tới `CreatorIdentityConflictService.resolveConflict()` và kiểm thử phân quyền `RESOLVE_CREATOR_DUPLICATE`.
+- [x] Mở endpoint `POST /admin/creator-conflicts/{id}/resolve` trong [AdminIdentityConflictController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/AdminIdentityConflictController.java).
+- [x] Kết nối tới `CreatorIdentityConflictService.resolveConflict()` và kiểm thử phân quyền `RESOLVE_CREATOR_DUPLICATE`.
 
 ### Phase 4: Shortlist Cart to CRM Outreach Bridging
 - [ ] Tạo DTO `ShortlistOutreachRequest` và `ShortlistOutreachResponse`.

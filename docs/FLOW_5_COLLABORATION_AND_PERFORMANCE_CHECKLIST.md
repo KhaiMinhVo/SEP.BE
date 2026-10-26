@@ -173,27 +173,33 @@ Dù không theo dõi dòng tiền hay tính ROI tài chính, hệ thống vẫn 
 
 ---
 
-### 🔹 PHASE 6: Automated Acceptance Test Suite & Post Tracking Proposal
+### 🔹 PHASE 6: Automated Acceptance Test Suite & Post Tracking Proposal 🟢 [ĐÃ HOÀN THÀNH]
 **Mục tiêu**: Kiểm thử tự động 100% kịch bản Flow 5 và đặc tả module Crawler đối soát tương tác bài đăng.
 
-#### 1. Bộ kiểm thử tự động toàn diện: `Flow5CollaborationAcceptanceTest.java`
-Xây dựng 10 kịch bản kiểm thử chuẩn mực (`TEST-F5-01` $\to$ `TEST-F5-10`):
-* `TEST-F5-01 [Collab From Collaborating]`: Tạo Collaboration thành công từ Relationship ở giai đoạn `COLLABORATING`.
-* `TEST-F5-02 [Collab Anti-Duplicate]`: Chặn tạo trùng lặp Collaboration cho cùng một Relationship (Unique Constraint).
-* `TEST-F5-03 [Brand Query List]`: Brand truy vấn danh sách KOC đang hợp tác trong Campaign (`GET /campaigns/{id}/collaborations`).
-* `TEST-F5-04 [Brand Collab Detail]`: Brand xem chi tiết tiến độ một hợp tác cụ thể (`GET /collaborations/{id}`).
-* `TEST-F5-05 [Creator Portal View]`: KOC xem danh sách công việc hợp tác được giao qua Creator Portal.
-* `TEST-F5-06 [Submit Evidence]`: KOC nộp link bài đăng và ảnh chụp Insights khi trạng thái là `IN_PROGRESS`.
-* `TEST-F5-07 [Record Outcome Metrics]`: Brand nghiệm thu ghi nhận Views, Clicks, chuyển `status = COMPLETED`.
-* `TEST-F5-08 [Outcome No Financial ROI]`: Nghiệm thu thành công không cần trường doanh thu/chi phí và không tính ROI tài chính.
-* `TEST-F5-09 [Creator Review]`: Brand đánh giá sao, `brandFitRating` và `wouldCollaborateAgain`.
-* `TEST-F5-10 [Memory Sync]`: Hoàn tất Review tự động sinh bản ghi `HistoricalCampaign` M1 với `evidenceQuality = VERIFIED`.
+#### 1. Bộ kiểm thử tự động toàn diện: [Flow5CollaborationAcceptanceTest.java](file:///d:/SEP_BE/src/test/java/com/influencermatch/backend/collaboration/Flow5CollaborationAcceptanceTest.java)
+Đã triển khai và vượt qua 10/10 kịch bản kiểm thử tích hợp chuẩn mực (`TEST-F5-01` $\to$ `TEST-F5-10`, `Tests run: 10, Failures: 0, Errors: 0, Skipped: 0`):
+* [x] `TEST-F5-01 [Collab From Collaborating]`: Tạo Collaboration thành công từ Relationship ở giai đoạn `COLLABORATING`.
+* [x] `TEST-F5-02 [Collab Anti-Duplicate]`: Chặn tạo trùng lặp Collaboration cho cùng một Relationship (Unique Constraint throw `ConflictException(COLLABORATION_ALREADY_EXISTS)`).
+* [x] `TEST-F5-03 [Brand Query List]`: Brand truy vấn danh sách KOC đang hợp tác trong Campaign (`GET /campaigns/{id}/collaborations`) phân trang chuẩn `PageResponse`.
+* [x] `TEST-F5-04 [Brand Collab Detail]`: Brand xem chi tiết tiến độ một hợp tác cụ thể (`GET /collaborations/{id}`), bao gồm thông tin outcome, review và evidence assets.
+* [x] `TEST-F5-05 [Creator Portal View]`: KOC xem danh sách công việc hợp tác được giao qua Creator Portal (`GET /creators/portal/collaborations`).
+* [x] `TEST-F5-06 [Submit Evidence]`: KOC hoặc Brand nộp link bài đăng và bằng chứng (`POST /collaborations/{id}/evidence`) khi trạng thái là `IN_PROGRESS`, tự động cập nhật `publishedContentUrl`.
+* [x] `TEST-F5-07 [Record Outcome Metrics]`: Brand nghiệm thu ghi nhận Views, Clicks, Likes, Shares (`POST /collaborations/{id}/outcome`), chuyển `status = COMPLETED` và relationship `stage = COMPLETED`.
+* [x] `TEST-F5-08 [Outcome No Financial ROI]`: Nghiệm thu thành công không cần trường doanh thu/chi phí và không tính ROI tài chính (`revenue`, `roi`, `actualFee` đều `null`, `evidenceQuality = 'SELF_REPORTED'`).
+* [x] `TEST-F5-09 [Creator Review]`: Brand đánh giá sao, `brandFitRating`, `wouldCollaborateAgain` và nhận xét chi tiết; tự động phát sinh `CollaborationReviewedEvent`.
+* [x] `TEST-F5-10 [Memory Sync]`: Hoàn tất Review kích hoạt Event Listener tự động sinh bản ghi `HistoricalCampaign` M1 (`quality = VERIFIED`, `evidenceType = COLLABORATION_REVIEW`) và cập nhật `BrandPattern` M4 (`COLLABORATION_SUCCESS`, `confidence`, `averageSuccessfulScore`).
 
-#### 2. Đề xuất Autonomous Post Tracking Worker (`creator-discovery` - P2)
-* Viết worker `app/workers/post_kpi_tracker.py` nhận `publishedContentUrl`:
-  * Quét định kỳ T+3 và T+7 ngày sau khi KOC nộp bài.
-  * Cập nhật số lượt view/like thực tế quan sát được từ nền tảng công khai.
-  * Gán nhãn `evidenceQuality = 'PUBLIC_METRIC_OBSERVED'`.
+#### 2. Đề xuất Autonomous Post Tracking Worker (`creator-discovery` - P2 Proposal)
+Đặc tả kiến trúc cho module cào tự động đối soát chỉ số bài đăng công khai:
+* **Vị trí**: `creator-discovery/app/workers/post_kpi_tracker.py`
+* **Cơ chế hoạt động**:
+  1. **Scheduler**: Celery Beat hoặc cron job chạy mỗi 6 giờ quét các `Collaboration` có `publishedContentUrl != null` và `status IN ('IN_PROGRESS', 'COMPLETED')`.
+  2. **Tần suất quét**:
+     * **T+1 ngày**: Đọc metrics khởi tạo bài đăng.
+     * **T+3 ngày**: Giai đoạn viral đỉnh cao của TikTok / Reels / Shorts.
+     * **T+7 ngày**: Giai đoạn bão hòa chỉ số để nghiệm thu tương tác cuối cùng.
+  3. **Thu thập dữ liệu**: Tái sử dụng Scraper Engine sẵn có (`TikTokClient`, `YouTubeClient`, `InstagramClient`) để trích xuất `view_count`, `like_count`, `comment_count`, `share_count`.
+  4. **Cập nhật Backend**: Gửi webhook hoặc gọi nội bộ endpoint cập nhật `CampaignOutcome` với nhãn `evidenceQuality = 'PUBLIC_METRIC_OBSERVED'`. Nếu Brand đã tự báo cáo (`SELF_REPORTED`), hệ thống đối soát độ lệch để cung cấp huy hiệu "Chỉ số đã được hệ thống xác thực" (Verified Analytics).
 
 ---
 
@@ -207,32 +213,32 @@ Xây dựng 10 kịch bản kiểm thử chuẩn mực (`TEST-F5-01` $\to$ `TEST
 
 ## ✅ V. IMPLEMENTATION TRACKING CHECKLIST
 
-### Phase 1: Collaboration Confirmation & Stage Alignment
-- [ ] Cập nhật `CollaborationService.create()` chấp nhận `RelationshipStage.COLLABORATING`.
-- [ ] Chuyển `agreedFee` và `currency` thành trường tùy chọn (optional reference) trong `CreateCollaborationRequest`.
-- [ ] Không tự động gán `paymentStatus = PENDING` trên giao diện trả về cho Brand.
+### Phase 1: Collaboration Confirmation & Stage Alignment 🟢
+- [x] Cập nhật `CollaborationService.create()` chấp nhận `RelationshipStage.COLLABORATING`.
+- [x] Chuyển `agreedFee` và `currency` thành trường tùy chọn (optional reference) trong `CreateCollaborationRequest`.
+- [x] Không tự động gán `paymentStatus = PENDING` trên giao diện trả về cho Brand.
 
-### Phase 2: Collaboration Read & Tracking APIs (Ưu tiên P0)
-- [ ] Thêm endpoint `GET /campaigns/{campaignId}/collaborations` cho Brand trong `CollaborationController`.
-- [ ] Thêm endpoint `GET /collaborations/{collaborationId}` xem chi tiết hợp tác trong `CollaborationController`.
-- [ ] Thêm endpoint `GET /creators/portal/collaborations` cho KOC trong Creator Portal.
+### Phase 2: Collaboration Read & Tracking APIs (Ưu tiên P0) 🟢
+- [x] Thêm endpoint `GET /campaigns/{campaignId}/collaborations` cho Brand trong `CollaborationController`.
+- [x] Thêm endpoint `GET /collaborations/{collaborationId}` xem chi tiết hợp tác trong `CollaborationController`.
+- [x] Thêm endpoint `GET /creators/portal/collaborations` cho KOC trong Creator Portal.
 
-### Phase 3: Content Deliverables & Evidence Submission (Ưu tiên P1)
-- [ ] Cho phép cập nhật `publishedContentUrl` khi hợp tác ở trạng thái `IN_PROGRESS`.
-- [ ] Mở endpoint `POST /collaborations/{id}/evidence` tiếp nhận link bài đăng hoặc ảnh chụp màn hình Insights.
-- [ ] Cung cấp API cho Brand xem và kiểm tra bằng chứng do KOC nộp.
+### Phase 3: Content Deliverables & Evidence Submission (Ưu tiên P1) 🟢
+- [x] Cho phép cập nhật `publishedContentUrl` khi hợp tác ở trạng thái `IN_PROGRESS`.
+- [x] Mở endpoint `POST /collaborations/{id}/evidence` tiếp nhận link bài đăng hoặc ảnh chụp màn hình Insights.
+- [x] Cung cấp API cho Brand xem và kiểm tra bằng chứng do KOC nộp.
 
-### Phase 4: Non-Financial Outcome Recording & Social Engagement Metrics
-- [ ] Chuẩn hóa `RecordOutcomeRequest` tập trung vào số liệu tương tác (Views, Clicks, Likes, Shares) và ghi chú thực tế.
-- [ ] Phân biệt rõ giữa số liệu chưa có (`null`) và số liệu bằng `0`.
-- [ ] Đánh dấu `evidenceQuality = 'SELF_REPORTED'` và chuyển hợp tác sang `COMPLETED`.
+### Phase 4: Non-Financial Outcome Recording & Social Engagement Metrics 🟢
+- [x] Chuẩn hóa `RecordOutcomeRequest` tập trung vào số liệu tương tác (Views, Clicks, Likes, Shares) và ghi chú thực tế.
+- [x] Phân biệt rõ giữa số liệu chưa có (`null`) và số liệu bằng `0`.
+- [x] Đánh dấu `evidenceQuality = 'SELF_REPORTED'` và chuyển hợp tác sang `COMPLETED`.
 
-### Phase 5: Creator Review & M1 Historical Collaboration Memory Sync
-- [ ] Kiểm thử hoàn thiện `POST /collaborations/{id}/review` với các tiêu chí `overallRating`, `brandFitRating`, `wouldCollaborateAgain`.
-- [ ] Viết Event Listener tự động trích xuất bản ghi M1 `HistoricalCampaign` sau khi có Review.
-- [ ] Cập nhật độ tin cậy và số lượng bằng chứng trong M4 `BrandPattern`.
+### Phase 5: Creator Review & M1 Historical Collaboration Memory Sync 🟢
+- [x] Kiểm thử hoàn thiện `POST /collaborations/{id}/review` với các tiêu chí `overallRating`, `brandFitRating`, `wouldCollaborateAgain`.
+- [x] Viết Event Listener tự động trích xuất bản ghi M1 `HistoricalCampaign` sau khi có Review.
+- [x] Cập nhật độ tin cậy và số lượng bằng chứng trong M4 `BrandPattern`.
 
-### Phase 6: Automated Acceptance Test Suite & Post Tracking Proposal
-- [ ] Xây dựng test suite `Flow5CollaborationAcceptanceTest.java` với 10 kịch bản kiểm thử (`TEST-F5-01` $\to$ `TEST-F5-10`).
-- [ ] Chạy kiểm thử tự động với Maven (`mvn test -Dtest=Flow5CollaborationAcceptanceTest`).
-- [ ] Đề xuất worker cào tự động đối soát chỉ số bài đăng `post_kpi_tracker.py` trong `creator-discovery` (P2).
+### Phase 6: Automated Acceptance Test Suite & Post Tracking Proposal 🟢
+- [x] Xây dựng test suite `Flow5CollaborationAcceptanceTest.java` với 10 kịch bản kiểm thử (`TEST-F5-01` $\to$ `TEST-F5-10`).
+- [x] Chạy kiểm thử tự động với Maven (`mvn test -Dtest=Flow5CollaborationAcceptanceTest`).
+- [x] Đề xuất worker cào tự động đối soát chỉ số bài đăng `post_kpi_tracker.py` trong `creator-discovery` (P2).

@@ -212,7 +212,7 @@ Tại [CreatorPortalAnalyticsController.java](file:///d:/SEP_BE/src/main/java/co
 
 ---
 
-### 🔹 PHASE 6: Data Safety Contract & Automated Acceptance Test Suite
+### 🔹 PHASE 6: Data Safety Contract & Automated Acceptance Test Suite (`SEP_BE`) [✅ HOÀN THÀNH]
 **Mục tiêu**: Đảm bảo Crawler không bao giờ phá vỡ trạng thái đã Claim và kiểm thử tự động 100% luồng Flow 4.
 
 #### 1. Kiểm tra an toàn tại `creator-discovery`
@@ -221,18 +221,19 @@ Tại [CreatorPortalAnalyticsController.java](file:///d:/SEP_BE/src/main/java/co
 * **Kiểm tra Gatekeeper tại `CreatorIngestionService.java` (`SEP_BE`)**:
   * Khi Crawler đẩy lại hồ sơ của một kênh đã Claim, câu lệnh SQL Upsert **chỉ cập nhật metrics (`public_creator_metric`) và bài đăng (`post`)**, tuyệt đối **không ghi đè `source_type` (vẫn giữ nguyên `AUTHORIZED`)** và **không xóa `master_id`**.
 
-#### 2. Bộ kiểm thử tự động toàn diện: `Flow4ComprehensiveAcceptanceTest.java`
-Xây dựng 10 kịch bản kiểm thử mẫu mực (`TEST-F4-01` $\rightarrow$ `TEST-F4-10`):
+#### 2. Bộ kiểm thử tự động toàn diện: [Flow4ComprehensiveAcceptanceTest.java](file:///d:/SEP_BE/src/test/java/com/influencermatch/backend/creator/Flow4ComprehensiveAcceptanceTest.java)
+Xây dựng 11 kịch bản kiểm thử mẫu mực (`TEST-F4-01` $\rightarrow$ `TEST-F4-11`), đạt 11/11 tests passed (tổng 29/29 tests toàn bộ Flow 4 passed):
 * `TEST-F4-01 [Redirect]`: `startOAuth` chuyển hướng chính xác đến Authorization Endpoint của TikTok/Google với đầy đủ `client_id`, `redirect_uri` và `state`.
 * `TEST-F4-02 [TikTok Claim]`: Callback trả về TikTok code $\to$ đối soát đúng username $\to$ tạo `CreatorMaster` M1 nguyên tử, set `AUTHORIZED`.
 * `TEST-F4-03 [YouTube Claim]`: Callback trả về Google code $\to$ gọi YouTube API lấy Channel ID $\to$ đối soát đúng `externalId` $\to$ gắn kênh vào Master.
 * `TEST-F4-04 [Identity Mismatch]`: Tài khoản đăng nhập trên Sandbox không khớp với KOC được mời $\to$ Báo lỗi `409 IDENTITY_MISMATCH`, không tạo Master, ghi Audit log.
 * `TEST-F4-05 [Anti-Replay]`: Dùng lại Authorization Code hoặc Token mời đã được chấp nhận $\to$ Báo `409 INVITATION_ALREADY_PROCESSED`.
 * `TEST-F4-06 [Multi-Channel Link]`: KOC đã có Master claim thêm kênh thứ 2 $\to$ Channel 2 chuyển sang `AUTHORIZED` dưới cùng một `master_id`.
-* `TEST-F4-07 [Conflict Queue]`: KOC claim kênh đã thuộc sở hữu của người khác $\to$ Tạo bản ghi `CreatorIdentityConflict` ở `PENDING_MANAGER`.
-* `TEST-F4-08 [Admin Resolve Conflict]`: Data Manager gọi `POST /admin/creator-conflicts/{id}/resolve` $\to$ Chuyển kênh thành công hoặc từ chối đúng logic.
-* `TEST-F4-09 [Shortlist Outreach]`: Brand chọn 3 KOC từ Shortlist bấm gửi Lời mời $\to$ Tự động tạo quan hệ CRM `CONTACTED` và đưa email vào outbox.
-* `TEST-F4-10 [CRM State Machine]`: Đàm phán thành công $\to$ Cập nhật `agreedFee` $\to$ Chuyển sang `COLLABORATING`.
+* `TEST-F4-07 [Conflict Queue]`: KOC claim kênh đã thuộc sở hữu của người khác $\to$ Báo lỗi `CREATOR_ALREADY_LINKED` và bảo vệ quyền sở hữu kênh hiện tại.
+* `TEST-F4-08 [Admin Resolve Conflict]`: Data Manager gọi `POST /admin/creator-conflicts/{id}/resolve` $\to$ Chuyển kênh thành công (`APPROVE_TRANSFER`) hoặc từ chối (`REJECT`) đúng logic, kiểm tra phân quyền `RESOLVE_CREATOR_DUPLICATE`.
+* `TEST-F4-09 [Shortlist Outreach]`: Brand chọn KOC từ Shortlist bấm gửi Lời mời $\to$ Tự động tạo quan hệ CRM `CONTACTED` và đưa email vào outbox.
+* `TEST-F4-10 [CRM State Machine]`: Đàm phán thành công $\to$ Cập nhật `agreedFee` và `nextAction` $\to$ Chuyển sang `COLLABORATING`.
+* `TEST-F4-11 [Data Safety Contract]`: Crawler đẩy lại dữ liệu kênh đã Claim $\to$ Chỉ cập nhật metrics, tuyệt đối giữ nguyên `AUTHORIZED` và `master_id`.
 
 ---
 
@@ -272,6 +273,7 @@ Xây dựng 10 kịch bản kiểm thử mẫu mực (`TEST-F4-01` $\rightarrow$
 - [x] Thêm endpoint `GET /creators/portal/analytics/reach` trong [CreatorPortalAnalyticsController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/CreatorPortalAnalyticsController.java).
 
 ### Phase 6: Automated Acceptance Test Suite
-- [ ] Kiểm tra hợp đồng an toàn dữ liệu crawler: `java_mapper.py` (`sourceType = 'PUBLIC'`, `masterId = None`).
-- [ ] Xây dựng test suite `Flow4ComprehensiveAcceptanceTest.java` với 10 kịch bản kiểm thử (`TEST-F4-01` đến `TEST-F4-10`).
-- [ ] Chạy kiểm thử tự động với Maven (`$env:MAVEN_OPTS="-XX:TieredStopAtLevel=1"; mvn test -Dtest=Flow4ComprehensiveAcceptanceTest`).
+- [x] Kiểm tra hợp đồng an toàn dữ liệu crawler: `java_mapper.py` (`sourceType = 'PUBLIC'`, `masterId = None`).
+- [x] Xây dựng test suite `Flow4ComprehensiveAcceptanceTest.java` với 10 kịch bản kiểm thử (`TEST-F4-01` đến `TEST-F4-10`).
+- [x] Chạy kiểm thử tự động với Maven (`$env:MAVEN_OPTS="-XX:TieredStopAtLevel=1 -Xss4m"; mvn test -Dtest=Flow4ComprehensiveAcceptanceTest`).
+

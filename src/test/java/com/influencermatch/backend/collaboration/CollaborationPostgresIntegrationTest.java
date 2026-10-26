@@ -264,7 +264,7 @@ VALUES ('10000000-0000-0000-0000-000000000007','10000000-0000-0000-0000-00000000
     postJson(
         path,
         f.owner(),
-        "{\"relationshipId\":\"" + f.relationship().getId() + "\",\"currency\":\"VND\"}",
+        "{\"currency\":\"VND\"}",
         400);
     postJson(
         path,
@@ -526,6 +526,30 @@ VALUES ('10000000-0000-0000-0000-000000000007','10000000-0000-0000-0000-00000000
     assertThat(reviews.existsByCollaborationId(id)).isFalse();
     assertThat(outcomes.existsByCollaborationId(id)).isTrue();
     assertThat(collaborations.findById(id).orElseThrow().getStatus()).isEqualTo(CollaborationStatus.COMPLETED);
+  }
+
+  @Test
+  void createFromCollaboratingStageWithOptionalFeeFallsBackToRelationship() throws Exception {
+    Fixture f = fixture();
+    f.relationship().setStage(RelationshipStage.COLLABORATING);
+    f.relationship().setAgreedFee(new java.math.BigDecimal("2500000.00"));
+    f.relationship().setCurrency("VND");
+    relationships.saveAndFlush(f.relationship());
+
+    String body =
+        "{\"relationshipId\":\"" + f.relationship().getId() + "\",\"note\":\"optional fee\"}";
+    JsonNode response =
+        postJson("/campaigns/" + f.campaign().getId() + "/collaborations", f.owner(), body, 201);
+
+    assertThat(response.get("status").asText()).isEqualTo("IN_PROGRESS");
+    assertThat(response.get("currency").asText()).isEqualTo("VND");
+    assertThat(response.get("agreedFee").asDouble()).isEqualTo(2500000.00);
+
+    var stored =
+        collaborations.findById(UUID.fromString(response.get("id").asText())).orElseThrow();
+    assertThat(stored.getStatus()).isEqualTo(CollaborationStatus.IN_PROGRESS);
+    assertThat(stored.getAgreedFee()).isEqualByComparingTo("2500000.00");
+    assertThat(stored.getCurrency()).isEqualTo("VND");
   }
 
   void race(String path, User actor, String body) throws Exception {

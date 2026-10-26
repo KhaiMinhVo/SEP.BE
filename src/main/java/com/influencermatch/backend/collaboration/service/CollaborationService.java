@@ -15,6 +15,7 @@ import com.influencermatch.backend.security.permission.*;
 import jakarta.persistence.EntityManager;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validator;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
@@ -47,14 +48,25 @@ public class CollaborationService {
     if (collaborations.existsByRelationshipId(relationship.getId()))
       throw conflict(
           ErrorCode.COLLABORATION_ALREADY_EXISTS, "This relationship already has a collaboration");
-    if (relationship.getStage() != RelationshipStage.CONTACTED
-        && relationship.getStage() != RelationshipStage.INTERESTED)
+    if (relationship.getStage() != RelationshipStage.COLLABORATING
+        && relationship.getStage() != RelationshipStage.INTERESTED
+        && relationship.getStage() != RelationshipStage.CONTACTED)
       throw conflict(
-          ErrorCode.INVALID_COLLABORATION_STATE, "Relationship must be CONTACTED or INTERESTED");
-    try {
-      Currency.getInstance(request.currency());
-    } catch (IllegalArgumentException ex) {
-      throw new ValidationException("currency must be a valid ISO currency code");
+          ErrorCode.INVALID_COLLABORATION_STATE,
+          "Relationship must be COLLABORATING, INTERESTED, or CONTACTED to start collaboration");
+    BigDecimal agreedFee =
+        request.agreedFee() != null ? request.agreedFee() : relationship.getAgreedFee();
+    String currency = request.currency() != null ? request.currency() : relationship.getCurrency();
+    if (currency != null && !currency.isBlank()) {
+      try {
+        Currency.getInstance(currency);
+      } catch (IllegalArgumentException ex) {
+        throw new ValidationException("currency must be a valid ISO currency code");
+      }
+    }
+    com.influencermatch.backend.creator.model.CreatorMaster master = relationship.getMaster();
+    if (master == null && relationship.getCreator() != null) {
+      master = relationship.getCreator().getMaster();
     }
     LocalDateTime now = LocalDateTime.now();
     Collaboration collaboration =
@@ -63,8 +75,9 @@ public class CollaborationService {
                 .campaign(campaign)
                 .relationship(relationship)
                 .creator(relationship.getCreator())
-                .agreedFee(request.agreedFee())
-                .currency(request.currency())
+                .master(master)
+                .agreedFee(agreedFee)
+                .currency(currency)
                 .note(request.note())
                 .status(CollaborationStatus.IN_PROGRESS)
                 .paymentStatus(CollaborationPaymentStatus.PENDING)
@@ -72,8 +85,8 @@ public class CollaborationService {
                 .updatedAt(now)
                 .build());
     relationship.setStage(RelationshipStage.COLLABORATING);
-    relationship.setAgreedFee(request.agreedFee());
-    relationship.setCurrency(request.currency());
+    relationship.setAgreedFee(agreedFee);
+    relationship.setCurrency(currency);
     relationship.setUpdatedAt(now);
     return new CollaborationResponse(
         collaboration.getId(),

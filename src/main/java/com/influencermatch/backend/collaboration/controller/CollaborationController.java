@@ -50,8 +50,8 @@ public class CollaborationController {
   @Operation(
       summary = "Confirm a creator collaboration",
       description =
-          "Owned ACTIVE campaign; CONTACTED or INTERESTED relationship from the same campaign."
-              + " Agreed fee is not a payment.")
+          "Owned ACTIVE campaign; COLLABORATING, INTERESTED, or CONTACTED relationship from the same"
+              + " campaign. Agreed fee is optional metadata (not a platform payment).")
   @ApiResponse(responseCode = "201", description = "Collaboration created")
   public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<CollaborationResponse>>
       create(@PathVariable UUID id, @Valid @RequestBody CreateCollaborationRequest request) {

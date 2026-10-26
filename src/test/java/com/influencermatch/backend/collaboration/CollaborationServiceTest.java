@@ -237,11 +237,46 @@ class CollaborationServiceTest {
   @ParameterizedTest
   @EnumSource(
       value = RelationshipStage.class,
-      names = {"SHORTLISTED", "COLLABORATING", "NOT_INTERESTED", "COMPLETED"})
+      names = {"SHORTLISTED", "NOT_INTERESTED", "COMPLETED"})
   void createRejectsIneligibleRelationshipStages(RelationshipStage stage) {
     relationship.setStage(stage);
     assertCode(
         () -> service.create(campaign.getId(), request()), ErrorCode.INVALID_COLLABORATION_STATE);
+  }
+
+  @Test
+  void createFromCollaboratingStageSucceeds() {
+    when(collaborations.save(any()))
+        .thenAnswer(
+            i -> {
+              Collaboration c = i.getArgument(0);
+              c.setId(UUID.randomUUID());
+              return c;
+            });
+    relationship.setStage(RelationshipStage.COLLABORATING);
+    CollaborationResponse response = service.create(campaign.getId(), request());
+    assertThat(response.status()).isEqualTo(CollaborationStatus.IN_PROGRESS);
+    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.COLLABORATING);
+  }
+
+  @Test
+  void createWithOptionalFeeAndCurrencyFallsBackToRelationship() {
+    when(collaborations.save(any()))
+        .thenAnswer(
+            i -> {
+              Collaboration c = i.getArgument(0);
+              c.setId(UUID.randomUUID());
+              return c;
+            });
+    relationship.setStage(RelationshipStage.COLLABORATING);
+    relationship.setAgreedFee(new BigDecimal("1800000.00"));
+    relationship.setCurrency("VND");
+    CreateCollaborationRequest req =
+        new CreateCollaborationRequest(relationship.getId(), null, null, "Optional fee note");
+    CollaborationResponse response = service.create(campaign.getId(), req);
+    assertThat(response.agreedFee()).isEqualByComparingTo("1800000.00");
+    assertThat(response.currency()).isEqualTo("VND");
+    assertThat(response.status()).isEqualTo(CollaborationStatus.IN_PROGRESS);
   }
 
   @Test

@@ -54,9 +54,6 @@ public class PublicCreatorMetric {
   @Column(length = 120)
   private String niche;
 
-  @Column(length = 150)
-  private String location;
-
   @Column(name = "content_summary", columnDefinition = "TEXT")
   private String contentSummary;
 
@@ -81,9 +78,6 @@ public class PublicCreatorMetric {
 
   @Column(length = 500)
   private String contact;
-
-  @Column(name = "url_profile", length = 1000)
-  private String urlProfile;
 
   @Column(length = 120)
   private String category;

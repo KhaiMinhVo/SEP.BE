@@ -22,11 +22,16 @@ import com.influencermatch.backend.user.model.User;
 import jakarta.persistence.EntityManager;
 import jakarta.validation.Validation;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import com.influencermatch.backend.creator.model.CreatorMaster;
+import com.influencermatch.backend.creator.repository.CreatorMasterRepository;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 class CollaborationServiceTest {
@@ -35,6 +40,8 @@ class CollaborationServiceTest {
   CollaborationRepository collaborations = mock(CollaborationRepository.class);
   CampaignOutcomeRepository outcomes = mock(CampaignOutcomeRepository.class);
   CreatorReviewRepository reviews = mock(CreatorReviewRepository.class);
+  CreatorMasterRepository creatorMasters = mock(CreatorMasterRepository.class);
+  EvidenceAssetRepository evidenceAssets = mock(EvidenceAssetRepository.class);
   EntityManager em = mock(EntityManager.class);
   jakarta.validation.ValidatorFactory factory;
   CollaborationService service;
@@ -53,6 +60,8 @@ class CollaborationServiceTest {
             collaborations,
             outcomes,
             reviews,
+            creatorMasters,
+            evidenceAssets,
             em,
             factory.getValidator());
     owner = User.builder().id(UUID.randomUUID()).role(Role.BRAND).status(UserStatus.ACTIVE).build();
@@ -172,6 +181,59 @@ class CollaborationServiceTest {
   }
 
   @Test
+  void recordOutcomeWithSocialEngagementMetricsSavesLikesCommentsShares() {
+    when(outcomes.save(any()))
+        .thenAnswer(
+            i -> {
+              CampaignOutcome o = i.getArgument(0);
+              o.setId(UUID.randomUUID());
+              return o;
+            });
+    RecordOutcomeRequest req =
+        new RecordOutcomeRequest(
+            5000L, 120L, 850L, 60L, 15L, "https://youtube.com/watch?v=abc", "Great engagement");
+    var response = service.recordOutcome(collaboration.getId(), req);
+
+    assertThat(response.views()).isEqualTo(5000L);
+    assertThat(response.clicks()).isEqualTo(120L);
+    assertThat(response.likes()).isEqualTo(850L);
+    assertThat(response.comments()).isEqualTo(60L);
+    assertThat(response.shares()).isEqualTo(15L);
+    assertThat(response.publishedContentUrl()).isEqualTo("https://youtube.com/watch?v=abc");
+    assertThat(collaboration.getStatus()).isEqualTo(CollaborationStatus.COMPLETED);
+    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.COMPLETED);
+  }
+
+  @Test
+  void recordOutcomeFallbacksToCollaborationPublishedUrlIfOmittedInRequest() {
+    collaboration.setPublishedContentUrl("https://tiktok.com/@koc/phase3video");
+    when(outcomes.save(any()))
+        .thenAnswer(
+            i -> {
+              CampaignOutcome o = i.getArgument(0);
+              o.setId(UUID.randomUUID());
+              return o;
+            });
+    RecordOutcomeRequest req =
+        new RecordOutcomeRequest(2000L, null, 100L, null, null, null, "Using existing post link");
+    var response = service.recordOutcome(collaboration.getId(), req);
+
+    assertThat(response.publishedContentUrl()).isEqualTo("https://tiktok.com/@koc/phase3video");
+    assertThat(collaboration.getPublishedContentUrl()).isEqualTo("https://tiktok.com/@koc/phase3video");
+    assertThat(collaboration.getStatus()).isEqualTo(CollaborationStatus.COMPLETED);
+  }
+
+  @Test
+  void recordOutcomeFailsIfPublishedContentUrlMissingEverywhere() {
+    collaboration.setPublishedContentUrl(null);
+    RecordOutcomeRequest req =
+        new RecordOutcomeRequest(2000L, null, 100L, null, null, null, "No post link anywhere");
+    assertCode(
+        () -> service.recordOutcome(collaboration.getId(), req),
+        ErrorCode.VALIDATION_ERROR);
+  }
+
+  @Test
   void reviewUsesAuthenticatedOwnerAndActualOutcome() {
     campaign.setStatus(CampaignStatus.COMPLETED);
     collaboration.setStatus(CollaborationStatus.COMPLETED);
@@ -190,6 +252,41 @@ class CollaborationServiceTest {
     assertThat(result.outcomeId()).isEqualTo(stored.getId());
     assertThat(result.wouldCollaborateAgain()).isFalse();
     assertThat(result.note()).isEqualTo("review");
+  }
+
+  @Test
+  void reviewPublishesCollaborationReviewedEventWhenPublisherPresent() {
+    org.springframework.context.ApplicationEventPublisher publisher =
+        mock(org.springframework.context.ApplicationEventPublisher.class);
+    CollaborationService serviceWithPublisher =
+        new CollaborationService(
+            campaigns,
+            relationships,
+            collaborations,
+            outcomes,
+            reviews,
+            creatorMasters,
+            evidenceAssets,
+            em,
+            factory.getValidator(),
+            publisher);
+
+    campaign.setStatus(CampaignStatus.COMPLETED);
+    collaboration.setStatus(CollaborationStatus.COMPLETED);
+    var stored =
+        CampaignOutcome.builder().id(UUID.randomUUID()).collaboration(collaboration).build();
+    when(outcomes.findByCollaborationId(collaboration.getId())).thenReturn(Optional.of(stored));
+    when(reviews.save(any()))
+        .thenAnswer(
+            i -> {
+              CreatorReview r = i.getArgument(0);
+              r.setId(UUID.randomUUID());
+              return r;
+            });
+
+    serviceWithPublisher.review(collaboration.getId(), review());
+
+    verify(publisher).publishEvent(any(com.influencermatch.backend.collaboration.event.CollaborationReviewedEvent.class));
   }
 
   @Test
@@ -237,11 +334,46 @@ class CollaborationServiceTest {
   @ParameterizedTest
   @EnumSource(
       value = RelationshipStage.class,
-      names = {"SHORTLISTED", "COLLABORATING", "NOT_INTERESTED", "COMPLETED"})
+      names = {"SHORTLISTED", "NOT_INTERESTED", "COMPLETED"})
   void createRejectsIneligibleRelationshipStages(RelationshipStage stage) {
     relationship.setStage(stage);
     assertCode(
         () -> service.create(campaign.getId(), request()), ErrorCode.INVALID_COLLABORATION_STATE);
+  }
+
+  @Test
+  void createFromCollaboratingStageSucceeds() {
+    when(collaborations.save(any()))
+        .thenAnswer(
+            i -> {
+              Collaboration c = i.getArgument(0);
+              c.setId(UUID.randomUUID());
+              return c;
+            });
+    relationship.setStage(RelationshipStage.COLLABORATING);
+    CollaborationResponse response = service.create(campaign.getId(), request());
+    assertThat(response.status()).isEqualTo(CollaborationStatus.IN_PROGRESS);
+    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.COLLABORATING);
+  }
+
+  @Test
+  void createWithOptionalFeeAndCurrencyFallsBackToRelationship() {
+    when(collaborations.save(any()))
+        .thenAnswer(
+            i -> {
+              Collaboration c = i.getArgument(0);
+              c.setId(UUID.randomUUID());
+              return c;
+            });
+    relationship.setStage(RelationshipStage.COLLABORATING);
+    relationship.setAgreedFee(new BigDecimal("1800000.00"));
+    relationship.setCurrency("VND");
+    CreateCollaborationRequest req =
+        new CreateCollaborationRequest(relationship.getId(), null, null, "Optional fee note");
+    CollaborationResponse response = service.create(campaign.getId(), req);
+    assertThat(response.agreedFee()).isEqualByComparingTo("1800000.00");
+    assertThat(response.currency()).isEqualTo("VND");
+    assertThat(response.status()).isEqualTo(CollaborationStatus.IN_PROGRESS);
   }
 
   @Test
@@ -289,6 +421,197 @@ class CollaborationServiceTest {
         () -> service.recordOutcome(collaboration.getId(), outcome()),
         ErrorCode.INVALID_COLLABORATION_STATE);
     verify(outcomes, never()).save(any());
+  }
+
+  @Test
+  void getCampaignCollaborationsReturnsSummaryPage() {
+    when(campaigns.findById(campaign.getId())).thenReturn(Optional.of(campaign));
+    when(collaborations.findByCampaignId(eq(campaign.getId()), any()))
+        .thenReturn(new PageImpl<>(List.of(collaboration), PageRequest.of(0, 20), 1));
+    when(outcomes.existsByCollaborationId(collaboration.getId())).thenReturn(true);
+    when(reviews.existsByCollaborationId(collaboration.getId())).thenReturn(false);
+
+    var page = service.getCampaignCollaborations(campaign.getId(), null, PageRequest.of(0, 20));
+    assertThat(page.totalElements()).isEqualTo(1);
+    assertThat(page.items()).hasSize(1);
+    assertThat(page.items().get(0).id()).isEqualTo(collaboration.getId());
+    assertThat(page.items().get(0).hasOutcome()).isTrue();
+    assertThat(page.items().get(0).hasReview()).isFalse();
+  }
+
+  @Test
+  void getCampaignCollaborationsRejectsForeignBrand() {
+    campaign.getBrandProfile().setUser(User.builder().id(UUID.randomUUID()).build());
+    when(campaigns.findById(campaign.getId())).thenReturn(Optional.of(campaign));
+    assertCode(
+        () -> service.getCampaignCollaborations(campaign.getId(), null, PageRequest.of(0, 20)),
+        ErrorCode.ACCESS_DENIED);
+  }
+
+  @Test
+  void getCollaborationDetailReturnsFullDetailWithOutcomeAndReview() {
+    CampaignOutcome outcome =
+        CampaignOutcome.builder()
+            .id(UUID.randomUUID())
+            .collaboration(collaboration)
+            .views(5000L)
+            .clicks(150L)
+            .resultNote("Great")
+            .evidenceQuality("SELF_REPORTED")
+            .recordedAt(java.time.LocalDateTime.now())
+            .completedAt(java.time.LocalDateTime.now())
+            .build();
+    CreatorReview review =
+        CreatorReview.builder()
+            .id(UUID.randomUUID())
+            .collaboration(collaboration)
+            .outcome(outcome)
+            .reviewedBy(owner)
+            .overallRating((short) 5)
+            .brandFitRating((short) 4)
+            .wouldCollaborateAgain(true)
+            .note("Pleased")
+            .reviewedAt(java.time.LocalDateTime.now())
+            .build();
+
+    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    when(outcomes.findByCollaborationId(collaboration.getId())).thenReturn(Optional.of(outcome));
+    when(reviews.findByCollaborationId(collaboration.getId())).thenReturn(Optional.of(review));
+
+    var detail = service.getCollaborationDetail(collaboration.getId());
+    assertThat(detail.id()).isEqualTo(collaboration.getId());
+    assertThat(detail.outcome()).isNotNull();
+    assertThat(detail.outcome().views()).isEqualTo(5000L);
+    assertThat(detail.review()).isNotNull();
+    assertThat(detail.review().overallRating()).isEqualTo((short) 5);
+  }
+
+  @Test
+  void getCollaborationDetailRejectsUnrelatedActor() {
+    User stranger =
+        User.builder().id(UUID.randomUUID()).role(Role.BRAND).status(UserStatus.ACTIVE).build();
+    authenticate(stranger);
+    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    assertCode(() -> service.getCollaborationDetail(collaboration.getId()), ErrorCode.ACCESS_DENIED);
+  }
+
+  @Test
+  void getCreatorPortalCollaborationsReturnsListForCreatorMaster() {
+    User creatorUser =
+        User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
+    authenticate(creatorUser);
+    CreatorMaster master =
+        CreatorMaster.builder()
+            .id(UUID.randomUUID())
+            .user(creatorUser)
+            .canonicalName("Master KOC")
+            .build();
+    when(creatorMasters.findByUserId(creatorUser.getId())).thenReturn(Optional.of(master));
+    when(collaborations.findByMasterId(master.getId())).thenReturn(List.of(collaboration));
+
+    var list = service.getCreatorPortalCollaborations(null);
+    assertThat(list).hasSize(1);
+    assertThat(list.get(0).id()).isEqualTo(collaboration.getId());
+  }
+
+  @Test
+  void getCreatorPortalCollaborationsReturnsEmptyWhenNoMaster() {
+    User creatorUser =
+        User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
+    authenticate(creatorUser);
+    when(creatorMasters.findByUserId(creatorUser.getId())).thenReturn(Optional.empty());
+
+    var list = service.getCreatorPortalCollaborations(null);
+    assertThat(list).isEmpty();
+  }
+
+  @Test
+  void submitEvidenceByBrandUpdatesPostUrlAndPersistsAsset() {
+    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    when(evidenceAssets.save(any()))
+        .thenAnswer(
+            i -> {
+              EvidenceAsset a = i.getArgument(0);
+              a.setId(UUID.randomUUID());
+              return a;
+            });
+
+    SubmitEvidenceRequest req =
+        new SubmitEvidenceRequest(
+            "POST_LINK",
+            "https://tiktok.com/@koc/video/999",
+            null,
+            "Published link");
+
+    EvidenceAssetResponse response = service.submitEvidence(collaboration.getId(), req);
+    assertThat(response.assetType()).isEqualTo("POST_LINK");
+    assertThat(response.source()).isEqualTo("BRAND_UPLOAD");
+    assertThat(response.storageUrl()).isEqualTo("https://tiktok.com/@koc/video/999");
+    assertThat(collaboration.getPublishedContentUrl()).isEqualTo("https://tiktok.com/@koc/video/999");
+  }
+
+  @Test
+  void submitEvidenceByCreatorMasterSetsCreatorSubmittedSource() {
+    User creatorUser =
+        User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
+    authenticate(creatorUser);
+    CreatorMaster master =
+        CreatorMaster.builder().id(UUID.randomUUID()).user(creatorUser).build();
+    collaboration.setMaster(master);
+
+    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    when(evidenceAssets.save(any()))
+        .thenAnswer(
+            i -> {
+              EvidenceAsset a = i.getArgument(0);
+              a.setId(UUID.randomUUID());
+              return a;
+            });
+
+    SubmitEvidenceRequest req =
+        new SubmitEvidenceRequest(
+            "INSIGHTS_SCREENSHOT",
+            "https://s3.amazonaws.com/evidence/insights.png",
+            null,
+            "Insights proof");
+
+    EvidenceAssetResponse response = service.submitEvidence(collaboration.getId(), req);
+    assertThat(response.assetType()).isEqualTo("INSIGHTS_SCREENSHOT");
+    assertThat(response.source()).isEqualTo("CREATOR_SUBMITTED");
+  }
+
+  @Test
+  void submitEvidenceRejectsUnrelatedActor() {
+    User stranger =
+        User.builder().id(UUID.randomUUID()).role(Role.BRAND).status(UserStatus.ACTIVE).build();
+    authenticate(stranger);
+    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+
+    SubmitEvidenceRequest req =
+        new SubmitEvidenceRequest(
+            "POST_LINK", "https://example.com/post", null, null);
+
+    assertCode(() -> service.submitEvidence(collaboration.getId(), req), ErrorCode.ACCESS_DENIED);
+  }
+
+  @Test
+  void getEvidenceAssetsReturnsAllAssetsForCollaboration() {
+    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    EvidenceAsset asset =
+        EvidenceAsset.builder()
+            .id(UUID.randomUUID())
+            .collaboration(collaboration)
+            .assetType("POST_LINK")
+            .storageUrl("https://tiktok.com/@koc/123")
+            .source("CREATOR_SUBMITTED")
+            .uploadedAt(LocalDateTime.now())
+            .build();
+    when(evidenceAssets.findByCollaborationIdOrderByUploadedAtDesc(collaboration.getId()))
+        .thenReturn(List.of(asset));
+
+    List<EvidenceAssetResponse> list = service.getEvidenceAssets(collaboration.getId());
+    assertThat(list).hasSize(1);
+    assertThat(list.get(0).assetType()).isEqualTo("POST_LINK");
   }
 
   void assertCode(org.assertj.core.api.ThrowableAssert.ThrowingCallable action, ErrorCode code) {

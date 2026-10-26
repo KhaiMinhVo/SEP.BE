@@ -17,26 +17,28 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/creators/claim/oauth")
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
 @RequiredArgsConstructor
 @Tag(name = "Creator Claim OAuth")
 public class CreatorClaimOAuthController {
 
   private final CreatorClaimResolutionService claimResolutionService;
   private final CreatorInvitationService invitationService;
+  private final com.influencermatch.backend.creator.client.OAuthProofClient proofClient;
 
   @GetMapping("/{platform}/start")
-  @Operation(summary = "Start OAuth Proof of Control flow (Public)")
+  @Operation(summary = "Start OAuth Proof of Control flow (authenticated Creator)")
   public ResponseEntity<Void> startOAuth(
       @PathVariable("platform") String platform,
       @RequestParam("token") String token,
       @RequestParam(value = "redirect", defaultValue = "true") boolean redirect) {
 
+    proofClient.requireConfigured();
     // First ensure token is valid before initiating redirect
     invitationService.verifyInvitationToken(token);
 
-    // Build platform authorization URL carrying raw token in state
-    String encodedState = URLEncoder.encode(token, StandardCharsets.UTF_8);
-    String redirectUri = "/api/v1/creators/claim/oauth/" + platform.toLowerCase() + "/callback?code=sim-auth-code&state=" + encodedState;
+    // Build platform authorization URL via OAuthProofClient (routes to official sandbox or mock fallback)
+    String redirectUri = proofClient.buildAuthorizationUrl(platform, token);
 
     return ResponseEntity.status(HttpStatus.FOUND)
         .header(HttpHeaders.LOCATION, redirectUri)
@@ -44,7 +46,7 @@ public class CreatorClaimOAuthController {
   }
 
   @GetMapping("/{platform}/callback")
-  @Operation(summary = "OAuth callback for profile claim proof of control (Public GET redirect)")
+  @Operation(summary = "OAuth callback for profile claim proof of control (authenticated Creator redirect)")
   public ApiResponse<OAuthCallbackResponse> handleOAuthCallback(
       @PathVariable("platform") String platform,
       @RequestParam("code") String code,

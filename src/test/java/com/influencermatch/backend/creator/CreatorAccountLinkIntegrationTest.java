@@ -1,6 +1,6 @@
 package com.influencermatch.backend.creator;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -59,10 +59,17 @@ class CreatorAccountLinkIntegrationTest {
   private User kocUser;
   private CreatorMaster masterM1;
 
+  private UUID authenticated(UUID id) {
+    var actor=userRepository.findById(id).orElseThrow();actor.setStatus(UserStatus.ACTIVE);actor.setEmailVerified(true);
+    org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+        new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(actor,null,actor.getAuthorities()));
+    return id;
+  }
+  @org.junit.jupiter.api.AfterEach void clearAuthentication(){org.springframework.security.core.context.SecurityContextHolder.clearContext();}
   @BeforeEach
   void setUp() {
     accountLinkService =
-        new CreatorAccountLinkService(
+        com.influencermatch.backend.support.CreatorServiceFixtures.wire(new CreatorAccountLinkService(
             creatorRepository,
             creatorMasterRepository,
             conflictRepository,
@@ -73,7 +80,7 @@ class CreatorAccountLinkIntegrationTest {
             relationshipRepository,
             userRepository,
             encryptionService,
-            oAuthProofClient);
+            oAuthProofClient));
 
     conflictService =
         new CreatorIdentityConflictService(
@@ -123,7 +130,7 @@ class CreatorAccountLinkIntegrationTest {
             .master(null)
             .build();
 
-    when(creatorRepository.findByPlatformAndExternalId("YOUTUBE", "UC_YOUTUBE_CRAWLED_002"))
+    when(creatorRepository.findLockedByPlatformAndExternalId("YOUTUBE", "UC_YOUTUBE_CRAWLED_002"))
         .thenReturn(Optional.of(crawledYoutube));
 
     when(oAuthProofClient.exchangeAndVerify(eq("YOUTUBE"), eq("auth_code_yt_2"), any(), any()))
@@ -139,7 +146,7 @@ class CreatorAccountLinkIntegrationTest {
     when(creatorRepository.save(any(Creator.class))).thenAnswer(inv -> inv.getArgument(0));
 
     ConnectAccountResponse response =
-        accountLinkService.linkAdditionalAccount(kocUser.getId(), "YOUTUBE", "auth_code_yt_2");
+        accountLinkService.linkAdditionalAccount(authenticated(kocUser.getId()), "YOUTUBE", "auth_code_yt_2");
 
     assertThat(response).isNotNull();
     assertThat(response.getStatus()).isEqualTo("LINKED");
@@ -164,7 +171,7 @@ class CreatorAccountLinkIntegrationTest {
   @Test
   @DisplayName("TC-09: Connect 2nd channel never crawled before -> creates new Creator, immediately sets master_id = M1, AUTHORIZED")
   void testTC09_connectSecondChannel_brandNewAccount_createsAndSetsMaster() {
-    when(creatorRepository.findByPlatformAndExternalId("INSTAGRAM", "ig_brand_new_koc"))
+    when(creatorRepository.findLockedByPlatformAndExternalId("INSTAGRAM", "ig_brand_new_koc"))
         .thenReturn(Optional.empty());
 
     when(oAuthProofClient.exchangeAndVerify(eq("INSTAGRAM"), eq("auth_code_ig_new"), any(), any()))
@@ -184,7 +191,7 @@ class CreatorAccountLinkIntegrationTest {
     });
 
     ConnectAccountResponse response =
-        accountLinkService.linkAdditionalAccount(kocUser.getId(), "INSTAGRAM", "auth_code_ig_new");
+        accountLinkService.linkAdditionalAccount(authenticated(kocUser.getId()), "INSTAGRAM", "auth_code_ig_new");
 
     assertThat(response).isNotNull();
     assertThat(response.getStatus()).isEqualTo("CREATED_AND_LINKED");
@@ -216,7 +223,7 @@ class CreatorAccountLinkIntegrationTest {
             .sourceType(CreatorSourceType.PUBLIC)
             .build();
 
-    when(creatorRepository.findByPlatformAndExternalId("TIKTOK", "tt_open_id_7788"))
+    when(creatorRepository.findLockedByPlatformAndExternalId("TIKTOK", "tt_open_id_7788"))
         .thenReturn(Optional.of(tiktokCreator));
 
     when(oAuthProofClient.exchangeAndVerify(eq("TIKTOK"), eq("auth_code_tt_ns"), any(), any()))
@@ -232,7 +239,7 @@ class CreatorAccountLinkIntegrationTest {
     when(creatorRepository.save(any(Creator.class))).thenAnswer(inv -> inv.getArgument(0));
 
     ConnectAccountResponse response =
-        accountLinkService.linkAdditionalAccount(kocUser.getId(), "TIKTOK", "auth_code_tt_ns");
+        accountLinkService.linkAdditionalAccount(authenticated(kocUser.getId()), "TIKTOK", "auth_code_tt_ns");
 
     assertThat(response).isNotNull();
     assertThat(response.getStatus()).isEqualTo("LINKED");
@@ -268,7 +275,7 @@ class CreatorAccountLinkIntegrationTest {
             .master(otherMasterM2) // already owned by M2!
             .build();
 
-    when(creatorRepository.findByPlatformAndExternalId("TIKTOK", "tt_contested_channel"))
+    when(creatorRepository.findLockedByPlatformAndExternalId("TIKTOK", "tt_contested_channel"))
         .thenReturn(Optional.of(alreadyOwnedAccount));
 
     when(oAuthProofClient.exchangeAndVerify(eq("TIKTOK"), eq("auth_code_conflict"), any(), any()))
@@ -291,22 +298,10 @@ class CreatorAccountLinkIntegrationTest {
           return c;
         });
 
-    ConnectAccountResponse response =
-        accountLinkService.linkAdditionalAccount(kocUser.getId(), "TIKTOK", "auth_code_conflict");
+    assertThatThrownBy(()->accountLinkService.linkAdditionalAccount(authenticated(kocUser.getId()),"TIKTOK","auth_code_conflict"))
+        .isInstanceOf(com.influencermatch.backend.exception.CreatorOwnershipConflictException.class);
+    verify(conflictRepository,never()).save(any());verify(creatorRepository,never()).save(any());
 
-    assertThat(response).isNotNull();
-    assertThat(response.getStatus()).isEqualTo("CONFLICT_PENDING_REVIEW");
-
-    // Critical assertion: account ownership is preserved, NOT reassigned to M1
-    assertThat(alreadyOwnedAccount.getMaster()).isEqualTo(otherMasterM2);
-
-    // Conflict recorded with PENDING_MANAGER status
-    verify(conflictRepository).save(argThat(conflict ->
-        "ACCOUNT_ALREADY_LINKED".equals(conflict.getConflictType())
-            && "PENDING_MANAGER".equals(conflict.getStatus())
-            && conflict.getSourceAccount().getId().equals(alreadyOwnedAccount.getId())
-            && conflict.getTargetMaster().getId().equals(masterM1.getId())
-    ));
   }
 
   @Test
@@ -331,7 +326,7 @@ class CreatorAccountLinkIntegrationTest {
             .status("ACTIVE")
             .build();
 
-    when(creatorRepository.findByPlatformAndExternalId("YOUTUBE", "UC_MY_CHANNEL_001"))
+    when(creatorRepository.findLockedByPlatformAndExternalId("YOUTUBE", "UC_MY_CHANNEL_001"))
         .thenReturn(Optional.of(myOwnChannel));
     when(verificationRepository.findFirstByCreatorIdAndStatusOrderByVerifiedAtDesc(myOwnChannel.getId(), "ACTIVE"))
         .thenReturn(Optional.of(existingVerification));
@@ -347,7 +342,7 @@ class CreatorAccountLinkIntegrationTest {
             .build());
 
     ConnectAccountResponse response =
-        accountLinkService.linkAdditionalAccount(kocUser.getId(), "YOUTUBE", "refresh_code_new");
+        accountLinkService.linkAdditionalAccount(authenticated(kocUser.getId()), "YOUTUBE", "refresh_code_new");
 
     assertThat(response).isNotNull();
     assertThat(response.getStatus()).isEqualTo("ALREADY_LINKED");

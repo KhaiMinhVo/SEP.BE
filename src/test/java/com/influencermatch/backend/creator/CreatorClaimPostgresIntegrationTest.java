@@ -5,7 +5,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.influencermatch.backend.auth.service.GoogleAuthService;
 import com.influencermatch.backend.creator.model.Creator;
 import com.influencermatch.backend.creator.repository.CreatorRepository;
 import com.influencermatch.backend.security.jwt.JwtTokenProvider;
@@ -46,7 +45,6 @@ class CreatorClaimPostgresIntegrationTest {
 
   @Autowired MockMvc mvc;
   @Autowired ObjectMapper json;
-  @Autowired GoogleAuthService google;
   @Autowired UserRepository users;
   @Autowired CreatorRepository creators;
   @Autowired JwtTokenProvider jwt;
@@ -71,11 +69,8 @@ class CreatorClaimPostgresIntegrationTest {
 
   private User user(Role role, boolean verified) {
     String email = UUID.randomUUID() + "@example.test";
-    if (verified) {
-      var login = google.exchange(google.completeGoogleLogin(UUID.randomUUID().toString(), email, "Creator", true, role));
-      return users.findById(login.getUser().getId()).orElseThrow();
-    }
-    return users.saveAndFlush(User.builder().email(email).fullName("Test").role(role).status(UserStatus.ACTIVE).build());
+    return users.saveAndFlush(User.builder().email(email).fullName("Test").role(role)
+        .status(UserStatus.ACTIVE).emailVerified(true).build());
   }
 
   private Creator channel() {
@@ -125,7 +120,8 @@ class CreatorClaimPostgresIntegrationTest {
     String path = "/creators/" + c.getId() + "/claim";
     call(null, post(path), EVIDENCE, 401);
     call(user(Role.BRAND, false), post(path), EVIDENCE, 403);
-    call(user(Role.CREATOR, false), post(path), EVIDENCE, 403);
+    var pending=user(Role.CREATOR,false);pending.setEmailVerified(false);users.saveAndFlush(pending);
+    call(pending, post(path), EVIDENCE, 401);
     call(owner, post(path), "{\"evidenceUrls\":[],\"note\":\"\"}", 400);
     call(owner, post("/creators/" + UUID.randomUUID() + "/claim"), EVIDENCE, 404);
     claim(owner, c);
@@ -171,12 +167,10 @@ class CreatorClaimPostgresIntegrationTest {
     assertThat(profile).doesNotContain("evidenceUrls","claimantId","My channel");
   }
 
-  @Test void unverifiedGoogleIdentityCannotSubmitClaim() throws Exception {
+  @Test void unverifiedEmailCannotAuthenticateForClaim() throws Exception {
     var owner=user(Role.CREATOR,false);var c=channel();
-    identities.saveAndFlush(com.influencermatch.backend.auth.model.ExternalIdentity.builder().user(owner)
-        .provider(com.influencermatch.backend.auth.model.ExternalIdentityProvider.GOOGLE)
-        .providerSubject(UUID.randomUUID().toString()).providerEmail(owner.getEmail()).emailVerified(false).build());
-    call(owner,post("/creators/"+c.getId()+"/claim"),EVIDENCE,403);
+    owner.setEmailVerified(false); users.saveAndFlush(owner);
+    call(owner,post("/creators/"+c.getId()+"/claim"),EVIDENCE,401);
     assertThat(claimRepository.existsByCreatorIdAndClaimantIdAndStatus(c.getId(),owner.getId(),
         com.influencermatch.backend.creator.enums.CreatorClaimStatus.PENDING)).isFalse();
     assertThat(creators.findById(c.getId()).orElseThrow().getOwner()).isNull();
@@ -214,7 +208,7 @@ class CreatorClaimPostgresIntegrationTest {
     call(user(Role.ADMIN,false),patch("/data/creator-claims/"+id+"/review"),
         json.writeValueAsString(Map.of("decision","APPROVED","reason","Verified")),200);
     call(user(Role.CREATOR,true),post("/creators/"+channel.getId()+"/claim"),EVIDENCE,409);
-    assertThat(creators.findById(channel.getId()).orElseThrow().getOwner().getId()).isEqualTo(owner.getId());
+    assertThat(jdbc.queryForObject("select m.user_id from creator c join creator_master m on m.id=c.master_id where c.id=?", UUID.class, channel.getId())).isEqualTo(owner.getId());
   }
 
 }

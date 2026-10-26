@@ -25,15 +25,16 @@ import org.springframework.web.bind.annotation.*;
 public class CreatorPortalAccountController {
 
   private final CreatorAccountLinkService accountLinkService;
+  private final com.influencermatch.backend.creator.client.OAuthProofClient proofClient;
 
   @PostMapping("/connect/{platform}/start")
-  @PreAuthorize("hasAuthority('VIEW_OWN_PROFILE') or hasAuthority('CLAIM_CREATOR_PROFILE')")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
   @Operation(summary = "Initiate connection flow for an additional social media channel")
   public ApiResponse<Map<String, String>> startConnect(
       @PathVariable("platform") String platform) {
 
     User actor = Permissions.actor();
-    String startUri = "/api/v1/creators/portal/accounts/connect/" + platform.toLowerCase() + "/callback?state=" + actor.getId();
+    String startUri = proofClient.buildAuthorizationUrl(platform, actor.getId().toString());
     return ApiResponse.ok(Map.of(
         "platform", platform.toUpperCase(),
         "startUri", startUri,
@@ -42,7 +43,7 @@ public class CreatorPortalAccountController {
   }
 
   @PostMapping("/connect/{platform}/callback")
-  @PreAuthorize("hasAuthority('VIEW_OWN_PROFILE') or hasAuthority('CLAIM_CREATOR_PROFILE')")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
   @Operation(summary = "Complete connection of additional channel using OAuth code")
   public ApiResponse<ConnectAccountResponse> handleConnectCallback(
       @PathVariable("platform") String platform,
@@ -56,11 +57,20 @@ public class CreatorPortalAccountController {
   }
 
   @GetMapping
-  @PreAuthorize("hasAuthority('VIEW_OWN_PROFILE') or hasAuthority('CLAIM_CREATOR_PROFILE')")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
   @Operation(summary = "List all social media accounts linked to current creator's master profile")
   public ApiResponse<List<LinkedAccountDto>> getLinkedAccounts() {
     User actor = Permissions.actor();
     List<LinkedAccountDto> accounts = accountLinkService.getLinkedAccounts(actor.getId());
     return ApiResponse.ok(accounts);
   }
+
+  @GetMapping("/reach")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
+  @Operation(summary = "Get aggregated multi-channel reach metrics across all linked channels for current creator master")
+  public ApiResponse<com.influencermatch.backend.creator.dto.AggregatedReachDto> getAggregatedReach() {
+    User actor = Permissions.actor();
+    return ApiResponse.ok(accountLinkService.getAggregatedReach(actor.getId()));
+  }
 }
+

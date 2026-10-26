@@ -51,13 +51,13 @@ class CreatorInvitationServiceTest {
     campaignRepository = mock(CampaignRepository.class);
     userRepository = mock(UserRepository.class);
 
-    invitationService = new CreatorInvitationService(
+    invitationService = com.influencermatch.backend.support.CreatorServiceFixtures.wire(new CreatorInvitationService(
         creatorRepository,
         creatorInvitationRepository,
         brandProfileRepository,
         campaignRepository,
         userRepository
-    );
+    ));
 
     mockBrandUser = User.builder()
         .id(UUID.randomUUID())
@@ -88,7 +88,7 @@ class CreatorInvitationServiceTest {
         .sourceType(CreatorSourceType.PUBLIC)
         .build();
 
-    when(creatorRepository.findById(creatorId)).thenReturn(Optional.of(creator));
+    when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
     when(brandProfileRepository.findByUserId(mockBrandUser.getId())).thenReturn(Optional.of(
         BrandProfile.builder().id(UUID.randomUUID()).user(mockBrandUser).businessName("Acme").build()
     ));
@@ -104,13 +104,18 @@ class CreatorInvitationServiceTest {
     assertThat(response.getCreatorId()).isEqualTo(creatorId);
     assertThat(response.getEmail()).isEqualTo("koc@gmail.com");
     assertThat(response.getStatus()).isEqualTo("PENDING");
-    assertThat(response.getRawToken()).isNotBlank();
+    var mail=org.mockito.ArgumentCaptor.forClass(String.class);
+    var outbox=(com.influencermatch.backend.creator.email.ClaimEmailOutboxService)org.springframework.test.util.ReflectionTestUtils.getField(invitationService,"outbox");
+    verify(outbox).requireConfigured();verify(outbox).enqueue(any(),mail.capture());
+    assertThat(response.getEmailStatus()).isEqualTo("QUEUED");
+    String rawToken=java.net.URI.create(mail.getValue()).getQuery().substring("token=".length());
+    assertThat(rawToken).hasSize(64);
 
     ArgumentCaptor<CreatorInvitation> captor = ArgumentCaptor.forClass(CreatorInvitation.class);
     verify(creatorInvitationRepository).save(captor.capture());
     CreatorInvitation saved = captor.getValue();
     assertThat(saved.getTargetCreator()).isEqualTo(creator);
-    assertThat(saved.getTokenHash()).isEqualTo(CreatorInvitationService.hashToken(response.getRawToken()));
+    assertThat(saved.getTokenHash()).isEqualTo(CreatorInvitationService.hashToken(rawToken));
     assertThat(saved.getExpiresAt()).isAfter(LocalDateTime.now().plusDays(6));
   }
 
@@ -125,7 +130,8 @@ class CreatorInvitationServiceTest {
         .sourceType(CreatorSourceType.AUTHORIZED)
         .build();
 
-    when(creatorRepository.findById(creatorId)).thenReturn(Optional.of(creator));
+    when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
+    when(brandProfileRepository.findByUserId(mockBrandUser.getId())).thenReturn(Optional.of(BrandProfile.builder().id(UUID.randomUUID()).user(mockBrandUser).build()));
 
     assertThatThrownBy(() -> invitationService.sendInvitation(creatorId, "koc@gmail.com", null, null))
         .isInstanceOf(ConflictException.class)
@@ -181,8 +187,8 @@ class CreatorInvitationServiceTest {
         .isInstanceOf(ConflictException.class)
         .satisfies(e -> assertThat(((ConflictException) e).code()).isEqualTo(ErrorCode.INVITATION_EXPIRED));
 
-    assertThat(invitation.getStatus()).isEqualTo("EXPIRED");
-    verify(creatorInvitationRepository).save(invitation);
+    assertThat(invitation.getStatus()).isEqualTo("PENDING");
+    verify(creatorInvitationRepository,never()).save(any());
   }
 
   @Test

@@ -18,6 +18,7 @@ public interface BrandCreatorRelationshipRepository extends JpaRepository<BrandC
     Optional<BrandCreatorRelationship> findLockedById(@org.springframework.data.repository.query.Param("id") UUID id);
     Page<BrandCreatorRelationship> findByCampaignId(UUID campaignId, Pageable pageable);
     boolean existsByCampaignIdAndCreatorId(UUID campaignId, UUID creatorId);
+    Optional<BrandCreatorRelationship> findByCampaignIdAndCreatorId(UUID campaignId, UUID creatorId);
     Optional<BrandCreatorRelationship> findByIdAndUserId(UUID id, UUID userId);
 
     @org.springframework.data.jpa.repository.Modifying

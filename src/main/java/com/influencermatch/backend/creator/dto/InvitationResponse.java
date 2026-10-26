@@ -16,6 +16,6 @@ public class InvitationResponse {
   private UUID creatorId;
   private String email;
   private String status;
+  private String emailStatus;
   private LocalDateTime expiresAt;
-  private String rawToken; // populated on invitation generation for delivery/testing
 }

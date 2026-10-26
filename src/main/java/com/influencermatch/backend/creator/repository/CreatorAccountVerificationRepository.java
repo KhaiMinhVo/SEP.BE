@@ -17,4 +17,7 @@ public interface CreatorAccountVerificationRepository
 
   Optional<CreatorAccountVerification> findFirstByCreatorIdAndStatusOrderByVerifiedAtDesc(
       UUID creatorId, String status);
+
+  Optional<CreatorAccountVerification> findFirstByCreatorIdOrderByVerifiedAtDesc(UUID creatorId);
 }
+

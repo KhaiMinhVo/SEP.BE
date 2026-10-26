@@ -105,6 +105,19 @@ public class BrandService {
 
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_BRAND_PROFILE')")
+  public BrandResponse updateMe(BrandRequest request, Authentication authentication) {
+    com.influencermatch.backend.security.permission.Permissions.require(
+        com.influencermatch.backend.security.permission.Permission.UPDATE_BRAND_PROFILE);
+    User actor = actor(authentication);
+    BrandProfile profile =
+        profiles
+            .findByUserId(actor.getId())
+            .orElseThrow(() -> notFound("Brand profile not found for user: " + actor.getId()));
+    return update(profile.getId(), request, authentication);
+  }
+
+  @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_BRAND_PROFILE')")
   public BrandResponse update(UUID profileId, BrandRequest request, Authentication authentication) {
     com.influencermatch.backend.security.permission.Permissions.require(
         com.influencermatch.backend.security.permission.Permission.UPDATE_BRAND_PROFILE);
@@ -112,8 +125,10 @@ public class BrandService {
     requireAccess(profile, actor(authentication));
     profile.setBusinessName(request.businessName().trim());
     applyProfile(profile, request);
+    profiles.save(profile);
     BrandContext context = requireContext(profileId);
     context.updateProfileContext(profileJson(profile));
+    contexts.save(context);
     return response(profile, context);
   }
 

@@ -30,7 +30,7 @@ public class RefreshTokenService {
   public Issued issue(User user) {
     users.lockRoleChanges();
     User current = users.findById(user.getId()).orElseThrow(this::invalid);
-    if (!current.isEnabled()
+    if (!current.isEmailVerified() || !current.isEnabled()
         || !current.isAccountNonLocked()
         || current.getAuthVersion() != user.getAuthVersion()
         || current.getRole() != user.getRole()) throw invalid();
@@ -54,7 +54,7 @@ public class RefreshTokenService {
     User user =
         users
             .findById(old.getUserId())
-            .filter(u -> u.isEnabled() && u.isAccountNonLocked())
+            .filter(u -> u.isEmailVerified() && u.isEnabled() && u.isAccountNonLocked())
             .orElseThrow(this::invalid);
     old.setRevokedAt(now);
     Issued next = create(user);

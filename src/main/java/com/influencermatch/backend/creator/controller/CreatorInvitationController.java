@@ -21,11 +21,12 @@ import org.springframework.web.bind.annotation.*;
 public class CreatorInvitationController {
 
   private final CreatorInvitationService invitationService;
+  private final com.influencermatch.backend.creator.email.ClaimEmailOutboxService outbox;
 
   @PostMapping("/{id}/invite")
-  @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('MANAGE_OWN_SHORTLIST')")
   @SecurityRequirement(name = "BearerAuth")
-  @Operation(summary = "Send claim invitation to creator")
+  @Operation(summary = "Queue a seven-day claim invitation email", description="BRAND owning the profile/campaign only. Commits invitation and encrypted outbox before async SMTP. HTTP 200 means queued, not delivered. Blocks owned channels or effective pending invitations with 409. No raw token; this link does not register a Creator.")
   public ApiResponse<InvitationResponse> sendInvitation(
       @PathVariable("id") UUID creatorId,
       @Valid @RequestBody SendInvitationRequest request) {
@@ -35,7 +36,7 @@ public class CreatorInvitationController {
   }
 
   @PostMapping("/invitations")
-  @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('MANAGE_OWN_SHORTLIST')")
   @SecurityRequirement(name = "BearerAuth")
   @Operation(summary = "Send claim invitation to creator (collection endpoint)")
   public ApiResponse<InvitationResponse> sendInvitationCollection(
@@ -47,6 +48,22 @@ public class CreatorInvitationController {
     InvitationResponse response =
         invitationService.sendInvitation(request.getCreatorId(), request.getEmail(), null, request.getCampaignId());
     return ApiResponse.ok(response);
+  }
+
+  @GetMapping("/invitations/{id}/email-delivery")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('MANAGE_OWN_SHORTLIST')")
+  @SecurityRequirement(name="BearerAuth")
+  @Operation(summary="Read claim email delivery status",description="Only the owning Brand. Historical invitations return NOT_TRACKED. No email content, token or SMTP errors are exposed.")
+  public ApiResponse<com.influencermatch.backend.creator.email.ClaimEmailOutboxService.Delivery> delivery(@PathVariable UUID id) {
+    return ApiResponse.ok(outbox.status(id));
+  }
+
+  @PostMapping("/invitations/{id}/retry-email")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('MANAGE_OWN_SHORTLIST')")
+  @SecurityRequirement(name="BearerAuth")
+  @Operation(summary="Queue a failed claim email again",description="FAILED and still valid only. Preserves token/email/expiry. At least 60 seconds since the last attempt; at most five manual retries per hour. 409 if not retryable; 429 if rate limited.")
+  public ApiResponse<com.influencermatch.backend.creator.email.ClaimEmailOutboxService.Delivery> retry(@PathVariable UUID id) {
+    return ApiResponse.ok(outbox.retry(id));
   }
 
   @GetMapping("/claim/invitation/verify")

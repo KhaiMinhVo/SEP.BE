@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.*;
 public class CreatorClaimController {
   private final CreatorClaimService service;
   @PostMapping("/creators/{id}/claim") @PreAuthorize("hasAuthority('CLAIM_CREATOR_PROFILE')")
-  @Operation(summary="Submit channel ownership evidence",description="Creates PENDING claim, not authorization. Requires an active CREATOR with verified Google identity. Evidence is private and URLs are not fetched.")
+  @Operation(summary="Submit channel ownership evidence",description="Creates PENDING claim, not authorization. Requires an active CREATOR with verified email. Evidence is private and URLs are not fetched.")
   public ResponseEntity<ApiResponse<ClaimResponse>> claim(@PathVariable UUID id,@Valid @RequestBody ClaimRequest request) {
     return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(service.claim(id,request)));
   }

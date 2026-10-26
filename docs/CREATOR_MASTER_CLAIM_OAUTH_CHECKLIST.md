@@ -1,3 +1,9 @@
+> MVP update: claim invitations now send SMTP email without rawToken response/logging, block owned channels and effective pending invitations, and reject ownership conflicts with HTTP 409 plus durable audit. Transfer resolve endpoint is removed; no conflict queue is created. See [claim-invitations-mvp.md](claim-invitations-mvp.md). Design items below are historical.
+
+> Schema update: V15 removes auth_exchange_code, creator_rate_card and duplicate metric profile fields; Creator retains the current URL/location. Historical schema references below are not the final schema. See [schema-cleanup-v15.md](schema-cleanup-v15.md).
+
+> Historical design checklist. Current authentication is invitation + password + email OTP, not Google Login. CreatorMaster is created on Creator registration. Claim callbacks require an authenticated verified matching Creator and never create users. Provider proof is dev-only simulation; checked historical items do not establish real platform integration. Current flow: [registration-and-email-otp.md](registration-and-email-otp.md).
+
 # CREATOR MASTER IDENTITY MANAGEMENT
 ## CLAIM-BASED IDENTITY & OAUTH ACCOUNT LINKING – CODEBASE AUDIT & ARCHITECTURE IMPLEMENTATION CHECKLIST
 

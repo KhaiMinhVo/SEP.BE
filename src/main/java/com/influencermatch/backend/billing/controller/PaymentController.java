@@ -21,14 +21,22 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 @RestController
 @RequestMapping("/billing")
 @RequiredArgsConstructor
+@Tag(name = "Billing & Payments", description = "VNPay payment gateway integration and subscription checkouts")
 public class PaymentController {
 
   private final PaymentService paymentService;
   private final BrandProfileRepository brandProfileRepository;
 
+  @Operation(
+      summary = "Create checkout payment URL for subscription plan",
+      security = @SecurityRequirement(name = "BearerAuth"))
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('MANAGE_OWN_SUBSCRIPTION')")
   @PostMapping("/subscribe")

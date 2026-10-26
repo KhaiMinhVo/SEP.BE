@@ -40,6 +40,12 @@ public class CampaignOutcome {
 
   private Long clicks;
 
+  private Long likes;
+
+  private Long comments;
+
+  private Long shares;
+
   private String resultNote;
 
   private LocalDateTime recordedAt;

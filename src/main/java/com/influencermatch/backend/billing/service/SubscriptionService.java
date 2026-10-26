@@ -12,14 +12,17 @@ import com.influencermatch.backend.security.permission.*;
 import java.time.LocalDate;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SubscriptionService {
   private final SubscriptionRepository subscriptionRepository;
   private final PlanService planService;
+  private final PlanRepository planRepository;
   private final BrandProfileRepository brandProfileRepository;
   private final AuditService audit;
   private final jakarta.persistence.EntityManager entityManager;
@@ -101,6 +104,84 @@ public class SubscriptionService {
           before,
           toResponse(sub),
           "Administrative cancellation");
+  }
+
+  /**
+   * Quota Guard: Thẩm định hạn mức chiến dịch trước khi cho phép tạo mới.
+   */
+  @Transactional
+  public void checkAndDeductCampaignQuota(UUID brandProfileId) {
+    Subscription sub =
+        subscriptionRepository.findByBrandProfileId(brandProfileId).stream()
+            .filter(
+                s ->
+                    s.getStatus() == SubscriptionStatus.ACTIVE
+                        && !s.getExpirationDate().isBefore(LocalDate.now()))
+            .findFirst()
+            .orElse(null);
+
+    if (sub == null) {
+      if (planRepository.count() == 0) {
+        log.warn("No billing plans configured in system; bypassing quota guard for brand {}", brandProfileId);
+        return;
+      }
+      throw new ForbiddenException("No active subscription found. Please subscribe to create campaigns.");
+    }
+
+    int quotaLimit = sub.getPlan().getCampaignQuota();
+    if (sub.getUsedCampaignQuota() >= quotaLimit) {
+      throw new ConflictException(
+          ErrorCode.QUOTA_EXCEEDED,
+          "Campaign quota exceeded (" + sub.getUsedCampaignQuota() + "/" + quotaLimit + "). Please upgrade your plan.");
+    }
+
+    sub.setUsedCampaignQuota(sub.getUsedCampaignQuota() + 1);
+    subscriptionRepository.save(sub);
+  }
+
+  /**
+   * Two-Phase Quota Guard: Đặt trước (reserve) 1 lượt đề xuất AI bằng câu lệnh Atomic UPDATE.
+   * Trả về subscriptionId để có thể rollback nếu luồng xử lý downstream gặp sự cố.
+   */
+  @Transactional
+  public UUID reserveRecommendationQuota(UUID brandProfileId) {
+    Subscription sub =
+        subscriptionRepository.findByBrandProfileId(brandProfileId).stream()
+            .filter(
+                s ->
+                    s.getStatus() == SubscriptionStatus.ACTIVE
+                        && !s.getExpirationDate().isBefore(LocalDate.now()))
+            .findFirst()
+            .orElse(null);
+
+    if (sub == null) {
+      if (planRepository.count() == 0) {
+        log.warn("No billing plans configured in system; bypassing recommendation quota guard for brand {}", brandProfileId);
+        return null;
+      }
+      throw new ForbiddenException("No active subscription found. Please subscribe to use AI recommendations.");
+    }
+
+    int updated = subscriptionRepository.reserveQuotaAtomically(sub.getId());
+    if (updated == 0) {
+      int quotaLimit = sub.getPlan().getRecommendationQuota();
+      throw new ConflictException(
+          ErrorCode.QUOTA_EXCEEDED,
+          "AI recommendation quota exceeded (" + sub.getUsedRecommendationQuota() + "/" + quotaLimit + "). Please upgrade your plan.");
+    }
+    return sub.getId();
+  }
+
+  /**
+   * Rollback hoàn trả lượt AI recommendation nếu downstream gặp sự cố (Network/Exception).
+   */
+  @Transactional
+  public void releaseRecommendationQuota(UUID subscriptionId) {
+    if (subscriptionId == null) {
+      return;
+    }
+    subscriptionRepository.releaseQuotaReservation(subscriptionId);
+    log.info("Rollback AI recommendation quota reservation for subscription {}", subscriptionId);
   }
 
   private void requireOwnerOrAdmin(BrandProfile brand) {

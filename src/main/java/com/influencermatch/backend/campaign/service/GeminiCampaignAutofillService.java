@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -146,9 +147,10 @@ public class GeminiCampaignAutofillService {
                       "generationConfig",
                       new java.util.LinkedHashMap<String, Object>() {
                         {
-                          put("maxOutputTokens", geminiProperties.getMaxOutputTokens());
+                          put("maxOutputTokens", Math.max(geminiProperties.getMaxOutputTokens(), 2048));
                           put("temperature", geminiProperties.getTemperature());
                           put("responseMimeType", "application/json");
+                          put("thinkingConfig", Map.of("thinkingBudget", 0));
                         }
                       });
                 }

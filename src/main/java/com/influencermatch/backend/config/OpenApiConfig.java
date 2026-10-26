@@ -66,13 +66,14 @@ public class OpenApiConfig {
             Enables Brand/SME users to discover creators, manage campaigns,
             track performance, and handle end-to-end collaboration workflows.
 
-            **Security**: Register, login, refresh and Google handshake/exchange are public.
+            **Security**: Brand registration, invited Creator registration, OTP verification, password setup, login and refresh are public. Google Login is removed. Registration requires SMTP; channel ownership is a separate Claim flow.
             `/auth/me` and logout require JWT. Permissions come from the current database role;
             role/status changes invalidate existing JWT and refresh tokens immediately.
             BRAND owns its business resources. ADMIN can read support data, not write Brand
             profiles or campaigns. DATA_MANAGER cannot access private Brand or billing data.
             Ingestion uses X-Service-Key instead of JWT. VNPay callbacks require a valid gateway
             signature, matching merchant and transaction amount; they do not use user permissions.
+            Brand channel invitations queue encrypted email jobs before async SMTP; HTTP 200 means QUEUED. Owner Brands can inspect delivery/retry FAILED jobs. Duplicate/owned accounts return 409. Ownership transfer resolution is unavailable in MVP.
             Notification, Recommendation and CRM permissions are declarations, not new APIs.
             """)
         .contact(

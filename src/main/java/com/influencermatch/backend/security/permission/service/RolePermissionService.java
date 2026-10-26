@@ -87,7 +87,7 @@ public class RolePermissionService {
       boolean enabled = rows.getOrDefault(p, def);
       boolean impl = PermissionCatalog.implemented(p);
       var entry = PermissionCatalog.entry(p);
-      return new Capability(p, entry.name(), entry.module(), def, enabled, impl, role != Role.ADMIN && def);
+      return new Capability(p, entry.name(), entry.module(), def, enabled, impl, role != Role.ADMIN && def && impl);
     }).sorted(Comparator.comparing(Capability::module).thenComparing(Capability::name)).toList();
     return new RoleView(role, version, capabilities);
   }

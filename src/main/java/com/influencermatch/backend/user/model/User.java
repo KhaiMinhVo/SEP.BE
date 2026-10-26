@@ -27,6 +27,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 @AllArgsConstructor
 @SuperBuilder
 @Entity
+@org.hibernate.annotations.DynamicUpdate
 @Table(name = "\"user\"")
 @AttributeOverride(name = "id", column = @Column(updatable = false, nullable = false))
 public class User extends BaseEntity implements UserDetails {
@@ -50,6 +51,9 @@ public class User extends BaseEntity implements UserDetails {
 
   @Column(nullable = false)
   private long authVersion;
+
+  @lombok.Builder.Default
+  @Column(nullable = false) private boolean emailVerified = true;
 
   @Column private LocalDateTime lastLoginAt;
 

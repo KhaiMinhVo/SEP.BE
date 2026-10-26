@@ -60,6 +60,7 @@ public class ShortlistServiceImpl implements ShortlistService {
   private final CreatorInvitationService creatorInvitationService;
   private final CreatorInvitationRepository creatorInvitationRepository;
   private final CrawlerServiceClient crawlerServiceClient;
+  private final ShortlistNotificationService notificationService;
 
   @Autowired
   public ShortlistServiceImpl(
@@ -72,7 +73,8 @@ public class ShortlistServiceImpl implements ShortlistService {
       BrandCreatorRelationshipRepository relationshipRepository,
       @Autowired(required = false) CreatorInvitationService creatorInvitationService,
       @Autowired(required = false) CreatorInvitationRepository creatorInvitationRepository,
-      @Autowired(required = false) CrawlerServiceClient crawlerServiceClient) {
+      @Autowired(required = false) CrawlerServiceClient crawlerServiceClient,
+      @Autowired(required = false) ShortlistNotificationService notificationService) {
     this.shortlistItemRepository = shortlistItemRepository;
     this.ownership = ownership;
     this.creatorRepository = creatorRepository;
@@ -83,6 +85,32 @@ public class ShortlistServiceImpl implements ShortlistService {
     this.creatorInvitationService = creatorInvitationService;
     this.creatorInvitationRepository = creatorInvitationRepository;
     this.crawlerServiceClient = crawlerServiceClient;
+    this.notificationService = notificationService;
+  }
+
+  public ShortlistServiceImpl(
+      ShortlistItemRepository shortlistItemRepository,
+      CampaignOwnershipService ownership,
+      CreatorRepository creatorRepository,
+      UserRepository userRepository,
+      RecommendationRunRepository recommendationRunRepository,
+      PublicCreatorMetricRepository publicCreatorMetricRepository,
+      BrandCreatorRelationshipRepository relationshipRepository,
+      CreatorInvitationService creatorInvitationService,
+      CreatorInvitationRepository creatorInvitationRepository,
+      CrawlerServiceClient crawlerServiceClient) {
+    this(
+        shortlistItemRepository,
+        ownership,
+        creatorRepository,
+        userRepository,
+        recommendationRunRepository,
+        publicCreatorMetricRepository,
+        relationshipRepository,
+        creatorInvitationService,
+        creatorInvitationRepository,
+        crawlerServiceClient,
+        null);
   }
 
   public ShortlistServiceImpl(
@@ -105,6 +133,7 @@ public class ShortlistServiceImpl implements ShortlistService {
         relationshipRepository,
         creatorInvitationService,
         creatorInvitationRepository,
+        null,
         null);
   }
 
@@ -124,6 +153,7 @@ public class ShortlistServiceImpl implements ShortlistService {
         recommendationRunRepository,
         publicCreatorMetricRepository,
         relationshipRepository,
+        null,
         null,
         null,
         null);
@@ -212,6 +242,11 @@ public class ShortlistServiceImpl implements ShortlistService {
 
     item = shortlistItemRepository.save(item);
 
+    long totalCount =
+        shortlistItemRepository.countByCampaignIdAndStatusNot(campaignId, ShortlistStatus.REMOVED);
+    String creatorName =
+        creator.getDisplayName() != null ? creator.getDisplayName() : creator.getUserName();
+
     if (crawlerServiceClient != null) {
       try {
         crawlerServiceClient.triggerShortlistCrawlAsync(
@@ -225,10 +260,19 @@ public class ShortlistServiceImpl implements ShortlistService {
       }
     }
 
-    long totalCount =
-        shortlistItemRepository.countByCampaignIdAndStatusNot(campaignId, ShortlistStatus.REMOVED);
-    String creatorName =
-        creator.getDisplayName() != null ? creator.getDisplayName() : creator.getUserName();
+    if (notificationService != null) {
+      try {
+        notificationService.notifyCrawlStarted(
+            campaignId,
+            creator.getId(),
+            creatorName,
+            creator.getPlatform(),
+            creator.getUserName()
+        );
+      } catch (Exception e) {
+        log.warn("Could not emit SSE crawl started event for creator {}: {}", creator.getId(), e.getMessage());
+      }
+    }
 
     ShortlistItemDto dto = mapToDto(item);
     dto.setAction("ADDED");

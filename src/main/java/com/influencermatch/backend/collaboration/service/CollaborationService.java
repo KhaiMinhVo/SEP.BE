@@ -7,11 +7,16 @@ import com.influencermatch.backend.collaboration.dto.*;
 import com.influencermatch.backend.collaboration.enums.*;
 import com.influencermatch.backend.collaboration.model.*;
 import com.influencermatch.backend.collaboration.repository.*;
+import com.influencermatch.backend.common.dto.PageResponse;
+import com.influencermatch.backend.creator.model.CreatorMaster;
+import com.influencermatch.backend.creator.repository.CreatorMasterRepository;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.relationship.enums.RelationshipStage;
 import com.influencermatch.backend.relationship.model.BrandCreatorRelationship;
 import com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository;
 import com.influencermatch.backend.security.permission.*;
+import com.influencermatch.backend.user.enums.Role;
+import com.influencermatch.backend.user.model.User;
 import jakarta.persistence.EntityManager;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validator;
@@ -19,6 +24,8 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +38,7 @@ public class CollaborationService {
   private final CollaborationRepository collaborations;
   private final CampaignOutcomeRepository outcomes;
   private final CreatorReviewRepository reviews;
+  private final CreatorMasterRepository creatorMasters;
   private final EntityManager entityManager;
   private final Validator validator;
 
@@ -192,6 +200,185 @@ public class CollaborationService {
         review.getWouldCollaborateAgain(),
         review.getNote(),
         review.getReviewedAt());
+  }
+
+  @Transactional(readOnly = true)
+  @PreAuthorize("hasAuthority('MANAGE_OWN_COLLABORATION')")
+  public PageResponse<CollaborationSummaryDto> getCampaignCollaborations(
+      UUID campaignId, CollaborationStatus status, Pageable pageable) {
+    Permissions.require(Permission.MANAGE_OWN_COLLABORATION);
+    Campaign campaign =
+        campaigns.findById(campaignId).orElseThrow(() -> new NotFoundException("Campaign not found"));
+    if (!campaign.getBrandProfile().getUser().getId().equals(Permissions.actor().getId())) {
+      throw new ForbiddenException("Campaign belongs to another brand");
+    }
+
+    Page<Collaboration> page =
+        (status == null)
+            ? collaborations.findByCampaignId(campaignId, pageable)
+            : collaborations.findByCampaignIdAndStatus(campaignId, status, pageable);
+
+    List<CollaborationSummaryDto> items =
+        page.getContent().stream()
+            .map(
+                c -> {
+                  boolean hasOutcome = outcomes.existsByCollaborationId(c.getId());
+                  boolean hasReview = reviews.existsByCollaborationId(c.getId());
+                  String creatorName =
+                      c.getCreator().getDisplayName() != null
+                              && !c.getCreator().getDisplayName().isBlank()
+                          ? c.getCreator().getDisplayName()
+                          : c.getCreator().getUserName();
+                  return new CollaborationSummaryDto(
+                      c.getId(),
+                      campaignId,
+                      c.getRelationship().getId(),
+                      c.getCreator().getId(),
+                      creatorName,
+                      c.getCreator().getPlatform(),
+                      c.getCreator().getAvatarUrl(),
+                      c.getAgreedFee(),
+                      c.getCurrency(),
+                      c.getStatus(),
+                      c.getPublishedContentUrl(),
+                      c.getNote(),
+                      c.getStartAt(),
+                      c.getCompletedAt(),
+                      c.getUpdatedAt(),
+                      hasOutcome,
+                      hasReview);
+                })
+            .toList();
+
+    return new PageResponse<>(
+        items, page.getNumber(), page.getSize(), page.getTotalElements(), page.getTotalPages());
+  }
+
+  @Transactional(readOnly = true)
+  public CollaborationDetailResponse getCollaborationDetail(UUID collaborationId) {
+    Collaboration c =
+        collaborations
+            .findById(collaborationId)
+            .orElseThrow(() -> new NotFoundException("Collaboration not found"));
+    User actor = Permissions.actor();
+
+    boolean isBrandOwner =
+        c.getCampaign().getBrandProfile().getUser().getId().equals(actor.getId());
+    boolean isCreatorOwner =
+        (c.getMaster() != null && c.getMaster().getUser().getId().equals(actor.getId()))
+            || (c.getCreator().getMaster() != null
+                && c.getCreator().getMaster().getUser().getId().equals(actor.getId()));
+    boolean isStaff = actor.getRole() == Role.ADMIN || actor.getRole() == Role.DATA_MANAGER;
+
+    if (!isBrandOwner && !isCreatorOwner && !isStaff) {
+      throw new ForbiddenException("Access denied to collaboration");
+    }
+
+    OutcomeResponse outcomeDto =
+        outcomes
+            .findByCollaborationId(collaborationId)
+            .map(
+                o ->
+                    new OutcomeResponse(
+                        o.getId(),
+                        collaborationId,
+                        o.getViews(),
+                        o.getClicks(),
+                        c.getPublishedContentUrl(),
+                        o.getResultNote(),
+                        o.getEvidenceQuality(),
+                        o.getRecordedAt(),
+                        o.getCompletedAt()))
+            .orElse(null);
+
+    CreatorReviewResponse reviewDto =
+        reviews
+            .findByCollaborationId(collaborationId)
+            .map(
+                r ->
+                    new CreatorReviewResponse(
+                        r.getId(),
+                        collaborationId,
+                        r.getOutcome().getId(),
+                        r.getReviewedBy().getId(),
+                        r.getOverallRating(),
+                        r.getBrandFitRating(),
+                        r.getWouldCollaborateAgain(),
+                        r.getNote(),
+                        r.getReviewedAt()))
+            .orElse(null);
+
+    String creatorName =
+        c.getCreator().getDisplayName() != null && !c.getCreator().getDisplayName().isBlank()
+            ? c.getCreator().getDisplayName()
+            : c.getCreator().getUserName();
+
+    return new CollaborationDetailResponse(
+        c.getId(),
+        c.getCampaign().getId(),
+        c.getCampaign().getName(),
+        c.getCampaign().getBrandProfile().getBusinessName(),
+        c.getRelationship().getId(),
+        c.getCreator().getId(),
+        creatorName,
+        c.getCreator().getPlatform(),
+        c.getCreator().getAvatarUrl(),
+        c.getCreator().getProfileUrl(),
+        c.getAgreedFee(),
+        c.getCurrency(),
+        c.getStatus(),
+        c.getPublishedContentUrl(),
+        c.getNote(),
+        c.getStartAt(),
+        c.getCompletedAt(),
+        c.getUpdatedAt(),
+        outcomeDto,
+        reviewDto);
+  }
+
+  @Transactional(readOnly = true)
+  @PreAuthorize("hasRole('CREATOR')")
+  public List<CreatorCollaborationDto> getCreatorPortalCollaborations(CollaborationStatus status) {
+    User actor = Permissions.actor();
+    if (actor.getRole() != Role.CREATOR) {
+      throw new ForbiddenException("Only creators can access creator portal collaborations");
+    }
+
+    CreatorMaster master = creatorMasters.findByUserId(actor.getId()).orElse(null);
+    if (master == null) {
+      return List.of();
+    }
+
+    List<Collaboration> list =
+        (status == null)
+            ? collaborations.findByMasterId(master.getId())
+            : collaborations.findByMasterIdAndStatus(master.getId(), status);
+
+    return list.stream()
+        .map(
+            c -> {
+              boolean hasOutcome = outcomes.existsByCollaborationId(c.getId());
+              boolean hasReview = reviews.existsByCollaborationId(c.getId());
+              return new CreatorCollaborationDto(
+                  c.getId(),
+                  c.getCampaign().getId(),
+                  c.getCampaign().getName(),
+                  c.getCampaign().getBrandProfile().getBusinessName(),
+                  c.getCreator().getId(),
+                  c.getCreator().getPlatform(),
+                  c.getCreator().getUserName(),
+                  c.getAgreedFee(),
+                  c.getCurrency(),
+                  c.getStatus(),
+                  c.getPublishedContentUrl(),
+                  c.getNote(),
+                  c.getStartAt(),
+                  c.getCompletedAt(),
+                  c.getUpdatedAt(),
+                  hasOutcome,
+                  hasReview);
+            })
+        .toList();
   }
 
   private Campaign ownedCampaign(UUID id) {

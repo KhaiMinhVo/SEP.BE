@@ -27,6 +27,10 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import com.influencermatch.backend.creator.model.CreatorMaster;
+import com.influencermatch.backend.creator.repository.CreatorMasterRepository;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 class CollaborationServiceTest {
@@ -35,6 +39,7 @@ class CollaborationServiceTest {
   CollaborationRepository collaborations = mock(CollaborationRepository.class);
   CampaignOutcomeRepository outcomes = mock(CampaignOutcomeRepository.class);
   CreatorReviewRepository reviews = mock(CreatorReviewRepository.class);
+  CreatorMasterRepository creatorMasters = mock(CreatorMasterRepository.class);
   EntityManager em = mock(EntityManager.class);
   jakarta.validation.ValidatorFactory factory;
   CollaborationService service;
@@ -53,6 +58,7 @@ class CollaborationServiceTest {
             collaborations,
             outcomes,
             reviews,
+            creatorMasters,
             em,
             factory.getValidator());
     owner = User.builder().id(UUID.randomUUID()).role(Role.BRAND).status(UserStatus.ACTIVE).build();
@@ -324,6 +330,108 @@ class CollaborationServiceTest {
         () -> service.recordOutcome(collaboration.getId(), outcome()),
         ErrorCode.INVALID_COLLABORATION_STATE);
     verify(outcomes, never()).save(any());
+  }
+
+  @Test
+  void getCampaignCollaborationsReturnsSummaryPage() {
+    when(campaigns.findById(campaign.getId())).thenReturn(Optional.of(campaign));
+    when(collaborations.findByCampaignId(eq(campaign.getId()), any()))
+        .thenReturn(new PageImpl<>(List.of(collaboration), PageRequest.of(0, 20), 1));
+    when(outcomes.existsByCollaborationId(collaboration.getId())).thenReturn(true);
+    when(reviews.existsByCollaborationId(collaboration.getId())).thenReturn(false);
+
+    var page = service.getCampaignCollaborations(campaign.getId(), null, PageRequest.of(0, 20));
+    assertThat(page.totalElements()).isEqualTo(1);
+    assertThat(page.items()).hasSize(1);
+    assertThat(page.items().get(0).id()).isEqualTo(collaboration.getId());
+    assertThat(page.items().get(0).hasOutcome()).isTrue();
+    assertThat(page.items().get(0).hasReview()).isFalse();
+  }
+
+  @Test
+  void getCampaignCollaborationsRejectsForeignBrand() {
+    campaign.getBrandProfile().setUser(User.builder().id(UUID.randomUUID()).build());
+    when(campaigns.findById(campaign.getId())).thenReturn(Optional.of(campaign));
+    assertCode(
+        () -> service.getCampaignCollaborations(campaign.getId(), null, PageRequest.of(0, 20)),
+        ErrorCode.ACCESS_DENIED);
+  }
+
+  @Test
+  void getCollaborationDetailReturnsFullDetailWithOutcomeAndReview() {
+    CampaignOutcome outcome =
+        CampaignOutcome.builder()
+            .id(UUID.randomUUID())
+            .collaboration(collaboration)
+            .views(5000L)
+            .clicks(150L)
+            .resultNote("Great")
+            .evidenceQuality("SELF_REPORTED")
+            .recordedAt(java.time.LocalDateTime.now())
+            .completedAt(java.time.LocalDateTime.now())
+            .build();
+    CreatorReview review =
+        CreatorReview.builder()
+            .id(UUID.randomUUID())
+            .collaboration(collaboration)
+            .outcome(outcome)
+            .reviewedBy(owner)
+            .overallRating((short) 5)
+            .brandFitRating((short) 4)
+            .wouldCollaborateAgain(true)
+            .note("Pleased")
+            .reviewedAt(java.time.LocalDateTime.now())
+            .build();
+
+    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    when(outcomes.findByCollaborationId(collaboration.getId())).thenReturn(Optional.of(outcome));
+    when(reviews.findByCollaborationId(collaboration.getId())).thenReturn(Optional.of(review));
+
+    var detail = service.getCollaborationDetail(collaboration.getId());
+    assertThat(detail.id()).isEqualTo(collaboration.getId());
+    assertThat(detail.outcome()).isNotNull();
+    assertThat(detail.outcome().views()).isEqualTo(5000L);
+    assertThat(detail.review()).isNotNull();
+    assertThat(detail.review().overallRating()).isEqualTo((short) 5);
+  }
+
+  @Test
+  void getCollaborationDetailRejectsUnrelatedActor() {
+    User stranger =
+        User.builder().id(UUID.randomUUID()).role(Role.BRAND).status(UserStatus.ACTIVE).build();
+    authenticate(stranger);
+    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    assertCode(() -> service.getCollaborationDetail(collaboration.getId()), ErrorCode.ACCESS_DENIED);
+  }
+
+  @Test
+  void getCreatorPortalCollaborationsReturnsListForCreatorMaster() {
+    User creatorUser =
+        User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
+    authenticate(creatorUser);
+    CreatorMaster master =
+        CreatorMaster.builder()
+            .id(UUID.randomUUID())
+            .user(creatorUser)
+            .canonicalName("Master KOC")
+            .build();
+    when(creatorMasters.findByUserId(creatorUser.getId())).thenReturn(Optional.of(master));
+    when(collaborations.findByMasterId(master.getId())).thenReturn(List.of(collaboration));
+
+    var list = service.getCreatorPortalCollaborations(null);
+    assertThat(list).hasSize(1);
+    assertThat(list.get(0).id()).isEqualTo(collaboration.getId());
+  }
+
+  @Test
+  void getCreatorPortalCollaborationsReturnsEmptyWhenNoMaster() {
+    User creatorUser =
+        User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
+    authenticate(creatorUser);
+    when(creatorMasters.findByUserId(creatorUser.getId())).thenReturn(Optional.empty());
+
+    var list = service.getCreatorPortalCollaborations(null);
+    assertThat(list).isEmpty();
   }
 
   void assertCode(org.assertj.core.api.ThrowableAssert.ThrowingCallable action, ErrorCode code) {

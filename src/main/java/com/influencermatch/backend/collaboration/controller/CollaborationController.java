@@ -1,7 +1,9 @@
 package com.influencermatch.backend.collaboration.controller;
 
 import com.influencermatch.backend.collaboration.dto.*;
+import com.influencermatch.backend.collaboration.enums.CollaborationStatus;
 import com.influencermatch.backend.collaboration.service.CollaborationService;
+import com.influencermatch.backend.common.dto.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.*;
 import io.swagger.v3.oas.annotations.responses.*;
@@ -10,6 +12,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.*;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -57,6 +61,39 @@ public class CollaborationController {
       create(@PathVariable UUID id, @Valid @RequestBody CreateCollaborationRequest request) {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(com.influencermatch.backend.common.dto.ApiResponse.ok(service.create(id, request)));
+  }
+
+  @GetMapping("/campaigns/{id}/collaborations")
+  @PreAuthorize("hasAuthority('MANAGE_OWN_COLLABORATION')")
+  @Operation(
+      summary = "Get collaboration list for a campaign",
+      description =
+          "Owned campaign. Returns paginated collaborations with creator info and deliverables"
+              + " progress.")
+  @ApiResponse(responseCode = "200", description = "Collaboration list retrieved")
+  public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<PageResponse<CollaborationSummaryDto>>>
+      getCampaignCollaborations(
+          @PathVariable UUID id,
+          @RequestParam(name = "status", required = false) CollaborationStatus status,
+          @PageableDefault(size = 20) Pageable pageable) {
+    return ResponseEntity.ok(
+        com.influencermatch.backend.common.dto.ApiResponse.ok(
+            service.getCampaignCollaborations(id, status, pageable)));
+  }
+
+  @GetMapping("/collaborations/{id}")
+  @PreAuthorize("isAuthenticated()")
+  @Operation(
+      summary = "Get collaboration detail",
+      description =
+          "Owned by campaign brand owner or assigned creator master. Returns full detail with"
+              + " outcome and review.")
+  @ApiResponse(responseCode = "200", description = "Collaboration detail retrieved")
+  public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<CollaborationDetailResponse>>
+      getCollaborationDetail(@PathVariable UUID id) {
+    return ResponseEntity.ok(
+        com.influencermatch.backend.common.dto.ApiResponse.ok(
+            service.getCollaborationDetail(id)));
   }
 
   @PostMapping("/collaborations/{id}/outcome")

@@ -44,9 +44,9 @@ Dù không theo dõi dòng tiền hay tính ROI tài chính, hệ thống vẫn 
 | STT | Function / Endpoint | Actor liên quan | Repo | Input / Output | Hiện trạng | Hành động cần hoàn thiện |
 | :---: | :--- | :---: | :---: | :--- | :---: | :--- |
 | **5.1** | `POST /campaigns/{id}/collaborations`<br>([CollaborationController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/controller/CollaborationController.java)) | Brand User | `SEP_BE` | **In**: `CreateCollaborationRequest`<br>**Out**: `CollaborationResponse` | 🟢 **ĐÃ HOÀN THÀNH** | Cho phép tạo từ `relationship.stage == COLLABORATING`; không bắt buộc `agreedFee` & `currency` (tự động fallback về `relationship`); liên kết `master_id`. |
-| **5.2** | `GET /campaigns/{id}/collaborations`<br>(Brand Collaboration List) | Brand User | `SEP_BE` | **In**: `campaignId, page, size, status`<br>**Out**: `Page<CollaborationSummaryDto>` | 🔴 **CHƯA CÓ (P0)** | Bổ sung API cho Brand xem danh sách tất cả các KOC đang hợp tác trong chiến dịch kèm tiến độ bàn giao bài viết. |
-| **5.3** | `GET /collaborations/{id}`<br>(Collaboration Detail API) | Brand & KOC | `SEP_BE` | **In**: `collaborationId`<br>**Out**: `CollaborationDetailResponse` | 🔴 **CHƯA CÓ (P0)** | Bổ sung API xem chi tiết hợp tác: thông tin KOC, brief nội dung, deadline, link bài đăng, kết quả outcome và đánh giá review. |
-| **5.4** | `GET /creators/portal/collaborations`<br>(Creator Portal Collaboration List) | KOC User | `SEP_BE` | **In**: Bearer JWT KOC, `status`<br>**Out**: `List<CreatorCollaborationDto>` | 🔴 **CHƯA CÓ (P0)** | Mở endpoint trong Creator Portal để KOC theo dõi các hợp tác được giao, thời hạn nộp bài và trạng thái nghiệm thu. |
+| **5.2** | `GET /campaigns/{id}/collaborations`<br>(Brand Collaboration List) | Brand User | `SEP_BE` | **In**: `campaignId, page, size, status`<br>**Out**: `PageResponse<CollaborationSummaryDto>` | 🟢 **ĐÃ HOÀN THÀNH** | Trả về danh sách phân trang các hợp tác thuộc Campaign của Brand kèm tiến độ bài viết, link bài đăng, hasOutcome, hasReview. |
+| **5.3** | `GET /collaborations/{id}`<br>(Collaboration Detail API) | Brand & KOC | `SEP_BE` | **In**: `collaborationId`<br>**Out**: `CollaborationDetailResponse` | 🟢 **ĐÃ HOÀN THÀNH** | Trả về chi tiết hợp tác: thông tin KOC, brief, link bài đăng, kết quả Outcome (nếu có) và Review (nếu có). Kiểm tra quyền Brand/KOC chặt chẽ. |
+| **5.4** | `GET /creators/portal/collaborations`<br>(Creator Portal Collaboration List) | KOC User | `SEP_BE` | **In**: Bearer JWT KOC, `status`<br>**Out**: `List<CreatorCollaborationDto>` | 🟢 **ĐÃ HOÀN THÀNH** | Endpoint Creator Portal cho KOC truy vấn toàn bộ hợp tác được giao qua `CreatorMaster` hoặc `creator.master`. |
 | **5.5** | `POST /collaborations/{id}/evidence`<br>(Nộp Bằng chứng Thực thi) | KOC User / Brand User | `SEP_BE` | **In**: `assetType, storageUrl, note`<br>**Out**: `EvidenceResponse` | 🟡 **CẦN SỬA (P1)** | Sửa kiến trúc [EvidenceAsset.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/model/EvidenceAsset.java) để hỗ trợ lưu link/ảnh bằng chứng trong lúc `IN_PROGRESS` trước khi có `CampaignOutcome`. |
 | **5.6** | `POST /collaborations/{id}/outcome`<br>([CollaborationController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/controller/CollaborationController.java)) | Brand User | `SEP_BE` | **In**: `RecordOutcomeRequest`<br>**Out**: `OutcomeResponse` | 🟢 **ĐÃ CÓ (GIỮ & CHUẨN HÓA)** | Nghiệm thu hiệu quả tương tác (Views, Clicks, Likes, Shares, Post URL), đóng `COMPLETED`, đánh dấu `evidenceQuality = 'SELF_REPORTED'`. Loại bỏ ROI tài chính. |
 | **5.7** | `POST /collaborations/{id}/review`<br>([CollaborationController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/controller/CollaborationController.java)) | Brand User | `SEP_BE` | **In**: `CreateCreatorReviewRequest`<br>**Out**: `CreatorReviewResponse` | 🟢 **ĐÃ LÀM** | Lưu đánh giá sao (1–5), mức độ phù hợp Brand Fit (1–5), xác nhận `wouldCollaborateAgain` và phản hồi định tính. |
@@ -87,20 +87,21 @@ Dù không theo dõi dòng tiền hay tính ROI tài chính, hệ thống vẫn 
 
 ---
 
-### 🔹 PHASE 2: Collaboration Read & Tracking APIs (`SEP_BE`) [Ưu tiên P0]
-**Mục tiêu**: Giải quyết lỗ hổng thiếu Read APIs, cung cấp dashboard theo dõi tiến độ cho cả Brand và Creator Portal.
+### 🔹 PHASE 2: Collaboration Read & Tracking APIs (`SEP_BE`) 🟢 [ĐÃ HOÀN THÀNH]
+**Mục tiêu**: Cung cấp dashboard theo dõi tiến độ và chi tiết hợp tác cho cả Brand và Creator Portal.
 
-#### 1. Thêm API cho Brand trong `CollaborationController.java`
-* `GET /campaigns/{campaignId}/collaborations`:
-  * Trả về danh sách phân trang các hợp tác thuộc Campaign của Brand.
-  * Thông tin bao gồm: `collaborationId`, `creatorId`, `creatorName`, `platform`, `avatarUrl`, `status` (`IN_PROGRESS`, `COMPLETED`), `publishedContentUrl`, `startAt`, `completedAt`.
-* `GET /collaborations/{collaborationId}`:
-  * Trả về chi tiết hợp tác cụ thể, bao gồm thông tin chi tiết KOC, thỏa thuận nội dung, link bài đăng, kết quả Outcome (nếu đã nghiệm thu) và Review (nếu đã đánh giá).
+#### 1. API cho Brand trong `CollaborationController.java`
+* [x] `GET /campaigns/{campaignId}/collaborations`:
+  * Trả về danh sách phân trang các hợp tác thuộc Campaign của Brand (`PageResponse<CollaborationSummaryDto>`).
+  * Thông tin bao gồm: `id`, `campaignId`, `relationshipId`, `creatorId`, `creatorName`, `platform`, `avatarUrl`, `agreedFee`, `currency`, `status`, `publishedContentUrl`, `note`, `startAt`, `completedAt`, `updatedAt`, `hasOutcome`, `hasReview`.
+* [x] `GET /collaborations/{collaborationId}`:
+  * Trả về chi tiết hợp tác cụ thể (`CollaborationDetailResponse`), bao gồm thông tin chi tiết KOC, thỏa thuận nội dung, link bài đăng, kết quả Outcome (nếu đã nghiệm thu) và Review (nếu đã đánh giá).
+  * Bảo mật: Xác thực quyền sở hữu của Brand hoặc KOC Master tương ứng.
 
-#### 2. Thêm API cho Creator Portal trong `CreatorPortalCollaborationController.java`
-* `GET /creators/portal/collaborations`:
-  * KOC truy vấn toàn bộ các hợp tác được giao thuộc quyền sở hữu của mình (`creator.master.user.id == actor.id`).
-  * Trả về tên chiến dịch, Brand Profile, yêu cầu bàn giao, deadline và trạng thái.
+#### 2. API cho Creator Portal trong `CreatorPortalCollaborationController.java`
+* [x] `GET /creators/portal/collaborations`:
+  * KOC truy vấn toàn bộ các hợp tác được giao thuộc quyền sở hữu của mình (`creator.master.user.id == actor.id` hoặc `collaboration.master.id == master.id`).
+  * Trả về `List<CreatorCollaborationDto>`: tên chiến dịch, Brand Profile, yêu cầu bàn giao, link bài đăng, tiến độ và trạng thái nghiệm thu.
 
 ---
 

@@ -35,7 +35,7 @@ public class CrawlerServiceClient {
     CompletableFuture.runAsync(() -> {
       try {
         Map<String, Object> body = Map.of(
-            "platform", platform != null ? platform : "TIKTOK",
+            "platform", platform != null ? platform.trim().toUpperCase() : "UNKNOWN",
             "username", username != null ? username : "",
             "creatorId", creatorId != null ? creatorId.toString() : "",
             "campaignId", campaignId != null ? campaignId.toString() : ""

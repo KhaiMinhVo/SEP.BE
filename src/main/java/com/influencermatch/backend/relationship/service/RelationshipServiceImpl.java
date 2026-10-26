@@ -86,6 +86,12 @@ public class RelationshipServiceImpl implements RelationshipService {
         Permissions.require(Permission.MANAGE_OWN_RELATIONSHIP);
         BrandCreatorRelationship relationship = getEntity(campaignId, relationshipId);
         relationship.setStage(request.getStage());
+        if (request.getAgreedFee() != null) {
+            relationship.setAgreedFee(request.getAgreedFee());
+        }
+        if (request.getNextAction() != null) {
+            relationship.setNextAction(request.getNextAction());
+        }
         relationship.setUpdatedAt(LocalDateTime.now());
         return mapToDto(relationshipRepository.save(relationship));
     }

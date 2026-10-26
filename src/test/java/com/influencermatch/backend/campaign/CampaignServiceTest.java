@@ -28,7 +28,8 @@ class CampaignServiceTest {
   final CampaignRepository campaigns=mock(CampaignRepository.class);
   final CampaignContextRepository contexts=mock(CampaignContextRepository.class);
   final BrandService brands=mock(BrandService.class);
-  final CampaignService service=new CampaignService(campaigns,contexts,brands,new ObjectMapper(),
+  final com.influencermatch.backend.billing.service.SubscriptionService subscriptions=mock(com.influencermatch.backend.billing.service.SubscriptionService.class);
+  final CampaignService service=new CampaignService(campaigns,contexts,brands,subscriptions,new ObjectMapper(),
       mock(PublicCreatorMetricRepository.class),mock(PostRepository.class));
   final com.influencermatch.backend.user.model.User user=TestActors.user(Role.BRAND);
   final org.springframework.security.core.Authentication auth=TestActors.authenticate(user);

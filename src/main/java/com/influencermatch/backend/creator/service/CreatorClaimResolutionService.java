@@ -52,6 +52,7 @@ public class CreatorClaimResolutionService {
       String platform, String code, String rawToken, User explicitUser) {
 
     Permissions.require(com.influencermatch.backend.security.permission.Permission.CLAIM_CREATOR_PROFILE);
+    com.influencermatch.backend.creator.meta.MetaPlatformGuard.requireLegacy(platform);
     User claimantUser = Permissions.actor();
     if (explicitUser == null || !explicitUser.getId().equals(claimantUser.getId())
         || claimantUser.getRole() != Role.CREATOR || claimantUser.getStatus() != UserStatus.ACTIVE
@@ -147,10 +148,22 @@ public class CreatorClaimResolutionService {
     String encryptedAccess = tokenEncryptionService.encrypt(proof.getAccessToken());
     String encryptedRefresh = tokenEncryptionService.encrypt(proof.getRefreshToken());
 
+    String verificationMethod = "OAUTH_AUTHORIZATION";
+    if (proof.getRawProfileData() != null) {
+      Object envObj = proof.getRawProfileData().get("verificationEnvironment");
+      if ("OFFICIAL_SANDBOX".equals(envObj)) {
+        verificationMethod = "OAUTH_OFFICIAL_SANDBOX";
+      } else if ("TESTING_MODE".equals(envObj)) {
+        verificationMethod = "OAUTH_TESTING_GOOGLE";
+      } else if ("SIMULATION".equals(envObj)) {
+        verificationMethod = "OAUTH_SIMULATED_MOCK";
+      }
+    }
+
     CreatorAccountVerification verification = CreatorAccountVerification.builder()
         .creator(creator)
         .verifiedByUser(claimantUser)
-        .verificationMethod("OAUTH_AUTHORIZATION")
+        .verificationMethod(verificationMethod)
         .grantedScopes("openid,profile,offline_access")
         .accessTokenEncrypted(encryptedAccess)
         .refreshTokenEncrypted(encryptedRefresh)
@@ -187,6 +200,7 @@ public class CreatorClaimResolutionService {
             "platform", platform,
             "externalId", creator.getExternalId(),
             "providerUserId", proof.getProviderUserId(),
+            "verificationMethod", verificationMethod,
             "action", "INITIAL_PROFILE_CLAIM"
         ))
         .build();

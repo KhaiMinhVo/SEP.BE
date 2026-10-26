@@ -16,4 +16,16 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
 
   boolean existsByBrandProfileIdAndStatusAndExpirationDateGreaterThanEqual(
       UUID brandProfileId, SubscriptionStatus status, java.time.LocalDate today);
+
+  @org.springframework.data.jpa.repository.Modifying
+  @org.springframework.data.jpa.repository.Query(
+      "UPDATE Subscription s SET s.usedRecommendationQuota = s.usedRecommendationQuota + 1 " +
+      "WHERE s.id = :id AND s.usedRecommendationQuota < s.plan.recommendationQuota")
+  int reserveQuotaAtomically(@org.springframework.data.repository.query.Param("id") UUID subscriptionId);
+
+  @org.springframework.data.jpa.repository.Modifying
+  @org.springframework.data.jpa.repository.Query(
+      "UPDATE Subscription s SET s.usedRecommendationQuota = s.usedRecommendationQuota - 1 " +
+      "WHERE s.id = :id AND s.usedRecommendationQuota > 0")
+  int releaseQuotaReservation(@org.springframework.data.repository.query.Param("id") UUID subscriptionId);
 }

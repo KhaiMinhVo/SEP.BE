@@ -34,6 +34,7 @@ public class CampaignService {
   private final CampaignRepository campaigns;
   private final CampaignContextRepository contexts;
   private final BrandService brandService;
+  private final com.influencermatch.backend.billing.service.SubscriptionService subscriptionService;
   private final ObjectMapper objectMapper;
   private final PublicCreatorMetricRepository metricRepository;
   private final com.influencermatch.backend.creator.repository.PostRepository postRepository;
@@ -46,6 +47,7 @@ public class CampaignService {
         Permission.CREATE_CAMPAIGN);
     BrandProfile brandProfile = brandService.requireAccessible(brandId, authentication);
     validate(request);
+    subscriptionService.checkAndDeductCampaignQuota(brandProfile.getId());
     Campaign campaign =
         Campaign.builder()
             .brandProfile(brandProfile)

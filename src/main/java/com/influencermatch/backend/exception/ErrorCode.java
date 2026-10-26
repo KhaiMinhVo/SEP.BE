@@ -3,6 +3,14 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  META_OAUTH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Meta OAuth unavailable"),
+  INSTAGRAM_OAUTH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Instagram Login unavailable"),
+  META_OAUTH_INVALID_STATE(HttpStatus.BAD_REQUEST, "Invalid Meta OAuth state"),
+  META_OAUTH_SESSION_EXPIRED(HttpStatus.CONFLICT, "Meta OAuth session expired"),
+  META_OAUTH_ALREADY_PROCESSED(HttpStatus.CONFLICT, "Meta OAuth request already processed"),
+  META_AUTHORIZATION_REJECTED(HttpStatus.FORBIDDEN, "Meta authorization rejected"),
+  META_PROVIDER_ERROR(HttpStatus.BAD_GATEWAY, "Meta verification unavailable"),
+  META_ACCOUNT_NOT_MATCHED(HttpStatus.CONFLICT, "Meta account does not match an existing channel"),
   CLAIM_EMAIL_NOT_RETRYABLE(HttpStatus.CONFLICT, "Claim email cannot be retried"),
   CLAIM_EMAIL_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Claim email retry limit exceeded"),
   CREATOR_INVITATION_PENDING(HttpStatus.CONFLICT, "A pending invitation already exists"),
@@ -48,6 +56,8 @@ public enum ErrorCode {
   INVALID_CAMPAIGN_RANGE(HttpStatus.BAD_REQUEST, "Invalid campaign range"),
   USER_NOT_BRAND(HttpStatus.BAD_REQUEST, "User is not a brand account"),
   OPTIMISTIC_CONFLICT(HttpStatus.CONFLICT, "Concurrent update conflict"),
+  QUOTA_EXCEEDED(HttpStatus.CONFLICT, "Campaign quota exceeded for current subscription plan"),
+  SUBSCRIPTION_REQUIRED(HttpStatus.FORBIDDEN, "Active subscription required"),
   METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "Method not allowed"),
   UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported media type"),
   AI_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI service is unavailable"),

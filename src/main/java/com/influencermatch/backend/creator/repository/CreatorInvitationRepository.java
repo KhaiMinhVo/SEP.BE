@@ -14,6 +14,7 @@ public interface CreatorInvitationRepository
 
   Optional<CreatorInvitation> findFirstByTargetCreatorIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
       UUID creatorId,String status,java.time.LocalDateTime now);
+  List<CreatorInvitation> findByTargetCreatorIdAndStatusAndExpiresAtAfterOrderByIdAsc(UUID creatorId,String status,java.time.LocalDateTime now);
 
   @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
   @org.springframework.data.jpa.repository.Query("select i from CreatorInvitation i where i.id=:id")

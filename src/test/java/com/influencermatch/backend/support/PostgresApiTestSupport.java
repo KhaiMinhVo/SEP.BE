@@ -1,6 +1,7 @@
 package com.influencermatch.backend.support;
 
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
 import com.fasterxml.jackson.databind.*;
 import com.influencermatch.backend.security.jwt.JwtTokenProvider;
 import com.influencermatch.backend.user.enums.Role;
@@ -19,56 +20,141 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
-/** One disposable database per JVM shared by domain suites; fixtures use unique owners/IDs.
- * Testcontainers/Ryuk cleans up the singleton at JVM exit, avoiding cached contexts with stopped DBs. */
-@SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=validate", "spring.flyway.enabled=true",
-    "application.bootstrap-admin.enabled=false", "application.oauth2.google.enabled=false",
-    "application.auth.creator-mock.enabled=false", "application.payment.mock.enabled=false",
-    "application.claim-email.dispatch-enabled=false",
-    "application.claim-email.encryption-key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
-    "spring.jpa.show-sql=false"})
-@ActiveProfiles("dev") @AutoConfigureMockMvc
+/**
+ * One disposable database per JVM shared by domain suites; fixtures use unique owners/IDs.
+ * Testcontainers/Ryuk cleans up the singleton at JVM exit, avoiding cached contexts with stopped
+ * DBs.
+ */
+@SpringBootTest(
+    properties = {
+      "spring.jpa.hibernate.ddl-auto=validate",
+      "spring.flyway.enabled=true",
+      "application.bootstrap-admin.enabled=false",
+      "application.oauth2.google.enabled=false",
+      "application.auth.creator-mock.enabled=false",
+      "application.payment.mock.enabled=false",
+      "application.claim-email.dispatch-enabled=false",
+      "application.meta.cleanup-enabled=false",
+      "application.claim-email.encryption-key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+      "spring.jpa.show-sql=false"
+    })
+@ActiveProfiles("dev")
+@AutoConfigureMockMvc
 public abstract class PostgresApiTestSupport {
-  private static final PostgreSQLContainer<?> DB=new PostgreSQLContainer<>(
-      DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
-  static { DB.start(); }
-  @DynamicPropertySource static void database(DynamicPropertyRegistry r) {
-    r.add("spring.datasource.url", DB::getJdbcUrl);r.add("spring.datasource.username",DB::getUsername);
-    r.add("spring.datasource.password",DB::getPassword);
+  private static final PostgreSQLContainer<?> DB =
+      new PostgreSQLContainer<>(
+          DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
+
+  static {
+    DB.start();
   }
+
+  @DynamicPropertySource
+  static void database(DynamicPropertyRegistry r) {
+    r.add("spring.datasource.url", DB::getJdbcUrl);
+    r.add("spring.datasource.username", DB::getUsername);
+    r.add("spring.datasource.password", DB::getPassword);
+  }
+
   @Autowired protected MockMvc mvc;
   @Autowired protected ObjectMapper json;
   @Autowired protected UserRepository users;
   @Autowired protected PasswordEncoder encoder;
   @Autowired protected JwtTokenProvider jwt;
   @Autowired protected JdbcTemplate jdbc;
+
+  @org.junit.jupiter.api.BeforeEach
+  void clearAuthenticationBeforeFixtureSetup() {
+    org.springframework.security.core.context.SecurityContextHolder.clearContext();
+  }
+
   protected User account(Role role) {
-    var user=TestActors.user(role);user.setId(null);user.setPasswordHash(encoder.encode("Password123!"));
+    var user = TestActors.user(role);
+    user.setId(null);
+    user.setPasswordHash(encoder.encode("Password123!"));
     return users.saveAndFlush(user);
   }
-  protected JsonNode call(User user,MockHttpServletRequestBuilder req,Object body,int expected) throws Exception {
-    return callToken(user==null?null:jwt.generateToken(user),req,body,expected);
+
+  protected JsonNode call(User user, MockHttpServletRequestBuilder req, Object body, int expected)
+      throws Exception {
+    return callToken(user == null ? null : jwt.generateToken(user), req, body, expected);
   }
-  protected JsonNode callToken(String token,MockHttpServletRequestBuilder req,Object body,int expected) throws Exception {
-    if(token!=null)req.header("Authorization","Bearer "+token);
-    if(body!=null)req.contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(body));
-    var result=mvc.perform(req).andExpect(status().is(expected)).andReturn().getResponse();
-    return result.getContentAsString().isEmpty()?json.nullNode():json.readTree(result.getContentAsString());
+
+  protected JsonNode callToken(
+      String token, MockHttpServletRequestBuilder req, Object body, int expected) throws Exception {
+    if (token != null) req.header("Authorization", "Bearer " + token);
+    if (body != null)
+      req.contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(body));
+    var result = mvc.perform(req).andExpect(status().is(expected)).andReturn().getResponse();
+    return result.getContentAsString().isEmpty()
+        ? json.nullNode()
+        : json.readTree(result.getContentAsString());
   }
+
   protected JsonNode login(User user) throws Exception {
-    return call(null,org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/auth/login"),
-        Map.of("email",user.getEmail(),"password","Password123!"),200).path("data");
+    return call(
+            null,
+            org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/auth/login"),
+            Map.of("email", user.getEmail(), "password", "Password123!"),
+            200)
+        .path("data");
   }
+
   protected UUID createBrand(User user) throws Exception {
-    return UUID.fromString(call(user,org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/brands"),
-        Map.of("businessName","Test Brand"),201).path("data").path("id").asText());
+    return UUID.fromString(
+        call(
+                user,
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/brands"),
+                Map.of("businessName", "Test Brand"),
+                201)
+            .path("data")
+            .path("id")
+            .asText());
   }
-  protected Map<String,Object> campaignBody() {
-    var body=new HashMap<String,Object>();body.put("name","Test Campaign");body.put("productService","Product");
-    body.put("objective","AWARENESS");body.put("platforms",List.of("TIKTOK"));return body;
+
+  protected Map<String, Object> campaignBody() {
+    var body = new HashMap<String, Object>();
+    body.put("name", "Test Campaign");
+    body.put("productService", "Product");
+    body.put("objective", "AWARENESS");
+    body.put("platforms", List.of("TIKTOK"));
+    return body;
   }
-  protected UUID createCampaign(User user,UUID brand) throws Exception {
-    return UUID.fromString(call(user,org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/brands/"+brand+"/campaigns"),
-        campaignBody(),201).path("data").path("id").asText());
+
+  protected UUID createCampaign(User user, UUID brand) throws Exception {
+    grantCampaignSubscription(brand, 100);
+    return UUID.fromString(
+        call(
+                user,
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
+                    "/brands/" + brand + "/campaigns"),
+                campaignBody(),
+                201)
+            .path("data")
+            .path("id")
+            .asText());
+  }
+
+  /** Positive campaign fixtures satisfy the new subscription precondition explicitly. */
+  protected UUID grantCampaignSubscription(UUID brand, int campaignQuota) {
+    UUID plan = UUID.randomUUID(), subscription = UUID.randomUUID();
+    jdbc.update(
+        "insert into"
+            + " plan(id,plan_name,price,currency,duration_days,campaign_quota,ai_recommendation_quota,refresh_quota,status,created_at)"
+            + " values(?,?,0,'VND',365,?,100,100,'ACTIVE',now())",
+        plan,
+        "campaign-fixture-" + plan,
+        campaignQuota);
+    java.time.LocalDate today = java.time.LocalDate.now();
+    jdbc.update(
+        "insert into"
+            + " subscription(id,brand_profile_id,plan_id,start_date,expiration_date,status,used_campaign_quota,used_ai_quota,used_refresh_quota)"
+            + " values(?,?,?,?,?,'ACTIVE',0,0,0)",
+        subscription,
+        brand,
+        plan,
+        today,
+        today.plusDays(365));
+    return subscription;
   }
 }

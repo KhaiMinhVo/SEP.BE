@@ -171,15 +171,15 @@ class CreatorAccountLinkIntegrationTest {
   @Test
   @DisplayName("TC-09: Connect 2nd channel never crawled before -> creates new Creator, immediately sets master_id = M1, AUTHORIZED")
   void testTC09_connectSecondChannel_brandNewAccount_createsAndSetsMaster() {
-    when(creatorRepository.findLockedByPlatformAndExternalId("INSTAGRAM", "ig_brand_new_koc"))
+    when(creatorRepository.findLockedByPlatformAndExternalId("TIKTOK", "tt_brand_new_koc"))
         .thenReturn(Optional.empty());
 
-    when(oAuthProofClient.exchangeAndVerify(eq("INSTAGRAM"), eq("auth_code_ig_new"), any(), any()))
+    when(oAuthProofClient.exchangeAndVerify(eq("TIKTOK"), eq("auth_code_tt_new"), any(), any()))
         .thenReturn(OAuthProofClient.ProofResult.builder()
-            .providerUserId("ig_brand_new_koc")
-            .providerUsername("koc_lifestyle_insta")
-            .accessToken("ig_token_abc")
-            .refreshToken("ig_ref_abc")
+            .providerUserId("tt_brand_new_koc")
+            .providerUsername("koc_lifestyle_tt")
+            .accessToken("tt_token_abc")
+            .refreshToken("tt_ref_abc")
             .tokenExpiresAt(LocalDateTime.now().plusDays(60))
             .rawProfileData(Map.of())
             .build());
@@ -191,21 +191,21 @@ class CreatorAccountLinkIntegrationTest {
     });
 
     ConnectAccountResponse response =
-        accountLinkService.linkAdditionalAccount(authenticated(kocUser.getId()), "INSTAGRAM", "auth_code_ig_new");
+        accountLinkService.linkAdditionalAccount(authenticated(kocUser.getId()), "TIKTOK", "auth_code_tt_new");
 
     assertThat(response).isNotNull();
     assertThat(response.getStatus()).isEqualTo("CREATED_AND_LINKED");
     assertThat(response.getAccountId()).isNotNull();
     assertThat(response.getMasterId()).isEqualTo(masterM1.getId());
-    assertThat(response.getPlatform()).isEqualTo("INSTAGRAM");
+    assertThat(response.getPlatform()).isEqualTo("TIKTOK");
 
     // Case 2 assertion: new Creator saved directly with master = M1, sourceType = AUTHORIZED
     verify(creatorRepository).save(argThat(c ->
         c.getMaster() != null
             && c.getMaster().getId().equals(masterM1.getId())
             && c.getSourceType() == CreatorSourceType.AUTHORIZED
-            && "INSTAGRAM".equals(c.getPlatform())
-            && "ig_brand_new_koc".equals(c.getExternalId())
+            && "TIKTOK".equals(c.getPlatform())
+            && "tt_brand_new_koc".equals(c.getExternalId())
     ));
 
     verify(auditRepository).save(argThat(audit -> "LINK_NEW_ACCOUNT".equals(audit.getEventType())));

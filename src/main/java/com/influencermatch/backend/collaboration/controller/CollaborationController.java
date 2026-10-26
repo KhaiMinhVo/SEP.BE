@@ -1,7 +1,9 @@
 package com.influencermatch.backend.collaboration.controller;
 
 import com.influencermatch.backend.collaboration.dto.*;
+import com.influencermatch.backend.collaboration.enums.CollaborationStatus;
 import com.influencermatch.backend.collaboration.service.CollaborationService;
+import com.influencermatch.backend.common.dto.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.*;
 import io.swagger.v3.oas.annotations.responses.*;
@@ -10,6 +12,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.*;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -50,13 +54,74 @@ public class CollaborationController {
   @Operation(
       summary = "Confirm a creator collaboration",
       description =
-          "Owned ACTIVE campaign; CONTACTED or INTERESTED relationship from the same campaign."
-              + " Agreed fee is not a payment.")
+          "Owned ACTIVE campaign; COLLABORATING, INTERESTED, or CONTACTED relationship from the same"
+              + " campaign. Agreed fee is optional metadata (not a platform payment).")
   @ApiResponse(responseCode = "201", description = "Collaboration created")
   public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<CollaborationResponse>>
       create(@PathVariable UUID id, @Valid @RequestBody CreateCollaborationRequest request) {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(com.influencermatch.backend.common.dto.ApiResponse.ok(service.create(id, request)));
+  }
+
+  @GetMapping("/campaigns/{id}/collaborations")
+  @PreAuthorize("hasAuthority('MANAGE_OWN_COLLABORATION')")
+  @Operation(
+      summary = "Get collaboration list for a campaign",
+      description =
+          "Owned campaign. Returns paginated collaborations with creator info and deliverables"
+              + " progress.")
+  @ApiResponse(responseCode = "200", description = "Collaboration list retrieved")
+  public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<PageResponse<CollaborationSummaryDto>>>
+      getCampaignCollaborations(
+          @PathVariable UUID id,
+          @RequestParam(name = "status", required = false) CollaborationStatus status,
+          @PageableDefault(size = 20) Pageable pageable) {
+    return ResponseEntity.ok(
+        com.influencermatch.backend.common.dto.ApiResponse.ok(
+            service.getCampaignCollaborations(id, status, pageable)));
+  }
+
+  @GetMapping("/collaborations/{id}")
+  @PreAuthorize("isAuthenticated()")
+  @Operation(
+      summary = "Get collaboration detail",
+      description =
+          "Owned by campaign brand owner or assigned creator master. Returns full detail with"
+              + " outcome, review, and evidence assets.")
+  @ApiResponse(responseCode = "200", description = "Collaboration detail retrieved")
+  public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<CollaborationDetailResponse>>
+      getCollaborationDetail(@PathVariable UUID id) {
+    return ResponseEntity.ok(
+        com.influencermatch.backend.common.dto.ApiResponse.ok(
+            service.getCollaborationDetail(id)));
+  }
+
+  @PostMapping("/collaborations/{id}/evidence")
+  @PreAuthorize("isAuthenticated()")
+  @Operation(
+      summary = "Submit deliverables and evidence for a collaboration",
+      description =
+          "Allowed for campaign brand owner or assigned creator master. Submits post link, screenshots,"
+              + " or draft videos during or after execution.")
+  @ApiResponse(responseCode = "201", description = "Evidence asset submitted")
+  public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<EvidenceAssetResponse>>
+      submitEvidence(
+          @PathVariable UUID id, @Valid @RequestBody SubmitEvidenceRequest request) {
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .body(com.influencermatch.backend.common.dto.ApiResponse.ok(service.submitEvidence(id, request)));
+  }
+
+  @GetMapping("/collaborations/{id}/evidence")
+  @PreAuthorize("isAuthenticated()")
+  @Operation(
+      summary = "Get list of evidence assets for a collaboration",
+      description =
+          "Allowed for campaign brand owner or assigned creator master. Returns all submitted evidence assets.")
+  @ApiResponse(responseCode = "200", description = "Evidence assets retrieved")
+  public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<java.util.List<EvidenceAssetResponse>>>
+      getEvidenceAssets(@PathVariable UUID id) {
+    return ResponseEntity.ok(
+        com.influencermatch.backend.common.dto.ApiResponse.ok(service.getEvidenceAssets(id)));
   }
 
   @PostMapping("/collaborations/{id}/outcome")

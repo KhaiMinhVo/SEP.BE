@@ -1,7 +1,9 @@
 package com.influencermatch.backend.creator.repository;
 
+import com.influencermatch.backend.creator.dto.RecommendationCandidateProjection;
 import com.influencermatch.backend.creator.model.PublicCreatorMetric;
 import com.influencermatch.backend.discovery.dto.HybridDiscoveryCreatorProjection;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -128,4 +130,50 @@ public interface PublicCreatorMetricRepository
         @Param("queryVector") String queryVector,
         Pageable pageable
     );
+
+  @Query(
+      value = """
+          SELECT c.id AS creatorId,
+                 c.master_id AS masterId,
+                 c.platform AS platform,
+                 c.display_name AS displayName,
+                 c.user_name AS userName,
+                 c.avatar_url AS avatarUrl,
+                 m.id AS id,
+                 m.followers AS followers,
+                 m.avg_views AS avgViews,
+                 m.avg_likes AS avgLikes,
+                 m.engagement_rate AS engagementRate,
+                 m.niche AS niche,
+                 m.category AS category,
+                 m.creator_type AS creatorType,
+                 (1.0 - (c.embedding <=> CAST(:briefVector AS vector))) AS semanticScore
+          FROM creator c
+          JOIN public_creator_metric m ON c.id = m.creator_id
+          WHERE (:hasExcludedIds = false OR c.id NOT IN (:excludedIds))
+            AND (:hasPlatforms = false OR c.platform IN (:platforms))
+            AND (:followerMin IS NULL OR m.followers >= :followerMin)
+            AND (:followerMax IS NULL OR m.followers <= :followerMax)
+            AND c.embedding IS NOT NULL
+            AND m.id = (
+                SELECT m2.id FROM public_creator_metric m2
+                WHERE m2.creator_id = c.id
+                ORDER BY m2.observed_at DESC NULLS LAST, m2.collected_at DESC, m2.id DESC
+                LIMIT 1
+            )
+          ORDER BY c.embedding <=> CAST(:briefVector AS vector) ASC
+          LIMIT :limit
+          """,
+      nativeQuery = true
+  )
+  List<RecommendationCandidateProjection> findTopCandidatesByEmbedding(
+      @Param("briefVector") String briefVector,
+      @Param("hasExcludedIds") boolean hasExcludedIds,
+      @Param("excludedIds") Collection<UUID> excludedIds,
+      @Param("hasPlatforms") boolean hasPlatforms,
+      @Param("platforms") Collection<String> platforms,
+      @Param("followerMin") Long followerMin,
+      @Param("followerMax") Long followerMax,
+      @Param("limit") int limit
+  );
 }

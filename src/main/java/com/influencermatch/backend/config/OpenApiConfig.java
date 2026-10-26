@@ -74,6 +74,8 @@ public class OpenApiConfig {
             Ingestion uses X-Service-Key instead of JWT. VNPay callbacks require a valid gateway
             signature, matching merchant and transaction amount; they do not use user permissions.
             Brand channel invitations queue encrypted email jobs before async SMTP; HTTP 200 means QUEUED. Owner Brands can inspect delivery/retry FAILED jobs. Duplicate/owned accounts return 409. Ownership transfer resolution is unavailable in MVP.
+            Facebook Page and linked Instagram Professional verification use real Meta OAuth when configured; no Meta mock fallback. Only existing stable official account IDs can be linked. Start in a browser to receive the HttpOnly binding cookie, complete OAuth in that browser, then inspect/confirm the private session with Creator JWT. The public Meta callback returns session ID/status only and never grants ownership. Manual Claim remains available; other simulated provider paths remain dev-only.
+            Direct Instagram Login also supports Business/Creator accounts without Facebook or a Page. It uses separate Instagram app configuration and `/integrations/instagram/callback`, then the same private session/confirm APIs. Session `oauthFlow` identifies the login method; direct accounts have no `pageId`. This is channel verification, not InfluencerMatch account sign-in.
             Notification, Recommendation and CRM permissions are declarations, not new APIs.
             """)
         .contact(
@@ -102,7 +104,11 @@ public class OpenApiConfig {
               && !method.equals("me")
               && !method.equals("logout")
           || controller == com.influencermatch.backend.billing.controller.PaymentController.class
-              && method.startsWith("vnpay")) operation.setSecurity(List.of());
+              && method.startsWith("vnpay")
+          || controller == com.influencermatch.backend.creator.meta.MetaOAuthController.class
+              && method.equals("callback")
+          || controller == com.influencermatch.backend.creator.meta.InstagramOAuthController.class
+              && method.equals("callback")) operation.setSecurity(List.of());
       if (controller
           == com.influencermatch.backend.creator.controller.CreatorIngestionController.class)
         operation.setSecurity(List.of(new SecurityRequirement().addList("CreatorServiceKey")));

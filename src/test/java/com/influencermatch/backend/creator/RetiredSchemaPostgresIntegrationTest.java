@@ -114,10 +114,10 @@ class RetiredSchemaPostgresIntegrationTest extends PostgresApiTestSupport {
   @Test void freshSchemaHasOnlyTheCurrentTablesAndColumns() {
     String s=schema();
     try {
-      assertThat(flyway(s,null).migrate().migrationsExecuted).isEqualTo(15);absent(s);
-      for(String table:List.of("external_identity","creator_invitation","creator_registration_invitation","email_verification_otp","email_verification_delivery","password_setup_otp","creator_master","creator_claim","claim_email_outbox","claim_email_retry"))
+      assertThat(flyway(s,null).migrate().migrationsExecuted).isEqualTo(20);absent(s);
+      for(String table:List.of("external_identity","creator_invitation","creator_registration_invitation","email_verification_otp","email_verification_delivery","password_setup_otp","creator_master","creator_claim","claim_email_outbox","claim_email_retry","meta_oauth_session"))
         assertThat(jdbc.queryForObject("select to_regclass(?)::text",String.class,s+"."+table)).isNotNull();
-      assertThat(flyway(s,null).info().current().getVersion().toString()).isEqualTo("16");
+      assertThat(flyway(s,null).info().current().getVersion().toString()).isEqualTo("21");
     } finally {jdbc.execute("drop schema "+s+" cascade");}
   }
   @Test void ingestionAndProfileComparisonUseCreatorFieldsAndLocationFilterJoinsCreator() throws Exception {

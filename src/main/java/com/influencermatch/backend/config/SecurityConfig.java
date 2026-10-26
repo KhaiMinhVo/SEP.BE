@@ -38,6 +38,8 @@ public class SecurityConfig {
 
   // Patterns are relative to context-path /api/v1
   private static final String[] PUBLIC_ENDPOINTS = {
+    "/integrations/meta/callback",
+    "/integrations/instagram/callback",
     "/auth/register",
     "/auth/login",
     "/auth/refresh",

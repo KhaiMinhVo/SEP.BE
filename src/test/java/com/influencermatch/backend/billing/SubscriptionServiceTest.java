@@ -6,6 +6,7 @@ import com.influencermatch.backend.audit.service.AuditService;
 import com.influencermatch.backend.billing.dto.SubscriptionDTOs.SubscriptionCreateRequest;
 import com.influencermatch.backend.billing.enums.*;
 import com.influencermatch.backend.billing.model.*;
+import com.influencermatch.backend.billing.repository.PlanRepository;
 import com.influencermatch.backend.billing.repository.SubscriptionRepository;
 import com.influencermatch.backend.billing.service.*;
 import com.influencermatch.backend.brand.model.BrandProfile;
@@ -25,8 +26,9 @@ class SubscriptionServiceTest {
   final PlanService plans=mock(PlanService.class);
   final BrandProfileRepository brands=mock(BrandProfileRepository.class);
   final AuditService audit=mock(AuditService.class);
+  final PlanRepository planRepository=mock(PlanRepository.class);
   final EntityManager em=mock(EntityManager.class);
-  final SubscriptionService service=new SubscriptionService(subscriptions,plans,brands,audit,em);
+  final SubscriptionService service=new SubscriptionService(subscriptions,plans,planRepository,brands,audit,em);
   final com.influencermatch.backend.user.model.User owner=TestActors.user(Role.BRAND);
   final BrandProfile brand=BrandProfile.builder().id(UUID.randomUUID()).user(owner).build();
   final Plan plan=Plan.builder().id(UUID.randomUUID()).status(PlanStatus.ACTIVE).price(BigDecimal.ZERO).durationDays(30).build();
@@ -65,5 +67,17 @@ class SubscriptionServiceTest {
     assertThat(sub.getStatus()).isEqualTo(SubscriptionStatus.CANCELLED);assertThat(sub.getUsedCampaignQuota()).isEqualTo(2);
     assertThat(sub.getExpirationDate()).isEqualTo(LocalDate.of(2026,1,31));
     verify(audit,times(1)).record(eq("CANCEL_SUBSCRIPTION"),anyString(),eq(sub.getId()),any(),any(),anyString());
+  }
+  @Test void checkAndDeductCampaignQuotaSuccessAndExceeded(){
+    var activePlan = Plan.builder().id(UUID.randomUUID()).campaignQuota(2).build();
+    var sub = Subscription.builder().id(UUID.randomUUID()).brandProfile(brand).plan(activePlan)
+        .status(SubscriptionStatus.ACTIVE).expirationDate(LocalDate.now().plusDays(10)).usedCampaignQuota(1).build();
+    when(subscriptions.findByBrandProfileId(brand.getId())).thenReturn(List.of(sub));
+    service.checkAndDeductCampaignQuota(brand.getId());
+    assertThat(sub.getUsedCampaignQuota()).isEqualTo(2);
+    verify(subscriptions).save(sub);
+
+    assertThatThrownBy(() -> service.checkAndDeductCampaignQuota(brand.getId()))
+        .isInstanceOfSatisfying(ConflictException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.QUOTA_EXCEEDED));
   }
 }

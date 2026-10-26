@@ -68,6 +68,14 @@ public class BrandController {
     return ApiResponse.ok(service.get(id, auth));
   }
 
+  @Operation(summary = "Update the current brand profile")
+  @PutMapping("/me")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_BRAND_PROFILE')")
+  public ApiResponse<BrandResponse> updateMe(
+      @Valid @RequestBody BrandRequest request, Authentication auth) {
+    return ApiResponse.ok(service.updateMe(request, auth));
+  }
+
   @Operation(summary = "Update a brand profile")
   @PutMapping("/{id}")
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_BRAND_PROFILE')")

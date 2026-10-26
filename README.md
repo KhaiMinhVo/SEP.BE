@@ -167,7 +167,7 @@ docker compose logs --tail 200 api
 
 ## Registration and email OTP
 
-Brand registration is public; Creator registration requires an ADMIN/DATA_MANAGER email invitation. Both verify OTP before password login. Google Login is removed. See [registration and SMTP guide](docs/registration-and-email-otp.md).
+Brand registration is public; Creator registration requires an ADMIN/DATA_MANAGER email invitation. Both verify OTP before password login. Google Login is removed.
 
 ## RBAC và phạm vi triển khai
 
@@ -177,7 +177,7 @@ Admin có thể bật/tắt chức năng sẵn có của ba role còn lại; kh�
 Quyền Admin giữ cố định. Quyền hiệu lực được nạp một lần mỗi request, không cache
 liên request; token hiện tại nhận cấu hình mới từ request tiếp theo sau khi lưu.
 Login/refresh/mock login trả `user.permissions`; `/auth/me` trả `permissions`.
-API và ma trận chức năng: [Role Permission Management](docs/role-permissions.md).
+Các trường hợp kiểm thử: [Backend Test Cases](docs/backend-test-cases.md).
 
 Các API hiện có đã được bảo vệ:
 
@@ -221,9 +221,6 @@ Shortlist/Relationship và Collaboration/Outcome/Review đã có API và test. P
 Notification, Recommendation, History/Insights, Usage/Billing read và các tác vụ
 vận hành dữ liệu chưa có API chỉ được khai báo trong enum; danh mục role-permissions
 đánh dấu chúng `implemented=false`, `editable=false`.
-Luồng Creator claim được mô tả tại [Creator Claim Profile](docs/creator-claim.md).
-Hàng đợi duyệt KOC được mô tả tại [Data Quality](docs/data-quality.md).
-API so sánh shortlist và mock thanh toán: [Compare & Mock Payment](docs/compare-and-mock-payment.md).
 Không tạo role mới hoặc cấp quyền chéo role. Chưa có entitlement/quota gate đầy đủ
 cho mọi API hiện tại; RBAC không thay thế các kiểm tra này khi chúng được triển khai.
 Không thể xem các permission đã khai báo là chức năng đã hoạt động.
@@ -232,10 +229,225 @@ Không thể xem các permission đã khai báo là chức năng đã hoạt đ�
 
 Creator Rate Card endpoints have been removed. Creator profile and shortlist compare responses
 no longer contain `rateCard`. Claim/ownership verification is unchanged. V12 preserves legacy
-prices and audits while retiring the permission override. See [Creator Claim](docs/creator-claim.md).
+prices and audits while retiring the permission override.
 
-Schema cleanup V15 removes retired exchange/Rate Card tables and duplicate metric profile fields. Review [data impact and deployment notes](docs/schema-cleanup-v15.md) before applying to a deployment database.
+Schema cleanup V15 removes retired exchange/Rate Card tables and duplicate metric profile fields.
 
-Brand channel-claim invitations, duplicate/ownership blocking and SMTP behavior: [MVP invitation flow](docs/claim-invitations-mvp.md). Brand claim links do not register Creator accounts.
+Brand channel-claim invitations block duplicate invitations and owned channels. Brand claim links do not register Creator accounts.
 
-Claim email now uses [durable outbox + async delivery](docs/claim-email-outbox.md), with status/retry APIs. Configure `EMAIL_OUTBOX_ENCRYPTION_KEY` before enabling invitations; V16 adds delivery tables without backfilling old invitations. Registration invitation and OTP emails remain synchronous.
+Claim email uses durable outbox and async delivery, with status/retry APIs. Configure `EMAIL_OUTBOX_ENCRYPTION_KEY` before enabling invitations; V16 adds delivery tables without backfilling old invitations. Registration invitation and OTP emails remain synchronous.
+
+## Facebook Page and Instagram Professional verification (Meta OAuth)
+
+This connects an already signed-in, ACTIVE, email-verified Creator to an existing database channel.
+It does not register/sign in a user. Manual Claim remains available. Facebook personal profiles,
+Instagram personal accounts, real TikTok/YouTube adapters and metrics collection are outside this feature.
+
+### Meta app and backend configuration
+
+1. In the Meta developer dashboard, configure Facebook Login for Business with a **User Access Token**
+   login configuration. Set the exact valid OAuth redirect URI, for example
+   `http://localhost:8080/api/v1/integrations/meta/callback` locally, or the HTTPS backend callback on deployment.
+2. Grant `pages_show_list` and `pages_read_engagement`; also grant `instagram_basic` for Instagram.
+   This backend does not request publishing, messaging or advertising permissions. Instagram must be a
+   Business/Creator account linked to a Facebook Page that the authorizing user can manage.
+   For assets managed through a Business Portfolio, additionally grant `business_management` when needed
+   to enumerate the Pages. In the local Facebook test on 2026-10-23, the three original scopes yielded no
+   Pages; a new grant including `business_management` returned the managed Pages. This is not a global
+   backend requirement: the required scope set stays minimal, and verification records the scopes
+   actually granted. If the dashboard cannot edit a configuration, create another User Access Token
+   configuration with the required permissions and use its configuration ID.
+3. In Development mode, use an accepted app-role/test account with access to the test Page and linked
+   Instagram account. Access for external Creators depends on Meta's access levels/App Review; backend
+   implementation cannot approve the app. Select a Graph API version supported by your app explicitly.
+4. Supply these environment variables using the placeholders in `.env.example`:
+
+   ```dotenv
+   META_OAUTH_ENABLED=true
+   META_APP_ID=<app ID>
+   META_APP_SECRET=<app secret>
+   META_LOGIN_CONFIG_ID=<User Access Token login configuration ID>
+   META_GRAPH_API_VERSION=<supported version such as vNN.0>
+   META_REDIRECT_URI=http://localhost:8080/api/v1/integrations/meta/callback
+   META_OAUTH_ENCRYPTION_KEY=<Base64 of 32 random bytes>
+   ```
+
+   Generate a separate key in PowerShell (do not reuse OTP or email outbox keys):
+
+   ```powershell
+   [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+   ```
+
+V17 adds encrypted, temporary OAuth sessions; V1–V16 and existing ownership are unchanged.
+Disabled/incomplete configuration returns `503 META_OAUTH_UNAVAILABLE`, with no mock fallback.
+Legacy simulated Facebook/Instagram callbacks cannot verify accounts, even when dev mock is enabled.
+
+Meta's official [Page account query](https://www.postman.com/meta/instagram/request/0vuw3vk/get-access-tokens-of-pages-you-manage)
+documents the Page ID, tasks and linked `instagram_business_account` fields. This implementation uses
+only the User Access Token, does not request Page tokens, and follows pagination cursors on a fixed Graph endpoint.
+
+### Test with browser Swagger and Bruno
+
+1. Register the Creator using the separate Admin/Data Manager registration invitation, verify OTP,
+   then log in with email/password. Authorize Swagger with that Creator's access token.
+2. Ensure the channel already exists with platform `FACEBOOK` or `INSTAGRAM`, `isStableId=true`,
+   and `externalId` equal to the exact official Page ID or Instagram Professional ID. A Page ID is not
+   its Instagram account ID. No channel is created or matched by username/email automatically.
+3. **In browser Swagger**, call `POST /creators/portal/accounts/connect/meta/start`:
+
+   ```json
+   {"platform":"FACEBOOK","creatorId":"<existing channel UUID>"}
+   ```
+
+   `creatorId` is optional for general selection; `invitationToken` optionally binds an existing claim
+   invitation. The caller needs effective `CLAIM_CREATOR_PROFILE`. The response includes `sessionId`,
+   `authorizationUrl` and `expiresAt` (at most ten minutes).
+4. Open `authorizationUrl` in the **same browser** and grant access with your Meta test account.
+   Start sets an HttpOnly, SameSite=Lax cookie bound to this session; forwarding the URL or starting
+   in Bruno then opening it in another cookie jar will be rejected. Future frontend requests must
+   preserve credentials and use a compatible same-site backend deployment. The public callback returns
+   JSON with session ID and `READY` only; it does not expose account choices/tokens or grant ownership.
+5. In Bruno with the same Creator JWT, call
+   `GET /creators/portal/accounts/connect/meta/sessions/{sessionId}`. Inspect sanitized choices:
+   `AVAILABLE`, `ALREADY_LINKED`, `UNMATCHED` or `UNAVAILABLE`. Other users receive 404.
+6. Confirm one account using `POST /creators/portal/accounts/connect/meta/sessions/{sessionId}/confirm`:
+
+   ```json
+   {"accountId":"<official Page or Instagram Professional ID returned in this session>"}
+   ```
+
+   The backend rechecks Meta outside database locks, then validates current User/authVersion/permission,
+   stable channel ID, invitation email/expiry and ownership under locks. Success returns `AUTHORIZED`,
+   reuses/creates the CreatorMaster, synchronizes relationships and records `META_OAUTH` evidence/audit.
+   An invitation never creates a User; general selection cannot bypass another email's active invitation.
+7. Repeat callback/confirm to check 409 replay protection. Another Master's channel returns 409 and
+   durable rejection audit without transfer. Nonmatching IDs return `409 META_ACCOUNT_NOT_MATCHED`;
+   use manual Claim instead. Changing permissions/status/authVersion before confirm blocks the operation.
+
+Sessions and tokens are encrypted with AES-256-GCM. Verification retains official IDs, actual scopes
+and verification time, not access/refresh tokens. Payload is cleared on completion/failure; a scheduled
+sweep expires and clears unfinished sessions. Provider errors/timeouts never grant ownership; code
+exchange is not retried automatically. No real Meta call is made by the automated tests.
+
+### Instagram test through Facebook Login after connecting a Page
+
+The same four endpoints already support `platform: INSTAGRAM`; no separate Instagram Login product,
+callback, token store or schema migration is required. The backend reads the linked Professional node
+from each managed Page. Pages without that node or management tasks produce no eligible Instagram
+choice; they do not become Instagram accounts automatically. Username and display name are labels only.
+
+The local manual test on 2026-10-25 confirmed `@iahkhnim_` with official Instagram ID
+`17841450386037138`, linked to InfluencerMatch Page `1401052256422981`. Confirm returned AUTHORIZED
+and reused the Facebook Master; Facebook records stayed unchanged and replay returned 409. This is
+local test data, not a shared-database deployment. For another account, obtain its official ID anew
+from Meta; never derive it from the handle, URL, Page ID or an earlier public Facebook URL.
+
+1. Use the local-only Meta test database and verified Creator fixture. Keep the Facebook channel and its
+   ownership in place. Do not use the shared database or change its IDs for this test.
+2. In browser Swagger, start a fresh session with `{"platform":"INSTAGRAM"}` and no `creatorId`.
+   Complete OAuth in that same browser. The public callback should report `READY`; this does not grant ownership.
+3. Read the session using the Creator JWT. Find the Instagram choice returned by Meta, check its `pageId`
+   against `1401052256422981`, and inspect the username as a human-readable confirmation. Its `accountId`
+   is the official Instagram ID; it differs from `pageId`.
+4. If `UNMATCHED`, prepare an explicit **local test fixture** with `platform=INSTAGRAM`, that official
+   `externalId`, `isStableId=true`, and no owner. This is test preparation, not an auto-create feature of
+   the OAuth API. Do not overwrite an existing crawler ID or create anything from a username alone.
+5. Start a new session using `{"platform":"INSTAGRAM","creatorId":"<local Instagram channel UUID>"}`,
+   finish OAuth, then confirm with `{"accountId":"<official Instagram ID>"}`. A session bound to a
+   different channel cannot be repurposed for this one.
+6. Expect `AUTHORIZED` and the same `masterId` as the Facebook connection. Verify the Facebook channel,
+   verification and provider identity remain unchanged; Instagram has one active `META_OAUTH`
+   verification and one provider identity, with the Page ID retained as metadata and no permanent token.
+   Completed session payload is cleared. Repeating confirm returns 409 without duplicate evidence.
+
+If the Instagram list is empty, check the actual Page–Professional account link and Meta asset grant;
+do not insert a guessed ID or enable the legacy mock. For missing/declined `instagram_basic`, authorize
+a fresh session with the correct configuration. Another Master's channel remains a 409 conflict.
+Standard Access tests use accounts with accepted roles in the App; external Creator access requires
+the relevant Meta approval/access level. Manual OAuth results and automated HTTP-mocked results are
+recorded separately in the test-case document.
+
+## Direct Instagram Login without Facebook
+
+Both connection methods are supported. Direct Instagram Login verifies a Business/Creator account
+without a Facebook account or Page. Creator registration invitation, email OTP and password login
+remain unchanged; this OAuth flow never registers a User or issues an InfluencerMatch login token.
+Personal Instagram accounts must be converted to Professional or use manual Claim.
+
+### Separate Instagram app configuration
+
+In Meta Dashboard, add/configure **Instagram API setup with Instagram Login**. Copy the **Instagram
+App ID and Instagram App Secret** from that setup, not the Facebook Login configuration ID or assumed
+Facebook credentials. Configure a valid HTTPS OAuth redirect and accepted Instagram test accounts/roles.
+Request only `instagram_business_basic`; no Page, publishing, messaging or advertising scope is needed.
+External accounts remain subject to Meta's access levels and App Review.
+
+Configure the placeholders from `.env.example` when ready (disabled by default):
+
+```dotenv
+INSTAGRAM_OAUTH_ENABLED=true
+INSTAGRAM_APP_ID=<Instagram App ID>
+INSTAGRAM_APP_SECRET=<Instagram App Secret>
+INSTAGRAM_GRAPH_API_VERSION=<explicit supported version>
+INSTAGRAM_REDIRECT_URI=https://<backend-host>/api/v1/integrations/instagram/callback
+INSTAGRAM_OAUTH_ENCRYPTION_KEY=<separate Base64 32-byte key>
+```
+
+Use the PowerShell key-generation command above, generating a new key distinct from Meta/OTP/outbox
+keys. Direct Login works even with Facebook OAuth disabled or unconfigured. Missing configuration
+returns `503 INSTAGRAM_OAUTH_UNAVAILABLE`; it never falls back to Facebook or the dev mock.
+Do not enable or replace secrets in an existing environment until its corresponding app is configured.
+
+### API and browser test
+
+1. Apply V18 in the intended test database and run the updated backend. V18 adds `oauth_flow` to sessions;
+   existing sessions default to `FACEBOOK_LOGIN` and keep their ciphertext/ownership unchanged.
+2. Open Swagger through the **same HTTPS backend hostname** used by `INSTAGRAM_REDIRECT_URI`. If a
+   test tunnel is needed, configure it explicitly; a Start request on localhost will not set a cookie
+   for a different tunnel hostname. No frontend page or automatic tunnel is provided.
+3. Log in the verified Creator, Authorize Swagger, then call
+   `POST /api/v1/creators/portal/accounts/connect/instagram/start` with `{}` for discovery, or
+   `{"creatorId":"<existing Instagram UUID>","invitationToken":"<optional claim invitation>"}`.
+   The platform is fixed to INSTAGRAM by this route. `CLAIM_CREATOR_PROFILE` is required.
+4. Open the returned `authorizationUrl` in the same browser and log in/consent on Instagram. The
+   HttpOnly Secure SameSite=Lax cookie and hashed one-time state bind the browser and session. Public
+   `GET /api/v1/integrations/instagram/callback` returns only session ID/status, never the token or profile.
+5. Inspect the session through the existing authenticated
+   `GET /api/v1/creators/portal/accounts/connect/meta/sessions/{sessionId}`. It reports
+   `oauthFlow=INSTAGRAM_LOGIN`, platform INSTAGRAM and one sanitized account with no `pageId`.
+6. Canonical ID is `user_id` from the authenticated Instagram account, independently of app-scoped
+   `id`/subject or username. Only exact stable IDs already in the database can match. `UNMATCHED`
+   requires manual Claim or an explicitly prepared local fixture, never auto-creation/ID rewriting.
+7. Confirm through the existing `POST .../sessions/{sessionId}/confirm` using
+   `{"accountId":"<canonical Instagram ID>"}`. The adapter rechecks Instagram before the transaction
+   locks and fresh permission/authVersion/invitation/owner checks. Success returns AUTHORIZED, stores
+   `INSTAGRAM_OAUTH` evidence and reuses the CreatorMaster and canonical INSTAGRAM identity.
+
+Provider identity stays `INSTAGRAM` across both login methods. An account already verified through
+Facebook is reused only if the canonical ID matches exactly; no username-based namespace mapping is
+attempted. Other owners return 409 with audit, never transfer. Callback flow mixing and replay are
+rejected, and audit failures roll back grant/session writes together.
+
+Direct Login uses fixed Instagram hosts and no Facebook `/me/accounts` or `debug_token`. Short-lived
+token validity is checked by profile access on confirm; no long-lived exchange, refresh job or token
+maintenance is implemented. If the provider omits expiry, proof validity is bounded by the ten-minute
+session rather than a guessed token lifetime. Payload uses the separate AES-256-GCM key and is cleared
+on success/failure/expiry. Tokens, codes, app secrets and raw provider errors are not logged or returned.
+
+The earlier live `@iahkhnim_` test used **Facebook Login**. It does not establish that Direct Instagram
+Login was tested with a real app; see the test-case document for current automated/manual results.
+
+## Local integration of be_vy (2026-10-26)
+
+The merged workspace retains invited Creator registration/OTP and the real Facebook/Instagram
+session flows while integrating be_vy `70453b2` Recommendation, Shortlist/CRM, reach analytics and
+Collaboration changes. Existing Meta V17 and direct Instagram V18 remain unchanged; incoming Vy
+migrations run as V19 (recommendation/shortlist), V20 (evidence) and V21 (outcome engagement).
+Do not apply this history directly to a database that already ran Vy's original V17–V19 without
+checking its migration history. This merge does not migrate or repair shared databases.
+
+Legacy provider simulation remains explicitly dev-only, including when official sandbox mode is
+selected. Facebook/Instagram verification cannot use those legacy callbacks. Ownership transfer
+through `/admin/creator-conflicts/{id}/resolve` remains unexposed under the existing MVP policy.
+TikTok/YouTube adapters are included from Vy but are not proven production-ready or live-tested by
+this merge. Registration, email OTP and Claim outbox configuration remain independent.

@@ -11,6 +11,7 @@ public final class PermissionCatalog {
   private static final Map<Permission, Entry> ENTRIES = new EnumMap<>(Permission.class);
 
   static {
+    add("Creator Registration", Permission.INVITE_CREATOR, "Invite Creator registration");
     add("Authentication", Permission.VIEW_OWN_PROFILE, "View own profile");
     add("Creators", Permission.VIEW_CREATOR_PROFILE, "View creator profile");
     add("Brand Profile", Permission.CREATE_BRAND_PROFILE, "Create brand profile");

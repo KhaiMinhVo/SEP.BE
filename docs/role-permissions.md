@@ -92,7 +92,7 @@ service checks và response permissions. Không cache giữa các request/instan
 Thay đổi đã commit có hiệu lực từ request tiếp theo; request đang xử lý tiếp tục
 theo snapshot ban đầu. Token hiện tại vẫn hợp lệ, không cần đăng nhập lại.
 
-Login, refresh, Google exchange, mock Creator login và `/auth/me` trả permissions
+Login, refresh, mock Creator login và `/auth/me` trả permissions
 hiệu lực. Frontend cần tải lại permissions để cập nhật menu; backend luôn chặn API
 bị tắt bằng 403. Tắt VIEW_OWN_PROFILE cũng chặn `/auth/me`; frontend có thể nhận
 lại permissions khi refresh/login. Logout và refresh không phụ thuộc công tắc này.
@@ -101,7 +101,7 @@ Không hủy dữ liệu/tác vụ đang chạy, không ảnh hưởng service-k
 callback VNPay công khai đã xác minh. Tắt checkout không ngăn đối soát giao dịch
 đã tạo trước đó qua callback VNPay. Không thay role/status/auth_version hoặc quota.
 
-V11 tạo hai bảng cấu hình, mặc định không tắt quyền nào. Chỉ chạy migration theo
+V6 trên nhánh Vy tạo hai bảng cấu hình, mặc định không tắt quyền nào. Chỉ chạy migration theo
 quy trình triển khai; quá trình phát triển/test không chạy vào database dùng chung.
 
 ## Kiểm thử
@@ -122,3 +122,5 @@ quyền ADMIN cố định, validation, optimistic conflict, no-op và audit rol
 `MANAGE_OWN_RATE_CARD` không còn trong enum, quyền mặc định hoặc danh mục Admin.
 Migration V12 xóa override cũ và tăng version cấu hình chỉ cho role có override bị xóa;
 Admin dùng version cũ sẽ gặp conflict. Không xóa bảng giá hoặc audit lịch sử.
+
+`INVITE_CREATOR`: ADMIN/DATA_MANAGER gửi lời mời đăng ký qua `/data/creator-invitations`; DATA_MANAGER có thể bị tắt quyền động. Lời mời không cấp ownership.

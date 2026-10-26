@@ -40,10 +40,9 @@ class AuthControllerTest {
     private AuthService authService;
 
     @MockBean
-    private com.influencermatch.backend.auth.service.GoogleAuthService googleAuthService;
+    private com.influencermatch.backend.auth.service.EmailVerificationService verification;
 
-    @MockBean
-    private com.influencermatch.backend.config.GoogleOAuthProperties googleOAuthProperties;
+
 
     @MockBean
     private com.influencermatch.backend.security.jwt.JwtTokenProvider jwtTokenProvider;
@@ -52,22 +51,10 @@ class AuthControllerTest {
     private org.springframework.security.core.userdetails.UserDetailsService userDetailsService;
 
     @Test
-    void googleLoginRedirectsWhenEnabled() throws Exception {
-        when(googleOAuthProperties.isEnabled()).thenReturn(true);
-        mockMvc.perform(get("/auth/google"))
-            .andExpect(status().isFound())
-            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                .redirectedUrl("/api/v1/oauth2/authorization/google"));
-    }
-
-    @Test
-    void googleExchangeReturnsLoginEnvelope() throws Exception {
-        when(googleAuthService.exchange("one-time-code")).thenReturn(createMockLoginResponse());
+    void googleLoginAndExchangeAreRemoved() throws Exception {
+        mockMvc.perform(get("/auth/google")).andExpect(status().isNotFound());
         mockMvc.perform(post("/auth/google/exchange").contentType(MediaType.APPLICATION_JSON)
-            .content("{\"code\":\"one-time-code\"}"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.success").value(true))
-            .andExpect(jsonPath("$.data.accessToken").exists());
+            .content("{\"code\":\"old\"}")).andExpect(status().isNotFound());
     }
 
     @Test

@@ -10,17 +10,14 @@ Base URL: `http://localhost:8080/api/v1`. Các API dữ liệu dùng header
 
 ## Luồng thử thủ công
 
-1. Mở `GET /auth/google/creator` bằng trình duyệt. Sau callback, frontend nhận
-   one-time `code`; gọi `POST /auth/google/exchange` với `{"code":"..."}` để lấy token.
-   Cần bật Google OAuth và cấu hình client/callback hợp lệ. Creator phải ACTIVE;
-   login Creator không chuyển một tài khoản BRAND/ADMIN/DATA_MANAGER thành Creator.
+1. Nhận email mời đăng ký Creator từ Admin/Data Manager, đặt mật khẩu và xác minh OTP, sau đó gọi `/auth/login`. Xem [hướng dẫn đăng ký](registration-and-email-otp.md). Creator phải ACTIVE và email đã xác minh; không cần Google identity.
 2. Gọi `POST /creators/{creatorId}/claim`:
 
    ```json
    {"evidenceUrls":["https://example.com/ownership-proof"],"note":"Bằng chứng quản lý kênh"}
    ```
 
-   Kết quả HTTP 201, `data.status=PENDING`. Google xác minh danh tính đăng nhập,
+   Kết quả HTTP 201, `data.status=PENDING`. OTP xác minh email đăng nhập,
    quyền sở hữu kênh vẫn cần người duyệt kiểm tra bằng chứng. URL không được backend
    tự tải; bằng chứng chỉ chủ claim và người duyệt được đọc qua các API tương ứng.
 3. Creator theo dõi `GET /creator-claims/me`. Admin/Data Manager dùng token riêng
@@ -48,8 +45,8 @@ Ingestion chỉ cập nhật dữ liệu công khai, không thay ownership.
 Yêu cầu JDK 21, Maven; integration test cần Docker chạy Linux containers:
 
 ```powershell
-mvn '-Dtest=CreatorClaimServiceTest,CreatorIngestionOwnershipTest,GoogleAuthServiceTest,RolePermissionsTest,AuthControllerTest,JwtAuthVersionTest,CreatorServiceKeyFilterTest' test
-mvn '-Dtest=CreatorClaimPostgresIntegrationTest,GoogleOAuthPostgresIntegrationTest,RbacPostgresIntegrationTest,RetiredRateCardPostgresIntegrationTest' test
+mvn '-Dtest=CreatorClaimServiceTest,CreatorIngestionOwnershipTest,RolePermissionsTest,AuthControllerTest,JwtAuthVersionTest,CreatorServiceKeyFilterTest' test
+mvn '-Dtest=CreatorClaimPostgresIntegrationTest,RbacPostgresIntegrationTest,RetiredRateCardPostgresIntegrationTest' test
 ```
 
 Integration suite dùng PostgreSQL 16 + pgvector qua Testcontainers, chạy Flyway và
@@ -61,5 +58,7 @@ validation và ingestion giữ trạng thái AUTHORIZED. Không dùng database p
 GET/PUT `/creators/{id}/rate-card` đã bị gỡ, trả 404 với tài khoản đã xác thực.
 Hồ sơ Creator và Compare không còn trường `rateCard`; frontend cần bỏ binding/hiển thị tương ứng.
 Migration V12 chỉ dọn override `MANAGE_OWN_RATE_CARD` và tăng version của role bị ảnh hưởng.
-Bảng `creator_rate_card`, dữ liệu giá và audit lịch sử được giữ nguyên, backend không còn sử dụng.
+Từ V15, bảng `creator_rate_card` và giá cũ đã được xóa; audit lịch sử vẫn giữ. Xem [dọn schema V15](schema-cleanup-v15.md).
 Claim, tick xác minh, Agreed Fee trong Collaboration và phí Relationship vẫn giữ nguyên.
+
+Brand channel-claim invitations, duplicate/ownership blocking and SMTP behavior: [MVP invitation flow](claim-invitations-mvp.md). Brand claim links do not register Creator accounts.

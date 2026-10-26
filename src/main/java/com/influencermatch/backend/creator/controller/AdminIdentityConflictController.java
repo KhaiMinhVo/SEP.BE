@@ -30,7 +30,7 @@ public class AdminIdentityConflictController {
 
   @GetMapping
   @PreAuthorize("hasAuthority('REVIEW_CREATOR_CLAIM') or hasAuthority('RESOLVE_CREATOR_DUPLICATE')")
-  @Operation(summary = "List creator account identity conflicts for Data Manager review")
+  @Operation(summary = "List and filter creator identity conflicts (PENDING_MANAGER, RESOLVED, REJECTED)")
   public ApiResponse<PageResponse<ConflictDetailDto>> listConflicts(
       @RequestParam(value = "status", required = false) String status,
       @RequestParam(value = "page", defaultValue = "0") int page,
@@ -42,16 +42,16 @@ public class AdminIdentityConflictController {
   }
 
   @PostMapping("/{id}/resolve")
-  @PreAuthorize("hasAuthority('REVIEW_CREATOR_CLAIM') or hasAuthority('RESOLVE_CREATOR_DUPLICATE')")
-  @Operation(summary = "Resolve a channel ownership conflict (APPROVE_TRANSFER or REJECT)")
+  @PreAuthorize("hasAuthority('RESOLVE_CREATOR_DUPLICATE')")
+  @Operation(summary = "Resolve creator identity conflict (Approve channel transfer or Reject dispute)")
   public ApiResponse<ConflictDetailDto> resolveConflict(
       @PathVariable("id") UUID conflictId,
       @Valid @RequestBody ResolveConflictRequest request) {
 
+    Permissions.require(com.influencermatch.backend.security.permission.Permission.RESOLVE_CREATOR_DUPLICATE);
     User actor = Permissions.actor();
-    ConflictDetailDto resolved = conflictService.resolveConflict(
+    ConflictDetailDto result = conflictService.resolveConflict(
         conflictId, request.getDecision(), request.getNotes(), actor);
-
-    return ApiResponse.ok(resolved);
+    return ApiResponse.ok(result);
   }
 }

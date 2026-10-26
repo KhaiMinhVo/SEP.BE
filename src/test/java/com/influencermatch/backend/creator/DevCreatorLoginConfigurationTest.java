@@ -15,6 +15,7 @@ class DevCreatorLoginConfigurationTest {
       .withPropertyValues("application.security.jwt.expiration=900000",
           "application.security.jwt.refresh-token.expiration=604800000")
       .withUserConfiguration(DevCreatorLoginController.class,DevCreatorLoginService.class)
+      .withBean(com.influencermatch.backend.creator.repository.CreatorMasterRepository.class,()->mock(com.influencermatch.backend.creator.repository.CreatorMasterRepository.class))
       .withBean(UserRepository.class,()->mock(UserRepository.class))
       .withBean(ExternalIdentityRepository.class,()->mock(ExternalIdentityRepository.class))
       .withBean(JwtTokenProvider.class,()->mock(JwtTokenProvider.class))

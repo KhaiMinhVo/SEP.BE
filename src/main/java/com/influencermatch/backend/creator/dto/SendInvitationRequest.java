@@ -18,7 +18,9 @@ public class SendInvitationRequest {
 
   @NotBlank(message = "Email is required")
   @Email(message = "Invalid email format")
+  @jakarta.validation.constraints.Size(max=255)
   private String email;
+  public void setEmail(String value) { this.email=value==null?null:value.trim().toLowerCase(java.util.Locale.ROOT); }
 
   private UUID campaignId;
 }

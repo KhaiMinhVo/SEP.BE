@@ -43,7 +43,7 @@ public class PublicCreatorMetricSpecification {
     public static Specification<PublicCreatorMetric> hasLocationIn(List<String> locations) {
         return (root, query, cb) -> {
             if (locations == null || locations.isEmpty()) return cb.conjunction();
-            return root.get("location").in(locations);
+            return root.join("creator").get("location").in(locations);
         };
     }
 

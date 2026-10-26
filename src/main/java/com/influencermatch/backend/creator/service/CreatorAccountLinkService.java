@@ -1,6 +1,7 @@
 package com.influencermatch.backend.creator.service;
 
 import com.influencermatch.backend.creator.client.OAuthProofClient;
+import com.influencermatch.backend.creator.dto.AggregatedReachDto;
 import com.influencermatch.backend.creator.dto.ConnectAccountResponse;
 import com.influencermatch.backend.creator.dto.LinkedAccountDto;
 import com.influencermatch.backend.creator.enums.CreatorSourceType;
@@ -12,21 +13,21 @@ import com.influencermatch.backend.relationship.repository.ShortlistItemReposito
 import com.influencermatch.backend.security.oauth.OAuthTokenEncryptionService;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
-import lombok.RequiredArgsConstructor;
+import java.util.*;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class CreatorAccountLinkService {
 
+  @org.springframework.beans.factory.annotation.Autowired private CreatorConflictAudit conflicts;
+  @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager em;
   private final CreatorRepository creatorRepository;
   private final CreatorMasterRepository creatorMasterRepository;
   private final CreatorIdentityConflictRepository conflictRepository;
@@ -38,18 +39,80 @@ public class CreatorAccountLinkService {
   private final UserRepository userRepository;
   private final OAuthTokenEncryptionService tokenEncryptionService;
   private final OAuthProofClient oAuthProofClient;
+  private final PublicCreatorMetricRepository publicCreatorMetricRepository;
+
+  @Autowired
+  public CreatorAccountLinkService(
+      CreatorRepository creatorRepository,
+      CreatorMasterRepository creatorMasterRepository,
+      CreatorIdentityConflictRepository conflictRepository,
+      CreatorAccountVerificationRepository accountVerificationRepository,
+      CreatorProviderIdentityRepository providerIdentityRepository,
+      CreatorIdentityAuditRepository identityAuditRepository,
+      ShortlistItemRepository shortlistItemRepository,
+      BrandCreatorRelationshipRepository relationshipRepository,
+      UserRepository userRepository,
+      OAuthTokenEncryptionService tokenEncryptionService,
+      OAuthProofClient oAuthProofClient,
+      @Autowired(required = false) PublicCreatorMetricRepository publicCreatorMetricRepository) {
+    this.creatorRepository = creatorRepository;
+    this.creatorMasterRepository = creatorMasterRepository;
+    this.conflictRepository = conflictRepository;
+    this.accountVerificationRepository = accountVerificationRepository;
+    this.providerIdentityRepository = providerIdentityRepository;
+    this.identityAuditRepository = identityAuditRepository;
+    this.shortlistItemRepository = shortlistItemRepository;
+    this.relationshipRepository = relationshipRepository;
+    this.userRepository = userRepository;
+    this.tokenEncryptionService = tokenEncryptionService;
+    this.oAuthProofClient = oAuthProofClient;
+    this.publicCreatorMetricRepository = publicCreatorMetricRepository;
+  }
+
+  public CreatorAccountLinkService(
+      CreatorRepository creatorRepository,
+      CreatorMasterRepository creatorMasterRepository,
+      CreatorIdentityConflictRepository conflictRepository,
+      CreatorAccountVerificationRepository accountVerificationRepository,
+      CreatorProviderIdentityRepository providerIdentityRepository,
+      CreatorIdentityAuditRepository identityAuditRepository,
+      ShortlistItemRepository shortlistItemRepository,
+      BrandCreatorRelationshipRepository relationshipRepository,
+      UserRepository userRepository,
+      OAuthTokenEncryptionService tokenEncryptionService,
+      OAuthProofClient oAuthProofClient) {
+    this(
+        creatorRepository,
+        creatorMasterRepository,
+        conflictRepository,
+        accountVerificationRepository,
+        providerIdentityRepository,
+        identityAuditRepository,
+        shortlistItemRepository,
+        relationshipRepository,
+        userRepository,
+        tokenEncryptionService,
+        oAuthProofClient,
+        null);
+  }
+
 
   /**
    * Links an additional social media channel (channel 2+) to the KOC's CreatorMaster.
    * Handles 4 distinct linking scenarios.
    */
-  @Transactional
+  @Transactional(noRollbackFor=com.influencermatch.backend.exception.CreatorOwnershipConflictException.class)
   public ConnectAccountResponse linkAdditionalAccount(
       UUID userId, String platform, String authorizationCode) {
 
     User currentUser = userRepository.findById(userId)
         .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
+    com.influencermatch.backend.security.permission.Permissions.require(com.influencermatch.backend.security.permission.Permission.CLAIM_CREATOR_PROFILE);
+    if(!currentUser.getId().equals(com.influencermatch.backend.security.permission.Permissions.actor().getId())
+        ||currentUser.getRole()!=com.influencermatch.backend.user.enums.Role.CREATOR
+        ||currentUser.getStatus()!=com.influencermatch.backend.user.enums.UserStatus.ACTIVE||!currentUser.isEmailVerified())
+      throw new com.influencermatch.backend.exception.ForbiddenException("An active verified Creator is required");
     CreatorMaster master = creatorMasterRepository.findByUserId(userId)
         .orElseThrow(() -> new ResourceNotFoundException("CreatorMaster", "userId", userId));
 
@@ -61,8 +124,9 @@ public class CreatorAccountLinkService {
     String providerUsername = proof.getProviderUsername();
     String normalizedPlatform = platform.toUpperCase();
 
+    creatorRepository.acquireIdentityLock(normalizedPlatform+":"+providerUserId);
     // 2. Check if this account already exists in DB
-    Optional<Creator> existingOpt = creatorRepository.findByPlatformAndExternalId(
+    Optional<Creator> existingOpt = creatorRepository.findLockedByPlatformAndExternalId(
         normalizedPlatform, providerUserId);
 
     // CASE 2: Tài khoản hoàn toàn mới chưa từng cào
@@ -107,6 +171,7 @@ public class CreatorAccountLinkService {
     }
 
     Creator existing = existingOpt.get();
+    em.refresh(existing);
 
     // CASE 3: Tài khoản đã thuộc chính Master M1 này
     if (existing.getMaster() != null && existing.getMaster().getId().equals(master.getId())) {
@@ -132,49 +197,13 @@ public class CreatorAccountLinkService {
           .build();
     }
 
-    // CASE 4: Tài khoản đã thuộc Master M2 khác (XUNG ĐỘT)
-    if (existing.getMaster() != null && !existing.getMaster().getId().equals(master.getId())) {
-      log.warn("Case 4: Conflict detected! Channel {}/{} belongs to masterId={} but requested by masterId={}",
-          normalizedPlatform, providerUserId, existing.getMaster().getId(), master.getId());
-
-      CreatorIdentityConflict conflict = CreatorIdentityConflict.builder()
-          .conflictType("ACCOUNT_ALREADY_LINKED")
-          .sourceAccount(existing)
-          .targetMaster(master)
-          .conflictDetails(Map.of(
-              "requestingUserId", userId.toString(),
-              "currentMasterId", existing.getMaster().getId().toString(),
-              "platform", normalizedPlatform,
-              "externalId", providerUserId,
-              "providerUsername", providerUsername
-          ))
-          .status("PENDING_MANAGER")
-          .build();
-      conflictRepository.save(conflict);
-
-      audit(master, existing, currentUser, "LINK_CONFLICT_DETECTED", Map.of(
-          "platform", normalizedPlatform,
-          "externalId", providerUserId,
-          "currentMasterId", existing.getMaster().getId().toString(),
-          "conflictType", "ACCOUNT_ALREADY_LINKED"
-      ));
-
-      return ConnectAccountResponse.builder()
-          .accountId(existing.getId())
-          .masterId(master.getId())
-          .platform(normalizedPlatform)
-          .externalId(providerUserId)
-          .userName(existing.getUserName())
-          .status("CONFLICT_PENDING_REVIEW")
-          .message("This channel is currently linked to another creator profile. A transfer request has been submitted to Data Manager for review.")
-          .build();
-    }
+    if(existing.getMaster()!=null || existing.getSourceType()==CreatorSourceType.AUTHORIZED)
+      throw conflicts.reject(existing.getId(),null,com.influencermatch.backend.exception.ErrorCode.CREATOR_ALREADY_LINKED,"Channel belongs to another Creator");
 
     // CASE 1: Tài khoản đã có trong DB qua crawler (master_id = NULL)
     log.info("Case 1: Linking unattached crawled channel {}/{} to masterId={}",
         normalizedPlatform, providerUserId, master.getId());
 
-    existing = creatorRepository.findLockedById(existing.getId()).orElse(existing);
     existing.setMaster(master);
     existing.setSourceType(CreatorSourceType.AUTHORIZED);
     existing.setAuthorizedAt(LocalDateTime.now());
@@ -227,16 +256,139 @@ public class CreatorAccountLinkService {
         .toList();
   }
 
+  /**
+   * FLOW 4 PHASE 5: Computes aggregated reach (total followers, avg views, weighted ER)
+   * across all linked social media channels under the KOC's CreatorMaster (M1).
+   */
+  @Transactional(readOnly = true)
+  public AggregatedReachDto getAggregatedReach(UUID userId) {
+    CreatorMaster master = creatorMasterRepository.findByUserId(userId)
+        .orElseThrow(() -> new ResourceNotFoundException("CreatorMaster", "userId", userId));
+
+    List<Creator> channels = creatorRepository.findByMasterId(master.getId());
+
+    long totalFollowers = 0L;
+    BigDecimal totalAvgViews = BigDecimal.ZERO;
+    BigDecimal weightedErSum = BigDecimal.ZERO;
+    BigDecimal simpleErSum = BigDecimal.ZERO;
+    int channelsWithMetrics = 0;
+
+    List<AggregatedReachDto.ChannelReachDto> breakdown = new ArrayList<>();
+    Set<String> platforms = new LinkedHashSet<>();
+    LocalDateTime now = LocalDateTime.now();
+
+    for (Creator channel : channels) {
+      if (channel.getPlatform() != null) {
+        platforms.add(channel.getPlatform().toUpperCase());
+      }
+
+      Long followers = 0L;
+      BigDecimal avgViews = BigDecimal.ZERO;
+      BigDecimal er = BigDecimal.ZERO;
+
+      if (publicCreatorMetricRepository != null) {
+        Optional<PublicCreatorMetric> metricOpt =
+            publicCreatorMetricRepository.findByCreatorId(channel.getId());
+        if (metricOpt.isPresent()) {
+          PublicCreatorMetric m = metricOpt.get();
+          if (m.getFollowers() != null) followers = m.getFollowers();
+          if (m.getAvgViews() != null) avgViews = m.getAvgViews();
+          if (m.getEngagementRate() != null) er = m.getEngagementRate();
+          channelsWithMetrics++;
+        }
+      }
+
+      totalFollowers += followers;
+      totalAvgViews = totalAvgViews.add(avgViews);
+      weightedErSum = weightedErSum.add(er.multiply(BigDecimal.valueOf(followers)));
+      simpleErSum = simpleErSum.add(er);
+
+      Optional<CreatorAccountVerification> verOpt =
+          accountVerificationRepository.findFirstByCreatorIdOrderByVerifiedAtDesc(channel.getId());
+
+      String tokenStatus = "ACTIVE";
+      String verificationMethod = "OAUTH_OFFICIAL_SANDBOX";
+      if (verOpt.isPresent()) {
+        CreatorAccountVerification v = verOpt.get();
+        if (v.getVerificationMethod() != null) {
+          verificationMethod = v.getVerificationMethod();
+        }
+        if ("ACTIVE".equalsIgnoreCase(v.getStatus())) {
+          if (v.getTokenExpiresAt() != null && v.getTokenExpiresAt().isBefore(now)) {
+            tokenStatus = "EXPIRED";
+          } else {
+            tokenStatus = "ACTIVE";
+          }
+        } else {
+          tokenStatus = v.getStatus().toUpperCase();
+        }
+      } else if (channel.getSourceType() == CreatorSourceType.AUTHORIZED) {
+        tokenStatus = "ACTIVE";
+      } else {
+        tokenStatus = "UNVERIFIED";
+      }
+
+      breakdown.add(
+          AggregatedReachDto.ChannelReachDto.builder()
+              .channelId(channel.getId())
+              .platform(channel.getPlatform() != null ? channel.getPlatform().toUpperCase() : null)
+              .userName(channel.getUserName())
+              .displayName(channel.getDisplayName())
+              .avatarUrl(channel.getAvatarUrl())
+              .profileUrl(channel.getProfileUrl())
+              .followers(followers)
+              .avgViews(avgViews)
+              .engagementRate(er)
+              .tokenStatus(tokenStatus)
+              .verificationMethod(verificationMethod)
+              .authorizedAt(channel.getAuthorizedAt())
+              .build());
+    }
+
+    BigDecimal averageEngagementRate = BigDecimal.ZERO;
+    if (totalFollowers > 0) {
+      averageEngagementRate =
+          weightedErSum.divide(BigDecimal.valueOf(totalFollowers), 4, RoundingMode.HALF_UP);
+    } else if (channelsWithMetrics > 0) {
+      averageEngagementRate =
+          simpleErSum.divide(BigDecimal.valueOf(channelsWithMetrics), 4, RoundingMode.HALF_UP);
+    }
+
+    return AggregatedReachDto.builder()
+        .masterId(master.getId())
+        .canonicalName(master.getCanonicalName())
+        .channelCount(channels.size())
+        .totalFollowers(totalFollowers)
+        .totalAvgViews(totalAvgViews)
+        .averageEngagementRate(averageEngagementRate)
+        .platforms(new ArrayList<>(platforms))
+        .platformBreakdown(breakdown)
+        .calculatedAt(now)
+        .build();
+  }
+
   private void saveVerificationAndProviderIdentity(
       Creator creator, User user, OAuthProofClient.ProofResult proof, String platform) {
 
     String encryptedAccess = tokenEncryptionService.encrypt(proof.getAccessToken());
     String encryptedRefresh = tokenEncryptionService.encrypt(proof.getRefreshToken());
 
+    String verificationMethod = "OAUTH_AUTHORIZATION";
+    if (proof.getRawProfileData() != null) {
+      Object envObj = proof.getRawProfileData().get("verificationEnvironment");
+      if ("OFFICIAL_SANDBOX".equals(envObj)) {
+        verificationMethod = "OAUTH_OFFICIAL_SANDBOX";
+      } else if ("TESTING_MODE".equals(envObj)) {
+        verificationMethod = "OAUTH_TESTING_GOOGLE";
+      } else if ("SIMULATION".equals(envObj)) {
+        verificationMethod = "OAUTH_SIMULATED_MOCK";
+      }
+    }
+
     CreatorAccountVerification verification = CreatorAccountVerification.builder()
         .creator(creator)
         .verifiedByUser(user)
-        .verificationMethod("OAUTH_AUTHORIZATION")
+        .verificationMethod(verificationMethod)
         .grantedScopes("openid,profile,offline_access")
         .accessTokenEncrypted(encryptedAccess)
         .refreshTokenEncrypted(encryptedRefresh)

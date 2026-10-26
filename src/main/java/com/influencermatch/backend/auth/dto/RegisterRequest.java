@@ -19,9 +19,15 @@ import lombok.Setter;
 @AllArgsConstructor
 @Builder
 public class RegisterRequest {
+  @com.fasterxml.jackson.annotation.JsonAnySetter
+  public void rejectUnknown(String name, Object value) {
+    throw new com.influencermatch.backend.exception.ValidationException("Registration does not accept a role or unknown fields");
+  }
+
 
   @NotBlank(message = "Email is required.")
   @Email(message = "Email must be a valid address.")
+  @Size(max = 255)
   private String email;
 
   @NotBlank(message = "Password is required.")

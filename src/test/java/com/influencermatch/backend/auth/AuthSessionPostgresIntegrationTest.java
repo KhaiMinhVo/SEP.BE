@@ -9,15 +9,20 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.*;
 
+@org.springframework.test.context.TestPropertySource(properties="application.auth.email-verification.secret=test-email-otp-secret-at-least-32-characters")
 class AuthSessionPostgresIntegrationTest extends PostgresApiTestSupport {
+  @org.springframework.boot.test.mock.mockito.MockBean com.influencermatch.backend.auth.service.VerificationEmailSender sender;
   @org.springframework.beans.factory.annotation.Autowired
   com.influencermatch.backend.auth.service.AuthService authService;
   @org.springframework.beans.factory.annotation.Autowired
   org.springframework.transaction.PlatformTransactionManager transactions;
 
-  @Test void registrationNormalizesCaseAndIgnoresInjectedRole() throws Exception {
+  @Test void registrationNormalizesCaseAndRejectsInjectedRole() throws Exception {
     String email="CASE-"+UUID.randomUUID()+"@EXAMPLE.TEST";
     var body=Map.of("email",email,"password","Password123!","fullName","  Test User  ","role","ADMIN");
+    call(null,post("/auth/register"),body,400);
+    assertThat(users.findByEmail(email.toLowerCase(Locale.ROOT))).isEmpty();
+    body=Map.of("email",email,"password","Password123!","fullName","  Test User  ");
     call(null,post("/auth/register"),body,201);
     var user=users.findByEmail(email.toLowerCase(Locale.ROOT)).orElseThrow();
     assertThat(user.getRole()).isEqualTo(Role.BRAND);assertThat(user.getFullName()).isEqualTo("Test User");

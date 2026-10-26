@@ -1,8 +1,11 @@
 package com.influencermatch.backend.relationship.model;
 
 import com.influencermatch.backend.campaign.model.Campaign;
+import com.influencermatch.backend.campaign.model.RecommendationRun;
 import com.influencermatch.backend.creator.model.Creator;
 import com.influencermatch.backend.relationship.enums.ShortlistPriority;
+import com.influencermatch.backend.relationship.enums.ShortlistSource;
+import com.influencermatch.backend.relationship.enums.ShortlistStatus;
 import com.influencermatch.backend.user.model.User;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
@@ -47,6 +50,20 @@ public class ShortlistItem {
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 16)
   private ShortlistPriority priority;
+
+  @Builder.Default
+  @Enumerated(EnumType.STRING)
+  @Column(nullable = false, length = 32)
+  private ShortlistStatus status = ShortlistStatus.SAVED;
+
+  @Builder.Default
+  @Enumerated(EnumType.STRING)
+  @Column(nullable = false, length = 32)
+  private ShortlistSource source = ShortlistSource.MANUAL_DISCOVERY;
+
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "recommendation_run_id")
+  private RecommendationRun recommendationRun;
 
   private String note;
 

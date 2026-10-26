@@ -117,4 +117,17 @@ public class ShortlistController {
     ContactReadinessResponse response = shortlistService.checkContactReadiness(campaignId, request);
     return ResponseEntity.ok(ApiResponse.ok("Contact readiness preview generated", response));
   }
+
+  @Operation(
+      summary = "FLOW SL-05 / CRM Bridge: Shortlist Batch Outreach to CRM",
+      security = @SecurityRequirement(name = "BearerAuth"))
+  @PostMapping("/outreach")
+  @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
+  public ResponseEntity<ApiResponse<ShortlistOutreachResponse>> outreach(
+      @PathVariable UUID campaignId,
+      @Valid @RequestBody ShortlistOutreachRequest request) {
+    ShortlistOutreachResponse response = shortlistService.outreachShortlist(campaignId, request);
+    return ResponseEntity.ok(ApiResponse.ok("Shortlist outreach processed", response));
+  }
 }
+

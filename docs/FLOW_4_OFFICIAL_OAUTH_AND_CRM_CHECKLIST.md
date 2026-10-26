@@ -159,12 +159,12 @@ public ApiResponse<ConflictDetailDto> resolveConflict(
 
 ---
 
-### 🔹 PHASE 4: Shortlist Cart to CRM Outreach Bridging (`SEP_BE`)
+### 🔹 PHASE 4: Shortlist Cart to CRM Outreach Bridging (`SEP_BE`) [✅ HOÀN THÀNH]
 **Mục tiêu**: Nối kết quả Shortlist Cart (từ Flow 3) vào phễu đàm phán hợp tác CRM (Flow 4 Tiểu luồng B).
 
 #### 1. Tạo DTOs & Service Method Outreach
 Tạo `POST /campaigns/{campaignId}/shortlist/outreach` tại [ShortlistController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/controller/ShortlistController.java):
-* **Input**:
+* **Input**: [ShortlistOutreachRequest.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/dto/ShortlistOutreachRequest.java)
   ```json
   {
     "shortlistItemIds": ["UUID1", "UUID2"],
@@ -174,18 +174,20 @@ Tạo `POST /campaigns/{campaignId}/shortlist/outreach` tại [ShortlistControll
     "contactMethod": "EMAIL_INVITATION"
   }
   ```
+* **Output**: [ShortlistOutreachResponse.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/dto/ShortlistOutreachResponse.java)
 * **Logic xử lý tại `ShortlistService`**:
-  1. Thẩm định quyền sở hữu Campaign của Brand.
+  1. Thẩm định quyền sở hữu Campaign của Brand (`CampaignOwnershipService`, `MANAGE_OWN_SHORTLIST`).
   2. Duyệt qua từng `ShortlistItem`:
      * Chuyển trạng thái `shortlistItem.status = CONTACTED`.
      * Tạo hoặc cập nhật bản ghi `BrandCreatorRelationship` ở giai đoạn `RelationshipStage.CONTACTED` kèm `quotedFee = proposedFee` và `notes = outreachMessage`.
-     * **Đối với Creator chưa Claim (`PUBLIC`)**: Tự động sinh `CreatorInvitation` và đưa vào hàng đợi `claim_email_outbox` (kế thừa V16) để gửi email mời Claim kèm lời ngỏ hợp tác.
-     * **Đối với Creator đã Claim (`AUTHORIZED`)**: Tạo thông báo nội bộ trong hệ thống gửi trực tiếp vào Creator Portal.
+     * **Đối với Creator chưa Claim (`PUBLIC`)**: Tự động sinh `CreatorInvitation` qua `CreatorInvitationService` và đưa vào hàng đợi `claim_email_outbox` để gửi email mời Claim kèm lời ngỏ hợp tác; nếu đã có invitation pending thì tái sử dụng mà không tạo trùng lặp.
+     * **Đối với Creator đã Claim (`AUTHORIZED`)**: Tạo quan hệ CRM trực tiếp và đánh dấu `PORTAL_NOTIFIED` để thông báo trong Creator Portal.
 
 #### 2. Hoàn thiện State Machine tại `RelationshipServiceImpl.java`
 * Đảm bảo luồng đàm phán chuyển trạng thái mượt mà:
   `CONTACTED` $\rightarrow$ `INTERESTED` $\rightarrow$ `COLLABORATING` $\rightarrow$ `COMPLETED`.
-* Cập nhật chi phí chốt cuối cùng (`agreedFee`) và hạn chót phản hồi (`nextAction`).
+* Cập nhật chi phí chốt cuối cùng (`agreedFee`) và hạn chót phản hồi (`nextAction`) trực tiếp trong `UpdateRelationshipStageRequest` và `updateStage()`.
+* Bộ test tự động [ShortlistOutreachPhase4Test.java](file:///d:/SEP_BE/src/test/java/com/influencermatch/backend/relationship/ShortlistOutreachPhase4Test.java) đạt 5/5 test cases passed (tổng 19/19 tests Shortlist/Relationship passed).
 
 ---
 
@@ -259,9 +261,9 @@ Xây dựng 10 kịch bản kiểm thử mẫu mực (`TEST-F4-01` $\rightarrow$
 - [x] Kết nối tới `CreatorIdentityConflictService.resolveConflict()` và kiểm thử phân quyền `RESOLVE_CREATOR_DUPLICATE`.
 
 ### Phase 4: Shortlist Cart to CRM Outreach Bridging
-- [ ] Tạo DTO `ShortlistOutreachRequest` và `ShortlistOutreachResponse`.
-- [ ] Thêm endpoint `POST /campaigns/{campaignId}/shortlist/outreach` trong [ShortlistController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/controller/ShortlistController.java).
-- [ ] Viết logic trong `ShortlistService`: chuyển Shortlist item sang `CONTACTED`, tạo `BrandCreatorRelationship`, và dispatch email mời claim nếu kênh chưa claim.
+- [x] Tạo DTO `ShortlistOutreachRequest` và `ShortlistOutreachResponse`.
+- [x] Thêm endpoint `POST /campaigns/{campaignId}/shortlist/outreach` trong [ShortlistController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/relationship/controller/ShortlistController.java).
+- [x] Viết logic trong `ShortlistService`: chuyển Shortlist item sang `CONTACTED`, tạo `BrandCreatorRelationship`, và dispatch email mời claim nếu kênh chưa claim.
 
 ### Phase 5: Creator Portal Analytics & Multi-Channel Reach
 - [ ] Tạo DTO `AggregatedReachDto` chứa tổng followers, views, ER bình quân và chi tiết kênh.

@@ -29,4 +29,8 @@ public interface ShortlistService {
 
   ContactReadinessResponse checkContactReadiness(
       UUID campaignId, ContactReadinessRequest request);
+
+  ShortlistOutreachResponse outreachShortlist(
+      UUID campaignId, ShortlistOutreachRequest request);
 }
+

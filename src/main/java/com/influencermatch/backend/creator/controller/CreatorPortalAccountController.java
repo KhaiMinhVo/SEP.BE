@@ -64,4 +64,13 @@ public class CreatorPortalAccountController {
     List<LinkedAccountDto> accounts = accountLinkService.getLinkedAccounts(actor.getId());
     return ApiResponse.ok(accounts);
   }
+
+  @GetMapping("/reach")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
+  @Operation(summary = "Get aggregated multi-channel reach metrics across all linked channels for current creator master")
+  public ApiResponse<com.influencermatch.backend.creator.dto.AggregatedReachDto> getAggregatedReach() {
+    User actor = Permissions.actor();
+    return ApiResponse.ok(accountLinkService.getAggregatedReach(actor.getId()));
+  }
 }
+

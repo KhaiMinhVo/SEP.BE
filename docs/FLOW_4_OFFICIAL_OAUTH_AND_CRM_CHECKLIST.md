@@ -191,22 +191,24 @@ Tạo `POST /campaigns/{campaignId}/shortlist/outreach` tại [ShortlistControll
 
 ---
 
-### 🔹 PHASE 5: Creator Portal Analytics & Multi-Channel Reach (`SEP_BE`)
+### 🔹 PHASE 5: Creator Portal Analytics & Multi-Channel Reach (`SEP_BE`) [✅ HOÀN THÀNH]
 **Mục tiêu**: Cung cấp góc nhìn toàn diện cho Creator sau khi Claim thành công để quản lý các kênh đã liên kết.
 
 #### 1. Thêm Endpoint Aggregated Reach
-Tại [CreatorPortalAccountController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/CreatorPortalAccountController.java):
-* **Endpoint**: `GET /creators/portal/analytics/reach`
-* **Xử lý**:
-  * Tìm `CreatorMaster` của KOC hiện tại.
+Tại [CreatorPortalAnalyticsController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/CreatorPortalAnalyticsController.java) & [CreatorPortalAccountController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/CreatorPortalAccountController.java):
+* **Endpoint**: `GET /creators/portal/analytics/reach` (và alias `GET /creators/portal/accounts/reach`)
+* **DTO**: [AggregatedReachDto.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/dto/AggregatedReachDto.java)
+* **Xử lý tại `CreatorAccountLinkService.getAggregatedReach()`**:
+  * Tìm `CreatorMaster` của KOC hiện tại (`creatorMasterRepository.findByUserId(userId)`).
   * Lấy danh sách toàn bộ các kênh thuộc Master (`creatorRepository.findByMasterId(master.getId())`).
-  * Lấy metrics mới nhất của từng kênh từ `public_creator_metric`.
+  * Lấy metrics mới nhất của từng kênh từ `publicCreatorMetricRepository.findByCreatorId()`.
   * **Tính toán Aggregated Metrics**:
     * `totalFollowers`: Tổng số followers cộng dồn từ TikTok + YouTube + Facebook.
-    * `totalViews`: Tổng lượt xem trung bình trên các nền tảng.
-    * `averageEngagementRate`: Tỷ lệ tương tác bình quân gia quyền.
+    * `totalViews`: Tổng lượt xem trung bình trên các nền tảng (`totalAvgViews`).
+    * `averageEngagementRate`: Tỷ lệ tương tác bình quân gia quyền theo số lượng follower: $\sum (ER_i \times Followers_i) / \sum Followers_i$ (làm tròn 4 chữ số thập phân).
     * `channelCount`: Số lượng kênh mạng xã hội đã xác minh.
-    * `platformBreakdown`: Chi tiết từng kênh kèm trạng thái token (ACTIVE/EXPIRED).
+    * `platformBreakdown`: Chi tiết từng kênh kèm trạng thái token (ACTIVE/EXPIRED) và phương thức xác thực (`verificationMethod`).
+* Bộ test tự động [CreatorPortalReachPhase5Test.java](file:///d:/SEP_BE/src/test/java/com/influencermatch/backend/creator/service/CreatorPortalReachPhase5Test.java) đạt 4/4 test cases passed (tổng 20/20 tests liên kết/claim kênh passed).
 
 ---
 
@@ -266,8 +268,8 @@ Xây dựng 10 kịch bản kiểm thử mẫu mực (`TEST-F4-01` $\rightarrow$
 - [x] Viết logic trong `ShortlistService`: chuyển Shortlist item sang `CONTACTED`, tạo `BrandCreatorRelationship`, và dispatch email mời claim nếu kênh chưa claim.
 
 ### Phase 5: Creator Portal Analytics & Multi-Channel Reach
-- [ ] Tạo DTO `AggregatedReachDto` chứa tổng followers, views, ER bình quân và chi tiết kênh.
-- [ ] Thêm endpoint `GET /creators/portal/analytics/reach` trong [CreatorPortalAccountController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/CreatorPortalAccountController.java).
+- [x] Tạo DTO `AggregatedReachDto` chứa tổng followers, views, ER bình quân và chi tiết kênh.
+- [x] Thêm endpoint `GET /creators/portal/analytics/reach` trong [CreatorPortalAnalyticsController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/creator/controller/CreatorPortalAnalyticsController.java).
 
 ### Phase 6: Automated Acceptance Test Suite
 - [ ] Kiểm tra hợp đồng an toàn dữ liệu crawler: `java_mapper.py` (`sourceType = 'PUBLIC'`, `masterId = None`).

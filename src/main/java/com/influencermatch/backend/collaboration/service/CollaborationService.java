@@ -39,6 +39,7 @@ public class CollaborationService {
   private final CampaignOutcomeRepository outcomes;
   private final CreatorReviewRepository reviews;
   private final CreatorMasterRepository creatorMasters;
+  private final EvidenceAssetRepository evidenceAssets;
   private final EntityManager entityManager;
   private final Validator validator;
 
@@ -308,6 +309,20 @@ public class CollaborationService {
                         r.getReviewedAt()))
             .orElse(null);
 
+    List<EvidenceAssetResponse> evidenceList =
+        evidenceAssets.findByCollaborationIdOrderByUploadedAtDesc(collaborationId).stream()
+            .map(
+                a ->
+                    new EvidenceAssetResponse(
+                        a.getId(),
+                        collaborationId,
+                        a.getOutcome() != null ? a.getOutcome().getId() : null,
+                        a.getAssetType(),
+                        a.getStorageUrl(),
+                        a.getSource(),
+                        a.getUploadedAt()))
+            .toList();
+
     String creatorName =
         c.getCreator().getDisplayName() != null && !c.getCreator().getDisplayName().isBlank()
             ? c.getCreator().getDisplayName()
@@ -333,7 +348,101 @@ public class CollaborationService {
         c.getCompletedAt(),
         c.getUpdatedAt(),
         outcomeDto,
-        reviewDto);
+        reviewDto,
+        evidenceList);
+  }
+
+  @Transactional
+  public EvidenceAssetResponse submitEvidence(UUID collaborationId, SubmitEvidenceRequest request) {
+    validate(request);
+    Collaboration collaboration =
+        collaborations
+            .findById(collaborationId)
+            .orElseThrow(() -> new NotFoundException("Collaboration not found"));
+
+    User actor = Permissions.actor();
+    boolean isBrandOwner =
+        collaboration.getCampaign().getBrandProfile().getUser().getId().equals(actor.getId());
+    boolean isCreatorOwner =
+        (collaboration.getMaster() != null
+                && collaboration.getMaster().getUser().getId().equals(actor.getId()))
+            || (collaboration.getCreator().getMaster() != null
+                && collaboration.getCreator().getMaster().getUser().getId().equals(actor.getId()));
+    boolean isStaff = actor.getRole() == Role.ADMIN || actor.getRole() == Role.DATA_MANAGER;
+
+    if (!isBrandOwner && !isCreatorOwner && !isStaff) {
+      throw new ForbiddenException("Access denied to submit evidence for this collaboration");
+    }
+
+    String source = isCreatorOwner ? "CREATOR_SUBMITTED" : "BRAND_UPLOAD";
+    LocalDateTime now = LocalDateTime.now();
+
+    if (request.publishedContentUrl() != null && !request.publishedContentUrl().isBlank()) {
+      collaboration.setPublishedContentUrl(request.publishedContentUrl());
+      collaboration.setUpdatedAt(now);
+    } else if ("POST_LINK".equalsIgnoreCase(request.assetType())
+        && (collaboration.getPublishedContentUrl() == null
+            || collaboration.getPublishedContentUrl().isBlank())) {
+      collaboration.setPublishedContentUrl(request.storageUrl());
+      collaboration.setUpdatedAt(now);
+    }
+
+    CampaignOutcome outcome = outcomes.findByCollaborationId(collaborationId).orElse(null);
+
+    EvidenceAsset asset =
+        evidenceAssets.save(
+            EvidenceAsset.builder()
+                .collaboration(collaboration)
+                .outcome(outcome)
+                .assetType(request.assetType())
+                .storageUrl(request.storageUrl())
+                .source(source)
+                .uploadedAt(now)
+                .build());
+
+    return new EvidenceAssetResponse(
+        asset.getId(),
+        collaborationId,
+        outcome != null ? outcome.getId() : null,
+        asset.getAssetType(),
+        asset.getStorageUrl(),
+        asset.getSource(),
+        asset.getUploadedAt());
+  }
+
+  @Transactional(readOnly = true)
+  public List<EvidenceAssetResponse> getEvidenceAssets(UUID collaborationId) {
+    Collaboration collaboration =
+        collaborations
+            .findById(collaborationId)
+            .orElseThrow(() -> new NotFoundException("Collaboration not found"));
+
+    User actor = Permissions.actor();
+    boolean isBrandOwner =
+        collaboration.getCampaign().getBrandProfile().getUser().getId().equals(actor.getId());
+    boolean isCreatorOwner =
+        (collaboration.getMaster() != null
+                && collaboration.getMaster().getUser().getId().equals(actor.getId()))
+            || (collaboration.getCreator().getMaster() != null
+                && collaboration.getCreator().getMaster().getUser().getId().equals(actor.getId()));
+    boolean isStaff = actor.getRole() == Role.ADMIN || actor.getRole() == Role.DATA_MANAGER;
+
+    if (!isBrandOwner && !isCreatorOwner && !isStaff) {
+      throw new ForbiddenException("Access denied to view evidence for this collaboration");
+    }
+
+    return evidenceAssets.findByCollaborationIdOrderByUploadedAtDesc(collaborationId).stream()
+        .map(
+            a ->
+                new EvidenceAssetResponse(
+                    a.getId(),
+                    collaborationId,
+                    a.getOutcome() != null ? a.getOutcome().getId() : null,
+                    a.getAssetType(),
+                    a.getStorageUrl(),
+                    a.getSource(),
+                    a.getUploadedAt()))
+        .toList();
   }
 
   @Transactional(readOnly = true)

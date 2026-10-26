@@ -22,6 +22,7 @@ import com.influencermatch.backend.user.model.User;
 import jakarta.persistence.EntityManager;
 import jakarta.validation.Validation;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -40,6 +41,7 @@ class CollaborationServiceTest {
   CampaignOutcomeRepository outcomes = mock(CampaignOutcomeRepository.class);
   CreatorReviewRepository reviews = mock(CreatorReviewRepository.class);
   CreatorMasterRepository creatorMasters = mock(CreatorMasterRepository.class);
+  EvidenceAssetRepository evidenceAssets = mock(EvidenceAssetRepository.class);
   EntityManager em = mock(EntityManager.class);
   jakarta.validation.ValidatorFactory factory;
   CollaborationService service;
@@ -59,6 +61,7 @@ class CollaborationServiceTest {
             outcomes,
             reviews,
             creatorMasters,
+            evidenceAssets,
             em,
             factory.getValidator());
     owner = User.builder().id(UUID.randomUUID()).role(Role.BRAND).status(UserStatus.ACTIVE).build();
@@ -432,6 +435,95 @@ class CollaborationServiceTest {
 
     var list = service.getCreatorPortalCollaborations(null);
     assertThat(list).isEmpty();
+  }
+
+  @Test
+  void submitEvidenceByBrandUpdatesPostUrlAndPersistsAsset() {
+    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    when(evidenceAssets.save(any()))
+        .thenAnswer(
+            i -> {
+              EvidenceAsset a = i.getArgument(0);
+              a.setId(UUID.randomUUID());
+              return a;
+            });
+
+    SubmitEvidenceRequest req =
+        new SubmitEvidenceRequest(
+            "POST_LINK",
+            "https://tiktok.com/@koc/video/999",
+            null,
+            "Published link");
+
+    EvidenceAssetResponse response = service.submitEvidence(collaboration.getId(), req);
+    assertThat(response.assetType()).isEqualTo("POST_LINK");
+    assertThat(response.source()).isEqualTo("BRAND_UPLOAD");
+    assertThat(response.storageUrl()).isEqualTo("https://tiktok.com/@koc/video/999");
+    assertThat(collaboration.getPublishedContentUrl()).isEqualTo("https://tiktok.com/@koc/video/999");
+  }
+
+  @Test
+  void submitEvidenceByCreatorMasterSetsCreatorSubmittedSource() {
+    User creatorUser =
+        User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
+    authenticate(creatorUser);
+    CreatorMaster master =
+        CreatorMaster.builder().id(UUID.randomUUID()).user(creatorUser).build();
+    collaboration.setMaster(master);
+
+    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    when(evidenceAssets.save(any()))
+        .thenAnswer(
+            i -> {
+              EvidenceAsset a = i.getArgument(0);
+              a.setId(UUID.randomUUID());
+              return a;
+            });
+
+    SubmitEvidenceRequest req =
+        new SubmitEvidenceRequest(
+            "INSIGHTS_SCREENSHOT",
+            "https://s3.amazonaws.com/evidence/insights.png",
+            null,
+            "Insights proof");
+
+    EvidenceAssetResponse response = service.submitEvidence(collaboration.getId(), req);
+    assertThat(response.assetType()).isEqualTo("INSIGHTS_SCREENSHOT");
+    assertThat(response.source()).isEqualTo("CREATOR_SUBMITTED");
+  }
+
+  @Test
+  void submitEvidenceRejectsUnrelatedActor() {
+    User stranger =
+        User.builder().id(UUID.randomUUID()).role(Role.BRAND).status(UserStatus.ACTIVE).build();
+    authenticate(stranger);
+    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+
+    SubmitEvidenceRequest req =
+        new SubmitEvidenceRequest(
+            "POST_LINK", "https://example.com/post", null, null);
+
+    assertCode(() -> service.submitEvidence(collaboration.getId(), req), ErrorCode.ACCESS_DENIED);
+  }
+
+  @Test
+  void getEvidenceAssetsReturnsAllAssetsForCollaboration() {
+    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    EvidenceAsset asset =
+        EvidenceAsset.builder()
+            .id(UUID.randomUUID())
+            .collaboration(collaboration)
+            .assetType("POST_LINK")
+            .storageUrl("https://tiktok.com/@koc/123")
+            .source("CREATOR_SUBMITTED")
+            .uploadedAt(LocalDateTime.now())
+            .build();
+    when(evidenceAssets.findByCollaborationIdOrderByUploadedAtDesc(collaboration.getId()))
+        .thenReturn(List.of(asset));
+
+    List<EvidenceAssetResponse> list = service.getEvidenceAssets(collaboration.getId());
+    assertThat(list).hasSize(1);
+    assertThat(list.get(0).assetType()).isEqualTo("POST_LINK");
   }
 
   void assertCode(org.assertj.core.api.ThrowableAssert.ThrowingCallable action, ErrorCode code) {

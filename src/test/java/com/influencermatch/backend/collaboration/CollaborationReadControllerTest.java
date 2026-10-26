@@ -134,7 +134,8 @@ class CollaborationReadControllerTest {
             LocalDateTime.now(),
             LocalDateTime.now(),
             outcome,
-            review);
+            review,
+            List.of());
 
     when(collaborationService.getCollaborationDetail(collabId)).thenReturn(detail);
 
@@ -185,5 +186,62 @@ class CollaborationReadControllerTest {
         .andExpect(jsonPath("$.data[0].brandName").value("Brand Y"))
         .andExpect(jsonPath("$.data[0].platform").value("YOUTUBE"))
         .andExpect(jsonPath("$.data[0].status").value("IN_PROGRESS"));
+  }
+
+  @Test
+  @DisplayName("POST /collaborations/{id}/evidence submits evidence asset successfully")
+  void submitEvidenceReturnsCreated() throws Exception {
+    UUID collabId = UUID.randomUUID();
+    UUID assetId = UUID.randomUUID();
+    EvidenceAssetResponse response =
+        new EvidenceAssetResponse(
+            assetId,
+            collabId,
+            null,
+            "POST_LINK",
+            "https://tiktok.com/@koc/123",
+            "CREATOR_SUBMITTED",
+            LocalDateTime.now());
+
+    when(collaborationService.submitEvidence(eq(collabId), any())).thenReturn(response);
+
+    String body =
+        "{\"assetType\":\"POST_LINK\",\"storageUrl\":\"https://tiktok.com/@koc/123\",\"publishedContentUrl\":\"https://tiktok.com/@koc/123\"}";
+
+    mockMvc
+        .perform(
+            org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
+                    "/collaborations/" + collabId + "/evidence")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.id").value(assetId.toString()))
+        .andExpect(jsonPath("$.data.assetType").value("POST_LINK"))
+        .andExpect(jsonPath("$.data.storageUrl").value("https://tiktok.com/@koc/123"))
+        .andExpect(jsonPath("$.data.source").value("CREATOR_SUBMITTED"));
+  }
+
+  @Test
+  @DisplayName("GET /collaborations/{id}/evidence returns list of evidence assets")
+  void getEvidenceAssetsReturnsList() throws Exception {
+    UUID collabId = UUID.randomUUID();
+    EvidenceAssetResponse response =
+        new EvidenceAssetResponse(
+            UUID.randomUUID(),
+            collabId,
+            null,
+            "INSIGHTS_SCREENSHOT",
+            "https://s3.aws.com/proof.png",
+            "BRAND_UPLOAD",
+            LocalDateTime.now());
+
+    when(collaborationService.getEvidenceAssets(collabId)).thenReturn(List.of(response));
+
+    mockMvc
+        .perform(get("/collaborations/" + collabId + "/evidence"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].assetType").value("INSIGHTS_SCREENSHOT"))
+        .andExpect(jsonPath("$.data[0].storageUrl").value("https://s3.aws.com/proof.png"))
+        .andExpect(jsonPath("$.data[0].source").value("BRAND_UPLOAD"));
   }
 }

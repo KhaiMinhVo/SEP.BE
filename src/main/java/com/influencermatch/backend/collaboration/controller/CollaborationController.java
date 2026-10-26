@@ -87,13 +87,41 @@ public class CollaborationController {
       summary = "Get collaboration detail",
       description =
           "Owned by campaign brand owner or assigned creator master. Returns full detail with"
-              + " outcome and review.")
+              + " outcome, review, and evidence assets.")
   @ApiResponse(responseCode = "200", description = "Collaboration detail retrieved")
   public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<CollaborationDetailResponse>>
       getCollaborationDetail(@PathVariable UUID id) {
     return ResponseEntity.ok(
         com.influencermatch.backend.common.dto.ApiResponse.ok(
             service.getCollaborationDetail(id)));
+  }
+
+  @PostMapping("/collaborations/{id}/evidence")
+  @PreAuthorize("isAuthenticated()")
+  @Operation(
+      summary = "Submit deliverables and evidence for a collaboration",
+      description =
+          "Allowed for campaign brand owner or assigned creator master. Submits post link, screenshots,"
+              + " or draft videos during or after execution.")
+  @ApiResponse(responseCode = "201", description = "Evidence asset submitted")
+  public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<EvidenceAssetResponse>>
+      submitEvidence(
+          @PathVariable UUID id, @Valid @RequestBody SubmitEvidenceRequest request) {
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .body(com.influencermatch.backend.common.dto.ApiResponse.ok(service.submitEvidence(id, request)));
+  }
+
+  @GetMapping("/collaborations/{id}/evidence")
+  @PreAuthorize("isAuthenticated()")
+  @Operation(
+      summary = "Get list of evidence assets for a collaboration",
+      description =
+          "Allowed for campaign brand owner or assigned creator master. Returns all submitted evidence assets.")
+  @ApiResponse(responseCode = "200", description = "Evidence assets retrieved")
+  public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<java.util.List<EvidenceAssetResponse>>>
+      getEvidenceAssets(@PathVariable UUID id) {
+    return ResponseEntity.ok(
+        com.influencermatch.backend.common.dto.ApiResponse.ok(service.getEvidenceAssets(id)));
   }
 
   @PostMapping("/collaborations/{id}/outcome")

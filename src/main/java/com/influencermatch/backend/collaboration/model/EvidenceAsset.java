@@ -18,8 +18,12 @@ public class EvidenceAsset {
   @Column
   private UUID id;
 
-  @ManyToOne(fetch = FetchType.LAZY, optional = false)
-  @JoinColumn(nullable = false)
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "collaboration_id")
+  private Collaboration collaboration;
+
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "outcome_id")
   private CampaignOutcome outcome;
 
   @Column(nullable = false, length = 50)

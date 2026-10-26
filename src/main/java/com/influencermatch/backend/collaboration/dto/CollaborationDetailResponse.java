@@ -3,6 +3,7 @@ package com.influencermatch.backend.collaboration.dto;
 import com.influencermatch.backend.collaboration.enums.CollaborationStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 public record CollaborationDetailResponse(
@@ -25,4 +26,5 @@ public record CollaborationDetailResponse(
     LocalDateTime completedAt,
     LocalDateTime updatedAt,
     OutcomeResponse outcome,
-    CreatorReviewResponse review) {}
+    CreatorReviewResponse review,
+    List<EvidenceAssetResponse> evidenceAssets) {}

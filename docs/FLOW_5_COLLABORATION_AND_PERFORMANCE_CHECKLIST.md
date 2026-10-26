@@ -47,7 +47,7 @@ Dù không theo dõi dòng tiền hay tính ROI tài chính, hệ thống vẫn 
 | **5.2** | `GET /campaigns/{id}/collaborations`<br>(Brand Collaboration List) | Brand User | `SEP_BE` | **In**: `campaignId, page, size, status`<br>**Out**: `PageResponse<CollaborationSummaryDto>` | 🟢 **ĐÃ HOÀN THÀNH** | Trả về danh sách phân trang các hợp tác thuộc Campaign của Brand kèm tiến độ bài viết, link bài đăng, hasOutcome, hasReview. |
 | **5.3** | `GET /collaborations/{id}`<br>(Collaboration Detail API) | Brand & KOC | `SEP_BE` | **In**: `collaborationId`<br>**Out**: `CollaborationDetailResponse` | 🟢 **ĐÃ HOÀN THÀNH** | Trả về chi tiết hợp tác: thông tin KOC, brief, link bài đăng, kết quả Outcome (nếu có) và Review (nếu có). Kiểm tra quyền Brand/KOC chặt chẽ. |
 | **5.4** | `GET /creators/portal/collaborations`<br>(Creator Portal Collaboration List) | KOC User | `SEP_BE` | **In**: Bearer JWT KOC, `status`<br>**Out**: `List<CreatorCollaborationDto>` | 🟢 **ĐÃ HOÀN THÀNH** | Endpoint Creator Portal cho KOC truy vấn toàn bộ hợp tác được giao qua `CreatorMaster` hoặc `creator.master`. |
-| **5.5** | `POST /collaborations/{id}/evidence`<br>(Nộp Bằng chứng Thực thi) | KOC User / Brand User | `SEP_BE` | **In**: `assetType, storageUrl, note`<br>**Out**: `EvidenceResponse` | 🟡 **CẦN SỬA (P1)** | Sửa kiến trúc [EvidenceAsset.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/model/EvidenceAsset.java) để hỗ trợ lưu link/ảnh bằng chứng trong lúc `IN_PROGRESS` trước khi có `CampaignOutcome`. |
+| **5.5** | `POST /collaborations/{id}/evidence`<br>`GET /collaborations/{id}/evidence`<br>(Nộp Bằng chứng Thực thi & Xem Deliverables) | KOC User / Brand User | `SEP_BE` | **In**: `SubmitEvidenceRequest`<br>**Out**: `EvidenceAssetResponse` | 🟢 **ĐÃ HOÀN THÀNH** | Tách rời ràng buộc cứng `outcome_id` qua Flyway `V18__evidence_asset_collaboration_support.sql`, hỗ trợ nộp link bài đăng (`publishedContentUrl`), ảnh Insights/Draft video trong lúc `IN_PROGRESS`. Tự nhận diện `source` (`CREATOR_SUBMITTED`/`BRAND_UPLOAD`) và nhúng trực tiếp vào `CollaborationDetailResponse`. |
 | **5.6** | `POST /collaborations/{id}/outcome`<br>([CollaborationController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/controller/CollaborationController.java)) | Brand User | `SEP_BE` | **In**: `RecordOutcomeRequest`<br>**Out**: `OutcomeResponse` | 🟢 **ĐÃ CÓ (GIỮ & CHUẨN HÓA)** | Nghiệm thu hiệu quả tương tác (Views, Clicks, Likes, Shares, Post URL), đóng `COMPLETED`, đánh dấu `evidenceQuality = 'SELF_REPORTED'`. Loại bỏ ROI tài chính. |
 | **5.7** | `POST /collaborations/{id}/review`<br>([CollaborationController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/controller/CollaborationController.java)) | Brand User | `SEP_BE` | **In**: `CreateCreatorReviewRequest`<br>**Out**: `CreatorReviewResponse` | 🟢 **ĐÃ LÀM** | Lưu đánh giá sao (1–5), mức độ phù hợp Brand Fit (1–5), xác nhận `wouldCollaborateAgain` và phản hồi định tính. |
 | **5.8** | *Autonomous Post KPI Auto-Tracking*<br>(Tự động cào chỉ số bài đăng T+3, T+7) | AI Crawler | `creator-discovery` | **In**: `publishedContentUrl, platform`<br>**Out**: Public Views, Likes, Comments | 🔴 **CHƯA LÀM (P2)** | Worker quét định kỳ cào lại số liệu công khai của link bài đăng đã nộp, nâng hạng `evidenceQuality = 'PUBLIC_METRIC_OBSERVED'`. |
@@ -105,17 +105,23 @@ Dù không theo dõi dòng tiền hay tính ROI tài chính, hệ thống vẫn 
 
 ---
 
-### 🔹 PHASE 3: Content Deliverables & Evidence Submission (`SEP_BE`) [Ưu tiên P1]
-**Mục tiêu**: Cho phép KOC nộp đường dẫn bài đăng đã xuất bản và ảnh chụp Insights ngay trong quá trình thực thi (`IN_PROGRESS`).
+### 🔹 PHASE 3: Content Deliverables & Evidence Submission (`SEP_BE`) 🟢 [ĐÃ HOÀN THÀNH]
+**Mục tiêu**: Cho phép KOC và Brand nộp đường dẫn bài đăng đã xuất bản và ảnh chụp Insights ngay trong quá trình thực thi (`IN_PROGRESS`).
 
-#### 1. Mở endpoint nộp bằng chứng
-* **Endpoint**: `POST /collaborations/{id}/evidence`
-* **Xử lý linh hoạt 2 đối tượng**:
-  * **KOC đã Claim**: Đăng nhập Creator Portal, nộp URL bài đăng TikTok/YouTube hoặc ảnh chụp màn hình Dashboard Insights.
-  * **KOC chưa Claim (Outreach qua email)**: Brand có thể cập nhật trực tiếp `publishedContentUrl` nhận được từ KOC qua email trao đổi bên ngoài.
-* **Tách rời ràng buộc cứng `outcome_id`**:
-  * Lưu trữ trực tiếp URL bài đăng chính vào `collaboration.publishedContentUrl`.
-  * Với các ảnh chụp màn hình bổ sung (`SCREENSHOT`), lưu vào bảng `evidence_asset` kèm tham chiếu mềm hoặc cập nhật schema hỗ trợ `collaboration_id`.
+#### 1. Mở endpoint nộp và xem bằng chứng
+* [x] **Flyway Migration [V18__evidence_asset_collaboration_support.sql](file:///d:/SEP_BE/src/main/resources/db/migration/V18__evidence_asset_collaboration_support.sql)**:
+  * Tách rời ràng buộc cứng `outcome_id NOT NULL` -> chuyển thành nullable.
+  * Bổ sung cột `collaboration_id UUID REFERENCES collaboration(id) ON DELETE CASCADE` và index `idx_evidence_asset_collaboration_id`.
+* [x] **Mở rộng Entity [EvidenceAsset.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/model/EvidenceAsset.java)**:
+  * Thêm quan hệ `@ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "collaboration_id") Collaboration collaboration`.
+* [x] **Repository [EvidenceAssetRepository.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/repository/EvidenceAssetRepository.java)**:
+  * Truy vấn danh sách tài nguyên bằng chứng theo hợp tác: `findByCollaborationIdOrderByUploadedAtDesc(UUID collaborationId)`.
+* [x] **Endpoints tại [CollaborationController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/controller/CollaborationController.java)**:
+  * `POST /collaborations/{id}/evidence`: Cho phép KOC hoặc Brand nộp link bài đăng, ảnh Insights (`INSIGHTS_SCREENSHOT`, `POST_LINK`, `DRAFT_VIDEO`).
+  * `GET /collaborations/{id}/evidence`: Trả về toàn bộ danh sách bằng chứng bàn giao của hợp tác.
+  * Tự động xác định actor: nếu KOC (Creator Master) nộp thì gán `source = 'CREATOR_SUBMITTED'`, nếu Brand thì gán `source = 'BRAND_UPLOAD'`.
+  * Tự động đồng bộ `publishedContentUrl` vào bảng `collaboration` khi có URL bài đăng được gửi kèm.
+  * Nhúng danh sách `evidenceAssets` trực tiếp vào [CollaborationDetailResponse.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/dto/CollaborationDetailResponse.java).
 
 ---
 

@@ -244,4 +244,43 @@ class CollaborationReadControllerTest {
         .andExpect(jsonPath("$.data[0].storageUrl").value("https://s3.aws.com/proof.png"))
         .andExpect(jsonPath("$.data[0].source").value("BRAND_UPLOAD"));
   }
+
+  @Test
+  @DisplayName("POST /collaborations/{id}/outcome records metrics with likes, comments, shares")
+  void recordOutcomeReturnsCreated() throws Exception {
+    UUID collabId = UUID.randomUUID();
+    OutcomeResponse response =
+        new OutcomeResponse(
+            UUID.randomUUID(),
+            collabId,
+            10000L,
+            300L,
+            1200L,
+            80L,
+            25L,
+            "https://tiktok.com/@koc/123",
+            "Great engagement",
+            "SELF_REPORTED",
+            LocalDateTime.now(),
+            LocalDateTime.now());
+
+    when(collaborationService.recordOutcome(eq(collabId), any())).thenReturn(response);
+
+    String body =
+        "{\"views\":10000,\"clicks\":300,\"likes\":1200,\"comments\":80,\"shares\":25,\"publishedContentUrl\":\"https://tiktok.com/@koc/123\",\"resultNote\":\"Great engagement\"}";
+
+    mockMvc
+        .perform(
+            org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
+                    "/collaborations/" + collabId + "/outcome")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.views").value(10000))
+        .andExpect(jsonPath("$.data.likes").value(1200))
+        .andExpect(jsonPath("$.data.comments").value(80))
+        .andExpect(jsonPath("$.data.shares").value(25))
+        .andExpect(jsonPath("$.data.publishedContentUrl").value("https://tiktok.com/@koc/123"))
+        .andExpect(jsonPath("$.data.source").value("SELF_REPORTED"));
+  }
 }

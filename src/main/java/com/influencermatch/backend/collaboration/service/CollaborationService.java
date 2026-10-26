@@ -129,6 +129,15 @@ public class CollaborationService {
     BrandCreatorRelationship relationship =
         lockedRelationship(collaboration.getRelationship().getId());
     requireConsistentRelationship(collaboration, relationship);
+    String finalPostUrl =
+        (request.publishedContentUrl() != null && !request.publishedContentUrl().isBlank())
+            ? request.publishedContentUrl().trim()
+            : collaboration.getPublishedContentUrl();
+
+    if (finalPostUrl == null || finalPostUrl.isBlank()) {
+      throw new BadRequestException("Published content URL is required");
+    }
+
     LocalDateTime now = LocalDateTime.now();
     CampaignOutcome outcome =
         outcomes.save(
@@ -136,12 +145,15 @@ public class CollaborationService {
                 .collaboration(collaboration)
                 .views(request.views())
                 .clicks(request.clicks())
+                .likes(request.likes())
+                .comments(request.comments())
+                .shares(request.shares())
                 .resultNote(request.resultNote())
                 .evidenceQuality("SELF_REPORTED")
                 .recordedAt(now)
                 .completedAt(now)
                 .build());
-    collaboration.setPublishedContentUrl(request.publishedContentUrl());
+    collaboration.setPublishedContentUrl(finalPostUrl);
     collaboration.setStatus(CollaborationStatus.COMPLETED);
     collaboration.setCompletedAt(now);
     collaboration.setUpdatedAt(now);
@@ -152,6 +164,9 @@ public class CollaborationService {
         collaborationId,
         outcome.getViews(),
         outcome.getClicks(),
+        outcome.getLikes(),
+        outcome.getComments(),
+        outcome.getShares(),
         collaboration.getPublishedContentUrl(),
         outcome.getResultNote(),
         "SELF_REPORTED",
@@ -285,6 +300,9 @@ public class CollaborationService {
                         collaborationId,
                         o.getViews(),
                         o.getClicks(),
+                        o.getLikes(),
+                        o.getComments(),
+                        o.getShares(),
                         c.getPublishedContentUrl(),
                         o.getResultNote(),
                         o.getEvidenceQuality(),

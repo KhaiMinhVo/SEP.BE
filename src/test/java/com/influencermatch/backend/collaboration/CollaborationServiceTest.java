@@ -181,6 +181,59 @@ class CollaborationServiceTest {
   }
 
   @Test
+  void recordOutcomeWithSocialEngagementMetricsSavesLikesCommentsShares() {
+    when(outcomes.save(any()))
+        .thenAnswer(
+            i -> {
+              CampaignOutcome o = i.getArgument(0);
+              o.setId(UUID.randomUUID());
+              return o;
+            });
+    RecordOutcomeRequest req =
+        new RecordOutcomeRequest(
+            5000L, 120L, 850L, 60L, 15L, "https://youtube.com/watch?v=abc", "Great engagement");
+    var response = service.recordOutcome(collaboration.getId(), req);
+
+    assertThat(response.views()).isEqualTo(5000L);
+    assertThat(response.clicks()).isEqualTo(120L);
+    assertThat(response.likes()).isEqualTo(850L);
+    assertThat(response.comments()).isEqualTo(60L);
+    assertThat(response.shares()).isEqualTo(15L);
+    assertThat(response.publishedContentUrl()).isEqualTo("https://youtube.com/watch?v=abc");
+    assertThat(collaboration.getStatus()).isEqualTo(CollaborationStatus.COMPLETED);
+    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.COMPLETED);
+  }
+
+  @Test
+  void recordOutcomeFallbacksToCollaborationPublishedUrlIfOmittedInRequest() {
+    collaboration.setPublishedContentUrl("https://tiktok.com/@koc/phase3video");
+    when(outcomes.save(any()))
+        .thenAnswer(
+            i -> {
+              CampaignOutcome o = i.getArgument(0);
+              o.setId(UUID.randomUUID());
+              return o;
+            });
+    RecordOutcomeRequest req =
+        new RecordOutcomeRequest(2000L, null, 100L, null, null, null, "Using existing post link");
+    var response = service.recordOutcome(collaboration.getId(), req);
+
+    assertThat(response.publishedContentUrl()).isEqualTo("https://tiktok.com/@koc/phase3video");
+    assertThat(collaboration.getPublishedContentUrl()).isEqualTo("https://tiktok.com/@koc/phase3video");
+    assertThat(collaboration.getStatus()).isEqualTo(CollaborationStatus.COMPLETED);
+  }
+
+  @Test
+  void recordOutcomeFailsIfPublishedContentUrlMissingEverywhere() {
+    collaboration.setPublishedContentUrl(null);
+    RecordOutcomeRequest req =
+        new RecordOutcomeRequest(2000L, null, 100L, null, null, null, "No post link anywhere");
+    assertCode(
+        () -> service.recordOutcome(collaboration.getId(), req),
+        ErrorCode.VALIDATION_ERROR);
+  }
+
+  @Test
   void reviewUsesAuthenticatedOwnerAndActualOutcome() {
     campaign.setStatus(CampaignStatus.COMPLETED);
     collaboration.setStatus(CollaborationStatus.COMPLETED);

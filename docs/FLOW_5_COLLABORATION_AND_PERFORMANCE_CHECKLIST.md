@@ -48,7 +48,7 @@ Dù không theo dõi dòng tiền hay tính ROI tài chính, hệ thống vẫn 
 | **5.3** | `GET /collaborations/{id}`<br>(Collaboration Detail API) | Brand & KOC | `SEP_BE` | **In**: `collaborationId`<br>**Out**: `CollaborationDetailResponse` | 🟢 **ĐÃ HOÀN THÀNH** | Trả về chi tiết hợp tác: thông tin KOC, brief, link bài đăng, kết quả Outcome (nếu có) và Review (nếu có). Kiểm tra quyền Brand/KOC chặt chẽ. |
 | **5.4** | `GET /creators/portal/collaborations`<br>(Creator Portal Collaboration List) | KOC User | `SEP_BE` | **In**: Bearer JWT KOC, `status`<br>**Out**: `List<CreatorCollaborationDto>` | 🟢 **ĐÃ HOÀN THÀNH** | Endpoint Creator Portal cho KOC truy vấn toàn bộ hợp tác được giao qua `CreatorMaster` hoặc `creator.master`. |
 | **5.5** | `POST /collaborations/{id}/evidence`<br>`GET /collaborations/{id}/evidence`<br>(Nộp Bằng chứng Thực thi & Xem Deliverables) | KOC User / Brand User | `SEP_BE` | **In**: `SubmitEvidenceRequest`<br>**Out**: `EvidenceAssetResponse` | 🟢 **ĐÃ HOÀN THÀNH** | Tách rời ràng buộc cứng `outcome_id` qua Flyway `V18__evidence_asset_collaboration_support.sql`, hỗ trợ nộp link bài đăng (`publishedContentUrl`), ảnh Insights/Draft video trong lúc `IN_PROGRESS`. Tự nhận diện `source` (`CREATOR_SUBMITTED`/`BRAND_UPLOAD`) và nhúng trực tiếp vào `CollaborationDetailResponse`. |
-| **5.6** | `POST /collaborations/{id}/outcome`<br>([CollaborationController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/controller/CollaborationController.java)) | Brand User | `SEP_BE` | **In**: `RecordOutcomeRequest`<br>**Out**: `OutcomeResponse` | 🟢 **ĐÃ CÓ (GIỮ & CHUẨN HÓA)** | Nghiệm thu hiệu quả tương tác (Views, Clicks, Likes, Shares, Post URL), đóng `COMPLETED`, đánh dấu `evidenceQuality = 'SELF_REPORTED'`. Loại bỏ ROI tài chính. |
+| **5.6** | `POST /collaborations/{id}/outcome`<br>([CollaborationController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/controller/CollaborationController.java)) | Brand User | `SEP_BE` | **In**: `RecordOutcomeRequest`<br>**Out**: `OutcomeResponse` | 🟢 **ĐÃ HOÀN THÀNH** | Nghiệm thu hiệu quả tương tác mạng xã hội (Views, Clicks, Likes, Comments, Shares, Post URL), đóng `COMPLETED`, cập nhật CRM stage sang `COMPLETED`, gán `evidenceQuality = 'SELF_REPORTED'`. Tách rời hoàn toàn khỏi số liệu tài chính. |
 | **5.7** | `POST /collaborations/{id}/review`<br>([CollaborationController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/controller/CollaborationController.java)) | Brand User | `SEP_BE` | **In**: `CreateCreatorReviewRequest`<br>**Out**: `CreatorReviewResponse` | 🟢 **ĐÃ LÀM** | Lưu đánh giá sao (1–5), mức độ phù hợp Brand Fit (1–5), xác nhận `wouldCollaborateAgain` và phản hồi định tính. |
 | **5.8** | *Autonomous Post KPI Auto-Tracking*<br>(Tự động cào chỉ số bài đăng T+3, T+7) | AI Crawler | `creator-discovery` | **In**: `publishedContentUrl, platform`<br>**Out**: Public Views, Likes, Comments | 🔴 **CHƯA LÀM (P2)** | Worker quét định kỳ cào lại số liệu công khai của link bài đăng đã nộp, nâng hạng `evidenceQuality = 'PUBLIC_METRIC_OBSERVED'`. |
 | **5.9** | *M1 Historical Collaboration Sync Listener*<br>(Đồng bộ sang Bộ nhớ Dài hạn) | Backend Core | `SEP_BE` | **In**: `CollaborationCompletedEvent`<br>**Out**: Tạo `HistoricalCampaign` & cập nhật `BrandPattern` | 🟡 **CẦN HOÀN THIỆN (P1)** | Lắng nghe sau bước Review để chuyển hóa kết quả nghiệm thu thành bản ghi M1 (`HistoricalCampaign`) phục vụ trực tiếp cho Flow 3 & Flow 6. |
@@ -125,17 +125,20 @@ Dù không theo dõi dòng tiền hay tính ROI tài chính, hệ thống vẫn 
 
 ---
 
-### 🔹 PHASE 4: Non-Financial Outcome Recording & Social Engagement Metrics (`SEP_BE`)
+### 🔹 PHASE 4: Non-Financial Outcome Recording & Social Engagement Metrics (`SEP_BE`) 🟢 [ĐÃ HOÀN THÀNH]
 **Mục tiêu**: Nghiệm thu hiệu quả chiến dịch dựa trên chỉ số tương tác thực tế, hoàn toàn không dính dáng đến doanh thu hay ROI tài chính hợp đồng.
 
 #### 1. Chuẩn hóa `RecordOutcomeRequest.java` & `recordOutcome()`
-* **Dữ liệu tiếp nhận**:
-  * `views`: Số lượt xem bài đăng (Long).
-  * `clicks`: Số lượt click link điều hướng (Long, tùy chọn).
-  * `likes`, `comments`, `shares`: Số lượt tương tác mạng xã hội (tùy chọn).
-  * `publishedContentUrl`: Link bài đăng công khai được nghiệm thu.
-  * `resultNote`: Ghi chú đánh giá hiệu quả chiến dịch của Brand.
-* **Xử lý dữ liệu chuẩn xác**:
+* [x] **Flyway Migration [V19__campaign_outcome_engagement_metrics.sql](file:///d:/SEP_BE/src/main/resources/db/migration/V19__campaign_outcome_engagement_metrics.sql)**:
+  * Bổ sung các cột chỉ số tương tác mạng xã hội: `likes BIGINT`, `comments BIGINT`, `shares BIGINT` cùng check constraint `>= 0`.
+* [x] **Entity [CampaignOutcome.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/model/CampaignOutcome.java)**:
+  * Thêm các thuộc tính `likes`, `comments`, `shares`.
+* [x] **DTOs [RecordOutcomeRequest.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/dto/RecordOutcomeRequest.java) & [OutcomeResponse.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/dto/OutcomeResponse.java)**:
+  * Tiếp nhận đầy đủ các chỉ số: `views`, `clicks`, `likes`, `comments`, `shares`.
+  * Hỗ trợ backward compatibility với constructor phụ cho các test hiện hữu.
+  * Validator `isMetricsProvided()` chấp nhận khi có ít nhất một chỉ số đo lường bất kỳ được cung cấp.
+* [x] **Service & Controller Logic**:
+  * Linh hoạt nhận diện `publishedContentUrl`: tự động tái sử dụng URL bài đăng đã nộp ở Phase 3 nếu Brand không nhập lại trong request.
   * Phân biệt rõ giữa giá trị `0` (không có tương tác) và giá trị `null` (chưa có số liệu đo lường).
   * Tự động gán nhãn độ tin cậy: `evidenceQuality = 'SELF_REPORTED'`.
   * Chuyển trạng thái: `Collaboration.status = COMPLETED`, `completedAt = now()`.

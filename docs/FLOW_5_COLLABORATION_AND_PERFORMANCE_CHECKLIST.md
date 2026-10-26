@@ -49,9 +49,9 @@ Dù không theo dõi dòng tiền hay tính ROI tài chính, hệ thống vẫn 
 | **5.4** | `GET /creators/portal/collaborations`<br>(Creator Portal Collaboration List) | KOC User | `SEP_BE` | **In**: Bearer JWT KOC, `status`<br>**Out**: `List<CreatorCollaborationDto>` | 🟢 **ĐÃ HOÀN THÀNH** | Endpoint Creator Portal cho KOC truy vấn toàn bộ hợp tác được giao qua `CreatorMaster` hoặc `creator.master`. |
 | **5.5** | `POST /collaborations/{id}/evidence`<br>`GET /collaborations/{id}/evidence`<br>(Nộp Bằng chứng Thực thi & Xem Deliverables) | KOC User / Brand User | `SEP_BE` | **In**: `SubmitEvidenceRequest`<br>**Out**: `EvidenceAssetResponse` | 🟢 **ĐÃ HOÀN THÀNH** | Tách rời ràng buộc cứng `outcome_id` qua Flyway `V18__evidence_asset_collaboration_support.sql`, hỗ trợ nộp link bài đăng (`publishedContentUrl`), ảnh Insights/Draft video trong lúc `IN_PROGRESS`. Tự nhận diện `source` (`CREATOR_SUBMITTED`/`BRAND_UPLOAD`) và nhúng trực tiếp vào `CollaborationDetailResponse`. |
 | **5.6** | `POST /collaborations/{id}/outcome`<br>([CollaborationController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/controller/CollaborationController.java)) | Brand User | `SEP_BE` | **In**: `RecordOutcomeRequest`<br>**Out**: `OutcomeResponse` | 🟢 **ĐÃ HOÀN THÀNH** | Nghiệm thu hiệu quả tương tác mạng xã hội (Views, Clicks, Likes, Comments, Shares, Post URL), đóng `COMPLETED`, cập nhật CRM stage sang `COMPLETED`, gán `evidenceQuality = 'SELF_REPORTED'`. Tách rời hoàn toàn khỏi số liệu tài chính. |
-| **5.7** | `POST /collaborations/{id}/review`<br>([CollaborationController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/controller/CollaborationController.java)) | Brand User | `SEP_BE` | **In**: `CreateCreatorReviewRequest`<br>**Out**: `CreatorReviewResponse` | 🟢 **ĐÃ LÀM** | Lưu đánh giá sao (1–5), mức độ phù hợp Brand Fit (1–5), xác nhận `wouldCollaborateAgain` và phản hồi định tính. |
+| **5.7** | `POST /collaborations/{id}/review`<br>([CollaborationController.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/controller/CollaborationController.java)) | Brand User | `SEP_BE` | **In**: `CreateCreatorReviewRequest`<br>**Out**: `CreatorReviewResponse` | 🟢 **ĐÃ HOÀN THÀNH** | Lưu đánh giá sao (1–5), mức độ phù hợp Brand Fit (1–5), xác nhận `wouldCollaborateAgain` và phản hồi định tính; kích hoạt phát sinh sự kiện `CollaborationReviewedEvent`. |
 | **5.8** | *Autonomous Post KPI Auto-Tracking*<br>(Tự động cào chỉ số bài đăng T+3, T+7) | AI Crawler | `creator-discovery` | **In**: `publishedContentUrl, platform`<br>**Out**: Public Views, Likes, Comments | 🔴 **CHƯA LÀM (P2)** | Worker quét định kỳ cào lại số liệu công khai của link bài đăng đã nộp, nâng hạng `evidenceQuality = 'PUBLIC_METRIC_OBSERVED'`. |
-| **5.9** | *M1 Historical Collaboration Sync Listener*<br>(Đồng bộ sang Bộ nhớ Dài hạn) | Backend Core | `SEP_BE` | **In**: `CollaborationCompletedEvent`<br>**Out**: Tạo `HistoricalCampaign` & cập nhật `BrandPattern` | 🟡 **CẦN HOÀN THIỆN (P1)** | Lắng nghe sau bước Review để chuyển hóa kết quả nghiệm thu thành bản ghi M1 (`HistoricalCampaign`) phục vụ trực tiếp cho Flow 3 & Flow 6. |
+| **5.9** | *M1 Historical Collaboration Sync Listener*<br>(Đồng bộ sang Bộ nhớ Dài hạn) | Backend Core | `SEP_BE` | **In**: `CollaborationReviewedEvent`<br>**Out**: Tạo `HistoricalCampaign` & cập nhật `BrandPattern` | 🟢 **ĐÃ HOÀN THÀNH** | [CollaborationCompletedEventListener.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/listener/CollaborationCompletedEventListener.java) lắng nghe sau bước Review để chuyển hóa kết quả nghiệm thu thành bản ghi M1 (`HistoricalCampaign`, `quality = VERIFIED`, `reliabilityScore`) và M4 (`BrandPattern`, tăng `evidenceCount`, cập nhật `confidence`). |
 
 ---
 
@@ -146,25 +146,30 @@ Dù không theo dõi dòng tiền hay tính ROI tài chính, hệ thống vẫn 
 
 ---
 
-### 🔹 PHASE 5: Creator Review & M1 Historical Collaboration Memory Sync (`SEP_BE`)
+### 🔹 PHASE 5: Creator Review & M1 Historical Collaboration Memory Sync (`SEP_BE`) 🟢 [ĐÃ HOÀN THÀNH]
 **Mục tiêu**: Ghi nhận đánh giá định tính của Brand và tự động chuyển hóa thành tri thức thực chiến cho Bộ nhớ AI M1 và M4.
 
-#### 1. Giữ nguyên và kiểm thử hoàn chỉnh `POST /collaborations/{id}/review`
-* Tiếp nhận đánh giá:
+#### 1. Kiểm thử và tích hợp hoàn chỉnh `POST /collaborations/{id}/review`
+* [x] **Tiếp nhận đánh giá**:
   * `overallRating`: Đánh giá tổng quan (1–5 sao).
   * `brandFitRating`: Mức độ phù hợp với phong cách thương hiệu (1–5 sao).
   * `wouldCollaborateAgain`: Brand có sẵn sàng tiếp tục hợp tác với KOC này không (Boolean).
   * `note`: Nhận xét chi tiết về tác phong làm việc, đúng hạn cam kết.
+* [x] **Domain Event [CollaborationReviewedEvent.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/event/CollaborationReviewedEvent.java)**:
+  * Được phát sinh tự động ngay khi Brand gửi review thành công qua `CollaborationService.review()`.
 
 #### 2. Kích hoạt Event Listener đồng bộ Bộ nhớ AI
-* Tạo `CollaborationCompletedEventListener.java` lắng nghe sự kiện sau khi Review thành công:
-  * Trích xuất kết quả tạo bản ghi **Bộ nhớ 1 ([HistoricalCampaign.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/model/HistoricalCampaign.java) - M1)**:
+* [x] **Listener [CollaborationCompletedEventListener.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/collaboration/listener/CollaborationCompletedEventListener.java)**:
+  * **Trích xuất kết quả tạo bản ghi Bộ nhớ 1 ([HistoricalCampaign.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/campaign/model/HistoricalCampaign.java) - M1)**:
     * `creator_id` & `master_id`: Định danh KOC thực chiến.
-    * `evidence_quality = 'VERIFIED'`.
-    * `reliability_score`: Tính toán chuẩn hóa từ `overallRating` và `brandFitRating` (ví dụ: rating 5 sao $\to$ reliability 1.0).
-  * Cập nhật **Bộ nhớ 4 ([BrandPattern.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/model/BrandPattern.java) - M4)**:
+    * `evidence_type = 'COLLABORATION_REVIEW'`, `quality = 'VERIFIED'`.
+    * `reliability_score`: Tính toán chuẩn hóa từ `(overallRating + brandFitRating) / 10.0` (rating 5 sao $\to$ reliability 1.0).
+    * `evidence_value`: Lưu trữ đầy đủ JSON snapshot bao gồm rating, reliabilityScore, views, clicks, likes, shares, comments, và post URL.
+  * **Cập nhật Bộ nhớ 4 ([BrandPattern.java](file:///d:/SEP_BE/src/main/java/com/influencermatch/backend/brand/model/BrandPattern.java) - M4)**:
+    * `pattern_type = 'COLLABORATION_SUCCESS'`.
     * Gia tăng `evidence_count += 1`.
-    * Nâng cao độ tin cậy tri thức `confidence` cho các Niche và Content Style được Brand đánh giá cao.
+    * Nâng cao độ tin cậy tri thức `confidence` theo cấp số cộng: $\min(1.0, 0.50 + 0.05 \times \text{evidenceCount})$.
+    * Tính toán và cập nhật `averageSuccessfulScore` chuẩn xác.
 
 ---
 

@@ -255,6 +255,41 @@ class CollaborationServiceTest {
   }
 
   @Test
+  void reviewPublishesCollaborationReviewedEventWhenPublisherPresent() {
+    org.springframework.context.ApplicationEventPublisher publisher =
+        mock(org.springframework.context.ApplicationEventPublisher.class);
+    CollaborationService serviceWithPublisher =
+        new CollaborationService(
+            campaigns,
+            relationships,
+            collaborations,
+            outcomes,
+            reviews,
+            creatorMasters,
+            evidenceAssets,
+            em,
+            factory.getValidator(),
+            publisher);
+
+    campaign.setStatus(CampaignStatus.COMPLETED);
+    collaboration.setStatus(CollaborationStatus.COMPLETED);
+    var stored =
+        CampaignOutcome.builder().id(UUID.randomUUID()).collaboration(collaboration).build();
+    when(outcomes.findByCollaborationId(collaboration.getId())).thenReturn(Optional.of(stored));
+    when(reviews.save(any()))
+        .thenAnswer(
+            i -> {
+              CreatorReview r = i.getArgument(0);
+              r.setId(UUID.randomUUID());
+              return r;
+            });
+
+    serviceWithPublisher.review(collaboration.getId(), review());
+
+    verify(publisher).publishEvent(any(com.influencermatch.backend.collaboration.event.CollaborationReviewedEvent.class));
+  }
+
+  @Test
   void duplicateOperationsHaveSpecificConflictCodes() {
     when(collaborations.existsByRelationshipId(relationship.getId())).thenReturn(true);
     assertCode(

@@ -24,6 +24,8 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
+import com.influencermatch.backend.collaboration.event.CollaborationReviewedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -42,6 +44,30 @@ public class CollaborationService {
   private final EvidenceAssetRepository evidenceAssets;
   private final EntityManager entityManager;
   private final Validator validator;
+  private final ApplicationEventPublisher eventPublisher;
+
+  public CollaborationService(
+      CampaignRepository campaigns,
+      BrandCreatorRelationshipRepository relationships,
+      CollaborationRepository collaborations,
+      CampaignOutcomeRepository outcomes,
+      CreatorReviewRepository reviews,
+      CreatorMasterRepository creatorMasters,
+      EvidenceAssetRepository evidenceAssets,
+      EntityManager entityManager,
+      Validator validator) {
+    this(
+        campaigns,
+        relationships,
+        collaborations,
+        outcomes,
+        reviews,
+        creatorMasters,
+        evidenceAssets,
+        entityManager,
+        validator,
+        null);
+  }
 
   @Transactional
   @PreAuthorize("hasAuthority('MANAGE_OWN_COLLABORATION')")
@@ -206,6 +232,34 @@ public class CollaborationService {
                 .note(request.note())
                 .reviewedAt(LocalDateTime.now())
                 .build());
+
+    if (eventPublisher != null) {
+      UUID masterId =
+          collaboration.getMaster() != null
+              ? collaboration.getMaster().getId()
+              : (collaboration.getCreator() != null && collaboration.getCreator().getMaster() != null
+                  ? collaboration.getCreator().getMaster().getId()
+                  : null);
+      UUID brandProfileId =
+          (collaboration.getCampaign() != null
+                  && collaboration.getCampaign().getBrandProfile() != null)
+              ? collaboration.getCampaign().getBrandProfile().getId()
+              : null;
+      eventPublisher.publishEvent(
+          new CollaborationReviewedEvent(
+              collaboration.getId(),
+              review.getId(),
+              outcome.getId(),
+              collaboration.getCampaign() != null ? collaboration.getCampaign().getId() : null,
+              brandProfileId,
+              collaboration.getCreator() != null ? collaboration.getCreator().getId() : null,
+              masterId,
+              collaboration.getCreator() != null ? collaboration.getCreator().getPlatform() : null,
+              review.getOverallRating(),
+              review.getBrandFitRating(),
+              review.getWouldCollaborateAgain(),
+              review.getNote()));
+    }
     return new CreatorReviewResponse(
         review.getId(),
         collaborationId,

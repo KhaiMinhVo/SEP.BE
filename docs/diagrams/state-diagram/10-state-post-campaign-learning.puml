@@ -1,0 +1,30 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam ArrowFontSize 13
+skinparam stateFontSize 16
+skinparam stateBackgroundColor #FFFFFF
+skinparam stateBorderColor #404040
+skinparam ArrowColor #505050
+skinparam roundcorner 12
+skinparam nodesep 55
+skinparam ranksep 65
+hide empty description
+title InfluencerMatch | Post-Campaign Learning Job
+[*] --> PENDING : campaignCompleted / queue learning job
+PENDING --> VALIDATING : workerStarts
+VALIDATING : do / inspect recorded outcome, fee and review evidence
+VALIDATING --> WAITING_EVIDENCE : validationCompleted\n[no usable validated evidence] / record missing evidence
+WAITING_EVIDENCE -[norank]-> VALIDATING : evidenceUpdated / recheck evidence
+VALIDATING --> PROCESSING : validationCompleted\n[usable validated evidence exists]
+PROCESSING : do / generate M1 from supported facts
+PROCESSING : do / update learned M4 patterns when supported
+PROCESSING : do / preserve M3 references and provenance
+PROCESSING --> SUCCEEDED : learningCommitted\n[outputs consistent and traceable]
+VALIDATING --> FAILED : technicalError / record diagnostics
+PROCESSING --> FAILED : technicalError / preserve last valid memories
+FAILED -[norank]-> PENDING : retryRequested [failure recoverable]\n/ resume safely without duplicate evidence
+SUCCEEDED --> [*]
+@enduml

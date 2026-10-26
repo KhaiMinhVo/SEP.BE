@@ -1,0 +1,170 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam roundcorner 0
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam classAttributeIconSize 0
+skinparam packageStyle folder
+skinparam classBackgroundColor white
+skinparam classBorderColor #444444
+skinparam classHeaderBackgroundColor #F2F2F2
+skinparam packageBackgroundColor white
+skinparam packageBorderColor #666666
+skinparam ArrowColor #555555
+skinparam nodesep 40
+skinparam ranksep 65
+hide circle
+title Shortlist, CRM and Campaign Outcomes | Class Diagram
+interface ShortlistService {
+--
++ addCreatorToShortlist(UUID, AddShortlistItemRequest): ShortlistItemDto
++ getShortlistByCampaign(UUID, Pageable): Page<ShortlistItemDto>
++ removeCreatorFromShortlist(UUID, UUID): void
+}
+
+class ShortlistServiceImpl <<service>> {
+}
+
+interface RelationshipService {
+--
++ createRelationship(UUID, CreateRelationshipRequest): RelationshipDto
++ updateStage(UUID, UUID, UpdateRelationshipStageRequest): RelationshipDto
++ updateDetails(UUID, UUID, UpdateRelationshipDetailsRequest): RelationshipDto
+}
+
+class RelationshipServiceImpl <<service>> {
+}
+
+class CampaignOwnershipService <<service>> {
+--
++ requireOwned(UUID): Campaign
+}
+
+class CollaborationService <<service>> {
+--
++ create(UUID, CreateCollaborationRequest): CollaborationResponse
++ recordOutcome(UUID, RecordOutcomeRequest): OutcomeResponse
++ review(UUID, CreateCreatorReviewRequest): CreatorReviewResponse
+}
+
+class Campaign <<entity>> {
+- id: UUID
+- name: String
+- status: CampaignStatus
+}
+
+class Creator <<entity>> {
+- id: UUID
+- platform: String
+- displayName: String
+}
+
+class ShortlistItem <<entity>> {
+- id: UUID
+- priority: ShortlistPriority
+- note: String
+- addedAt: LocalDateTime
+}
+
+class BrandCreatorRelationship <<entity>> {
+- id: UUID
+- stage: RelationshipStage
+- contactMethod: String
+- quotedFee: BigDecimal
+- agreedFee: BigDecimal
+- nextAction: String
+}
+
+class Collaboration <<entity>> {
+- id: UUID
+- agreedFee: BigDecimal
+- currency: String
+- status: CollaborationStatus
+- paymentStatus: CollaborationPaymentStatus
+- publishedContentUrl: String
+}
+
+class CampaignOutcome <<entity>> {
+- id: UUID
+- kpiType: String
+- kpiTarget: BigDecimal
+- kpiActual: BigDecimal
+- actualFee: BigDecimal
+- revenue: BigDecimal
+- roi: BigDecimal
+- evidenceQuality: String
+}
+
+class CreatorReview <<entity>> {
+- id: UUID
+- overallRating: short
+- brandFitRating: short
+- wouldCollaborateAgain: Boolean
+- note: String
+}
+
+class EvidenceAsset <<entity>> {
+- id: UUID
+- assetType: String
+- storageUrl: String
+- source: String
+}
+
+enum ShortlistPriority {
+LOW
+MEDIUM
+HIGH
+}
+
+enum RelationshipStage {
+SHORTLISTED
+CONTACTED
+INTERESTED
+COLLABORATING
+NOT_INTERESTED
+COMPLETED
+}
+
+enum CollaborationStatus {
+PLANNED
+IN_PROGRESS
+COMPLETED
+CANCELLED
+}
+
+enum CollaborationPaymentStatus {
+PENDING
+PARTIALLY_PAID
+PAID
+FAILED
+REFUNDED
+}
+
+ShortlistItem "0..*" --> "1" Campaign : campaign
+ShortlistItem "0..*" --> "1" Creator : creator
+BrandCreatorRelationship "0..*" --> "1" Creator : creator
+BrandCreatorRelationship "0..*" --> "1" Campaign : campaign
+BrandCreatorRelationship "0..*" --> "0..1" ShortlistItem : shortlistItem
+Collaboration "0..1" --> "1" BrandCreatorRelationship : relationship
+Collaboration "0..*" --> "1" Campaign : campaign
+Collaboration "0..*" --> "1" Creator : creator
+CampaignOutcome "0..1" --> "1" Collaboration : collaboration
+CreatorReview "0..1" --> "1" CampaignOutcome : outcome
+CreatorReview "0..1" --> "1" Collaboration : collaboration
+EvidenceAsset "0..*" --> "1" CampaignOutcome : outcome
+ShortlistServiceImpl ..|> ShortlistService
+ShortlistServiceImpl ..> CampaignOwnershipService
+RelationshipServiceImpl ..|> RelationshipService
+RelationshipServiceImpl ..> CampaignOwnershipService
+ShortlistItem ..> ShortlistPriority : priority
+BrandCreatorRelationship ..> RelationshipStage : stage
+Collaboration ..> CollaborationStatus : status
+Collaboration ..> CollaborationPaymentStatus : paymentStatus
+ShortlistServiceImpl ..> ShortlistItem : manages via repository
+RelationshipServiceImpl ..> BrandCreatorRelationship : manages via repository
+CollaborationService ..> Collaboration : creates
+CollaborationService ..> CampaignOutcome : records
+CollaborationService ..> CreatorReview : records
+
+@enduml

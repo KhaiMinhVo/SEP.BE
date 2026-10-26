@@ -1,0 +1,26 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam ArrowFontSize 13
+skinparam stateFontSize 16
+skinparam stateBackgroundColor #FFFFFF
+skinparam stateBorderColor #404040
+skinparam ArrowColor #505050
+skinparam roundcorner 12
+skinparam nodesep 55
+skinparam ranksep 65
+hide empty description
+title InfluencerMatch | User Account Status
+[*] --> ACTIVE : registrationOrProvisioningCompleted
+ACTIVE --> LOCKED : Admin.lockAccount [authorized] / record reason
+LOCKED -[norank]-> ACTIVE : Admin.unlockAccount [authorized]
+ACTIVE --> SUSPENDED : Admin.suspendAccount [authorized] / record reason
+LOCKED --> SUSPENDED : Admin.suspendAccount [authorized]
+SUSPENDED -[norank]-> ACTIVE : Admin.restoreAccount [issue resolved]
+ACTIVE : login [credentials and verification valid] / create session
+ACTIVE : logout / end session
+LOCKED : login / deny access
+SUSPENDED : login / deny access
+@enduml

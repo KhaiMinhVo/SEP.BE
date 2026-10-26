@@ -1,0 +1,31 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam ArrowFontSize 13
+skinparam stateFontSize 16
+skinparam stateBackgroundColor #FFFFFF
+skinparam stateBorderColor #404040
+skinparam ArrowColor #505050
+skinparam roundcorner 12
+skinparam nodesep 55
+skinparam ranksep 65
+hide empty description
+title InfluencerMatch | Campaign Lifecycle
+[*] --> DRAFT : Brand.createCampaign / save draft
+DRAFT : editBrief [valid input] / save changes
+DRAFT : acceptAiBrief [Brand confirmed] / save confirmed fields
+DRAFT --> ACTIVE : Brand.activate\n[required brief fields valid]
+DRAFT --> CANCELLED : Brand.cancel / record reason
+ACTIVE : requestDiscovery / preserve versioned M3
+ACTIVE : requestRecommendation / create separate run
+ACTIVE --> COMPLETED : Brand.complete\n[required closure information processed]
+ACTIVE --> CANCELLED : Brand.cancel\n[open collaboration obligations resolved]
+COMPLETED : entry / retain campaign history
+CANCELLED : entry / retain records and cancellation reason
+DRAFT --> ARCHIVED : Brand.archiveDraft
+COMPLETED --> ARCHIVED : Brand.archive / retain references
+CANCELLED --> ARCHIVED : Brand.archive / retain references
+ARCHIVED --> [*]
+@enduml

@@ -1,0 +1,23 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam ArrowFontSize 13
+skinparam stateFontSize 16
+skinparam stateBackgroundColor #FFFFFF
+skinparam stateBorderColor #404040
+skinparam ArrowColor #505050
+skinparam roundcorner 12
+skinparam nodesep 55
+skinparam ranksep 65
+hide empty description
+title InfluencerMatch | Creator Ownership Claim
+[*] --> PENDING : Creator.submitClaim\n[eligible account; evidence supplied]
+PENDING --> APPROVED : Reviewer.approve\n[proof valid; eligible claimant; channel unowned]\n/ link channel to CreatorMaster
+PENDING --> REJECTED : Reviewer.reject\n[proof insufficient] / record reason
+PENDING --> REJECTED : competingClaimApproved\n/ preserve decision audit
+APPROVED --> REVOKED : Reviewer.revoke\n[claim still owns channel]\n/ unlink ownership; retain public data
+REJECTED --> [*]
+REVOKED --> [*]
+@enduml

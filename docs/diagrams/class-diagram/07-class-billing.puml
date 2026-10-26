@@ -1,0 +1,134 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam roundcorner 0
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam classAttributeIconSize 0
+skinparam packageStyle folder
+skinparam classBackgroundColor white
+skinparam classBorderColor #444444
+skinparam classHeaderBackgroundColor #F2F2F2
+skinparam packageBackgroundColor white
+skinparam packageBorderColor #666666
+skinparam ArrowColor #555555
+skinparam nodesep 40
+skinparam ranksep 65
+hide circle
+title Subscriptions and VNPay Payments | Class Diagram
+class BrandProfile <<entity>> {
+- id: UUID
+- businessName: String
+}
+
+class Plan <<entity>> {
+- id: UUID
+- planName: String
+- price: BigDecimal
+- currency: String
+- durationDays: int
+- campaignQuota: int
+- recommendationQuota: int
+- refreshQuota: int
+- status: PlanStatus
+}
+
+class Subscription <<entity>> {
+- id: UUID
+- startDate: LocalDate
+- expirationDate: LocalDate
+- status: SubscriptionStatus
+- usedCampaignQuota: int
+- usedRecommendationQuota: int
+- usedRefreshQuota: int
+}
+
+class Payment <<entity>> {
+- id: UUID
+- amount: BigDecimal
+- currency: String
+- paymentGateway: String
+- transactionCode: String
+- status: PaymentStatus
+- paidAt: LocalDateTime
+}
+
+class PlanService <<service>> {
+--
++ createPlan(PPlanCreateRequest): PPlanResponse
++ updatePlan(UUID, PPlanUpdateRequest): PPlanResponse
++ deactivatePlan(UUID): void
+}
+
+class SubscriptionService <<service>> {
+--
++ subscribeBrandToPlan(SSubscriptionCreateRequest): SSubscriptionResponse
++ cancelSubscription(UUID): void
+}
+
+class PaymentService <<service>> {
+--
++ createCheckout(UUID, BrandProfile, String): PaymentResponse
++ processVnPayReturn(Map<String, String>): boolean
+}
+
+class PaymentSettlementService <<service>> {
+--
++ lock(Payment): Payment
++ apply(Payment, boolean, String): boolean
+}
+
+interface PlanRepository <<repository>> {
+}
+
+interface SubscriptionRepository <<repository>> {
+}
+
+interface PaymentRepository <<repository>> {
+}
+
+class AuditService <<service>> {
+}
+
+enum PlanStatus {
+ACTIVE
+INACTIVE
+}
+
+enum SubscriptionStatus {
+PENDING
+ACTIVE
+EXPIRED
+CANCELLED
+}
+
+enum PaymentStatus {
+PENDING
+PAID
+FAILED
+REFUNDED
+}
+
+Subscription "0..*" --> "1" BrandProfile : brandProfile
+Subscription "0..*" --> "1" Plan : plan
+Payment "0..*" --> "1" BrandProfile : brandProfile
+Payment "0..*" --> "1" Subscription : subscription
+Plan ..> PlanStatus : status
+Subscription ..> SubscriptionStatus : status
+Payment ..> PaymentStatus : status
+PlanService ..> PlanRepository
+PlanService ..> AuditService
+SubscriptionService ..> SubscriptionRepository
+SubscriptionService ..> PlanService
+SubscriptionService ..> AuditService
+PaymentService ..> PlanRepository
+PaymentService ..> SubscriptionRepository
+PaymentService ..> PaymentRepository
+PaymentService ..> PaymentSettlementService
+PaymentSettlementService ..> PaymentRepository
+PaymentSettlementService ..> SubscriptionRepository
+PlanRepository ..> Plan : persists
+SubscriptionRepository ..> Subscription : persists
+PaymentRepository ..> Payment : persists
+
+@enduml

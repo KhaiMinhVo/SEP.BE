@@ -1,0 +1,168 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam roundcorner 0
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam classAttributeIconSize 0
+skinparam packageStyle folder
+skinparam classBackgroundColor white
+skinparam classBorderColor #444444
+skinparam classHeaderBackgroundColor #F2F2F2
+skinparam packageBackgroundColor white
+skinparam packageBorderColor #666666
+skinparam ArrowColor #555555
+skinparam nodesep 40
+skinparam ranksep 65
+hide circle
+title Creator Identity, Claim and Public Intelligence | Class Diagram
+class User <<entity>> {
+- id: UUID
+- email: String
+- role: Role
+- status: UserStatus
+}
+
+class CreatorMaster <<entity>> {
+- id: UUID
+- canonicalName: String
+- status: String
+}
+
+class Creator <<entity>> {
+- id: UUID
+- platform: String
+- externalId: String
+- displayName: String
+- isStableId: Boolean
+- sourceType: CreatorSourceType
+--
++ getOwner(): User
+}
+
+class PublicCreatorMetric <<entity>> {
+- id: UUID
+- followers: Long
+- engagementRate: BigDecimal
+- niche: String
+- contentSummary: String
+- freshnessStatus: MetricDataStatus
+- dataConfidence: BigDecimal
+- collectedAt: LocalDateTime
+}
+
+class Post <<entity>> {
+- id: UUID
+- platformPostId: String
+- postUrl: String
+- views: Long
+- likes: Long
+}
+
+class CreatorClaim <<entity>> {
+- id: UUID
+- status: CreatorClaimStatus
+- evidenceUrls: List<String>
+- note: String
+- reason: String
+}
+
+class CreatorInvitation <<entity>> {
+- id: UUID
+- invitedEmail: String
+- status: String
+- expiresAt: LocalDateTime
+}
+
+class CreatorProviderIdentity <<entity>> {
+- id: UUID
+- provider: String
+- providerUserId: String
+- providerUsername: String
+}
+
+class CreatorAccountVerification <<entity>> {
+- id: UUID
+- verificationMethod: String
+- grantedScopes: String
+- status: String
+- verifiedAt: LocalDateTime
+}
+
+class CreatorClaimService <<service>> {
+--
++ claim(UUID, ClaimRequest): ClaimResponse
++ review(UUID, ReviewRequest): ClaimResponse
++ revoke(UUID, RevokeRequest): ClaimResponse
+}
+
+class MetaOAuthService <<service>> {
+--
++ callback(String, String, String, Map<String, String>): MCallback
++ instagramCallback(String, String, String, Map<String, String>): MCallback
++ confirm(UUID, String): MConnected
+}
+
+class MetaOwnershipService <<service>> {
+}
+
+class MetaSessionStore <<service>> {
+}
+
+class MetaOAuthSession <<entity>> {
+- id: UUID
+- platform: String
+- oauthFlow: OAuthFlow
+- status: String
+- expiresAt: Instant
+- confirmedAccountId: String
+}
+
+enum CreatorClaimStatus {
+PENDING
+APPROVED
+REJECTED
+REVOKED
+}
+
+enum CreatorSourceType {
+PUBLIC
+AUTHORIZED
+}
+
+enum MetricDataStatus {
+FRESH
+STALE
+REFRESH_FAILED
+}
+
+enum OAuthFlow {
+FACEBOOK_LOGIN
+INSTAGRAM_LOGIN
+}
+
+CreatorMaster "0..1" --> "1" User : user
+Creator "0..*" --> "0..1" CreatorMaster : master
+PublicCreatorMetric "0..*" --> "1" Creator : creator
+Post "0..*" --> "1" Creator : creator
+CreatorClaim "0..*" --> "1" Creator : creator
+CreatorClaim "0..*" --> "1" User : claimant
+CreatorInvitation "0..*" --> "1" Creator : targetCreator
+CreatorProviderIdentity "0..*" --> "1" Creator : creator
+CreatorAccountVerification "0..*" --> "1" Creator : creator
+MetaOAuthSession "0..*" --> "1" User : user
+MetaOAuthSession "0..*" --> "0..1" Creator : targetCreator
+MetaOAuthSession "0..*" --> "0..1" CreatorInvitation : invitation
+Creator ..> CreatorSourceType : sourceType
+PublicCreatorMetric ..> MetricDataStatus : freshnessStatus
+CreatorClaim ..> CreatorClaimStatus : status
+MetaOAuthService ..> MetaSessionStore
+MetaOAuthService ..> MetaOwnershipService
+MetaOwnershipService ..> MetaSessionStore
+MetaOAuthSession ..> OAuthFlow : oauthFlow
+CreatorClaimService ..> CreatorClaim : reviews via repository
+CreatorClaimService ..> CreatorMaster : resolves identity
+MetaSessionStore ..> MetaOAuthSession : persists via repository
+MetaOwnershipService ..> Creator : grants verified ownership
+
+@enduml

@@ -1,0 +1,26 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam ArrowFontSize 13
+skinparam stateFontSize 16
+skinparam stateBackgroundColor #FFFFFF
+skinparam stateBorderColor #404040
+skinparam ArrowColor #505050
+skinparam roundcorner 12
+skinparam nodesep 55
+skinparam ranksep 65
+hide empty description
+title InfluencerMatch | Subscription Payment
+[*] --> PENDING : Brand.checkout [paid plan selected]\n/ create transaction reference
+PENDING --> SUCCESS : gatewayCallback\n[verified callback; success; activation allowed]\n/ record payment and activate subscription atomically
+PENDING --> FAILED : gatewayCallback\n[verified callback; final failure]\n/ cancel pending subscription
+PENDING : invalidCallback / reject; do not activate
+PENDING : activationConflict / reject settlement; require resolution
+SUCCESS : duplicateSuccessCallback / acknowledge without reactivation
+FAILED : duplicateFailureCallback / acknowledge without repeat effects
+SUCCESS --> REFUNDED : refundConfirmed\n[eligible request; authorized operator; gateway confirms]\n/ record refund and apply entitlement policy
+FAILED --> [*]
+REFUNDED --> [*]
+@enduml

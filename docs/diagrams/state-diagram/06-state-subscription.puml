@@ -1,0 +1,28 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam ArrowFontSize 13
+skinparam stateFontSize 16
+skinparam stateBackgroundColor #FFFFFF
+skinparam stateBorderColor #404040
+skinparam ArrowColor #505050
+skinparam roundcorner 12
+skinparam nodesep 55
+skinparam ranksep 65
+hide empty description
+title InfluencerMatch | Brand Subscription
+state planType <<choice>>
+[*] --> planType : Brand.selectPlan [plan available]
+planType --> PENDING : [paid plan] / create checkout
+planType --> ACTIVE : [free plan and eligible]\n/ set validity period
+PENDING --> ACTIVE : paymentConfirmed\n[verified success; no activation conflict]\n/ set validity period and entitlements
+PENDING --> CANCELLED : paymentFailed / record failure
+PENDING --> CANCELLED : Brand.cancelPending
+ACTIVE : useFeature [within entitlement] / record usage
+ACTIVE --> EXPIRED : validityPeriodEnded / stop paid access
+ACTIVE --> CANCELLED : cancelApproved\n[authorized cancellation policy] / stop access
+EXPIRED --> [*]
+CANCELLED --> [*]
+@enduml

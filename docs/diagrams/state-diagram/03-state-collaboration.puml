@@ -1,0 +1,24 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam ArrowFontSize 13
+skinparam stateFontSize 16
+skinparam stateBackgroundColor #FFFFFF
+skinparam stateBorderColor #404040
+skinparam ArrowColor #505050
+skinparam roundcorner 12
+skinparam nodesep 55
+skinparam ranksep 65
+hide empty description
+title InfluencerMatch | Collaboration and Outcome
+[*] --> IN_PROGRESS : Brand.startCollaboration\n[campaign active; creator selected; terms recorded]
+IN_PROGRESS : recordPublishedContent / retain available URL
+IN_PROGRESS : recordOutcome / retain actual available results
+IN_PROGRESS --> COMPLETED : Brand.completeCollaboration\n[required closure information processed]\n/ record completion; update relationship
+IN_PROGRESS --> CANCELLED : Brand.cancelCollaboration\n[obligations resolved] / record reason
+COMPLETED : submitReview [no review yet] / record Brand evaluation
+COMPLETED : viewHistory / read retained outcomes and fees
+CANCELLED --> [*]
+@enduml

@@ -1,0 +1,25 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam ArrowFontSize 13
+skinparam stateFontSize 16
+skinparam stateBackgroundColor #FFFFFF
+skinparam stateBorderColor #404040
+skinparam ArrowColor #505050
+skinparam roundcorner 12
+skinparam nodesep 55
+skinparam ranksep 65
+hide empty description
+title InfluencerMatch | Extended Collaboration Invitation
+[*] --> PENDING : Brand.sendInvitation\n[campaign active; offer and deadline valid]
+PENDING --> ACCEPTED : Creator.accept\n[not expired; campaign permits collaboration]\n/ create accepted collaboration
+PENDING --> DECLINED : Creator.decline / retain response
+PENDING --> EXPIRED : invitationDeadlineReached
+PENDING --> CANCELLED : Brand.withdraw [not yet answered]
+ACCEPTED --> [*]
+DECLINED --> [*]
+EXPIRED --> [*]
+CANCELLED --> [*]
+@enduml

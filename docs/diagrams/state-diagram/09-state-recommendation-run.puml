@@ -1,0 +1,26 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam ArrowFontSize 13
+skinparam stateFontSize 16
+skinparam stateBackgroundColor #FFFFFF
+skinparam stateBorderColor #404040
+skinparam ArrowColor #505050
+skinparam roundcorner 12
+skinparam nodesep 55
+skinparam ranksep 65
+hide empty description
+title InfluencerMatch | Recommendation Run
+[*] --> QUEUED : Brand.requestRecommendation\n[campaign context valid; access allowed]\n/ bind M3, M4 and configuration versions
+QUEUED --> RUNNING : workerStarts
+RUNNING : do / retrieve candidate pool and apply hard filters
+RUNNING : do / evaluate available M1-M4 evidence
+RUNNING : do / score, rank and calculate confidence
+RUNNING : do / estimate fees when supported; explain results
+RUNNING --> SUCCEEDED : evaluationCompleted\n[results and evidence references persisted]
+RUNNING --> FAILED : processingError / retain diagnostics
+SUCCEEDED --> [*]
+FAILED --> [*]
+@enduml

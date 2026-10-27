@@ -80,4 +80,19 @@ class SubscriptionServiceTest {
     assertThatThrownBy(() -> service.checkAndDeductCampaignQuota(brand.getId()))
         .isInstanceOfSatisfying(ConflictException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.QUOTA_EXCEEDED));
   }
+
+  @Test void trialPlanCanOnlyBeUsedOnceByBrand() {
+    lookup();
+    var pastTrial = Subscription.builder()
+        .brandProfile(brand)
+        .plan(Plan.builder().price(BigDecimal.ZERO).planName("FREE").build())
+        .status(SubscriptionStatus.EXPIRED)
+        .build();
+    when(subscriptions.findByBrandProfileId(brand.getId())).thenReturn(List.of(pastTrial));
+
+    assertThatThrownBy(() -> service.subscribeBrandToPlan(request()))
+        .isInstanceOfSatisfying(BusinessException.class,
+            e -> assertThat(e.code()).isEqualTo(ErrorCode.SUBSCRIPTION_CONFLICT));
+    verify(subscriptions, never()).save(any());
+  }
 }

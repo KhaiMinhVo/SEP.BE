@@ -16,9 +16,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequestMapping("/campaigns/{campaignId}/shortlist")
@@ -28,6 +30,7 @@ public class ShortlistController {
 
   private final ShortlistService shortlistService;
   private final ShortlistCompareService compareService;
+  private final com.influencermatch.backend.relationship.service.ShortlistNotificationService notificationService;
 
   @PostMapping("/compare")
   @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
@@ -128,6 +131,15 @@ public class ShortlistController {
       @Valid @RequestBody ShortlistOutreachRequest request) {
     ShortlistOutreachResponse response = shortlistService.outreachShortlist(campaignId, request);
     return ResponseEntity.ok(ApiResponse.ok("Shortlist outreach processed", response));
+  }
+
+  @Operation(
+      summary = "Realtime SSE stream for campaign shortlist updates",
+      security = @SecurityRequirement(name = "BearerAuth"))
+  @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+  @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
+  public SseEmitter streamShortlistEvents(@PathVariable UUID campaignId) {
+    return notificationService.subscribe(campaignId);
   }
 }
 

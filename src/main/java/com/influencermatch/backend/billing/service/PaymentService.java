@@ -19,6 +19,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
@@ -115,7 +116,7 @@ public class PaymentService {
     vnp_Params.put("vnp_ReturnUrl", vnPayConfig.getReturnUrl());
     vnp_Params.put("vnp_IpAddr", ipAddress);
 
-    LocalDateTime now = LocalDateTime.now();
+    LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
     DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     vnp_Params.put("vnp_CreateDate", now.format(formatter));
     vnp_Params.put("vnp_ExpireDate", now.plusMinutes(15).format(formatter));

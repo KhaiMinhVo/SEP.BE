@@ -9,10 +9,14 @@ import com.influencermatch.backend.common.dto.ApiResponse;
 import com.influencermatch.backend.security.permission.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import com.influencermatch.backend.config.VnPayConfig;
+import java.net.URI;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,6 +37,7 @@ public class PaymentController {
 
   private final PaymentService paymentService;
   private final BrandProfileRepository brandProfileRepository;
+  private final VnPayConfig vnPayConfig;
 
   @Operation(
       summary = "Create checkout payment URL for subscription plan",
@@ -72,7 +77,7 @@ public class PaymentController {
       description = "Public gateway callback; verified signature and transaction required",
       security = {})
   @GetMapping("/vnpay/return")
-  public ResponseEntity<String> vnpayReturn(HttpServletRequest request) {
+  public ResponseEntity<Void> vnpayReturn(HttpServletRequest request) {
     Map<String, String> fields = new HashMap<>();
     for (Enumeration<String> params = request.getParameterNames(); params.hasMoreElements(); ) {
       String fieldName = params.nextElement();
@@ -83,15 +88,27 @@ public class PaymentController {
     }
 
     boolean success = paymentService.processVnPayReturn(fields);
+    boolean isPaid =
+        success
+            && "00".equals(fields.get("vnp_ResponseCode"))
+            && "00".equals(fields.get("vnp_TransactionStatus"));
 
-    if (success) {
-      if (!"00".equals(fields.get("vnp_ResponseCode"))
-          || !"00".equals(fields.get("vnp_TransactionStatus")))
-        return ResponseEntity.ok("Payment was not completed. You can return to the app.");
-      return ResponseEntity.ok("Payment Success! You can close this tab and return to the app.");
-    } else {
-      return ResponseEntity.badRequest().body("Payment Failed or Invalid Signature!");
+    String target = vnPayConfig.getFrontendReturnUrl();
+    if (target == null || target.isBlank()) {
+      target = "http://localhost:5173/subscription";
     }
+    String delimiter = target.contains("?") ? "&" : "?";
+    String redirectUrl =
+        target
+            + delimiter
+            + "payment="
+            + (isPaid ? "success" : "failed")
+            + "&txnRef="
+            + (fields.getOrDefault("vnp_TxnRef", ""));
+
+    HttpHeaders headers = new HttpHeaders();
+    headers.setLocation(URI.create(redirectUrl));
+    return new ResponseEntity<>(headers, HttpStatus.FOUND);
   }
 
   @io.swagger.v3.oas.annotations.Operation(

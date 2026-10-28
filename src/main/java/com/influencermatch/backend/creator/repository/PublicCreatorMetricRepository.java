@@ -176,4 +176,47 @@ public interface PublicCreatorMetricRepository
       @Param("followerMax") Long followerMax,
       @Param("limit") int limit
   );
+
+  @Query(
+      value = """
+          SELECT c.id AS creatorId,
+                 c.master_id AS masterId,
+                 c.platform AS platform,
+                 c.display_name AS displayName,
+                 c.user_name AS userName,
+                 c.avatar_url AS avatarUrl,
+                 m.id AS id,
+                 m.followers AS followers,
+                 m.avg_views AS avgViews,
+                 m.avg_likes AS avgLikes,
+                 m.engagement_rate AS engagementRate,
+                 m.niche AS niche,
+                 m.category AS category,
+                 m.creator_type AS creatorType,
+                 CASE 
+                     WHEN c.embedding IS NOT NULL AND :briefVector IS NOT NULL 
+                     THEN (1.0 - (c.embedding <=> CAST(:briefVector AS vector)))
+                     ELSE 0.50 
+                 END AS semanticScore
+          FROM creator c
+          JOIN shortlist_item s ON s.creator_id = c.id
+          LEFT JOIN public_creator_metric m ON m.id = (
+              SELECT m2.id FROM public_creator_metric m2
+              WHERE m2.creator_id = c.id
+              ORDER BY m2.observed_at DESC NULLS LAST, m2.collected_at DESC, m2.id DESC
+              LIMIT 1
+          )
+          WHERE s.campaign_id = :campaignId
+            AND s.status != 'REMOVED'
+            AND (:hasExcludedIds = false OR c.id NOT IN (:excludedIds))
+          ORDER BY semanticScore DESC
+          """,
+      nativeQuery = true
+  )
+  List<RecommendationCandidateProjection> findCandidatesByShortlist(
+      @Param("campaignId") UUID campaignId,
+      @Param("briefVector") String briefVector,
+      @Param("hasExcludedIds") boolean hasExcludedIds,
+      @Param("excludedIds") Collection<UUID> excludedIds
+  );
 }

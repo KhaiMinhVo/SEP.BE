@@ -94,26 +94,38 @@ public class AiRecommendationService {
       List<Float> embedding = aiServiceClient.getEmbedding(queryBrief);
       String briefVectorStr = formatVectorForPgvector(embedding);
 
-      // 4. Truy vấn Hybrid Candidate Retrieval (50 ứng viên thô qua pgvector c.embedding)
+      // 4. Ưu tiên truy vấn ứng viên ĐÃ CÓ TRONG SHORTLIST của Campaign
       boolean hasExcluded = !excludedIds.isEmpty();
       Collection<UUID> safeExcluded = hasExcluded ? excludedIds : Set.of(DUMMY_UUID);
 
-      boolean hasPlatforms = campaign.getPlatforms() != null && !campaign.getPlatforms().isEmpty();
-      Collection<String> safePlatforms = hasPlatforms ? campaign.getPlatforms() : List.of("TIKTOK");
-
       List<RecommendationCandidateProjection> rawCandidates =
-          publicCreatorMetricRepository.findTopCandidatesByEmbedding(
+          publicCreatorMetricRepository.findCandidatesByShortlist(
+              campaignId,
               briefVectorStr,
               hasExcluded,
-              safeExcluded,
-              hasPlatforms,
-              safePlatforms,
-              campaign.getFollowerMin(),
-              campaign.getFollowerMax(),
-              50
+              safeExcluded
           );
 
-      log.info("Retrieved {} raw candidates via pgvector search for campaign {}", rawCandidates.size(), campaignId);
+      // Nếu Shortlist chưa có ai, fallback sang quét toàn bộ kho Discovery (cho phép khám phá rộng)
+      if (rawCandidates.isEmpty()) {
+        boolean hasPlatforms = campaign.getPlatforms() != null && !campaign.getPlatforms().isEmpty();
+        Collection<String> safePlatforms = hasPlatforms ? campaign.getPlatforms() : List.of("TIKTOK");
+
+        rawCandidates =
+            publicCreatorMetricRepository.findTopCandidatesByEmbedding(
+                briefVectorStr,
+                hasExcluded,
+                safeExcluded,
+                hasPlatforms,
+                safePlatforms,
+                campaign.getFollowerMin(),
+                campaign.getFollowerMax(),
+                50
+            );
+        log.info("Shortlist was empty. Retrieved {} raw candidates via pgvector search for campaign {}", rawCandidates.size(), campaignId);
+      } else {
+        log.info("Retrieved {} candidates from shortlist for campaign {}", rawCandidates.size(), campaignId);
+      }
 
       // 5. Four-Memory Feature Scorer
       List<ScoredCandidate> scoredList = new ArrayList<>();
@@ -139,8 +151,8 @@ public class AiRecommendationService {
         }
       }
 
-      // 7. Sắp xếp điểm FinalScore giảm dần và chọn Top N
-      int effectiveLimit = limit > 0 ? Math.min(limit, 20) : 10;
+      // 7. Sắp xếp điểm FinalScore giảm dần và chọn Top N (hoặc toàn bộ Shortlist nếu nhỏ hơn limit)
+      int effectiveLimit = limit > 0 ? Math.min(limit, 50) : 10;
       List<ScoredCandidate> topList =
           uniqueKocs.values().stream()
               .sorted(Comparator.comparingDouble((ScoredCandidate sc) -> sc.breakdown.getFinalScore()).reversed())

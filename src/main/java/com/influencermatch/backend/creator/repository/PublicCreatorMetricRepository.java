@@ -72,8 +72,22 @@ public interface PublicCreatorMetricRepository
               WHERE 
                   m.creator_type IN ('KOL', 'KOC')
                   AND (:hasPlatforms = false OR c.platform IN (:platforms))
-                  AND (:hasNiches = false OR m.niche IN (:niches) OR m.category IN (:niches))
-                  AND (:uiNiche IS NULL OR m.niche = :uiNiche OR m.category = :uiNiche)
+                  AND (
+                      :hasNiches = false 
+                      OR m.niche IN (:niches) 
+                      OR m.category IN (:niches)
+                      OR EXISTS (
+                          SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part_niche 
+                          WHERE trim(part_niche) IN (:niches)
+                      )
+                  )
+                  AND (
+                      :uiNiche IS NULL 
+                      OR m.niche = :uiNiche 
+                      OR m.category = :uiNiche
+                      OR m.niche ILIKE '%' || :uiNiche || '%'
+                      OR m.category ILIKE '%' || :uiNiche || '%'
+                  )
                   AND (:followerMin IS NULL OR m.followers >= :followerMin)
                   AND (:followerMax IS NULL OR m.followers <= :followerMax)
                   AND (
@@ -103,8 +117,22 @@ public interface PublicCreatorMetricRepository
           WHERE 
               m.creator_type IN ('KOL', 'KOC')
               AND (:hasPlatforms = false OR c.platform IN (:platforms))
-              AND (:hasNiches = false OR m.niche IN (:niches) OR m.category IN (:niches))
-              AND (:uiNiche IS NULL OR m.niche = :uiNiche OR m.category = :uiNiche)
+              AND (
+                  :hasNiches = false 
+                  OR m.niche IN (:niches) 
+                  OR m.category IN (:niches)
+                  OR EXISTS (
+                      SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part_niche 
+                      WHERE trim(part_niche) IN (:niches)
+                  )
+              )
+              AND (
+                  :uiNiche IS NULL 
+                  OR m.niche = :uiNiche 
+                  OR m.category = :uiNiche
+                  OR m.niche ILIKE '%' || :uiNiche || '%'
+                  OR m.category ILIKE '%' || :uiNiche || '%'
+              )
               AND (:followerMin IS NULL OR m.followers >= :followerMin)
               AND (:followerMax IS NULL OR m.followers <= :followerMax)
               AND (

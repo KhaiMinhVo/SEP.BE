@@ -36,7 +36,16 @@ public class PublicCreatorMetricSpecification {
     public static Specification<PublicCreatorMetric> hasNicheIn(List<String> niches) {
         return (root, query, cb) -> {
             if (niches == null || niches.isEmpty()) return cb.conjunction();
-            return root.get("niche").in(niches);
+            List<jakarta.persistence.criteria.Predicate> predicates = new java.util.ArrayList<>();
+            for (String n : niches) {
+                if (n != null && !n.isBlank()) {
+                    String pattern = "%" + n.trim().toLowerCase() + "%";
+                    predicates.add(cb.like(cb.lower(root.get("niche")), pattern));
+                    predicates.add(cb.like(cb.lower(root.get("category")), pattern));
+                }
+            }
+            if (predicates.isEmpty()) return cb.conjunction();
+            return cb.or(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
         };
     }
 

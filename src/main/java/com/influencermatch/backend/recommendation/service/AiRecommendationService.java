@@ -152,7 +152,7 @@ public class AiRecommendationService {
       }
 
       // 7. Sắp xếp điểm FinalScore giảm dần và chọn Top N (hoặc toàn bộ Shortlist nếu nhỏ hơn limit)
-      int effectiveLimit = limit > 0 ? Math.min(limit, 50) : 10;
+      int effectiveLimit = limit > 0 ? Math.min(limit, 50) : 30;
       List<ScoredCandidate> topList =
           uniqueKocs.values().stream()
               .sorted(Comparator.comparingDouble((ScoredCandidate sc) -> sc.breakdown.getFinalScore()).reversed())

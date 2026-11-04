@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class CreatorAccountLinkService {
 
   @org.springframework.beans.factory.annotation.Autowired private CreatorConflictAudit conflicts;
+  @org.springframework.beans.factory.annotation.Autowired(required = false) private com.influencermatch.backend.creator.client.CrawlerServiceClient crawlerServiceClient;
   @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager em;
   private final CreatorRepository creatorRepository;
   private final CreatorMasterRepository creatorMasterRepository;
@@ -125,10 +126,21 @@ public class CreatorAccountLinkService {
     String providerUsername = proof.getProviderUsername();
     String normalizedPlatform = platform.toUpperCase();
 
-    creatorRepository.acquireIdentityLock(normalizedPlatform+":"+providerUserId);
+    String lookupExternalId = providerUserId;
+    if ("TIKTOK".equals(normalizedPlatform) && crawlerServiceClient != null) {
+      log.info("Resolving TikTok stable authorId for username @{} via crawler...", providerUsername);
+      java.util.Optional<com.influencermatch.backend.creator.dto.CrawlerResolveAuthorResponse> resolveOpt =
+          crawlerServiceClient.resolveTikTokAuthor(providerUsername, null);
+      if (resolveOpt.isPresent() && resolveOpt.get().getAuthorId() != null && !resolveOpt.get().getAuthorId().isBlank()) {
+        lookupExternalId = resolveOpt.get().getAuthorId();
+        log.info("Resolved TikTok stable authorId='{}' for @{}", lookupExternalId, providerUsername);
+      }
+    }
+
+    creatorRepository.acquireIdentityLock(normalizedPlatform+":"+lookupExternalId);
     // 2. Check if this account already exists in DB
     Optional<Creator> existingOpt = creatorRepository.findLockedByPlatformAndExternalId(
-        normalizedPlatform, providerUserId);
+        normalizedPlatform, lookupExternalId);
 
     // CASE 2: Tài khoản hoàn toàn mới chưa từng cào
     if (existingOpt.isEmpty()) {
@@ -142,7 +154,7 @@ public class CreatorAccountLinkService {
 
       Creator newCreator = Creator.builder()
           .platform(normalizedPlatform)
-          .externalId(providerUserId)
+          .externalId(lookupExternalId)
           .userName(providerUsername)
           .displayName(displayName)
           .master(master)

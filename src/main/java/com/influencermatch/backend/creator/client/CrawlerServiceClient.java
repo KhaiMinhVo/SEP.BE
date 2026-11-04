@@ -1,7 +1,10 @@
 package com.influencermatch.backend.creator.client;
 
+import com.influencermatch.backend.creator.dto.CrawlerResolveAuthorResponse;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import lombok.extern.slf4j.Slf4j;
@@ -20,8 +23,9 @@ public class CrawlerServiceClient {
   public CrawlerServiceClient(
       @Value("${crawler.service.url:http://localhost:8000/api/v1/crawl}") String crawlerServiceUrl) {
     SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-    requestFactory.setConnectTimeout(Duration.ofSeconds(3));
-    requestFactory.setReadTimeout(Duration.ofSeconds(5));
+    requestFactory.setConnectTimeout(Duration.ofSeconds(5));
+    // SSR parsing can take 10-15s, set read timeout to 25s
+    requestFactory.setReadTimeout(Duration.ofSeconds(25));
 
     this.restClient =
         RestClient.builder()
@@ -51,5 +55,40 @@ public class CrawlerServiceClient {
         log.warn("Failed to trigger crawler for @{}: {}", username, e.getMessage());
       }
     });
+  }
+
+  /**
+   * Resolves TikTok Author ID (permanent numeric ID) via Crawler SSR preflight.
+   * Useful when KOC changed username (e.g. mixigaming -> domixi) before OAuth verification.
+   *
+   * @param username current TikTok username (e.g. "domixi")
+   * @param expectedExternalId expected permanent ID stored in database (nullable)
+   * @return CrawlerResolveAuthorResponse containing author_id and is_matched flag
+   */
+  public Optional<CrawlerResolveAuthorResponse> resolveTikTokAuthor(String username, String expectedExternalId) {
+    if (username == null || username.isBlank()) {
+      return Optional.empty();
+    }
+    String cleanUsername = username.replace("@", "").trim();
+    try {
+      Map<String, Object> body = new HashMap<>();
+      body.put("username", cleanUsername);
+      if (expectedExternalId != null && !expectedExternalId.isBlank()) {
+        body.put("expected_external_id", expectedExternalId.trim());
+      }
+      body.put("auto_update_staging", false);
+
+      CrawlerResolveAuthorResponse response = restClient.post()
+          .uri("/tiktok/resolve-author")
+          .contentType(MediaType.APPLICATION_JSON)
+          .body(body)
+          .retrieve()
+          .body(CrawlerResolveAuthorResponse.class);
+
+      return Optional.ofNullable(response);
+    } catch (Exception e) {
+      log.warn("Failed to resolve TikTok author ID via crawler for @{}: {}", cleanUsername, e.getMessage());
+      return Optional.empty();
+    }
   }
 }

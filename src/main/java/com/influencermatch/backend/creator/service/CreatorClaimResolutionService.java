@@ -31,6 +31,8 @@ public class CreatorClaimResolutionService {
 
   @org.springframework.beans.factory.annotation.Autowired private CreatorConflictAudit conflicts;
   @org.springframework.beans.factory.annotation.Autowired private java.time.Clock clock;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.creator.client.CrawlerServiceClient crawlerServiceClient;
   @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager em;
   private final CreatorRepository creatorRepository;
   private final CreatorMasterRepository creatorMasterRepository;
@@ -108,6 +110,37 @@ public class CreatorClaimResolutionService {
       String expected = creator.getUserName().replace("@", "").trim();
       String actual = proof.getProviderUsername().replace("@", "").trim();
       matches = expected.equalsIgnoreCase(actual);
+
+      // If direct username match fails (e.g. KOC changed username from mixigaming to domixi),
+      // call Crawler Preflight to resolve Author ID from SSR and compare with externalId
+      if (!matches && crawlerServiceClient != null) {
+        log.info("TikTok username mismatch for creatorId={}: expected='{}', actual='{}'. Querying crawler to resolve Author ID...",
+            creator.getId(), expected, actual);
+        java.util.Optional<com.influencermatch.backend.creator.dto.CrawlerResolveAuthorResponse> resolveOpt =
+            crawlerServiceClient.resolveTikTokAuthor(actual, creator.getExternalId());
+        if (resolveOpt.isPresent()) {
+          var resolveRes = resolveOpt.get();
+          String resolvedAuthorId = resolveRes.getAuthorId();
+          log.info("Crawler resolved Author ID: '{}' for @{} (creator.externalId='{}', isMatched={})",
+              resolvedAuthorId, actual, creator.getExternalId(), resolveRes.getIsMatched());
+
+          if (Boolean.TRUE.equals(resolveRes.getIsMatched())
+              || (resolvedAuthorId != null && resolvedAuthorId.equals(creator.getExternalId()))) {
+            matches = true;
+            log.info("Author ID matched! Updating Creator id={} username from @{} to @{}",
+                creator.getId(), creator.getUserName(), actual);
+            creator.setUserName(actual);
+            if (resolveRes.getCreatorInfo() != null) {
+              if (resolveRes.getCreatorInfo().getDisplayName() != null && !resolveRes.getCreatorInfo().getDisplayName().isBlank()) {
+                creator.setDisplayName(resolveRes.getCreatorInfo().getDisplayName());
+              }
+              if (resolveRes.getCreatorInfo().getAvatarUrl() != null && !resolveRes.getCreatorInfo().getAvatarUrl().isBlank()) {
+                creator.setAvatarUrl(resolveRes.getCreatorInfo().getAvatarUrl());
+              }
+            }
+          }
+        }
+      }
     } else {
       // General match
       matches = creator.getExternalId().equalsIgnoreCase(proof.getProviderUserId())

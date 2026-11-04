@@ -82,6 +82,94 @@ class CreatorClaimResolutionServiceTest {
   }
 
   @Test
+  void resolveClaim_tiktok_reconciled_after_username_change() {
+    String rawToken = "invitation_token_tiktok";
+    String tokenHash = CreatorInvitationService.hashToken(rawToken);
+
+    UUID creatorId = UUID.randomUUID();
+    Creator creator = Creator.builder()
+        .id(creatorId)
+        .platform("TIKTOK")
+        .externalId("6631682124809076737")
+        .userName("mixigaming")
+        .displayName("Mixi Gaming")
+        .sourceType(CreatorSourceType.PUBLIC)
+        .master(null)
+        .build();
+
+    CreatorInvitation invitation = CreatorInvitation.builder()
+        .id(UUID.randomUUID())
+        .targetCreator(creator)
+        .invitedEmail("koc@influencermatch.com")
+        .tokenHash(tokenHash)
+        .status("PENDING")
+        .expiresAt(LocalDateTime.now().plusDays(5))
+        .build();
+
+    User claimantUser = User.builder()
+        .id(UUID.randomUUID())
+        .email("koc@influencermatch.com")
+        .fullName("Do Mixi")
+        .role(Role.CREATOR)
+        .status(UserStatus.ACTIVE)
+        .build();
+
+    when(creatorInvitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(invitation));
+    org.mockito.Mockito.lenient().when(creatorInvitationRepository.findLockedById(invitation.getId())).thenReturn(Optional.of(invitation));
+    when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
+    login(claimantUser);
+
+    // KOC logged in with new username domixi, open_id as providerUserId
+    when(oAuthProofClient.exchangeAndVerify(eq("TIKTOK"), eq("auth_code_tt"), eq("6631682124809076737"), eq("mixigaming")))
+        .thenReturn(OAuthProofClient.ProofResult.builder()
+            .providerUserId("open_id_tiktok_123")
+            .providerUsername("domixi")
+            .accessToken("tt_access_token")
+            .refreshToken("tt_refresh_token")
+            .tokenExpiresAt(LocalDateTime.now().plusHours(2))
+            .rawProfileData(Map.of("username", "domixi"))
+            .build());
+
+    // Mock crawler service client resolving authorId
+    com.influencermatch.backend.creator.client.CrawlerServiceClient mockCrawler =
+        mock(com.influencermatch.backend.creator.client.CrawlerServiceClient.class);
+    when(mockCrawler.resolveTikTokAuthor(eq("domixi"), eq("6631682124809076737")))
+        .thenReturn(Optional.of(com.influencermatch.backend.creator.dto.CrawlerResolveAuthorResponse.builder()
+            .status("success")
+            .platform("TIKTOK")
+            .authorId("6631682124809076737")
+            .isMatched(true)
+            .creatorInfo(new com.influencermatch.backend.creator.dto.CrawlerResolveAuthorResponse.CreatorInfo(
+                "Độ Mixi", "https://avatar.test/domixi.jpg", 1000000L, 100L, 50000000L, 500L, "Bio", "", true, "https://tiktok.com/@domixi"))
+            .build()));
+
+    org.springframework.test.util.ReflectionTestUtils.setField(resolutionService, "crawlerServiceClient", mockCrawler);
+
+    when(tokenEncryptionService.encrypt("tt_access_token")).thenReturn("enc_access_token");
+    when(tokenEncryptionService.encrypt("tt_refresh_token")).thenReturn("enc_refresh_token");
+
+    when(creatorMasterRepository.findByUserId(claimantUser.getId())).thenReturn(Optional.empty());
+    when(creatorMasterRepository.save(any())).thenAnswer(i -> {
+      CreatorMaster m = i.getArgument(0);
+      m.setId(UUID.randomUUID());
+      return m;
+    });
+
+    when(creatorRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+    OAuthCallbackResponse response = resolutionService.resolveClaim("TIKTOK", "auth_code_tt", rawToken, claimantUser);
+
+    assertThat(response).isNotNull();
+    assertThat(response.getStatus()).isEqualTo("AUTHORIZED");
+    assertThat(creator.getUserName()).isEqualTo("domixi");
+    assertThat(creator.getDisplayName()).isEqualTo("Độ Mixi");
+    assertThat(creator.getSourceType()).isEqualTo(CreatorSourceType.AUTHORIZED);
+
+    verify(mockCrawler).resolveTikTokAuthor("domixi", "6631682124809076737");
+    verify(creatorRepository, atLeastOnce()).save(creator);
+  }
+
+  @Test
   void resolveClaim_success_flow() {
     String rawToken = "invitation_token_123";
     String tokenHash = CreatorInvitationService.hashToken(rawToken);

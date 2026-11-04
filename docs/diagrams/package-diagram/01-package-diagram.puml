@@ -1,0 +1,107 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam roundcorner 0
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam classAttributeIconSize 0
+skinparam packageStyle folder
+skinparam classBackgroundColor white
+skinparam classBorderColor #444444
+skinparam classHeaderBackgroundColor #F2F2F2
+skinparam packageBackgroundColor white
+skinparam packageBorderColor #666666
+skinparam ArrowColor #555555
+skinparam nodesep 40
+skinparam ranksep 65
+hide circle
+title InfluencerMatch Backend | Package Diagram
+package "com.influencermatch.backend" {
+package "auth" as p_auth {
+rectangle "**Subpackages**\ncontroller\ndto\nmodel\nrepository\nservice" as p_auth_contents
+}
+package "user" as p_user {
+rectangle "**Subpackages**\ncontroller\ndto\nenums\nmodel\nrepository\nservice" as p_user_contents
+}
+package "security" as p_security {
+rectangle "**Subpackages**\napikey\nevaluator\njwt\noauth\npermission\npermission.controller\npermission.dto\npermission.model\npermission.repository\npermission.service\nservice" as p_security_contents
+}
+package "brand" as p_brand {
+rectangle "**Subpackages**\ncontroller\ndto\nenums\nmodel\nrepository\nservice" as p_brand_contents
+}
+package "campaign" as p_campaign {
+rectangle "**Subpackages**\ncontroller\ndto\nenums\nmodel\nrepository\nservice" as p_campaign_contents
+}
+package "discovery" as p_discovery {
+rectangle "**Subpackages**\ncontroller\ndto\nrepository\nservice" as p_discovery_contents
+}
+package "creator" as p_creator {
+rectangle "**Subpackages**\nclient\ncontroller\ndto\nemail\nenums\nmeta\nmodel\nrepository\nservice" as p_creator_contents
+}
+package "relationship" as p_relationship {
+rectangle "**Subpackages**\ncontroller\ndto\nenums\nmodel\nrepository\nservice" as p_relationship_contents
+}
+package "collaboration" as p_collaboration {
+rectangle "**Subpackages**\ncontroller\ndto\nenums\nmodel\nrepository\nservice" as p_collaboration_contents
+}
+package "billing" as p_billing {
+rectangle "**Subpackages**\ncontroller\ndto\nenums\nmodel\nrepository\nservice\nutils" as p_billing_contents
+}
+package "audit" as p_audit {
+rectangle "**Subpackages**\ncontroller\nmodel\nrepository\nservice" as p_audit_contents
+}
+package "taxonomy" as p_taxonomy {
+rectangle "**Subpackages**\ncontroller" as p_taxonomy_contents
+}
+package "config" as p_config {
+rectangle "**Classes**\nAdminBootstrapConfiguration\nAdminBootstrapRunner\nBootstrapAdminProperties\nCorrelationIdFilter\nEmailVerificationConfig\nGeminiProperties\nJpaConfig\nOpenApiConfig\nProductionSecurityGuard\nSecurityConfig\nVnPayConfig\nWebConfig" as p_config_contents
+}
+package "exception" as p_exception {
+rectangle "**Classes**\nBadRequestException\nBusinessException\nConflictException\nCreatorOwnershipConflictException\nEmailOtpAttemptException\nErrorCode\nForbiddenException\nGlobalExceptionHandler\nNotFoundException\nRefreshTokenReplayException\nResourceNotFoundException\nValidationException" as p_exception_contents
+}
+package "common" as p_common {
+rectangle "**Subpackages**\ndto\n**Base classes**\nBaseEntity, BaseRepository\nBaseService, BaseController" as p_common_contents
+}
+}
+p_auth_contents -[hidden]right-> p_user_contents
+p_user_contents -[hidden]right-> p_security_contents
+p_brand_contents -[hidden]right-> p_campaign_contents
+p_campaign_contents -[hidden]right-> p_discovery_contents
+p_creator_contents -[hidden]right-> p_relationship_contents
+p_relationship_contents -[hidden]right-> p_collaboration_contents
+p_billing_contents -[hidden]right-> p_audit_contents
+p_audit_contents -[hidden]right-> p_taxonomy_contents
+p_config_contents -[hidden]right-> p_exception_contents
+p_exception_contents -[hidden]right-> p_common_contents
+p_auth_contents -[hidden]down-> p_brand_contents
+p_user_contents -[hidden]down-> p_campaign_contents
+p_security_contents -[hidden]down-> p_discovery_contents
+p_brand_contents -[hidden]down-> p_creator_contents
+p_campaign_contents -[hidden]down-> p_relationship_contents
+p_discovery_contents -[hidden]down-> p_collaboration_contents
+p_creator_contents -[hidden]down-> p_billing_contents
+p_relationship_contents -[hidden]down-> p_audit_contents
+p_collaboration_contents -[hidden]down-> p_taxonomy_contents
+p_billing_contents -[hidden]down-> p_config_contents
+p_audit_contents -[hidden]down-> p_exception_contents
+p_taxonomy_contents -[hidden]down-> p_common_contents
+p_auth .[norank].> p_user
+p_auth .[norank].> p_security
+p_user .[norank].> p_audit
+p_brand .[norank].> p_user
+p_campaign .[norank].> p_brand
+p_campaign .[norank].> p_creator
+p_discovery .[norank].> p_campaign
+p_discovery .[norank].> p_creator
+p_relationship .[norank].> p_campaign
+p_relationship .[norank].> p_creator
+p_collaboration .[norank].> p_relationship
+p_collaboration .[norank].> p_campaign
+p_collaboration .[norank].> p_creator
+p_billing .[norank].> p_brand
+p_billing .[norank].> p_audit
+p_creator .[norank].> p_relationship
+p_security .[norank].> p_user
+p_config .[norank].> p_security
+
+@enduml

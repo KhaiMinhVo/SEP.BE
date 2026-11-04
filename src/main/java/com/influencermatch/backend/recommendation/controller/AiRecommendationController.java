@@ -34,7 +34,7 @@ public class AiRecommendationController {
       security = @SecurityRequirement(name = "BearerAuth"))
   public ResponseEntity<ApiResponse<RecommendationResponseDto>> recommendKocs(
       @PathVariable UUID campaignId,
-      @RequestParam(defaultValue = "10") int limit) {
+      @RequestParam(defaultValue = "30") int limit) {
     RecommendationResponseDto result = recommendationService.recommendKocs(campaignId, limit);
     return ResponseEntity.ok(ApiResponse.ok("KOC recommendations generated successfully", result));
   }

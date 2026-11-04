@@ -104,7 +104,9 @@ public class CreatorDiscoveryService {
             }
         }
 
-        Pageable pageable = PageRequest.of(req.getPage(), req.getSize());
+        int safePageSize = (req.getSize() != null && req.getSize() > 0 && req.getSize() <= 30) ? req.getSize() : 30;
+        int safePage = (req.getPage() != null && req.getPage() >= 0) ? req.getPage() : 0;
+        Pageable pageable = PageRequest.of(safePage, safePageSize);
 
         // BƯỚC 3: TRỘN ĐIỂM XẾP HẠNG (Chạy Native Hybrid Query)
         Page<HybridDiscoveryCreatorProjection> pool = executeHybridSearch(ctx, req, isStrictSearch, hasKeyword, formattedKeyword, hasVector, queryVectorStr, pageable);

@@ -47,6 +47,35 @@ public class SubscriptionService {
         brand.getId(), SubscriptionStatus.ACTIVE, LocalDate.now()))
       throw new ConflictException(
           ErrorCode.SUBSCRIPTION_CONFLICT, "An active subscription already exists");
+
+    // Chỉ cho phép sử dụng gói Dùng thử (Trial/Free) đúng 1 lần duy nhất trong lịch sử Brand
+    boolean isTrialOrFree =
+        plan.getPrice().signum() == 0
+            || (plan.getPlanName() != null
+                && (plan.getPlanName().equalsIgnoreCase("FREE")
+                    || plan.getPlanName().toLowerCase().contains("trial")
+                    || plan.getPlanName().toLowerCase().contains("free")));
+
+    if (isTrialOrFree) {
+      List<Subscription> history = subscriptionRepository.findByBrandProfileId(brand.getId());
+      boolean alreadyUsedTrial =
+          history != null
+              && history.stream()
+                  .anyMatch(
+                      s ->
+                          s.getPlan() != null
+                              && (s.getPlan().getPrice().signum() == 0
+                                  || (s.getPlan().getPlanName() != null
+                                      && (s.getPlan().getPlanName().equalsIgnoreCase("FREE")
+                                          || s.getPlan().getPlanName().toLowerCase().contains("trial")
+                                          || s.getPlan().getPlanName().toLowerCase().contains("free")))));
+
+      if (alreadyUsedTrial) {
+        throw new ConflictException(
+            ErrorCode.SUBSCRIPTION_CONFLICT,
+            "Tài khoản của bạn đã từng sử dụng gói Dùng thử (Trial). Vui lòng nâng cấp lên gói trả phí.");
+      }
+    }
     Subscription sub =
         subscriptionRepository.save(
             Subscription.builder()

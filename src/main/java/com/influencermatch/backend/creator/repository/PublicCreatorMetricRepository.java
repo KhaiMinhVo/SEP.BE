@@ -72,8 +72,22 @@ public interface PublicCreatorMetricRepository
               WHERE 
                   m.creator_type IN ('KOL', 'KOC')
                   AND (:hasPlatforms = false OR c.platform IN (:platforms))
-                  AND (:hasNiches = false OR m.niche IN (:niches) OR m.category IN (:niches))
-                  AND (:uiNiche IS NULL OR m.niche = :uiNiche OR m.category = :uiNiche)
+                  AND (
+                      :hasNiches = false 
+                      OR m.niche IN (:niches) 
+                      OR m.category IN (:niches)
+                      OR EXISTS (
+                          SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part_niche 
+                          WHERE trim(part_niche) IN (:niches)
+                      )
+                  )
+                  AND (
+                      :uiNiche IS NULL 
+                      OR m.niche = :uiNiche 
+                      OR m.category = :uiNiche
+                      OR m.niche ILIKE '%' || :uiNiche || '%'
+                      OR m.category ILIKE '%' || :uiNiche || '%'
+                  )
                   AND (:followerMin IS NULL OR m.followers >= :followerMin)
                   AND (:followerMax IS NULL OR m.followers <= :followerMax)
                   AND (
@@ -103,8 +117,22 @@ public interface PublicCreatorMetricRepository
           WHERE 
               m.creator_type IN ('KOL', 'KOC')
               AND (:hasPlatforms = false OR c.platform IN (:platforms))
-              AND (:hasNiches = false OR m.niche IN (:niches) OR m.category IN (:niches))
-              AND (:uiNiche IS NULL OR m.niche = :uiNiche OR m.category = :uiNiche)
+              AND (
+                  :hasNiches = false 
+                  OR m.niche IN (:niches) 
+                  OR m.category IN (:niches)
+                  OR EXISTS (
+                      SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part_niche 
+                      WHERE trim(part_niche) IN (:niches)
+                  )
+              )
+              AND (
+                  :uiNiche IS NULL 
+                  OR m.niche = :uiNiche 
+                  OR m.category = :uiNiche
+                  OR m.niche ILIKE '%' || :uiNiche || '%'
+                  OR m.category ILIKE '%' || :uiNiche || '%'
+              )
               AND (:followerMin IS NULL OR m.followers >= :followerMin)
               AND (:followerMax IS NULL OR m.followers <= :followerMax)
               AND (
@@ -175,5 +203,48 @@ public interface PublicCreatorMetricRepository
       @Param("followerMin") Long followerMin,
       @Param("followerMax") Long followerMax,
       @Param("limit") int limit
+  );
+
+  @Query(
+      value = """
+          SELECT c.id AS creatorId,
+                 c.master_id AS masterId,
+                 c.platform AS platform,
+                 c.display_name AS displayName,
+                 c.user_name AS userName,
+                 c.avatar_url AS avatarUrl,
+                 m.id AS id,
+                 m.followers AS followers,
+                 m.avg_views AS avgViews,
+                 m.avg_likes AS avgLikes,
+                 m.engagement_rate AS engagementRate,
+                 m.niche AS niche,
+                 m.category AS category,
+                 m.creator_type AS creatorType,
+                 CASE 
+                     WHEN c.embedding IS NOT NULL AND :briefVector IS NOT NULL 
+                     THEN (1.0 - (c.embedding <=> CAST(:briefVector AS vector)))
+                     ELSE 0.50 
+                 END AS semanticScore
+          FROM creator c
+          JOIN shortlist_item s ON s.creator_id = c.id
+          LEFT JOIN public_creator_metric m ON m.id = (
+              SELECT m2.id FROM public_creator_metric m2
+              WHERE m2.creator_id = c.id
+              ORDER BY m2.observed_at DESC NULLS LAST, m2.collected_at DESC, m2.id DESC
+              LIMIT 1
+          )
+          WHERE s.campaign_id = :campaignId
+            AND s.status != 'REMOVED'
+            AND (:hasExcludedIds = false OR c.id NOT IN (:excludedIds))
+          ORDER BY semanticScore DESC
+          """,
+      nativeQuery = true
+  )
+  List<RecommendationCandidateProjection> findCandidatesByShortlist(
+      @Param("campaignId") UUID campaignId,
+      @Param("briefVector") String briefVector,
+      @Param("hasExcludedIds") boolean hasExcludedIds,
+      @Param("excludedIds") Collection<UUID> excludedIds
   );
 }

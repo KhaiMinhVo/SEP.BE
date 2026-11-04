@@ -6,19 +6,44 @@ import com.influencermatch.backend.creator.dto.CreatorIngestionResponse;
 import com.influencermatch.backend.creator.enums.*;
 import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.repository.*;
+import com.influencermatch.backend.relationship.service.ShortlistNotificationService;
 import java.time.LocalDateTime;
-import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
-@RequiredArgsConstructor
 public class CreatorIngestionService {
 
   private final CreatorRepository creatorRepository;
   private final PublicCreatorMetricRepository metricRepository;
   private final PostRepository postRepository;
   private final jakarta.persistence.EntityManager entityManager;
+  private final ShortlistNotificationService shortlistNotificationService;
+
+  @Autowired
+  public CreatorIngestionService(
+      CreatorRepository creatorRepository,
+      PublicCreatorMetricRepository metricRepository,
+      PostRepository postRepository,
+      jakarta.persistence.EntityManager entityManager,
+      @Autowired(required = false) ShortlistNotificationService shortlistNotificationService) {
+    this.creatorRepository = creatorRepository;
+    this.metricRepository = metricRepository;
+    this.postRepository = postRepository;
+    this.entityManager = entityManager;
+    this.shortlistNotificationService = shortlistNotificationService;
+  }
+
+  public CreatorIngestionService(
+      CreatorRepository creatorRepository,
+      PublicCreatorMetricRepository metricRepository,
+      PostRepository postRepository,
+      jakarta.persistence.EntityManager entityManager) {
+    this(creatorRepository, metricRepository, postRepository, entityManager, null);
+  }
 
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize(
@@ -150,6 +175,25 @@ public class CreatorIngestionService {
 
     if (request.getEmbedding() != null && !request.getEmbedding().isEmpty()) {
       creatorRepository.updateEmbedding(savedCreator.getId(), request.getEmbedding().toString());
+    }
+
+    if (shortlistNotificationService != null) {
+      try {
+        shortlistNotificationService.notifyCrawlCompleted(
+            savedCreator.getId(),
+            savedCreator.getPlatform(),
+            savedCreator.getUserName(),
+            savedCreator.getDisplayName(),
+            savedCreator.getAvatarUrl(),
+            request.getFollowers(),
+            request.getAvgViews(),
+            request.getAvgLikes(),
+            request.getAvgComments(),
+            request.getAvgShares(),
+            request.getEngagementRate());
+      } catch (Exception e) {
+        log.warn("Failed to notify shortlist crawl completion for creator {}: {}", savedCreator.getId(), e.getMessage());
+      }
     }
 
     return CreatorIngestionResponse.builder()

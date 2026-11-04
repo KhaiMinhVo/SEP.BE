@@ -38,6 +38,11 @@ public class OpenApiConfig {
   @Bean
   public OpenAPI influencerMatchOpenAPI() {
     return new OpenAPI()
+        .servers(
+            List.of(
+                new Server().url("/api/v1").description("Current Host Server (Inherits HTTPS/HTTP)"),
+                new Server().url("https://api.influencermatch.site/api/v1").description("HTTPS Production Server")
+            ))
         .info(apiInfo())
         .addSecurityItem(new SecurityRequirement().addList(SECURITY_SCHEME_NAME))
         .components(

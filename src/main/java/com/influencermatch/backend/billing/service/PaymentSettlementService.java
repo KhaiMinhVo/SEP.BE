@@ -2,6 +2,7 @@ package com.influencermatch.backend.billing.service;
 
 import com.influencermatch.backend.billing.enums.*;
 import com.influencermatch.backend.billing.model.Payment;
+import com.influencermatch.backend.billing.model.Subscription;
 import com.influencermatch.backend.billing.repository.*;
 import com.influencermatch.backend.brand.repository.BrandProfileRepository;
 import jakarta.persistence.EntityManager;
@@ -34,8 +35,13 @@ public class PaymentSettlementService {
     em.refresh(sub);
     if(sub.getStatus()!=SubscriptionStatus.PENDING) return false;
     if(success) {
-      if(subscriptions.existsByBrandProfileIdAndStatusAndExpirationDateGreaterThanEqual(
-          payment.getBrandProfile().getId(),SubscriptionStatus.ACTIVE,LocalDate.now())) return false;
+      java.util.List<Subscription> activeSubs =
+          subscriptions.findByBrandProfileIdAndStatus(
+              payment.getBrandProfile().getId(), SubscriptionStatus.ACTIVE);
+      for (Subscription oldSub : activeSubs) {
+        oldSub.setStatus(SubscriptionStatus.CANCELLED);
+        subscriptions.save(oldSub);
+      }
       payment.setStatus(PaymentStatus.PAID);
       payment.setPaidAt(LocalDateTime.now());
       sub.setStatus(SubscriptionStatus.ACTIVE);

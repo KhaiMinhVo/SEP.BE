@@ -1,0 +1,27 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam ArrowFontSize 13
+skinparam stateFontSize 16
+skinparam stateBackgroundColor #FFFFFF
+skinparam stateBorderColor #404040
+skinparam ArrowColor #505050
+skinparam roundcorner 12
+skinparam nodesep 55
+skinparam ranksep 65
+hide empty description
+title InfluencerMatch | Brand-Creator Relationship
+[*] --> SHORTLISTED : Brand.startTracking / create relationship
+SHORTLISTED : updateNotesOrPriority / retain evidence unchanged
+SHORTLISTED --> CONTACTED : Brand.recordContact\n[external contact actually occurred]
+SHORTLISTED --> NOT_INTERESTED : Brand.recordDecision / record reason
+CONTACTED : recordInteraction / update notes and last contact
+CONTACTED --> COLLABORATING : Brand.startCollaboration\n[campaign active and terms recorded]\n/ create collaboration
+CONTACTED --> NOT_INTERESTED : Brand.recordDecision / record reason
+NOT_INTERESTED --> CONTACTED : Brand.resumeContact\n[campaign still permits collaboration]
+COLLABORATING --> COMPLETED : collaborationCompleted\n/ retain outcome and review references
+COLLABORATING --> NOT_INTERESTED : collaborationCancelled\n[obligations resolved] / retain history
+COMPLETED --> [*]
+@enduml

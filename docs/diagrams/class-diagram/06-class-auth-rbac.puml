@@ -1,0 +1,138 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam roundcorner 0
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam classAttributeIconSize 0
+skinparam packageStyle folder
+skinparam classBackgroundColor white
+skinparam classBorderColor #444444
+skinparam classHeaderBackgroundColor #F2F2F2
+skinparam packageBackgroundColor white
+skinparam packageBorderColor #666666
+skinparam ArrowColor #555555
+skinparam nodesep 40
+skinparam ranksep 65
+hide circle
+title Authentication and Permission RBAC | Class Diagram
+abstract class BaseEntity <<mapped superclass>> {
+- id: UUID
+- createdAt: LocalDateTime
+- updatedAt: LocalDateTime
+}
+
+class User <<entity>> {
+- email: String
+- passwordHash: String
+- fullName: String
+- role: Role
+- status: UserStatus
+- authVersion: long
+- emailVerified: boolean
+--
++ getAuthorities(): Collection<? extends GrantedAuthority>
++ isEnabled(): boolean
+}
+
+interface AuthService {
+--
++ register(RegisterRequest): void
++ login(LoginRequest): LoginResponse
++ refresh(RefreshTokenRequest): LoginResponse
++ logout(RefreshTokenRequest): void
++ getProfile(User): UserProfileResponse
+}
+
+class AuthServiceImpl <<service>> {
+}
+
+class RefreshTokenService <<service>> {
+}
+
+class EmailVerificationService <<service>> {
+}
+
+class RefreshToken <<entity>> {
+- id: UUID
+- userId: UUID
+- tokenHash: String
+- expiresAt: LocalDateTime
+- revokedAt: LocalDateTime
+--
++ active(LocalDateTime): boolean
+}
+
+class EmailVerificationOtp <<entity>> {
+- userId: UUID
+- codeHash: String
+- expiresAt: Instant
+- attempts: int
+}
+
+class CreatorRegistrationInvitation <<entity>> {
+- id: UUID
+- email: String
+- expiresAt: Instant
+- consumedAt: Instant
+}
+
+class JwtTokenProvider {
+}
+
+class JwtAuthenticationFilter {
+}
+
+class EffectivePermissionService <<service>> {
+--
++ resolve(Role): Set<Permission>
++ names(Role): List<String>
+}
+
+interface RolePermissionOverrideRepository <<repository>> {
+}
+
+class RolePermissionOverride <<entity>> {
+- id: UUID
+- role: Role
+- permission: Permission
+- enabled: boolean
+}
+
+class RolePermissionConfig <<entity>> {
+- id: UUID
+- role: Role
+- version: long
+}
+
+enum Role {
+ADMIN
+DATA_MANAGER
+BRAND
+CREATOR
+}
+
+enum UserStatus {
+ACTIVE
+LOCKED
+DISABLED
+}
+
+User --|> BaseEntity
+User ..> Role : role
+User ..> UserStatus : status
+AuthServiceImpl ..|> AuthService
+AuthServiceImpl ..> EmailVerificationService
+AuthServiceImpl ..> JwtTokenProvider
+AuthServiceImpl ..> RefreshTokenService
+AuthServiceImpl ..> EffectivePermissionService
+JwtAuthenticationFilter ..> JwtTokenProvider
+JwtAuthenticationFilter ..> EffectivePermissionService
+EffectivePermissionService ..> RolePermissionOverrideRepository
+RolePermissionOverride ..> Role : role
+RolePermissionConfig ..> Role : role
+RefreshToken ..> User : userId (UUID reference)
+EmailVerificationOtp ..> User : userId (UUID reference)
+RolePermissionOverrideRepository ..> RolePermissionOverride : persists
+
+@enduml

@@ -48,6 +48,10 @@ public interface ShortlistItemRepository
 
   Optional<ShortlistItem> findByIdAndUserId(UUID id, UUID userId);
 
+  List<ShortlistItem> findByCreatorId(UUID creatorId);
+
+  List<ShortlistItem> findByCreatorIdAndStatusNot(UUID creatorId, ShortlistStatus status);
+
   @Modifying
   @Query("UPDATE ShortlistItem s SET s.master = :master WHERE s.creator.id = :creatorId")
   int updateMasterForCreator(

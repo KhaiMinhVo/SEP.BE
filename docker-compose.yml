@@ -52,6 +52,7 @@ services:
       SPRING_DATASOURCE_USERNAME: ${DB_USER:-influencermatch_user}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASS:-12345}
       AI_SERVICE_URL: ${AI_SERVICE_URL:-http://host.docker.internal:8000/api/v1/ai/embed}
+      CRAWLER_SERVICE_URL: ${CRAWLER_SERVICE_URL:-http://host.docker.internal:8000/api/v1/crawl}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

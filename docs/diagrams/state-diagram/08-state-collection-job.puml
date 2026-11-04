@@ -1,0 +1,28 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam ArrowFontSize 13
+skinparam stateFontSize 16
+skinparam stateBackgroundColor #FFFFFF
+skinparam stateBorderColor #404040
+skinparam ArrowColor #505050
+skinparam roundcorner 12
+skinparam nodesep 55
+skinparam ranksep 65
+hide empty description
+title InfluencerMatch | Creator Data Collection Job
+[*] --> PENDING : scheduledOrManualRefresh\n[authorized and within quota] / queue job
+PENDING --> RUNNING : workerStarts [source available]
+PENDING --> CANCELLED : Operator.cancelPending
+RUNNING : do / retrieve and normalize public data
+RUNNING --> SUCCEEDED : collectionCompleted\n[normalized data valid] / publish new M2 snapshot
+RUNNING --> RATE_LIMITED : providerRateLimit / record retry time
+RATE_LIMITED -[norank]-> PENDING : retryTimeReached [retry allowed]
+RATE_LIMITED --> FAILED : retryBudgetExhausted / record error
+RUNNING --> FAILED : collectionError / retain last valid snapshot
+FAILED -[norank]-> PENDING : Operator.retry [temporary issue resolved]\n/ record new attempt
+SUCCEEDED --> [*]
+CANCELLED --> [*]
+@enduml

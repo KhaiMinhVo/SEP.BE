@@ -4,6 +4,7 @@ import com.influencermatch.backend.brand.model.BrandProfile;
 import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.campaign.model.RecommendationRun;
 import com.influencermatch.backend.campaign.repository.RecommendationRunRepository;
+import com.influencermatch.backend.creator.client.CrawlerServiceClient;
 import com.influencermatch.backend.creator.dto.InvitationResponse;
 import com.influencermatch.backend.creator.enums.CreatorSourceType;
 import com.influencermatch.backend.creator.model.Creator;
@@ -58,6 +59,8 @@ public class ShortlistServiceImpl implements ShortlistService {
   private final BrandCreatorRelationshipRepository relationshipRepository;
   private final CreatorInvitationService creatorInvitationService;
   private final CreatorInvitationRepository creatorInvitationRepository;
+  private final CrawlerServiceClient crawlerServiceClient;
+  private final ShortlistNotificationService notificationService;
 
   @Autowired
   public ShortlistServiceImpl(
@@ -69,7 +72,9 @@ public class ShortlistServiceImpl implements ShortlistService {
       PublicCreatorMetricRepository publicCreatorMetricRepository,
       BrandCreatorRelationshipRepository relationshipRepository,
       @Autowired(required = false) CreatorInvitationService creatorInvitationService,
-      @Autowired(required = false) CreatorInvitationRepository creatorInvitationRepository) {
+      @Autowired(required = false) CreatorInvitationRepository creatorInvitationRepository,
+      @Autowired(required = false) CrawlerServiceClient crawlerServiceClient,
+      @Autowired(required = false) ShortlistNotificationService notificationService) {
     this.shortlistItemRepository = shortlistItemRepository;
     this.ownership = ownership;
     this.creatorRepository = creatorRepository;
@@ -79,6 +84,57 @@ public class ShortlistServiceImpl implements ShortlistService {
     this.relationshipRepository = relationshipRepository;
     this.creatorInvitationService = creatorInvitationService;
     this.creatorInvitationRepository = creatorInvitationRepository;
+    this.crawlerServiceClient = crawlerServiceClient;
+    this.notificationService = notificationService;
+  }
+
+  public ShortlistServiceImpl(
+      ShortlistItemRepository shortlistItemRepository,
+      CampaignOwnershipService ownership,
+      CreatorRepository creatorRepository,
+      UserRepository userRepository,
+      RecommendationRunRepository recommendationRunRepository,
+      PublicCreatorMetricRepository publicCreatorMetricRepository,
+      BrandCreatorRelationshipRepository relationshipRepository,
+      CreatorInvitationService creatorInvitationService,
+      CreatorInvitationRepository creatorInvitationRepository,
+      CrawlerServiceClient crawlerServiceClient) {
+    this(
+        shortlistItemRepository,
+        ownership,
+        creatorRepository,
+        userRepository,
+        recommendationRunRepository,
+        publicCreatorMetricRepository,
+        relationshipRepository,
+        creatorInvitationService,
+        creatorInvitationRepository,
+        crawlerServiceClient,
+        null);
+  }
+
+  public ShortlistServiceImpl(
+      ShortlistItemRepository shortlistItemRepository,
+      CampaignOwnershipService ownership,
+      CreatorRepository creatorRepository,
+      UserRepository userRepository,
+      RecommendationRunRepository recommendationRunRepository,
+      PublicCreatorMetricRepository publicCreatorMetricRepository,
+      BrandCreatorRelationshipRepository relationshipRepository,
+      CreatorInvitationService creatorInvitationService,
+      CreatorInvitationRepository creatorInvitationRepository) {
+    this(
+        shortlistItemRepository,
+        ownership,
+        creatorRepository,
+        userRepository,
+        recommendationRunRepository,
+        publicCreatorMetricRepository,
+        relationshipRepository,
+        creatorInvitationService,
+        creatorInvitationRepository,
+        null,
+        null);
   }
 
   public ShortlistServiceImpl(
@@ -97,6 +153,8 @@ public class ShortlistServiceImpl implements ShortlistService {
         recommendationRunRepository,
         publicCreatorMetricRepository,
         relationshipRepository,
+        null,
+        null,
         null,
         null);
   }
@@ -190,6 +248,33 @@ public class ShortlistServiceImpl implements ShortlistService {
         shortlistItemRepository.countByCampaignIdAndStatusNot(campaignId, ShortlistStatus.REMOVED);
     String creatorName =
         creator.getDisplayName() != null ? creator.getDisplayName() : creator.getUserName();
+
+    if (crawlerServiceClient != null) {
+      try {
+        crawlerServiceClient.triggerShortlistCrawlAsync(
+            creator.getPlatform(),
+            creator.getUserName(),
+            creator.getId(),
+            campaignId
+        );
+      } catch (Exception e) {
+        log.warn("Could not trigger async shortlist crawl for creator {}: {}", creator.getId(), e.getMessage());
+      }
+    }
+
+    if (notificationService != null) {
+      try {
+        notificationService.notifyCrawlStarted(
+            campaignId,
+            creator.getId(),
+            creatorName,
+            creator.getPlatform(),
+            creator.getUserName()
+        );
+      } catch (Exception e) {
+        log.warn("Could not emit SSE crawl started event for creator {}: {}", creator.getId(), e.getMessage());
+      }
+    }
 
     ShortlistItemDto dto = mapToDto(item);
     dto.setAction("ADDED");

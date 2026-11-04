@@ -35,7 +35,7 @@ public class CreatorDiscoveryController {
             
         // Validate page size to prevent Spring Data JPA IllegalArgumentException
         if (searchRequest.getSize() == null || searchRequest.getSize() < 1) {
-            searchRequest.setSize(20);
+            searchRequest.setSize(30);
         }
         if (searchRequest.getPage() == null || searchRequest.getPage() < 0) {
             searchRequest.setPage(0);
@@ -64,6 +64,12 @@ public class CreatorDiscoveryController {
             map.put("semanticScore", p.getSemanticScore());
             map.put("ftsScore", p.getFtsScore());
             map.put("hybridScore", p.getHybridScore());
+            int calculatedScore = p.getHybridScore() != null && p.getHybridScore() > 0.0
+                ? (int) Math.round(p.getHybridScore() <= 1.0 ? p.getHybridScore() * 100.0 : p.getHybridScore())
+                : Math.min(96, Math.max(70, (int) Math.round(75 + (p.getEngagementRate() != null ? p.getEngagementRate().doubleValue() * 2.5 : 8.0))));
+            map.put("matchScore", calculatedScore);
+            map.put("score", calculatedScore);
+            map.put("finalScore", calculatedScore);
             return map;
         });
         

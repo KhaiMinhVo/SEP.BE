@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="vi">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>InfluencerMatch · Class Diagrams</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;color:#202428;background:#f5f5f3}header{padding:20px 24px;background:white;border-bottom:1px solid #ddd}h1{font-size:22px;margin:0 0 6px}p{margin:0;color:#62696f;line-height:1.6}nav{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:14px 24px;border-bottom:1px solid #ddd;background:white}select,button,a{font:inherit}select,button{padding:8px 10px;border:1px solid #bbb;border-radius:4px;background:white;color:inherit}button{cursor:pointer}a{color:#214e70;text-underline-offset:3px}#viewport{height:calc(100vh - 205px);min-height:400px;overflow:auto;padding:24px}#diagram{display:block;background:white;max-width:none}footer{padding:10px 24px;font-size:12px;color:#60666b}#zoom{min-width:42px;text-align:center}button:focus-visible,a:focus-visible,select:focus-visible{outline:3px solid #4b83a8;outline-offset:2px}
+</style>
+<header><h1>InfluencerMatch · Class Diagrams</h1><p><a href="../package-diagram/index.html">Package diagram</a> · <a href="../class-diagram/index.html">Class diagrams</a> · <a href="../state-diagram/index.html">State diagrams</a> · <a href="../README.md">Hướng dẫn</a></p></header>
+<nav aria-label="Điều khiển sơ đồ">
+<select id="select" aria-label="Chọn sơ đồ"></select>
+<button id="minus" aria-label="Thu nhỏ">−</button><output id="zoom">100%</output><button id="plus" aria-label="Phóng to">+</button><button id="fit">Vừa chiều rộng</button><button id="actual">100%</button>
+<a id="svg" target="_blank" rel="noopener">Mở SVG</a><a id="png" download>Tải PNG</a><a id="source" download>Mã PlantUML</a>
+</nav>
+<main id="viewport"><img id="diagram" alt="Sơ đồ UML InfluencerMatch"></main>
+<footer id="caption"></footer>
+<script>
+const items=[["02-class-overview", "02 · Class diagram tổng quan", "18 lớp nghiệp vụ cốt lõi; thuộc tính và quan hệ phụ được rút gọn để dễ đọc."], ["03-class-campaign-discovery", "03 · Brand, Campaign & Discovery", "M3/M4, Gemini autofill và hybrid discovery."], ["04-class-shortlist-collaboration", "04 · Shortlist, CRM & Collaboration", "Interface/implementation, trạng thái và quan hệ giữa collaboration, outcome, review."], ["05-class-creator-identity", "05 · Creator Identity & Intelligence", "CreatorMaster là danh tính đã claim; Creator là từng kênh mạng xã hội."], ["06-class-auth-rbac", "06 · Authentication & RBAC", "Đăng nhập, OTP, JWT và phân quyền."], ["07-class-billing", "07 · Subscription & Payment", "Thanh toán gói VNPay và trạng thái subscription."]];
+const el=id=>document.getElementById(id);let ratio=1;let natural=1;
+for(const [id,label] of items){const o=document.createElement('option');o.value=id;o.textContent=label;el('select').append(o)}
+function scale(value){ratio=Math.min(3,Math.max(.1,value));el('diagram').style.width=Math.round(natural*ratio)+'px';el('zoom').textContent=Math.round(ratio*100)+'%'}
+function fit(){scale((el('viewport').clientWidth-48)/natural)}
+function show(){const [id,label,caption]=items.find(x=>x[0]===el('select').value);el('diagram').onload=()=>{natural=el('diagram').naturalWidth;fit()};el('diagram').src='rendered/'+id+'.svg';el('diagram').alt=label;el('svg').href='rendered/'+id+'.svg';el('png').href='rendered/'+id+'.png';el('source').href=id+'.puml';el('caption').textContent=caption;el('viewport').scrollTo(0,0)}
+el('select').onchange=show;el('plus').onclick=()=>scale(ratio*1.2);el('minus').onclick=()=>scale(ratio/1.2);el('fit').onclick=fit;el('actual').onclick=()=>scale(1);show();
+</script>
+</html>

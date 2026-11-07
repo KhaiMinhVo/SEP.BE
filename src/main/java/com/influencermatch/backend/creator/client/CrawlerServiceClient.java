@@ -151,6 +151,31 @@ public class CrawlerServiceClient {
   }
 
   /**
+   * Kích hoạt cào KOC mới theo danh sách từ khóa do Manager chỉ định.
+   */
+  public Optional<Map<String, Object>> triggerKeywordDiscovery(List<String> keywords, int maxChannels) {
+    try {
+      Map<String, Object> body = new HashMap<>();
+      body.put("max_new_kocs", maxChannels > 0 ? maxChannels : 30);
+      if (keywords != null && !keywords.isEmpty()) {
+        body.put("keywords", keywords);
+      }
+
+      @SuppressWarnings("unchecked")
+      Map<String, Object> result = restClient.post()
+          .uri("/trigger-weekly-discovery")
+          .contentType(MediaType.APPLICATION_JSON)
+          .body(body)
+          .retrieve()
+          .body(Map.class);
+      return Optional.ofNullable(result);
+    } catch (Exception e) {
+      log.warn("Failed to trigger keyword discovery (keywords={}): {}", keywords, e.getMessage());
+      return Optional.empty();
+    }
+  }
+
+  /**
    * Lấy danh mục ngành hàng hỗ trợ Taxonomy.
    */
   public List<Map<String, Object>> getSupportedCategories() {

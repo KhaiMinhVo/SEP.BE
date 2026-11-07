@@ -194,23 +194,20 @@ class AiRecommendationServicePhase2Test {
   }
 
   @Test
-  @DisplayName("Follower Score Math: Log10 Asymmetric Scoring with floor at 60 for oversized creator")
-  void testFollowerScore_mathFormulas() {
+  @DisplayName("Four-Memory Scoring & TOPSIS: Đảm bảo đầy đủ 4 điểm SM1..SM4 và Match Score TOPSIS hợp lệ")
+  void testFourMemoryScores_andTopsisCalculation() {
     UUID normalId = UUID.randomUUID();
-    RecommendationCandidateProjection insideRange = mockCandidate(normalId, null, "TIKTOK", "Fit", 50_000L, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, "Beauty", "Beauty", 0.5);
-    ScoreBreakdownDto scoreInside = service.calculateFourMemoryScores(insideRange, campaign, brandProfileId);
-    assertThat(scoreInside.getFollowerScore()).isEqualTo(100.0);
-
-    UUID hugeId = UUID.randomUUID(); // 5 triệu followers (trần là 500k)
-    RecommendationCandidateProjection overRange = mockCandidate(hugeId, null, "TIKTOK", "Huge", 5_000_000L, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, "Beauty", "Beauty", 0.5);
-    ScoreBreakdownDto scoreOver = service.calculateFourMemoryScores(overRange, campaign, brandProfileId);
-    // log10(5M / 500k) = log10(10) = 1.0 -> 100 - 30 = 70.0
-    assertThat(scoreOver.getFollowerScore()).isEqualTo(70.0);
-
-    UUID superHugeId = UUID.randomUUID(); // 100 triệu followers -> sàn 60.0
-    RecommendationCandidateProjection superHuge = mockCandidate(superHugeId, null, "TIKTOK", "Celeb", 100_000_000L, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, "Beauty", "Beauty", 0.5);
-    ScoreBreakdownDto scoreSuperHuge = service.calculateFourMemoryScores(superHuge, campaign, brandProfileId);
-    assertThat(scoreSuperHuge.getFollowerScore()).isEqualTo(60.0);
+    RecommendationCandidateProjection cand = mockCandidate(
+        normalId, null, "TIKTOK", "Fit KOC", 50_000L,
+        BigDecimal.valueOf(25_000), BigDecimal.valueOf(1_250), BigDecimal.valueOf(5.0),
+        "Beauty", "Skincare", 0.80
+    );
+    ScoreBreakdownDto score = service.calculateFourMemoryScores(cand, campaign, brandProfileId);
+    assertThat(score.getM1Score()).isNotNull().isBetween(0.0, 100.0);
+    assertThat(score.getM2Score()).isNotNull().isBetween(0.0, 100.0);
+    assertThat(score.getM3Score()).isNotNull().isBetween(0.0, 100.0);
+    assertThat(score.getM4Score()).isNotNull().isBetween(0.0, 100.0);
+    assertThat(score.getFinalScore()).isNotNull().isBetween(0.0, 100.0);
   }
 
   @Test

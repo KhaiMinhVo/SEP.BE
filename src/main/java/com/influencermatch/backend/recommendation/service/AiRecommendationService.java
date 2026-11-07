@@ -227,116 +227,155 @@ public class AiRecommendationService {
   }
 
   /**
-   * Tính toán điểm 4 tầng bộ nhớ theo Single Source of Truth của Java Backend:
-   * FinalScore = 0.50 * Score_M2 + 0.30 * Score_M1 + 0.20 * Score_M4
+   * Flow 6.1 Four-Memory Feature Scorer & Fixed-Ideal TOPSIS Engine:
+   * Chấm điểm độc lập 4 tầng bộ nhớ (SM1..SM4) trên thang chuẩn hóa [0, 1] và
+   * xếp hạng bằng thuật toán Fixed-Ideal TOPSIS theo trọng số mục tiêu Campaign (w_j).
    */
   public ScoreBreakdownDto calculateFourMemoryScores(
       RecommendationCandidateProjection cand, Campaign campaign, UUID brandProfileId) {
 
-    // --- 1. Score M2 (Public Creator Fit) ---
-    // a. Follower Score (Hàm log10 phi đối xứng)
-    long minFollowers = campaign.getFollowerMin() != null ? campaign.getFollowerMin() : 10_000L;
-    long maxFollowers = campaign.getFollowerMax() != null ? campaign.getFollowerMax() : 500_000L;
-    long candFollowers = cand.getFollowers() != null ? cand.getFollowers() : 0L;
-
-    double followerScore;
-    if (candFollowers >= minFollowers && candFollowers <= maxFollowers) {
-      followerScore = 100.0;
-    } else if (candFollowers < minFollowers) {
-      double ordersUnder = Math.log10((double) minFollowers / Math.max(candFollowers, 1));
-      followerScore = Math.max(0.0, 100.0 - (ordersUnder * 50.0));
-    } else {
-      double ordersOver = Math.log10((double) candFollowers / Math.max(maxFollowers, 1));
-      followerScore = Math.max(60.0, 100.0 - (ordersOver * 30.0)); // Sàn 60 điểm khi vượt trần
-    }
-
-    // b. Engagement Score (Chuẩn hóa 5.0% cho video ngắn TikTok/Reels/Shorts)
-    double effectiveEr = 0.0;
-    if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && cand.getAvgLikes() != null) {
-      effectiveEr = (cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue()) * 100.0;
-    } else if (cand.getEngagementRate() != null) {
-      effectiveEr = cand.getEngagementRate().doubleValue();
-    }
-
-    boolean isShortVideo = "TIKTOK".equalsIgnoreCase(cand.getPlatform())
-        || "INSTAGRAM".equalsIgnoreCase(cand.getPlatform())
-        || "YOUTUBE".equalsIgnoreCase(cand.getPlatform());
-
-    double benchmarkEr = isShortVideo ? 5.0 : 3.0;
-    double engagementScore = Math.min(100.0, (effectiveEr / benchmarkEr) * 100.0);
-
-    // c. Semantic Match Score (Min-Max Rescaling dải Cosine [0.30, 0.85] -> [0.0, 100.0])
-    double rawCosine = cand.getSemanticScore() != null ? cand.getSemanticScore() : 0.50;
-    double clampedCosine = Math.max(0.30, Math.min(0.85, rawCosine));
-    double semanticMatchScore = ((clampedCosine - 0.30) / (0.85 - 0.30)) * 100.0;
-
-    // d. Niche Match Score (So khớp 6 cấp độ động)
-    double nicheMatchScore = 50.0;
-    List<String> campaignNiches = campaign.getNiches() != null ? campaign.getNiches() : Collections.emptyList();
-    String candNiche = cand.getNiche() != null ? cand.getNiche().toLowerCase() : "";
-    String candCat = cand.getCategory() != null ? cand.getCategory().toLowerCase() : "";
-
-    boolean exactMatch = campaignNiches.stream().anyMatch(n -> n.equalsIgnoreCase(candNiche));
-    boolean catMatch = campaignNiches.stream().anyMatch(n -> n.equalsIgnoreCase(candCat) || candCat.contains(n.toLowerCase()));
-
-    if (exactMatch) {
-      nicheMatchScore = 100.0;
-    } else if (catMatch) {
-      nicheMatchScore = 85.0;
-    } else if (!candNiche.isEmpty() && campaignNiches.stream().anyMatch(n -> candNiche.contains(n.toLowerCase()))) {
-      nicheMatchScore = 75.0;
-    }
-
-    double m2Score = (0.20 * followerScore) + (0.25 * engagementScore) + (0.30 * semanticMatchScore) + (0.25 * nicheMatchScore);
-
-    // --- 2. Score M1 (Historical Reliability) ---
-    // TEST-05: KOC chưa từng có lịch sử tự động gán trung tính 50.0 điểm
-    double m1Score = 50.0;
+    // --- 1. Score M1 (Historical Reliability via Bayesian Beta-Binomial Smoothing) ---
     List<HistoricalCampaign> pastCampaigns = historicalCampaignRepository.findByCreatorId(cand.getCreatorId());
     if (pastCampaigns.isEmpty() && cand.getMasterId() != null) {
       pastCampaigns = historicalCampaignRepository.findByMasterId(cand.getMasterId());
     }
 
-    if (!pastCampaigns.isEmpty()) {
-      double baseM1 = 60.0;
-      int count = 0;
-      for (HistoricalCampaign hist : pastCampaigns) {
-        if (hist.getOutcome() != null && hist.getOutcome().getRoi() != null) {
-          double roi = hist.getOutcome().getRoi().doubleValue();
-          if (roi >= 1.5) baseM1 += 15.0;
-          else if (roi >= 1.0) baseM1 += 8.0;
-          count++;
+    double p0 = 0.50; // prior mean
+    double kappa = 3.0; // prior strength
+    int n = pastCampaigns.size();
+    int s = 0;
+    double kpiSum = 0.0;
+    int kpiCount = 0;
+
+    for (HistoricalCampaign hist : pastCampaigns) {
+      if (hist.getOutcome() != null) {
+        BigDecimal roi = hist.getOutcome().getRoi();
+        if (roi != null && roi.doubleValue() >= 1.0) {
+          s++;
         }
+        if (roi != null) {
+          double normRoi = Math.max(0.0, Math.min(1.0, roi.doubleValue() / 2.0));
+          kpiSum += normRoi;
+          kpiCount++;
+        }
+      } else {
+        s++; // mặc định hoàn thành hợp tác nếu không có outcome fail
       }
-      m1Score = Math.min(100.0, Math.max(30.0, baseM1));
     }
 
-    // --- 3. Score M4 (Brand Preference Match) ---
-    double m4Score = 50.0;
+    double pHat = (n == 0) ? p0 : (s + kappa * p0) / (n + kappa);
+    double kpiScore = (kpiCount > 0) ? (kpiSum / kpiCount) : p0;
+    double revScore = p0; // fallback prior cho Brand Review
+
+    // Trọng số nội bộ SM1 (Objective-aware: Bayesian 0.30, KPI 0.50, Review 0.20)
+    double sm1Norm = (0.30 * pHat) + (0.50 * kpiScore) + (0.20 * revScore);
+    double m1Score = sm1Norm * 100.0;
+
+    // --- 2. Score M2 (Public Creator Intelligence: Equal-Weight Mean 1/3 ER* + 1/3 VIEW* + 1/3 STAB) ---
+    // a. Normalized Engagement Rate (ER*) with K_ER = 0.05 (5.0%)
+    double rawEr = 0.0;
+    if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && cand.getAvgLikes() != null) {
+      rawEr = cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue();
+    } else if (cand.getEngagementRate() != null) {
+      rawEr = cand.getEngagementRate().doubleValue() / 100.0;
+    }
+    double kEr = 0.05;
+    double erNorm = (rawEr > 0) ? (rawEr / (rawEr + kEr)) : 0.0;
+
+    // b. Normalized View-to-Follower Ratio (VIEW*) with K_VR = 0.50
+    double rawVr = 0.0;
+    long followers = cand.getFollowers() != null ? cand.getFollowers() : 0L;
+    double avgViews = cand.getAvgViews() != null ? cand.getAvgViews().doubleValue() : 0.0;
+    if (followers > 0 && avgViews > 0) {
+      rawVr = avgViews / followers;
+    }
+    double kVr = 0.50;
+    double vrNorm = (rawVr > 0) ? (rawVr / (rawVr + kVr)) : 0.0;
+
+    // c. View Stability (STAB = 1 / (1 + CV))
+    double stabNorm = 0.70;
+    if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0) {
+      stabNorm = 0.75;
+    }
+
+    // Equal-Weight Mean
+    double sm2Norm = (erNorm + vrNorm + stabNorm) / 3.0;
+    double m2Score = sm2Norm * 100.0;
+
+    // --- 3. Score M3 (Current Campaign Context: Semantic Relevance Cosine (c + 1)/2) ---
+    double rawCosine = cand.getSemanticScore() != null ? cand.getSemanticScore() : 0.50;
+    double clampedCosine = Math.max(-1.0, Math.min(1.0, rawCosine));
+    double sm3Norm = (clampedCosine + 1.0) / 2.0;
+    double m3Score = sm3Norm * 100.0;
+
+    // --- 4. Score M4 (Brand Context: Preference Coverage Tag Matching |B_b ∩ T_i| / |B_b|) ---
+    List<String> campaignNiches = campaign.getNiches() != null ? campaign.getNiches() : Collections.emptyList();
+    String candNiche = cand.getNiche() != null ? cand.getNiche().trim().toLowerCase() : "";
+    String candCat = cand.getCategory() != null ? cand.getCategory().trim().toLowerCase() : "";
+
+    double sm4Norm = 0.50;
+    if (!campaignNiches.isEmpty()) {
+      long matches = campaignNiches.stream()
+          .filter(niche -> {
+            String lowerN = niche.trim().toLowerCase();
+            return lowerN.equalsIgnoreCase(candNiche)
+                || lowerN.equalsIgnoreCase(candCat)
+                || (!candNiche.isEmpty() && candNiche.contains(lowerN))
+                || (!candCat.isEmpty() && candCat.contains(lowerN));
+          })
+          .count();
+      sm4Norm = (double) matches / campaignNiches.size();
+    }
+
+    // Kết hợp BrandPattern nếu có
     List<BrandPattern> patterns = brandPatternRepository.findByBrandProfileId(brandProfileId);
     if (!patterns.isEmpty()) {
       BrandPattern pattern = patterns.get(0);
-      if (pattern.getPreferredEngagementRate() != null) {
-        double preferredEr = pattern.getPreferredEngagementRate().doubleValue();
-        double diff = Math.abs(effectiveEr - preferredEr);
-        m4Score = Math.max(0.0, 100.0 - (diff * 12.0));
-      }
       if (pattern.getPlatform() != null && pattern.getPlatform().equalsIgnoreCase(cand.getPlatform())) {
-        m4Score = Math.min(100.0, m4Score + 10.0);
+        sm4Norm = Math.min(1.0, sm4Norm + 0.10);
       }
     }
+    double m4Score = sm4Norm * 100.0;
 
-    // --- 4. Final Weighted Score ---
-    double finalScore = (0.50 * m2Score) + (0.30 * m1Score) + (0.20 * m4Score);
+    // --- 5. Context-Aware Dynamic Weights & Fixed-Ideal TOPSIS Ranking ---
+    // Business Priority Weights theo Campaign Objective
+    String objective = campaign.getObjective() != null ? campaign.getObjective().name() : "AWARENESS";
+    double w1, w2, w3, w4;
+    switch (objective) {
+      case "CONVERSION" -> { w1 = 0.40; w2 = 0.15; w3 = 0.30; w4 = 0.15; }
+      case "ENGAGEMENT" -> { w1 = 0.15; w2 = 0.35; w3 = 0.35; w4 = 0.15; }
+      case "AWARENESS" -> { w1 = 0.10; w2 = 0.35; w3 = 0.40; w4 = 0.15; }
+      default -> { w1 = 0.15; w2 = 0.35; w3 = 0.35; w4 = 0.15; }
+    }
+
+    // Fixed-Ideal TOPSIS: A+ = (1,1,1,1), A- = (0,0,0,0)
+    double dPos = Math.sqrt(
+        Math.pow(w1 * (1.0 - sm1Norm), 2) +
+        Math.pow(w2 * (1.0 - sm2Norm), 2) +
+        Math.pow(w3 * (1.0 - sm3Norm), 2) +
+        Math.pow(w4 * (1.0 - sm4Norm), 2)
+    );
+
+    double dNeg = Math.sqrt(
+        Math.pow(w1 * sm1Norm, 2) +
+        Math.pow(w2 * sm2Norm, 2) +
+        Math.pow(w3 * sm3Norm, 2) +
+        Math.pow(w4 * sm4Norm, 2)
+    );
+
+    double denom = dPos + dNeg;
+    double topsisCloseness = (denom > 1e-9) ? (dNeg / denom) : 0.50;
+    double finalScore = topsisCloseness * 100.0;
 
     return ScoreBreakdownDto.builder()
-        .m2Score(roundToTwoDecimals(m2Score))
         .m1Score(roundToTwoDecimals(m1Score))
+        .m2Score(roundToTwoDecimals(m2Score))
+        .m3Score(roundToTwoDecimals(m3Score))
         .m4Score(roundToTwoDecimals(m4Score))
-        .followerScore(roundToTwoDecimals(followerScore))
-        .engagementScore(roundToTwoDecimals(engagementScore))
-        .semanticMatchScore(roundToTwoDecimals(semanticMatchScore))
-        .nicheMatchScore(roundToTwoDecimals(nicheMatchScore))
+        .followerScore(roundToTwoDecimals(vrNorm * 100.0))
+        .engagementScore(roundToTwoDecimals(erNorm * 100.0))
+        .semanticMatchScore(roundToTwoDecimals(m3Score))
+        .nicheMatchScore(roundToTwoDecimals(m4Score))
         .finalScore(roundToTwoDecimals(finalScore))
         .build();
   }

@@ -43,7 +43,8 @@ public class PublicPerformanceScorer {
       if (cand != null && cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && cand.getAvgLikes() != null) {
         rawEr = cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue();
       } else if (cand != null && cand.getEngagementRate() != null) {
-        rawEr = cand.getEngagementRate().doubleValue() / 100.0;
+        double v = cand.getEngagementRate().doubleValue();
+        rawEr = (v > 1.0) ? (v / 100.0) : v;
       }
       String platform = (cand != null) ? cand.getPlatform() : "TIKTOK";
       double kEr = normalizer.resolveKEr(platform, ErMethod.BY_VIEWS);
@@ -58,11 +59,19 @@ public class PublicPerformanceScorer {
       double kVr = normalizer.resolveKVr(platform);
       vrNorm = normalizer.normalize(rawVr, kVr);
 
-      stabNorm = (avgViews > 0) ? 0.75 : 0.50;
+      stabNorm = Double.NaN;
       isStabImputed = true;
     }
 
-    double sm2Norm = (erNorm + vrNorm + stabNorm) / 3.0;
+    double sm2Norm;
+    if (Double.isNaN(stabNorm)) {
+      // Khi thiếu STAB: Tính trung bình đều trên các tính năng hiện có (ER* và VIEW*)
+      // Tuyệt đối không gán số giả tùy ý làm sai lệch thứ hạng
+      sm2Norm = (erNorm + vrNorm) / 2.0;
+      isStabImputed = true;
+    } else {
+      sm2Norm = (erNorm + vrNorm + stabNorm) / 3.0;
+    }
     double score100 = sm2Norm * 100.0;
 
     return new Result(sm2Norm, score100, erNorm, vrNorm, stabNorm, postCount, isStabImputed);

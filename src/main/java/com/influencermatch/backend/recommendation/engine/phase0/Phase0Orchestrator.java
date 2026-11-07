@@ -34,38 +34,61 @@ public class Phase0Orchestrator {
       UUID creatorId = cand.getCreatorId();
       String platform = cand.getPlatform() != null ? cand.getPlatform().trim().toUpperCase() : "";
 
-      // LUỒNG 1: Eligibility (Hard Constraints)
+      // LUỒNG 1: Eligibility (Hard Constraints with Precedence INELIGIBLE > PENDING_DATA > ELIGIBLE)
       var elig = eligibilityChecker.check(cand, campaign, excludedIds);
-      if (!elig.eligible()) {
+      if (elig.isExcluded()) {
         results.add(new NormalizedCandidateContext(
             creatorId, cand.getMasterId(), platform, Phase0Status.INELIGIBLE,
-            elig.reasons(), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, null, 0, false, 0.0,
+            elig.reasons(), 0.0, 0.0, Double.NaN, 0.0, 0.0, Double.NaN, null, 0, false, 0.0,
             ScoringPolicyConfig.CALIBRATION_VERSION
         ));
         continue;
       }
 
-      // LUỒNG 2: Evidence Validation (Crawler 3 bài gần nhất)
-      List<Post> posts = postsByCreator != null ? postsByCreator.get(creatorId) : null;
-      var ev = evidenceValidator.evaluate(cand, posts);
+      if (elig.isPendingData()) {
+        results.add(new NormalizedCandidateContext(
+            creatorId, cand.getMasterId(), platform, Phase0Status.PENDING_DATA,
+            elig.reasons(), 0.0, 0.0, Double.NaN, 0.0, 0.0, Double.NaN, null, 0, false, 0.0,
+            ScoringPolicyConfig.CALIBRATION_VERSION
+        ));
+        continue;
+      }
 
-      Phase0Status status = ev.canComputeStability() ? Phase0Status.ELIGIBLE : Phase0Status.PENDING_DATA;
+      // LUỒNG 2 & 3: Evidence Validation & Policy-Based Saturation Normalization with Error Isolation
+      try {
+        // LUỒNG 2: Evidence Validation (Crawler 3 bài gần nhất)
+        List<Post> posts = postsByCreator != null ? postsByCreator.get(creatorId) : null;
+        var ev = evidenceValidator.evaluate(cand, posts);
 
-      // LUỒNG 3: Policy-Based Saturation Normalization (x / (x + K))
-      double kEr = policyNormalizer.resolveKEr(platform, ev.erMethod());
-      double kVr = policyNormalizer.resolveKVr(platform);
+        Phase0Status status = ev.canComputeStability() ? Phase0Status.ELIGIBLE : Phase0Status.PENDING_DATA;
 
-      double erNorm = policyNormalizer.normalize(ev.rawEr(), kEr);
-      double vrNorm = policyNormalizer.normalize(ev.rawVr(), kVr);
-      double stabNorm = Math.max(0.0, Math.min(1.0, ev.rawStab()));
+        // LUỒNG 3: Policy-Based Saturation Normalization (x / (x + K))
+        double kEr = policyNormalizer.resolveKEr(platform, ev.erMethod());
+        double kVr = policyNormalizer.resolveKVr(platform);
 
-      results.add(new NormalizedCandidateContext(
-          creatorId, cand.getMasterId(), platform, status,
-          List.of(), erNorm, vrNorm, stabNorm,
-          ev.rawEr(), ev.rawVr(), ev.rawStab(),
-          ev.erMethod(), ev.postCount(), ev.isStabImputed(), ev.evidenceReliabilityM2(),
-          ScoringPolicyConfig.CALIBRATION_VERSION
-      ));
+        double erNorm = policyNormalizer.normalize(ev.rawEr(), kEr);
+        double vrNorm = policyNormalizer.normalize(ev.rawVr(), kVr);
+        double stabNorm = Double.isNaN(ev.rawStab()) ? Double.NaN : Math.max(0.0, Math.min(1.0, ev.rawStab()));
+
+        results.add(new NormalizedCandidateContext(
+            creatorId, cand.getMasterId(), platform, status,
+            List.of(), erNorm, vrNorm, stabNorm,
+            ev.rawEr(), ev.rawVr(), ev.rawStab(),
+            ev.erMethod(), ev.postCount(), ev.isStabImputed(), ev.evidenceReliabilityM2(),
+            ScoringPolicyConfig.CALIBRATION_VERSION
+        ));
+      } catch (IllegalArgumentException ex) {
+        // Error isolation: Creator-level data error (e.g. negative numbers)
+        // Mark individual creator INELIGIBLE without crashing the entire run
+        results.add(new NormalizedCandidateContext(
+            creatorId, cand.getMasterId(), platform, Phase0Status.INELIGIBLE,
+            List.of("INVALID_METRICS: " + ex.getMessage()), 0.0, 0.0, Double.NaN,
+            0.0, 0.0, Double.NaN, null, 0, false, 0.0,
+            ScoringPolicyConfig.CALIBRATION_VERSION
+        ));
+      }
+      // Note: IllegalStateException (e.g. invalid system policy K <= 0) is intentionally unhandled
+      // so it halts the entire run if system policy configuration is broken.
     }
 
     return results;

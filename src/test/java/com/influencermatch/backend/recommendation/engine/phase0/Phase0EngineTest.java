@@ -76,7 +76,7 @@ class Phase0EngineTest {
     var singleMetrics = evidenceValidator.evaluate(cand, List.of(singlePost));
     assertThat(singleMetrics.canComputeStability()).isFalse();
     assertThat(singleMetrics.isStabImputed()).isTrue();
-    assertThat(singleMetrics.rawStab()).isEqualTo(0.25); // Sàn bảo thủ không tạo lợi thế giả
+    assertThat(singleMetrics.rawStab()).isNaN(); // Giữ Double.NaN, không gán số giả tùy tiện
     assertThat(singleMetrics.evidenceReliabilityM2()).isEqualTo(0.20);
   }
 
@@ -171,6 +171,104 @@ class Phase0EngineTest {
     assertThat(resF.status()).isEqualTo(Phase0Status.PENDING_DATA);
     assertThat(resF.isStabImputed()).isTrue();
     assertThat(resF.evidenceReliabilityM2()).isEqualTo(0.20);
+  }
+
+  @Test
+  @DisplayName("Luồng 1: Quy tắc ưu tiên Tri-state: INELIGIBLE > PENDING_DATA > ELIGIBLE")
+  void testEligibility_triStatePrecedence_ineligibleBeatsPendingData() {
+    Campaign campaign = Campaign.builder().platforms(List.of("TIKTOK")).build();
+    UUID creatorId = UUID.randomUUID();
+
+    // Trường hợp 1: Platform = NULL (thiếu) VÀ creator nằm trong danh sách loại trừ (feedback)
+    // -> Cả 2 điều kiện xảy ra: Precedence quy định phải ra INELIGIBLE
+    RecommendationCandidateProjection candBoth = mockCandidate(creatorId, null, 50_000L);
+    var resBoth = eligibilityChecker.check(candBoth, campaign, Set.of(creatorId));
+    assertThat(resBoth.status()).isEqualTo(Phase0Status.INELIGIBLE);
+    assertThat(resBoth.isExcluded()).isTrue();
+    assertThat(resBoth.reasons()).contains("EXCLUDED_BY_FEEDBACK", "MISSING_PLATFORM: Creator platform is unknown");
+
+    // Trường hợp 2: Platform = NULL nhưng KHÔNG bị loại trừ
+    // -> Chỉ thiếu dữ liệu: ra PENDING_DATA
+    RecommendationCandidateProjection candMissingOnly = mockCandidate(UUID.randomUUID(), null, 50_000L);
+    var resMissing = eligibilityChecker.check(candMissingOnly, campaign, Collections.emptySet());
+    assertThat(resMissing.status()).isEqualTo(Phase0Status.PENDING_DATA);
+    assertThat(resMissing.isPendingData()).isTrue();
+    assertThat(resMissing.isExcluded()).isFalse();
+
+    // Trường hợp 3: Platform = TIKTOK và KHÔNG bị loại trừ
+    // -> Hợp lệ: ra ELIGIBLE
+    RecommendationCandidateProjection candValid = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
+    var resValid = eligibilityChecker.check(candValid, campaign, Collections.emptySet());
+    assertThat(resValid.status()).isEqualTo(Phase0Status.ELIGIBLE);
+    assertThat(resValid.eligible()).isTrue();
+  }
+
+  @Test
+  @DisplayName("Luồng 3: Error Isolation - Creator có dữ liệu âm bị loại INELIGIBLE mà không làm sập cả Run")
+  void testPhase0Orchestrator_errorIsolation_negativeMetrics() {
+    Campaign campaign = Campaign.builder().platforms(List.of("TIKTOK")).build();
+    UUID validCreatorId = UUID.randomUUID();
+    UUID invalidCreatorId = UUID.randomUUID();
+
+    RecommendationCandidateProjection validCand = mockCandidate(validCreatorId, "TIKTOK", 50_000L);
+
+    // KOC có dữ liệu dị thường (likes âm dẫn tới ER âm)
+    RecommendationCandidateProjection invalidCand = mock(RecommendationCandidateProjection.class);
+    when(invalidCand.getCreatorId()).thenReturn(invalidCreatorId);
+    when(invalidCand.getPlatform()).thenReturn("TIKTOK");
+    when(invalidCand.getFollowers()).thenReturn(50_000L);
+    when(invalidCand.getAvgViews()).thenReturn(BigDecimal.valueOf(10_000));
+    when(invalidCand.getAvgLikes()).thenReturn(BigDecimal.valueOf(-500)); // Âm!
+    when(invalidCand.getEngagementRate()).thenReturn(BigDecimal.valueOf(-5.0));
+
+    List<NormalizedCandidateContext> results = orchestrator.execute(
+        List.of(validCand, invalidCand),
+        campaign,
+        Collections.emptySet(),
+        Collections.emptyMap()
+    );
+
+    assertThat(results).hasSize(2);
+
+    var validRes = results.stream().filter(r -> r.creatorId().equals(validCreatorId)).findFirst().orElseThrow();
+    assertThat(validRes.status()).isNotEqualTo(Phase0Status.INELIGIBLE);
+
+    var invalidRes = results.stream().filter(r -> r.creatorId().equals(invalidCreatorId)).findFirst().orElseThrow();
+    assertThat(invalidRes.status()).isEqualTo(Phase0Status.INELIGIBLE);
+    assertThat(invalidRes.exclusionReasons().get(0)).contains("INVALID_METRICS");
+  }
+
+  @Test
+  @DisplayName("Phase 1 - SM2: Khi STAB là Double.NaN, SM2 tính trung bình 2 tính năng (ER* + VR*) / 2.0")
+  void testPublicPerformanceScorer_missingStabilityCalculatesTwoFeatureMean() {
+    com.influencermatch.backend.recommendation.engine.memory.PublicPerformanceScorer scorer =
+        new com.influencermatch.backend.recommendation.engine.memory.PublicPerformanceScorer();
+
+    NormalizedCandidateContext p0MissingStab = new NormalizedCandidateContext(
+        UUID.randomUUID(),
+        null,
+        "TIKTOK",
+        Phase0Status.PENDING_DATA,
+        Collections.emptyList(),
+        0.60, // erNorm
+        0.80, // vrNorm
+        Double.NaN, // stabNorm missing
+        0.06,
+        0.55,
+        Double.NaN,
+        ErMethod.BY_VIEWS,
+        1,
+        true,
+        0.20,
+        "MVP_CALIBRATION_2026Q1"
+    );
+
+    var res = scorer.score(p0MissingStab, null);
+    // (0.60 + 0.80) / 2.0 = 0.70
+    assertThat(res.sm2Norm()).isEqualTo(0.70);
+    assertThat(res.score100()).isEqualTo(70.0);
+    assertThat(res.isStabImputed()).isTrue();
+    assertThat(res.stabNorm()).isNaN();
   }
 
   private RecommendationCandidateProjection mockCandidate(UUID id, String platform, Long followers) {

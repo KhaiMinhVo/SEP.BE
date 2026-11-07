@@ -34,14 +34,21 @@ public class ConfidenceCalculator {
     }
 
     // 2. Reliability for M2 (Public Intelligence)
+    // Rule-based heuristic minh bạch phản ánh độ dày bằng chứng (Evidence Reliability):
+    // >= 10 bài: 1.00 (mẫu dài hạn)
+    // 3 - 9 bài: 0.65 (mẫu ngắn hạn crawler)
+    // 2 bài: 0.45 (mẫu tối thiểu)
+    // < 2 bài hoặc thiếu: 0.20 (bằng chứng yếu / chỉ số ổn định chưa khả dụng)
     double r2;
-    if (scores.m2PostCount() >= 3 && !scores.m2StabImputed()) {
+    if (scores.m2PostCount() >= 10 && !scores.m2StabImputed()) {
       r2 = 1.00;
+    } else if (scores.m2PostCount() >= 3 && !scores.m2StabImputed()) {
+      r2 = 0.65;
     } else if (scores.m2PostCount() == 2 && !scores.m2StabImputed()) {
-      r2 = 0.70;
+      r2 = 0.45;
     } else {
-      r2 = 0.40;
-      warnings.add("Số lượng bài đăng hạn chế (chỉ số ổn định ước lượng)");
+      r2 = 0.20;
+      warnings.add("Số lượng bài đăng hạn chế (chỉ số ổn định chưa khả dụng hoặc ước lượng)");
     }
 
     // 3. Reliability for M3 (Semantic Relevance)

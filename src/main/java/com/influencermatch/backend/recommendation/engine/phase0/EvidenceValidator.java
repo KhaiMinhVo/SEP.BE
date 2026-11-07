@@ -43,7 +43,7 @@ public class EvidenceValidator {
       if (cand.getAvgLikes() != null) totalInteractions = cand.getAvgLikes().doubleValue();
     }
 
-    // 1. Xác định phương pháp tính ER và tính raw ER
+    // 1. Xác định phương pháp tính ER và tính raw ER an toàn
     ErMethod erMethod;
     double rawEr;
 
@@ -59,18 +59,25 @@ public class EvidenceValidator {
         rawEr = 0.0;
       }
     } else {
-      // Khi posts rỗng, ưu tiên trường engagementRate đã tổng hợp trong metric
+      // Khi posts rỗng, kiểm tra an toàn trường engagementRate
+      double dbEr = 0.0;
+      if (cand.getEngagementRate() != null && cand.getEngagementRate().doubleValue() > 0) {
+        double v = cand.getEngagementRate().doubleValue();
+        // Kiểm soát scale: > 1.0 là % (vd 5.2%), <= 1.0 là thập phân (vd 0.052)
+        dbEr = (v > 1.0) ? (v / 100.0) : v;
+      }
+
       if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0) {
         erMethod = ErMethod.BY_VIEWS;
-        if (cand.getEngagementRate() != null && cand.getEngagementRate().doubleValue() > 0) {
-          rawEr = cand.getEngagementRate().doubleValue() / 100.0;
+        if (dbEr > 0) {
+          rawEr = dbEr;
         } else {
           rawEr = (cand.getAvgLikes() != null) ? (cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue()) : 0.0;
         }
       } else if (followers > 0) {
         erMethod = ErMethod.BY_FOLLOWERS;
-        if (cand.getEngagementRate() != null && cand.getEngagementRate().doubleValue() > 0) {
-          rawEr = cand.getEngagementRate().doubleValue() / 100.0;
+        if (dbEr > 0) {
+          rawEr = dbEr;
         } else {
           rawEr = (cand.getAvgLikes() != null) ? (cand.getAvgLikes().doubleValue() / followers) : 0.0;
         }
@@ -84,7 +91,7 @@ public class EvidenceValidator {
     double avgViews = (postCount > 0) ? (totalViews / postCount) : (cand.getAvgViews() != null ? cand.getAvgViews().doubleValue() : 0.0);
     double rawVr = (followers > 0 && avgViews > 0) ? (avgViews / followers) : 0.0;
 
-    // 3. Tính View Stability (STAB)
+    // 3. Tính View Stability (STAB = 1 / (1 + CV))
     double rawStab;
     boolean canComputeStability = false;
     boolean isStabImputed = false;
@@ -101,21 +108,14 @@ public class EvidenceValidator {
       rawStab = 1.0 / (1.0 + cv);
       canComputeStability = true;
       isStabImputed = false;
-      // Hiệu chuẩn độ tin cậy theo quy mô mẫu:
-      // m >= 10: 1.00 (dài hạn), 3 <= m < 10: 0.65 (ngắn hạn sơ bộ), m = 2: 0.45 (tối thiểu)
-      if (postCount >= 10) {
-        evidenceReliabilityM2 = 1.00;
-      } else if (postCount >= 3) {
-        evidenceReliabilityM2 = 0.65;
-      } else {
-        evidenceReliabilityM2 = 0.45;
-      }
+      // Heuristic cấu hình minh bạch: 3 bài ngắn hạn đạt 0.65, 2 bài tối thiểu đạt 0.45
+      evidenceReliabilityM2 = (postCount >= 3) ? 0.65 : 0.45;
     } else {
-      // Thiếu bài để tính mẫu số s_V -> Không tự ý gán 0.50 tạo lợi thế giả, gán cận dưới thận trọng 0.25
-      rawStab = 0.25;
+      // Thiếu bài để tính mẫu số s_V -> Giữ Double.NaN, không tự gán số tùy ý che thiếu dữ liệu
+      rawStab = Double.NaN;
       canComputeStability = false;
       isStabImputed = true;
-      evidenceReliabilityM2 = 0.20; // Phạt bằng chứng để Phase 5 phản ánh đúng
+      evidenceReliabilityM2 = 0.20; // Bằng chứng rất yếu
     }
 
     return new EvidenceMetrics(

@@ -35,30 +35,32 @@ public class EligibilityChecker {
       Set<UUID> excludedIds) {
 
     List<String> reasons = new ArrayList<>();
+    boolean isHardIneligible = false;
+    boolean isPendingData = false;
 
     // 1. Hard Exclusion: KOC nằm trong danh sách loại trừ (Negative Constraints từ Feedback)
     if (excludedIds != null && excludedIds.contains(cand.getCreatorId())) {
       reasons.add("EXCLUDED_BY_FEEDBACK");
-      return new Result(Phase0Status.INELIGIBLE, reasons, false, true);
+      isHardIneligible = true;
     }
 
     // 2. Platform Validation (Tri-state)
     String candPlatform = cand.getPlatform() != null ? cand.getPlatform().trim().toUpperCase() : "";
     if (candPlatform.isEmpty()) {
       reasons.add("MISSING_PLATFORM: Creator platform is unknown");
-      return new Result(Phase0Status.PENDING_DATA, reasons, false, true);
-    }
+      isPendingData = true;
+    } else {
+      List<String> allowedPlatforms = (campaign != null && campaign.getPlatforms() != null)
+          ? campaign.getPlatforms()
+          : List.of();
 
-    List<String> allowedPlatforms = (campaign != null && campaign.getPlatforms() != null)
-        ? campaign.getPlatforms()
-        : List.of();
-
-    if (!allowedPlatforms.isEmpty()) {
-      boolean match = allowedPlatforms.stream()
-          .anyMatch(p -> p.trim().equalsIgnoreCase(candPlatform));
-      if (!match) {
-        reasons.add("PLATFORM_MISMATCH: " + candPlatform);
-        return new Result(Phase0Status.INELIGIBLE, reasons, false, true);
+      if (!allowedPlatforms.isEmpty()) {
+        boolean match = allowedPlatforms.stream()
+            .anyMatch(p -> p.trim().equalsIgnoreCase(candPlatform));
+        if (!match) {
+          reasons.add("PLATFORM_MISMATCH: " + candPlatform);
+          isHardIneligible = true;
+        }
       }
     }
 
@@ -77,6 +79,16 @@ public class EligibilityChecker {
     // 4. Soft: Giá (Chưa có giá -> PRICE_UNKNOWN, không loại)
     boolean priceUnknown = true;
 
-    return new Result(Phase0Status.ELIGIBLE, reasons, outsideFollowers, priceUnknown);
+    // Quy tắc ưu tiên nghiêm ngặt: INELIGIBLE > PENDING_DATA > ELIGIBLE
+    Phase0Status status;
+    if (isHardIneligible) {
+      status = Phase0Status.INELIGIBLE;
+    } else if (isPendingData) {
+      status = Phase0Status.PENDING_DATA;
+    } else {
+      status = Phase0Status.ELIGIBLE;
+    }
+
+    return new Result(status, reasons, outsideFollowers, priceUnknown);
   }
 }

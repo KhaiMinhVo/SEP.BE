@@ -46,18 +46,38 @@ public class EvidenceValidator {
     // 1. Xác định phương pháp tính ER và tính raw ER
     ErMethod erMethod;
     double rawEr;
-    if (totalViews > 0) {
-      erMethod = ErMethod.BY_VIEWS;
-      rawEr = totalInteractions / totalViews;
-    } else if (followers > 0 && postCount > 0) {
-      erMethod = ErMethod.BY_FOLLOWERS;
-      rawEr = (totalInteractions / postCount) / followers;
-    } else if (cand.getEngagementRate() != null && cand.getEngagementRate().doubleValue() > 0) {
-      erMethod = ErMethod.BY_VIEWS;
-      rawEr = cand.getEngagementRate().doubleValue() / 100.0;
+
+    if (posts != null && !posts.isEmpty()) {
+      if (totalViews > 0) {
+        erMethod = ErMethod.BY_VIEWS;
+        rawEr = totalInteractions / totalViews;
+      } else if (followers > 0) {
+        erMethod = ErMethod.BY_FOLLOWERS;
+        rawEr = (totalInteractions / postCount) / followers;
+      } else {
+        erMethod = ErMethod.BY_VIEWS;
+        rawEr = 0.0;
+      }
     } else {
-      erMethod = ErMethod.BY_VIEWS;
-      rawEr = 0.0;
+      // Khi posts rỗng, ưu tiên trường engagementRate đã tổng hợp trong metric
+      if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0) {
+        erMethod = ErMethod.BY_VIEWS;
+        if (cand.getEngagementRate() != null && cand.getEngagementRate().doubleValue() > 0) {
+          rawEr = cand.getEngagementRate().doubleValue() / 100.0;
+        } else {
+          rawEr = (cand.getAvgLikes() != null) ? (cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue()) : 0.0;
+        }
+      } else if (followers > 0) {
+        erMethod = ErMethod.BY_FOLLOWERS;
+        if (cand.getEngagementRate() != null && cand.getEngagementRate().doubleValue() > 0) {
+          rawEr = cand.getEngagementRate().doubleValue() / 100.0;
+        } else {
+          rawEr = (cand.getAvgLikes() != null) ? (cand.getAvgLikes().doubleValue() / followers) : 0.0;
+        }
+      } else {
+        erMethod = ErMethod.BY_VIEWS;
+        rawEr = 0.0;
+      }
     }
 
     // 2. Tính View-to-Follower Ratio (VR)
@@ -81,13 +101,21 @@ public class EvidenceValidator {
       rawStab = 1.0 / (1.0 + cv);
       canComputeStability = true;
       isStabImputed = false;
-      evidenceReliabilityM2 = 0.85; // Cửa sổ quan sát ngắn (2-3 bài) đạt mức khá
+      // Hiệu chuẩn độ tin cậy theo quy mô mẫu:
+      // m >= 10: 1.00 (dài hạn), 3 <= m < 10: 0.65 (ngắn hạn sơ bộ), m = 2: 0.45 (tối thiểu)
+      if (postCount >= 10) {
+        evidenceReliabilityM2 = 1.00;
+      } else if (postCount >= 3) {
+        evidenceReliabilityM2 = 0.65;
+      } else {
+        evidenceReliabilityM2 = 0.45;
+      }
     } else {
-      // Thiếu bài để tính mẫu số s_V
-      rawStab = 0.50; // Điểm trung tính thận trọng
+      // Thiếu bài để tính mẫu số s_V -> Không tự ý gán 0.50 tạo lợi thế giả, gán cận dưới thận trọng 0.25
+      rawStab = 0.25;
       canComputeStability = false;
       isStabImputed = true;
-      evidenceReliabilityM2 = 0.20; // Phạt bằng chứng để Confidence phản ánh đúng
+      evidenceReliabilityM2 = 0.20; // Phạt bằng chứng để Phase 5 phản ánh đúng
     }
 
     return new EvidenceMetrics(

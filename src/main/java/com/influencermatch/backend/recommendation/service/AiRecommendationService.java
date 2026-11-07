@@ -58,6 +58,9 @@ public class AiRecommendationService {
   private final AiServiceClient aiServiceClient;
   private final ObjectMapper objectMapper;
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.creator.repository.PostRepository postRepository;
+
   private final Phase0Orchestrator phase0Orchestrator = new Phase0Orchestrator();
   private final FourMemoryTopsisEngine fourMemoryTopsisEngine = new FourMemoryTopsisEngine();
   private final DisplaySorter displaySorter = new DisplaySorter();
@@ -140,8 +143,22 @@ public class AiRecommendationService {
       }
 
       // 5. Phase 0: Eligibility Checking, Evidence Validation & Policy-Based Normalization
+      Map<UUID, List<com.influencermatch.backend.creator.model.Post>> postsByCreator = Collections.emptyMap();
+      if (postRepository != null && !rawCandidates.isEmpty()) {
+        List<UUID> candidateIds = rawCandidates.stream()
+            .map(RecommendationCandidateProjection::getCreatorId)
+            .filter(Objects::nonNull)
+            .toList();
+        List<com.influencermatch.backend.creator.model.Post> posts = postRepository.findByCreatorIdIn(candidateIds);
+        if (posts != null && !posts.isEmpty()) {
+          postsByCreator = posts.stream()
+              .filter(p -> p.getCreator() != null && p.getCreator().getId() != null)
+              .collect(Collectors.groupingBy(p -> p.getCreator().getId()));
+        }
+      }
+
       List<NormalizedCandidateContext> phase0Results =
-          phase0Orchestrator.execute(rawCandidates, campaign, excludedIds, null);
+          phase0Orchestrator.execute(rawCandidates, campaign, excludedIds, postsByCreator);
 
       Map<UUID, NormalizedCandidateContext> phase0Map = phase0Results.stream()
           .collect(Collectors.toMap(NormalizedCandidateContext::creatorId, r -> r, (a, b) -> a));

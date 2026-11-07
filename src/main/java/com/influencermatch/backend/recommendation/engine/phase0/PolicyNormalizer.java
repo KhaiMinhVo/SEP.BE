@@ -42,10 +42,19 @@ public class PolicyNormalizer {
 
   /**
    * Công thức biến đổi bão hòa: S = x / (x + K)
-   * Yêu cầu x >= 0 và K > 0. Điểm kết quả luôn thuộc [0, 1).
+   * Yêu cầu x >= 0 và K > 0.
+   * Chặn đứng việc che giấu lỗi: x âm hoặc K <= 0 sẽ báo lỗi ngay lập tức thay vì tự gán 0.0 hay 0.50.
    */
   public double normalize(double x, double k) {
-    if (x <= 0.0 || k <= 0.0) {
+    if (Double.isNaN(x) || Double.isInfinite(x) || x < 0.0) {
+      throw new IllegalArgumentException(
+          String.format("Invalid feature value x = %f. Expected non-negative finite number.", x));
+    }
+    if (Double.isNaN(k) || Double.isInfinite(k) || k <= 0.0) {
+      throw new IllegalStateException(
+          String.format("Invalid scoring policy parameter K = %f. Expected positive finite number.", k));
+    }
+    if (x == 0.0) {
       return 0.0;
     }
     return x / (x + k);

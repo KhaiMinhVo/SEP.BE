@@ -69,14 +69,14 @@ class Phase0EngineTest {
     assertThat(metrics.canComputeStability()).isTrue();
     assertThat(metrics.isStabImputed()).isFalse();
     assertThat(metrics.rawStab()).isBetween(0.0, 1.0);
-    assertThat(metrics.evidenceReliabilityM2()).isEqualTo(0.85);
+    assertThat(metrics.evidenceReliabilityM2()).isEqualTo(0.65); // Cửa sổ 3 bài (Short-Window)
 
     // KOC chỉ có 1 bài -> không thể tính độ lệch chuẩn mẫu s_V
     Post singlePost = Post.builder().views(12_000L).likes(500L).build();
     var singleMetrics = evidenceValidator.evaluate(cand, List.of(singlePost));
     assertThat(singleMetrics.canComputeStability()).isFalse();
     assertThat(singleMetrics.isStabImputed()).isTrue();
-    assertThat(singleMetrics.rawStab()).isEqualTo(0.50);
+    assertThat(singleMetrics.rawStab()).isEqualTo(0.25); // Sàn bảo thủ không tạo lợi thế giả
     assertThat(singleMetrics.evidenceReliabilityM2()).isEqualTo(0.20);
   }
 
@@ -114,6 +114,14 @@ class Phase0EngineTest {
     assertThat(kErFb).isEqualTo(0.025);
     double sFb = policyNormalizer.normalize(0.025, kErFb);
     assertThat(sFb).isEqualTo(0.50);
+
+    // Xử lý lỗi nghiêm ngặt: không che giấu lỗi bằng 0 hay 0.50
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> policyNormalizer.normalize(-0.01, 0.05))
+        .isInstanceOf(IllegalArgumentException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> policyNormalizer.normalize(0.05, 0.0))
+        .isInstanceOf(IllegalStateException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> policyNormalizer.normalize(0.05, -1.0))
+        .isInstanceOf(IllegalStateException.class);
   }
 
   @Test

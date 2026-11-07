@@ -21,5 +21,7 @@ public record CreatorDiscoveryResponse(
     BigDecimal estimatedFeeMin,
     BigDecimal estimatedFeeMax,
     BigDecimal actualFee,
+    Boolean isClaimed,
+    Boolean isSimilarFallback,
     java.util.List<PostDto> recentPosts
 ) {}

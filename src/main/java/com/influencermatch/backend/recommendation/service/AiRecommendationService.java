@@ -20,6 +20,10 @@ import com.influencermatch.backend.creator.repository.PublicCreatorMetricReposit
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.recommendation.dto.*;
+import com.influencermatch.backend.recommendation.engine.phase0.Phase0Orchestrator;
+import com.influencermatch.backend.recommendation.engine.phase0.PolicyNormalizer;
+import com.influencermatch.backend.recommendation.engine.phase0.enums.ErMethod;
+import com.influencermatch.backend.recommendation.engine.phase0.model.NormalizedCandidateContext;
 import com.influencermatch.backend.relationship.enums.ShortlistStatus;
 import com.influencermatch.backend.relationship.model.ShortlistItem;
 import com.influencermatch.backend.relationship.repository.ShortlistItemRepository;
@@ -127,14 +131,27 @@ public class AiRecommendationService {
         log.info("Retrieved {} candidates from shortlist for campaign {}", rawCandidates.size(), campaignId);
       }
 
-      // 5. Four-Memory Feature Scorer
+      // 5. Phase 0: Eligibility Checking, Evidence Validation & Policy-Based Normalization
+      Phase0Orchestrator phase0Orchestrator = new Phase0Orchestrator();
+      List<NormalizedCandidateContext> phase0Results =
+          phase0Orchestrator.execute(rawCandidates, campaign, excludedIds, null);
+
+      Map<UUID, NormalizedCandidateContext> phase0Map = phase0Results.stream()
+          .collect(Collectors.toMap(NormalizedCandidateContext::creatorId, r -> r, (a, b) -> a));
+
+      // 6. Four-Memory Feature Scorer & Fixed-Ideal TOPSIS Ranking
       List<ScoredCandidate> scoredList = new ArrayList<>();
       for (RecommendationCandidateProjection cand : rawCandidates) {
-        ScoreBreakdownDto breakdown = calculateFourMemoryScores(cand, campaign, brandProfileId);
+        NormalizedCandidateContext p0 = phase0Map.get(cand.getCreatorId());
+        if (p0 != null && p0.isExcluded()) {
+          log.info("Candidate {} excluded in Phase 0: {}", cand.getCreatorId(), p0.exclusionReasons());
+          continue;
+        }
+        ScoreBreakdownDto breakdown = calculateFourMemoryScores(cand, campaign, brandProfileId, p0);
         scoredList.add(new ScoredCandidate(cand, breakdown));
       }
 
-      // 6. Master-aware Grouping (Khử trùng lặp đa kênh - Mỗi KOC chỉ lấy 1 kênh điểm cao nhất)
+      // 7. Master-aware Grouping (Khử trùng lặp đa kênh - Mỗi KOC chỉ lấy 1 kênh điểm cao nhất)
       Map<String, ScoredCandidate> uniqueKocs = new LinkedHashMap<>();
       for (ScoredCandidate item : scoredList) {
         String masterKey = item.candidate.getMasterId() != null
@@ -233,6 +250,14 @@ public class AiRecommendationService {
    */
   public ScoreBreakdownDto calculateFourMemoryScores(
       RecommendationCandidateProjection cand, Campaign campaign, UUID brandProfileId) {
+    return calculateFourMemoryScores(cand, campaign, brandProfileId, null);
+  }
+
+  public ScoreBreakdownDto calculateFourMemoryScores(
+      RecommendationCandidateProjection cand,
+      Campaign campaign,
+      UUID brandProfileId,
+      NormalizedCandidateContext p0) {
 
     // --- 1. Score M1 (Historical Reliability via Bayesian Beta-Binomial Smoothing) ---
     List<HistoricalCampaign> pastCampaigns = historicalCampaignRepository.findByCreatorId(cand.getCreatorId());
@@ -240,7 +265,7 @@ public class AiRecommendationService {
       pastCampaigns = historicalCampaignRepository.findByMasterId(cand.getMasterId());
     }
 
-    double p0 = 0.50; // prior mean
+    double p0Mean = 0.50; // prior mean
     double kappa = 3.0; // prior strength
     int n = pastCampaigns.size();
     int s = 0;
@@ -263,39 +288,44 @@ public class AiRecommendationService {
       }
     }
 
-    double pHat = (n == 0) ? p0 : (s + kappa * p0) / (n + kappa);
-    double kpiScore = (kpiCount > 0) ? (kpiSum / kpiCount) : p0;
-    double revScore = p0; // fallback prior cho Brand Review
+    double pHat = (n == 0) ? p0Mean : (s + kappa * p0Mean) / (n + kappa);
+    double kpiScore = (kpiCount > 0) ? (kpiSum / kpiCount) : p0Mean;
+    double revScore = p0Mean; // fallback prior cho Brand Review
 
     // Trọng số nội bộ SM1 (Objective-aware: Bayesian 0.30, KPI 0.50, Review 0.20)
     double sm1Norm = (0.30 * pHat) + (0.50 * kpiScore) + (0.20 * revScore);
     double m1Score = sm1Norm * 100.0;
 
     // --- 2. Score M2 (Public Creator Intelligence: Equal-Weight Mean 1/3 ER* + 1/3 VIEW* + 1/3 STAB) ---
-    // a. Normalized Engagement Rate (ER*) with K_ER = 0.05 (5.0%)
-    double rawEr = 0.0;
-    if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && cand.getAvgLikes() != null) {
-      rawEr = cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue();
-    } else if (cand.getEngagementRate() != null) {
-      rawEr = cand.getEngagementRate().doubleValue() / 100.0;
-    }
-    double kEr = 0.05;
-    double erNorm = (rawEr > 0) ? (rawEr / (rawEr + kEr)) : 0.0;
+    double erNorm;
+    double vrNorm;
+    double stabNorm;
 
-    // b. Normalized View-to-Follower Ratio (VIEW*) with K_VR = 0.50
-    double rawVr = 0.0;
-    long followers = cand.getFollowers() != null ? cand.getFollowers() : 0L;
-    double avgViews = cand.getAvgViews() != null ? cand.getAvgViews().doubleValue() : 0.0;
-    if (followers > 0 && avgViews > 0) {
-      rawVr = avgViews / followers;
-    }
-    double kVr = 0.50;
-    double vrNorm = (rawVr > 0) ? (rawVr / (rawVr + kVr)) : 0.0;
+    if (p0 != null) {
+      erNorm = p0.erNormalized();
+      vrNorm = p0.vrNormalized();
+      stabNorm = p0.stabNormalized();
+    } else {
+      PolicyNormalizer normalizer = new PolicyNormalizer();
+      double rawEr = 0.0;
+      if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && cand.getAvgLikes() != null) {
+        rawEr = cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue();
+      } else if (cand.getEngagementRate() != null) {
+        rawEr = cand.getEngagementRate().doubleValue() / 100.0;
+      }
+      double kEr = normalizer.resolveKEr(cand.getPlatform(), ErMethod.BY_VIEWS);
+      erNorm = normalizer.normalize(rawEr, kEr);
 
-    // c. View Stability (STAB = 1 / (1 + CV))
-    double stabNorm = 0.70;
-    if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0) {
-      stabNorm = 0.75;
+      double rawVr = 0.0;
+      long followers = cand.getFollowers() != null ? cand.getFollowers() : 0L;
+      double avgViews = cand.getAvgViews() != null ? cand.getAvgViews().doubleValue() : 0.0;
+      if (followers > 0 && avgViews > 0) {
+        rawVr = avgViews / followers;
+      }
+      double kVr = normalizer.resolveKVr(cand.getPlatform());
+      vrNorm = normalizer.normalize(rawVr, kVr);
+
+      stabNorm = (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0) ? 0.75 : 0.50;
     }
 
     // Equal-Weight Mean

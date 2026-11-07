@@ -43,6 +43,9 @@ import org.testcontainers.junit.jupiter.*;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RbacPostgresIntegrationTest {
+  @org.springframework.boot.test.mock.mockito.MockBean
+  com.influencermatch.backend.creator.client.CrawlerServiceClient crawler;
+
   @Container
   static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
       DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
@@ -131,7 +134,8 @@ class RbacPostgresIntegrationTest {
             .schemas("empty_rbac")
             .defaultSchema("empty_rbac")
             .load();
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(20);
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(23);
+    assertThat(flyway.info().current().getVersion().toString()).isEqualTo("24");
     assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
   }
 

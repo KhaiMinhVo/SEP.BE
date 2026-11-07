@@ -24,7 +24,7 @@ class OAuthSandboxProviderTest {
     properties = new OAuthSandboxProperties();
     properties.getTiktok().setClientKey("test_tiktok_client_key");
     properties.getTiktok().setClientSecret("test_tiktok_client_secret");
-    properties.getTiktok().setRedirectUri("http://localhost:8080/callback/tiktok");
+    properties.getTiktok().setRedirectUri("https://example.test/api/v1/integrations/tiktok/callback");
 
     properties.getGoogle().setClientId("test_google_client_id");
     properties.getGoogle().setClientSecret("test_google_client_secret");
@@ -44,7 +44,7 @@ class OAuthSandboxProviderTest {
     assertThat(authUrl).contains("client_key=test_tiktok_client_key");
     assertThat(authUrl).contains("response_type=code");
     assertThat(authUrl).contains("state=token_12345");
-    assertThat(authUrl).contains("redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fcallback%2Ftiktok");
+    assertThat(authUrl).contains("redirect_uri=https://example.test/api/v1/integrations/tiktok/callback");
   }
 
   @Test
@@ -72,8 +72,13 @@ class OAuthSandboxProviderTest {
         new OAuthProofClient(
             env, false, properties, tikTokProvider, googleProvider, fallbackProvider);
 
-    String tikTokUrl = client.buildAuthorizationUrl("TIKTOK", "state_tt");
-    assertThat(tikTokUrl).contains("https://www.tiktok.com/v2/auth/authorize/");
+    assertThatThrownBy(() -> client.buildAuthorizationUrl("TIKTOK", "state_tt"))
+        .isInstanceOf(BusinessException.class);
+    assertThatThrownBy(() -> client.exchangeAndVerify("TIKTOK", "real-code", "crawler-id", "name"))
+        .isInstanceOf(BusinessException.class);
+    env.setActiveProfiles("dev");
+    assertThatThrownBy(() -> client.exchangeAndVerify("TIKTOK", "sim:id:name", "crawler-id", "name"))
+        .isInstanceOf(BusinessException.class);
 
     String ytUrl = client.buildAuthorizationUrl("YOUTUBE", "state_yt");
     assertThat(ytUrl).contains("https://accounts.google.com/o/oauth2/v2/auth");

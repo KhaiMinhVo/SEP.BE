@@ -20,6 +20,7 @@ public class CrawlerServiceClient {
 
   private final RestClient restClient;
 
+  @org.springframework.beans.factory.annotation.Autowired
   public CrawlerServiceClient(
       @Value("${crawler.service.url:http://localhost:8000/api/v1/crawl}") String crawlerServiceUrl) {
     SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
@@ -33,6 +34,10 @@ public class CrawlerServiceClient {
             .requestFactory(requestFactory)
             .build();
     log.info("Initialized CrawlerServiceClient with endpoint: {}", crawlerServiceUrl);
+  }
+
+  public CrawlerServiceClient(RestClient restClient) {
+    this.restClient = restClient;
   }
 
   public void triggerShortlistCrawlAsync(String platform, String username, UUID creatorId, UUID campaignId) {
@@ -89,6 +94,22 @@ public class CrawlerServiceClient {
     } catch (Exception e) {
       log.warn("Failed to resolve TikTok author ID via crawler for @{}: {}", cleanUsername, e.getMessage());
       return Optional.empty();
+    }
+  }
+
+  /** Strict identity-only request used by OAuth; never queues crawl or changes staging. */
+  public CrawlerResolveAuthorResponse resolveTikTokIdentity(String username) {
+    try {
+      return restClient.post()
+          .uri("/tiktok/resolve-author")
+          .contentType(MediaType.APPLICATION_JSON)
+          .body(Map.of("username", username, "auto_update_staging", false))
+          .retrieve()
+          .body(CrawlerResolveAuthorResponse.class);
+    } catch (Exception ex) {
+      throw new com.influencermatch.backend.exception.BusinessException(
+          com.influencermatch.backend.exception.ErrorCode.TIKTOK_IDENTITY_RESOLUTION_FAILED,
+          "Unable to verify TikTok identity; start a new connection");
     }
   }
 }

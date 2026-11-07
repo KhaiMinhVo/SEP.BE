@@ -1,0 +1,61 @@
+package com.influencermatch.backend.creator.tiktok;
+
+import com.influencermatch.backend.common.BaseEntity;
+import com.influencermatch.backend.creator.model.*;
+import com.influencermatch.backend.user.model.User;
+import jakarta.persistence.*;
+import java.time.Instant;
+import lombok.*;
+import lombok.experimental.SuperBuilder;
+
+@Entity
+@Table(name = "tiktok_oauth_session")
+@Getter
+@Setter
+@NoArgsConstructor
+@SuperBuilder
+public class TikTokOAuthSession extends BaseEntity {
+  @ManyToOne(fetch = FetchType.LAZY, optional = false)
+  @JoinColumn(name = "user_id", nullable = false)
+  private User user;
+
+  private long authVersion;
+
+  @Column(nullable = false, length = 255)
+  private String clientKey;
+
+  @Column(nullable = false, unique = true, length = 64)
+  private String stateHash;
+
+  @Column(nullable = false, length = 64)
+  private String browserBindingHash;
+
+  @Column(nullable = false, length = 20)
+  private String status;
+
+  @Column(nullable = false)
+  private Instant expiresAt;
+
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "target_creator_id")
+  private Creator targetCreator;
+
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "invitation_id")
+  private CreatorInvitation invitation;
+
+  @Column(length = 255)
+  private String openId;
+
+  @Column(length = 255)
+  private String username;
+
+  @Column(length = 255)
+  private String displayName;
+
+  @Column(length = 24)
+  private String matchStatus;
+
+  private java.util.UUID linkedCreatorId;
+  private java.util.UUID linkedMasterId;
+}

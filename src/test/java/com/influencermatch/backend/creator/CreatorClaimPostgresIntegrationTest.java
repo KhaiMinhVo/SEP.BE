@@ -33,6 +33,9 @@ import org.testcontainers.utility.DockerImageName;
 @AutoConfigureMockMvc
 @Testcontainers
 class CreatorClaimPostgresIntegrationTest {
+  @org.springframework.boot.test.mock.mockito.MockBean
+  com.influencermatch.backend.creator.client.CrawlerServiceClient crawler;
+
   @Container static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
       DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
 

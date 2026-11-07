@@ -43,6 +43,9 @@ import org.testcontainers.utility.DockerImageName;
     "application.auth.creator-mock.enabled=true", "spring.jpa.show-sql=false"})
 @ActiveProfiles("dev") @AutoConfigureMockMvc @Testcontainers
 class RolePermissionPostgresIntegrationTest {
+  @org.springframework.boot.test.mock.mockito.MockBean
+  com.influencermatch.backend.creator.client.CrawlerServiceClient crawler;
+
   @Container static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
       DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
   @DynamicPropertySource static void database(DynamicPropertyRegistry r) {

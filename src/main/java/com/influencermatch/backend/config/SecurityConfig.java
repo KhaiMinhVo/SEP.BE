@@ -40,7 +40,10 @@ public class SecurityConfig {
   private static final String[] PUBLIC_ENDPOINTS = {
     "/integrations/meta/callback",
     "/integrations/instagram/callback",
+    "/integrations/tiktok/callback",
     "/auth/register",
+    "/auth/google/start",
+    "/auth/google/login",
     "/auth/login",
     "/auth/refresh",
     "/auth/verify-email",
@@ -86,7 +89,8 @@ public class SecurityConfig {
   @org.springframework.core.annotation.Order(2)
   public SecurityFilterChain securityFilterChain(HttpSecurity http,
       org.springframework.beans.factory.ObjectProvider<com.influencermatch.backend.auth.service.DevCreatorLoginService> devCreatorLogin) throws Exception {
-    http.csrf(AbstractHttpConfigurer::disable)
+    http.cors(org.springframework.security.config.Customizer.withDefaults())
+        .csrf(AbstractHttpConfigurer::disable)
         .formLogin(AbstractHttpConfigurer::disable)
         .httpBasic(AbstractHttpConfigurer::disable)
         .securityContext(

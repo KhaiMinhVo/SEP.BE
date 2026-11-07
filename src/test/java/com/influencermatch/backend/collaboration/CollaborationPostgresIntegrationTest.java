@@ -56,6 +56,9 @@ import org.testcontainers.utility.DockerImageName;
 @AutoConfigureMockMvc
 @Testcontainers
 class CollaborationPostgresIntegrationTest {
+  @org.springframework.boot.test.mock.mockito.MockBean
+  com.influencermatch.backend.creator.client.CrawlerServiceClient crawler;
+
   @Container static final PostgreSQLContainer<?> postgres = container();
 
   static PostgreSQLContainer<?> container() {
@@ -133,7 +136,8 @@ VALUES ('10000000-0000-0000-0000-000000000007','10000000-0000-0000-0000-00000000
           Flyway.configure()
               .dataSource(fresh.getJdbcUrl(), fresh.getUsername(), fresh.getPassword())
               .load();
-      assertThat(flyway.migrate().migrationsExecuted).isEqualTo(20);
+      assertThat(flyway.migrate().migrationsExecuted).isEqualTo(23);
+      assertThat(flyway.info().current().getVersion().toString()).isEqualTo("24");
       assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
     }
   }

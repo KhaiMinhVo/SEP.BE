@@ -1,4 +1,218 @@
+# Google Brand Login — 2026-11-07
+
+This section supersedes the historical statement that all Google Login was removed. The old `/auth/google` redirect and `/auth/google/exchange` endpoints remain retired; new GIS endpoints are `/auth/google/start` and `/auth/google/login`. Creator invitation/OTP is unchanged. No frontend or real Google consent is included.
+
+- **GGL-001 · Unit · GoogleIdTokenVerifierTest:** generated RSA signature; accept valid Google issuer/audience/expiry/verified email/subject, reject wrong issuer/client/azp, multiple audiences without authorized party, expired token, missing subject, unverified/malformed email and foreign signature. Disabled configuration rejects without calling the decoder.
+- **GGL-002 · PostgreSQL/MockMvc · GoogleBrandLoginPostgresIntegrationTest#createsVerifiedBrandWithoutPasswordAndReplayCannotIssueAnotherSession:** browser-bound nonce → verified BRAND with Google identity and hashed nonce/browser data, normal JWT/refresh response; successful session replay returns 409 and cannot create another refresh token.
+- **GGL-003 · PostgreSQL/MockMvc · knownGoogleSubjectReusesBrandAndSupportsRefreshAndMe:** existing subject reuses User, `/auth/me` permissions match login, refresh remains available.
+- **GGL-004 · PostgreSQL/MockMvc · sameEmailNeverAutomaticallyLinksPasswordAccount; pendingOtpCannotBeActivatedByGoogle:** same-email password user receives 409 without identity/session creation; pending OTP remains unverified and returns 403.
+- **GGL-005 · PostgreSQL/MockMvc · onlyBrandCanUseKnownIdentity; blockedBrandCannotReceiveTokens:** CREATOR/ADMIN/DATA_MANAGER denied; LOCKED/DISABLED Brand denied without issuing tokens.
+- **GGL-006 · PostgreSQL/MockMvc · wrongBrowserAndNonceAndExpiredSessionCannotCreateUser; invalidProviderCredentialCannotCreateAccount:** wrong browser/nonce, expired session and invalid provider credential do not create a User.
+- **GGL-007 · PostgreSQL/MockMvc · simultaneousLoginConsumesSessionOnlyOnce:** latch-synchronized duplicate login yields 200/409, one identity/User/refresh issuance.
+- **GGL-008 · PostgreSQL/MockMvc · issuingSessionFailureRollsBackNewUserIdentityAndConsumption:** refresh issuance failure rolls back User, identity and session consumption.
+- **GGL-009 · PostgreSQL/MockMvc · disabledConfigurationReturns503WithoutCreatingSession; allowedFrontendCanPreflightGoogleLoginAndHttpsCookieIsSecure:** disabled config returns 503, allowed origin preflight permits credentials, foreign origin denied, HTTPS cookies Secure/HttpOnly/SameSite=Lax.
+
+Verified results (2026-11-07):
+- New Google tests: **26/26 passed** (11 signature/claim unit cases and 15 PostgreSQL/MockMvc cases).
+- Focused authentication regression: **58/58 passed**; focused PostgreSQL registration/OTP/session regression: **101/101 passed**.
+- Full regression executed **957 tests**. Initial run: 951 passed, 6 failures, zero errors/skips. Three failures were stale fresh-schema assertions expecting 22 migrations/V23 after V24 was added. Updated them to 23 migrations/V24, retained all historical-data assertions, and added the Google session table assertion. Reran all three affected suites: **53 tests, 52 passed, 1 existing Payment failure**.
+- Latest reports across all suites: **957 tests, 954 passed, 3 failures, 0 errors, 0 skipped**. The three remaining inherited financial-contract failures are `PaymentSettlementServiceTest#activeSubscriptionPreventsActivationWithoutMutatingPendingPayment` (replacement behavior), `ComparePaymentPostgresIntegrationTest#parallelPaymentsForSameBrandCannotActivateTwoSubscriptions` (200/200 instead of 200/409), and `RbacPostgresIntegrationTest#paidSubscriptionRequiresCheckoutAndGatewayVerification` (302 redirect instead of 400). No financial assertions were removed or disabled.
+- Initial PostgreSQL attempt was blocked because Docker was stopped; it was rerun after Docker became available. All database tests used disposable PostgreSQL Testcontainers. No shared database, real email or real Google consent was used. Actual `.env`/Bruno were not edited; BE was not restarted; no commit/push.
+
 # Backend Test Cases — Khải
+
+## TikTok crawler identity — current implementation (2026-11-05)
+
+Supersedes username-only ownership below. Historical migration tests remain unchanged.
+
+- **TTC-001 — Unit / contract:** strict author ID/type/platform/status, OAuth username, freshness
+  (inclusive 90-second/5-second boundaries), and sanitized optional fields. `TikTokIdentityResolverTest`.
+- **TTC-002 — Unit / HTTP:** read-only request without expected ID; sanitized HTTP, timeout and JSON
+  errors without retry. `TikTokIdentityResolverTest`.
+- **TTC-003 — PostgreSQL / creation:** minimal new channel, readable without metrics, later ingestion
+  updates same UUID/ownership. `TikTokCrawlerIdentityPostgresIntegrationTest.createsMinimalProfileAndLaterIngestionUpdatesSameUuid`.
+- **TTC-004 — PostgreSQL / rename:** crawler ID selects existing channel despite changed/duplicate
+  username; preserve history and Master. Both TikTok ownership integration suites.
+- **TTC-005 — PostgreSQL / denial:** target/invitation mismatch, unstable ID, permission/authVersion
+  changes, resolver errors, conflicting bindings and audit rollback preserve business data.
+  `TikTokCrawlerIdentityPostgresIntegrationTest` and `TikTokOwnershipPostgresIntegrationTest`.
+- **TTC-006 — PostgreSQL / concurrency:** callbacks, competing owners, two channels/one Master and
+  ingestion versus OAuth do not duplicate channels/bindings. HTTP runs outside transactions.
+  Both TikTok ownership integration suites.
+- **TTC-007 — Crawler / mocked SSR and API:** no username fallback, reject missing/invalid ID,
+  actual observed_at/id_type, each call fetches again, no staging update when false.
+  `tests/test_preflight_author_resolver.py` in creator-discovery.
+
+Validation on 2026-11-05:
+- TikTok suites: **121 passed / 0 failed / 0 errors / 0 skipped**, including 14 crawler-identity
+  PostgreSQL cases, 23 resolver unit cases and the retained OAuth/ownership/provider suites.
+- Full backend regression: **931 tests, 928 passed, 3 failed, 0 errors, 0 skipped**.
+- Crawler regression: **60 passed, 0 failed** (one harmless FastAPI test_app collection warning).
+- Legacy PostgreSQL suites rerun after crawler isolation: **117 tests, 115 passed, 2 failed**;
+  these are the same integration Payment/VNPay failures listed below, not additional failures.
+
+Known failures inherited from develop, left enabled without weakening assertions:
+1. `PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment`:
+   expected rejection with an existing active subscription; develop now activates the new one and
+   cancels the old subscription.
+2. `ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions`:
+   expected HTTP 200/409; develop returns 200/200 using replacement-subscription behavior.
+3. `RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification`:
+   expected HTTP 400 for invalid gateway return; develop now redirects HTTP 302 to frontend failure.
+
+The initial PostgreSQL attempt was blocked by pre-existing Brand/Campaign ListArrayType schema
+validation (ARRAY versus OTHER). With user approval, mappings now use Hibernate native ARRAY while
+retaining text[] columns and full schema validation. Brand/Campaign integration: **20/20 passed**.
+An initial fixture reused open_id across tests; it was corrected to unique per-test identities.
+
+Isolation correction: some standalone legacy tests initially reached the local crawler resolver and
+shortlist-trigger before complete client isolation. The local crawler was stopped and all six
+standalone PostgreSQL suites plus the shared support now mock CrawlerServiceClient; their isolated
+rerun made no crawler dispatch calls. Crawler backend URL remained localhost; shared database was
+not used or migrated. No real TikTok Sandbox OAuth consent was performed.
+
+No new migration; V1–V23 unchanged. Actual .env/Bruno untouched; no backend restart or commit/push.
+
+
+## Historical: username ownership — V23 (2026-10-27, superseded)
+
+The selected MVP policy compares the OAuth-returned username with stored TikTok usernames, without
+Bio Challenge or live crawler refresh. A unique existing channel can be linked automatically at
+callback; `externalId` remains unchanged. READY means no ownership grant, while AUTHORIZED returns
+linked IDs and persists a COMPLETED session. The badge is InfluencerMatch verification.
+
+- **TTO-001 — Unit / normalization.** Trim, remove exactly one leading `@`, lowercase independently
+  of server locale; null/blank is not an identity. `TikTokUsernamesTest` (parameterized cases).
+  PostgreSQL parity: `TikTokOwnershipPostgresIntegrationTest.sqlNormalizationMatchesJavaIncludingWhitespaceAndSingleAt`.
+- **TTO-002 — PostgreSQL / atomic grant and badge.** Unique username, optional valid invitation;
+  callback returns AUTHORIZED, existing externalId/User count preserved, Master linked, badge true,
+  invitation accepted, one token-free verification/binding, success audit and cleared profile.
+  `grantsMatchingChannelAndPreservesCrawlerIdAndInvitationAtomicity`.
+- **TTO-003 — PostgreSQL / matching failures.** Wrong platform or display name, missing channel,
+  duplicate normalized usernames or wrong requested target; READY with the correct matchStatus,
+  no channel creation or business writes. `differentPlatformOrDisplayNameNeverMatches`,
+  `ambiguousMissingAndWrongTargetRemainReadyWithoutBusinessWrites`.
+- **TTO-004 — PostgreSQL / ownership and bindings.** Another owner or conflicting scoped binding
+  returns 409 and commits rejection audit without overwrites. Different app bindings coexist;
+  mock/legacy identities cannot bypass username matching. `foreignOwnerReturns409AndCommitsRejectionAudit`,
+  `mismatchedBindingCannotBeOverwritten`, `anotherOpenIdCannotReplaceExistingChannelBinding`,
+  `bindingIsScopedToAppAndDoesNotTrustLegacyIdentity`, `legacyMockIdentityCannotBypassUsernameMatching`.
+- **TTO-005 — PostgreSQL / Master and reauthorization.** Same owner reuses one Master, binding and
+  active verification; existing Facebook row stays identical. Two concurrent channel connections
+  use one Master. `reusesExistingMasterAndRefreshesOneVerification`, `sameCreatorTwoChannelsShareOneMaster`.
+- **TTO-006 — PostgreSQL / concurrency.** Latch-coordinated callbacks yield one grant and replay;
+  two Creators racing for one channel yield one owner and a 409, no duplicate binding or success
+  audit. `concurrentCallbacksHaveOneGrantAndOneReplay`, `twoCreatorsRacingForOneChannelHaveOneOwner`.
+- **TTO-007 — PostgreSQL / ingestion.** Real ingestion renames a profile during OAuth or holds its
+  transaction concurrently; grant reads the final username under the shared gate and does not
+  authorize the old name. The test also checks PostgreSQL cannot acquire the held advisory gate.
+  `ingestionRenameDuringOAuthCannotGrantOldUsername`, `concurrentIngestionAndGrantShareTheUsernameGate`.
+- **TTO-008 — PostgreSQL / rollback and invitation.** Success audit trigger failure rolls back
+  Master, ownership, verification, binding and invitation; general Start cannot bypass another
+  email's invitation. `auditFailureRollsBackMasterBindingTickAndInvitation`,
+  `generalStartCannotBypassInvitationEmail`.
+- **TTO-009 — PostgreSQL / compatibility.** V22 READY proof is preserved by V23 and cannot grant
+  retroactively. Completed sessions keep only result metadata after expiry. `oldReadySessionCannotGrantOwnershipAfterUpgrade`,
+  `migrationV23PreservesV22ProofAndCreatorWithoutGranting`, `completedSessionKeepsOnlyResultAfterExpiry`.
+  Expiry during the cleanup worker/provider overlap: `TikTokOAuthPostgresIntegrationTest.cleanupDuringProviderRequestReturns400WithoutGrant`.
+- **TTO-010 — Regression.** Existing TikTok state/cookie/expiry, fresh role/status/email/authVersion/
+  permission/configuration checks remain active in `TikTokOAuthPostgresIntegrationTest`. Its V22
+  migration case explicitly targets V22; fresh-schema regression checks include V23. Existing
+  Facebook/Instagram, Claim, OTP, outbox, RBAC and business assertions remain in the full suite.
+
+Execution notes: the first focused run could not initialize PostgreSQL because Docker Desktop was
+stopped (47 initialization errors, no assertion failures). Docker was started for disposable test
+databases. A subsequent test compile found missing imports in the newly added ingestion fixture;
+those imports and the typed Boolean assertion were corrected without relaxing assertions.
+Focused verification passed **95/95** (`tiktok-ownership-focused.log`, BUILD SUCCESS). Two lifecycle
+edges were then strengthened: cleanup during provider HTTP returns expiry 400, and late replay
+cannot erase a COMPLETED session result. The final full regression passed **893/893 across 94
+suites**, zero failures, errors or skipped (`tiktok-ownership-full.log`, BUILD SUCCESS, 11m46s).
+This change adds **29 cases** to the previous 864 baseline: six normalization unit cases,
+22 PostgreSQL ownership cases, and one additional PostgreSQL expiry case. All existing assertions
+remain active.
+During environment teardown the pre-existing Claim email scheduler logged connection refusal to a
+stopped local Testcontainer, and Surefire reported taking over 30 seconds to terminate its fork.
+These warnings are separate from passing test results; Maven exited successfully. No production
+business failures were found in the final run.
+No actual `.env`, Bruno, V1–V22 migration or shared database was changed. No BE restart, commit or
+push occurred; pre-existing `docs/diagrams/` files remain untouched.
+Real TikTok Sandbox consent is a separate manual step and has not been performed in this change.
+
+## TikTok Sandbox proof-only OAuth (2026-10-26)
+
+Automated provider tests use mocked HTTP; PostgreSQL cases use a disposable pgvector/PostgreSQL
+Testcontainer, not a shared database. Real Sandbox consent is pending user app configuration.
+READY means OAuth succeeded, and every returned account remains UNMATCHED. No Confirm is exposed.
+
+- **TTS-001 — Unit / real adapter contract.** Given a valid token and matching User Info, exchange
+  code and read account; expect official openId/username, fixed endpoints, no access/refresh token
+  in proof and no fallback to expected crawler identity.
+  `TikTokLoginProviderTest.readsRealAccountWithoutLeakingTokensOrUsingExpectedCrawlerIdentity`.
+- **TTS-002 — Unit / fail closed.** Remove token fields, omit scopes/username/openId or contradict
+  provider IDs/error code; expect rejection without synthesized identity.
+  `rejectsMissingTokenFieldsWithoutFallback`, `requiresBothGrantedScopes`,
+  `rejectsIncompleteOrContradictoryProfile` in `TikTokLoginProviderTest`.
+- **TTS-003 — Unit / transport and configuration.** HTTP errors, timeout, denial, mock codes,
+  disabled configuration, HTTP redirect or extra requested scopes; expect sanitized 403/502/503,
+  no automatic code retry and no provider body/secret exposure. `sanitizesHttpErrorsWithoutRetry`,
+  `sanitizesTimeout`, `providerDenialDoesNotExposeRawResponse`, `mockCodesCannotEnterRealAdapter`,
+  `configurationRequiresExplicitEnableHttpsAndExactScopes`.
+- **TTS-004 — Unit / legacy isolation.** Official TikTok authorization/exchange through old
+  ownership callbacks is unavailable, including simulation codes; explicit dev MOCK_FALLBACK
+  remains permitted and YouTube authorization routing is unchanged.
+  `OAuthSandboxProviderTest.oAuthProofClientDelegatesToOfficialSandbox`,
+  `officialModeCannotEnableSimulationOrUnconfiguredFallbackInProduction`,
+  `oAuthProofClientFallsBackToSimulationInMockMode`.
+- **TTS-005 — PostgreSQL / proof only.** Start with an optional invitation/channel, callback and
+  view; expect secure browser cookie, hashed state, READY/UNMATCHED, private account data and no
+  changes to Users, Master, Creator, invitation, verification or provider identity. Confirm 404.
+  `TikTokOAuthPostgresIntegrationTest.successIsProofOnlyAndNeverChangesBusinessData`,
+  `sameMasterChannelIsStillUnmatchedAndNeverReverified`.
+- **TTS-006 — PostgreSQL / state and browser.** Invalid state, wrong cookie, denial, repeat or
+  simultaneous callbacks; expect 400/403/409 as appropriate, one provider exchange, committed
+  FAILED/EXPIRED status and no reuse. `invalidStateRejected`,
+  `wrongBrowserDoesNotConsumeState`, `denialConsumesStateAndReturns403`,
+  `replayDoesNotCallProviderOrChangeResult`, `concurrentCallbacksExchangeExactlyOnce`.
+- **TTS-007 — PostgreSQL / fresh guards.** Change role/status/email/authVersion/permission or
+  application key during HTTP; expect rejection and no profile saved. Wrong user view is 404,
+  anonymous 401, wrong role/disabled permission 403, missing config 503 before writes.
+  `changedAccountDuringProviderRequestCannotSaveProof`,
+  `callbackRejectsChangedConfigurationBeforeSavingProof`, `onlyCreatorWhoStartedCanView`,
+  `permissionDisabledBeforeStartIsRejected`,
+  `missingConfigurationReturns503WithoutCreatingOrConsumingSession`.
+- **TTS-008 — PostgreSQL / invitation and ownership.** Wrong platform, missing channel, wrong
+  email/expired/processed invitation, pending invitation bypass or another Master; expect
+  400/403/404/409 without consuming invitation or changing ownership. `startValidatesChannelAndInvitationWithoutConsumption`,
+  `pendingInvitationEmailCannotBeBypassedByGeneralStart`,
+  `callbackRevalidatesInvitationExpiryBeforeProvider`,
+  `invitationChangedDuringProviderRequestDoesNotBecomeProof`,
+  `anotherMastersChannelIsRejectedWithoutChangingOwnership`.
+- **TTS-009 — PostgreSQL / expiry and failures.** At exactly ten minutes or after a slow provider,
+  expire the session and remove profile; provider failure persists FAILED without replay.
+  Cleanup affects only expired sessions and never business data. `exactExpiryIsExpiredAndPurgesProfile`,
+  `expiredUnconsumedStateNeverCallsProvider`, `expiresDuringProviderRequestDoesNotSaveProfile`,
+  `providerErrorPersistsFailureAndCannotReplay`, `cleanupDoesNotChangeOtherSessionsOrBusinessData`.
+- **TTS-010 — PostgreSQL / V22.** Upgrade V21 to V22; expect only the new session migration,
+  preserved historical Creator row and no token columns. Fresh-schema assertions include V22.
+  `migrationV22AddsOnlyProofSessionAndPreservesExistingData`; existing Collaboration/RBAC/schema
+  regression checks count all migrations, while historical version targets remain unchanged.
+
+Initial targeted execution: 58 tests, 57 passed, one fixture error (foreign-owner test omitted the
+existing AUTHORIZED/authorizedAt constraint). The fixture was corrected without weakening assertions.
+Final verification: **173/173 passed** across the targeted TikTok/Meta/Instagram suites
+(`tiktok-related.log`, BUILD SUCCESS). The complete regression then passed **864/864 across
+92 suites**, zero failures, errors or skipped (`tiktok-full-regression.log`, BUILD SUCCESS,
+7m05s). This includes **56 new cases**: 27 HTTP/configuration unit cases and 29 PostgreSQL
+TikTok cases. Existing assertions were preserved; fresh-schema migration counts now include V22.
+During teardown the existing Claim email scheduler attempted to access a stopped local
+Testcontainer and logged connection refusal; Surefire again took over 30 seconds to terminate
+its fork. These are teardown warnings, separate from the 864 passing test results; Maven completed
+successfully. No test failed due to an environment or business error.
+
+Real TikTok Sandbox consent has **not** been performed. It requires the user's Sandbox client
+configuration/Target users and browser consent. No actual `.env`, Bruno or shared database was
+changed; no BE restart, commit or push occurred. Pre-existing `docs/diagrams/` files are untouched.
 
 ## Current verification — be_vy merge (2026-10-26)
 

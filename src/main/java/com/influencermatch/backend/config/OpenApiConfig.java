@@ -71,7 +71,7 @@ public class OpenApiConfig {
             Enables Brand/SME users to discover creators, manage campaigns,
             track performance, and handle end-to-end collaboration workflows.
 
-            **Security**: Brand registration, invited Creator registration, OTP verification, password setup, login and refresh are public. Google Login is removed. Registration requires SMTP; channel ownership is a separate Claim flow.
+            **Security**: Brand registration, invited Creator registration, OTP verification, password setup, login and refresh are public. Optional Google Identity Services login is Brand-only and requires a one-time nonce and original browser cookie. Existing password accounts are not automatically linked by email. Registration requires SMTP; channel ownership is a separate Claim flow.
             `/auth/me` and logout require JWT. Permissions come from the current database role;
             role/status changes invalidate existing JWT and refresh tokens immediately.
             BRAND owns its business resources. ADMIN can read support data, not write Brand
@@ -111,6 +111,8 @@ public class OpenApiConfig {
           || controller == com.influencermatch.backend.billing.controller.PaymentController.class
               && method.startsWith("vnpay")
           || controller == com.influencermatch.backend.creator.meta.MetaOAuthController.class
+              && method.equals("callback")
+          || controller == com.influencermatch.backend.creator.tiktok.TikTokOAuthController.class
               && method.equals("callback")
           || controller == com.influencermatch.backend.creator.meta.InstagramOAuthController.class
               && method.equals("callback")) operation.setSecurity(List.of());

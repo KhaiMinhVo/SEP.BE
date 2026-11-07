@@ -3,6 +3,9 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  GOOGLE_LOGIN_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Google Login unavailable"),
+  GOOGLE_ACCOUNT_LINK_REQUIRED(HttpStatus.CONFLICT, "Existing account requires explicit linking"),
+  GOOGLE_LOGIN_REPLAY(HttpStatus.CONFLICT, "Google login session already used"),
   META_OAUTH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Meta OAuth unavailable"),
   INSTAGRAM_OAUTH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Instagram Login unavailable"),
   META_OAUTH_INVALID_STATE(HttpStatus.BAD_REQUEST, "Invalid Meta OAuth state"),
@@ -62,6 +65,13 @@ public enum ErrorCode {
   UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported media type"),
   AI_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI service is unavailable"),
   AI_PARSE_ERROR(HttpStatus.BAD_GATEWAY, "AI returned an unprocessable response"),
+  TIKTOK_OAUTH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "TikTok Sandbox unavailable"),
+  TIKTOK_INVALID_STATE(HttpStatus.BAD_REQUEST, "Invalid TikTok state"),
+  TIKTOK_SESSION_EXPIRED(HttpStatus.BAD_REQUEST, "TikTok session expired"),
+  TIKTOK_ALREADY_PROCESSED(HttpStatus.CONFLICT, "TikTok session already processed"),
+  TIKTOK_AUTHORIZATION_REJECTED(HttpStatus.FORBIDDEN, "TikTok authorization rejected"),
+  TIKTOK_PROVIDER_ERROR(HttpStatus.BAD_GATEWAY, "TikTok provider error"),
+  TIKTOK_IDENTITY_RESOLUTION_FAILED(HttpStatus.BAD_GATEWAY, "TikTok identity resolution failed"),
   INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
   private final HttpStatus status;
   private final String title;

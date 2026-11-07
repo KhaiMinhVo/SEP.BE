@@ -35,12 +35,17 @@ import org.testcontainers.utility.DockerImageName;
       "application.payment.mock.enabled=false",
       "application.claim-email.dispatch-enabled=false",
       "application.meta.cleanup-enabled=false",
+      "application.tiktok.cleanup-enabled=false",
       "application.claim-email.encryption-key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
       "spring.jpa.show-sql=false"
     })
 @ActiveProfiles("dev")
 @AutoConfigureMockMvc
 public abstract class PostgresApiTestSupport {
+  // No domain suite may dispatch a real crawler job; TikTok fixtures stub resolver responses.
+  @org.springframework.boot.test.mock.mockito.MockBean
+  protected com.influencermatch.backend.creator.client.CrawlerServiceClient crawler;
+
   private static final PostgreSQLContainer<?> DB =
       new PostgreSQLContainer<>(
           DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));

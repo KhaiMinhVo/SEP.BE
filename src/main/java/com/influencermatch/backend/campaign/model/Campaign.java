@@ -41,22 +41,22 @@ public class Campaign extends BaseEntity {
   private CampaignObjective objective;
 
   @Builder.Default
-  @org.hibernate.annotations.Type(io.hypersistence.utils.hibernate.type.array.ListArrayType.class)
+  @JdbcTypeCode(SqlTypes.ARRAY)
   @Column(columnDefinition = "text[]", nullable = false)
   private List<String> targetAudiences = new ArrayList<>();
 
   @Builder.Default
-  @org.hibernate.annotations.Type(io.hypersistence.utils.hibernate.type.array.ListArrayType.class)
+  @JdbcTypeCode(SqlTypes.ARRAY)
   @Column(columnDefinition = "text[]", nullable = false)
   private List<String> platforms = new ArrayList<>();
 
   @Builder.Default
-  @org.hibernate.annotations.Type(io.hypersistence.utils.hibernate.type.array.ListArrayType.class)
+  @JdbcTypeCode(SqlTypes.ARRAY)
   @Column(columnDefinition = "text[]", nullable = false)
   private List<String> niches = new ArrayList<>();
 
   @Builder.Default
-  @org.hibernate.annotations.Type(io.hypersistence.utils.hibernate.type.array.ListArrayType.class)
+  @JdbcTypeCode(SqlTypes.ARRAY)
   @Column(columnDefinition = "text[]", nullable = false)
   private List<String> locations = new ArrayList<>();
 

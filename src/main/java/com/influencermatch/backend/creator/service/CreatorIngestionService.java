@@ -67,6 +67,9 @@ public class CreatorIngestionService {
     }
 
     // 1. Advisory Lock to prevent concurrent ingestion of the exact same account
+    if ("TIKTOK".equalsIgnoreCase(request.getPlatform())) {
+      creatorRepository.acquireIdentityLock(com.influencermatch.backend.creator.tiktok.TikTokUsernames.MATCH_LOCK);
+    }
     creatorRepository.acquireIdentityLock(request.getPlatform() + ":" + request.getExternalId());
 
     // 2. Find existing creator or create new one

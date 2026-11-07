@@ -89,16 +89,11 @@ public class OAuthProofClient {
   /** Generates authorization redirect URL for official provider sandbox or fallback mock. */
   public String buildAuthorizationUrl(String platform, String state) {
     com.influencermatch.backend.creator.meta.MetaPlatformGuard.requireLegacy(platform);
+    requireLegacyTikTok(platform);
     requireConfigured();
     String normPlatform = platform != null ? platform.toUpperCase() : "";
 
     if (isOfficialSandboxMode()) {
-      if ("TIKTOK".equals(normPlatform)
-          && tikTokProvider != null
-          && tikTokProvider.isConfigured()) {
-        log.info("Directing client to Official TikTok Developer Sandbox consent screen");
-        return tikTokProvider.buildAuthorizationUrl(state);
-      }
       if (("YOUTUBE".equals(normPlatform) || "GOOGLE".equals(normPlatform))
           && googleProvider != null
           && googleProvider.isConfigured()) {
@@ -116,6 +111,7 @@ public class OAuthProofClient {
   public ProofResult exchangeAndVerify(
       String platform, String code, String expectedExternalId, String expectedUserName) {
     com.influencermatch.backend.creator.meta.MetaPlatformGuard.requireLegacy(platform);
+    requireLegacyTikTok(platform);
     requireConfigured();
     String normPlatform = platform != null ? platform.toUpperCase() : "";
 
@@ -130,11 +126,6 @@ public class OAuthProofClient {
     }
 
     if (isOfficialSandboxMode()) {
-      if ("TIKTOK".equals(normPlatform)
-          && tikTokProvider != null
-          && tikTokProvider.isConfigured()) {
-        return tikTokProvider.exchangeAndVerify(code, expectedExternalId, expectedUserName);
-      }
       if (("YOUTUBE".equals(normPlatform) || "GOOGLE".equals(normPlatform))
           && googleProvider != null
           && googleProvider.isConfigured()) {
@@ -144,6 +135,13 @@ public class OAuthProofClient {
 
     requireDevSimulation();
     return fallbackProvider.exchangeAndVerify(platform, code, expectedExternalId, expectedUserName);
+  }
+
+  private void requireLegacyTikTok(String platform) {
+    if ("TIKTOK".equalsIgnoreCase(platform) && isOfficialSandboxMode()) {
+      throw new BusinessException(ErrorCode.SOCIAL_PROOF_UNAVAILABLE,
+          "Use TikTok proof-only session endpoints; legacy ownership verification is disabled");
+    }
   }
 
   private void requireDevSimulation() {

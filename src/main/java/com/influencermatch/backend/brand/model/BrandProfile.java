@@ -35,7 +35,7 @@ public class BrandProfile extends BaseEntity {
   private String industry;
 
   @Builder.Default
-  @org.hibernate.annotations.Type(io.hypersistence.utils.hibernate.type.array.ListArrayType.class)
+  @JdbcTypeCode(SqlTypes.ARRAY)
   @Column(columnDefinition = "text[]", nullable = false)
   private List<String> productCategories = new ArrayList<>();
 
@@ -46,12 +46,12 @@ public class BrandProfile extends BaseEntity {
   private String location;
 
   @Builder.Default
-  @org.hibernate.annotations.Type(io.hypersistence.utils.hibernate.type.array.ListArrayType.class)
+  @JdbcTypeCode(SqlTypes.ARRAY)
   @Column(columnDefinition = "text[]", nullable = false)
   private List<String> targetMarkets = new ArrayList<>();
 
   @Builder.Default
-  @org.hibernate.annotations.Type(io.hypersistence.utils.hibernate.type.array.ListArrayType.class)
+  @JdbcTypeCode(SqlTypes.ARRAY)
   @Column(columnDefinition = "text[]", nullable = false)
   private List<String> targetAudiences = new ArrayList<>();
 
@@ -59,7 +59,7 @@ public class BrandProfile extends BaseEntity {
   private String brandTone;
 
   @Builder.Default
-  @org.hibernate.annotations.Type(io.hypersistence.utils.hibernate.type.array.ListArrayType.class)
+  @JdbcTypeCode(SqlTypes.ARRAY)
   @Column(columnDefinition = "text[]", nullable = false)
   private List<String> preferredPlatforms = new ArrayList<>();
 

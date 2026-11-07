@@ -167,7 +167,7 @@ docker compose logs --tail 200 api
 
 ## Registration and email OTP
 
-Brand registration is public; Creator registration requires an ADMIN/DATA_MANAGER email invitation. Both verify OTP before password login. Google Login is removed.
+Brand registration is public; Creator registration requires an ADMIN/DATA_MANAGER email invitation. Both verify OTP before password login. Optional Google Identity Services login is available only to Brand accounts; Google verifies email for new Google accounts.
 
 ## RBAC và phạm vi triển khai
 
@@ -206,7 +206,7 @@ Migration V4 thêm `auth_version`, constraint role và một bản ghi khóa chu
 Mỗi thay đổi role/status thực sự tăng version, revoke refresh token và ghi audit trong cùng transaction.
 JWT kiểm tra role/status/version hiện tại từ database. JWT cũ thiếu claim coi là version 0;
 sau khi version tăng, mở khóa không làm token cũ hợp lệ lại. Thao tác không đổi giá trị không tăng version.
-Các API sử dụng JWT stateless; Google Login đã được gỡ.
+Các API sử dụng JWT stateless; Google Login dành riêng cho Brand có thể bật qua GOOGLE_LOGIN_ENABLED; Google Login không cấp ownership kênh.
 
 ### Ingestion service key
 
@@ -446,8 +446,109 @@ migrations run as V19 (recommendation/shortlist), V20 (evidence) and V21 (outcom
 Do not apply this history directly to a database that already ran Vy's original V17–V19 without
 checking its migration history. This merge does not migrate or repair shared databases.
 
-Legacy provider simulation remains explicitly dev-only, including when official sandbox mode is
-selected. Facebook/Instagram verification cannot use those legacy callbacks. Ownership transfer
+Legacy provider simulation remains explicitly dev-only. Facebook/Instagram cannot use legacy
+callbacks; official TikTok uses the proof-only session APIs below. Ownership transfer
 through `/admin/creator-conflicts/{id}/resolve` remains unexposed under the existing MVP policy.
 TikTok/YouTube adapters are included from Vy but are not proven production-ready or live-tested by
 this merge. Registration, email OTP and Claim outbox configuration remain independent.
+
+## TikTok Sandbox OAuth — crawler author ID ownership (V22/V23)
+
+Creators sign in using invited registration, password and email OTP. TikTok OAuth proves control
+of the provider account; a fresh internal crawler read resolves its username to a stable author ID.
+The callback links an existing channel or creates a minimal one. There is no extra Confirm endpoint.
+The badge is InfluencerMatch verification, not TikTok's official badge. No Bio Challenge is used.
+`externalId` stores the crawler author ID; `open_id` is kept in the app/environment-scoped binding.
+
+Configure your environment using `.env.example` (the actual `.env` is not modified by this feature):
+
+```dotenv
+TIKTOK_SANDBOX_LOGIN_ENABLED=true
+TIKTOK_SANDBOX_CLIENT_KEY=<Sandbox client key>
+TIKTOK_SANDBOX_CLIENT_SECRET=<Sandbox client secret>
+TIKTOK_SANDBOX_REDIRECT_URI=https://api.influencermatch.site/api/v1/integrations/tiktok/callback
+TIKTOK_SANDBOX_SCOPE=user.info.basic,user.info.profile
+CRAWLER_SERVICE_URL=http://localhost:8000/api/v1/crawl
+```
+
+In TikTok Developer Portal select/create a Sandbox, enable Login Kit Web, register the exact HTTPS
+redirect, request both scopes and add the consenting account to Target users (up to ten). Use that
+Sandbox's credentials. Disabled/missing/invalid configuration returns 503. The adapter uses fixed
+TikTok HTTPS endpoints and ignores legacy configurable provider URLs.
+
+For local testing use an HTTPS tunnel you control. Open Swagger/Start and callback on the same
+hostname and browser to preserve the Secure HttpOnly SameSite=Lax cookie. This feature does not
+create a tunnel or restart the backend for you.
+
+1. Sign in as an ACTIVE, email-verified CREATOR with effective `CLAIM_CREATOR_PROFILE` permission.
+2. POST `/api/v1/creators/portal/accounts/connect/tiktok/start` with `{}` and your JWT. Optional
+   `creatorId` must identify an accessible TikTok channel. Optional `invitationToken` must be
+   pending, unexpired and match your email; it is consumed only on a successful ownership grant.
+3. Open `authorizationUrl` in the same browser and consent using the Sandbox target account.
+4. Public GET `/api/v1/integrations/tiktok/callback` validates state/cookie, exchanges code and
+   obtains TikTok User Info. It calls `POST {CRAWLER_SERVICE_URL}/tiktok/resolve-author` with
+   `{"username":"<OAuth username>","auto_update_staging":false}`, without an expected ID.
+   The crawler must return `status=success`, `platform=TIKTOK`, positive numeric `author_id` (1–20 digits),
+   `id_type=TIKTOK_USER_ID`, actual `resolved_username` and UTC `observed_at`. Username normalization
+   trims, removes one leading `@` and lowercases. Observations may be at most 90 seconds old or
+   5 seconds ahead of the backend clock. Missing SSR uniqueId never falls back to the requested name.
+5. Look up `(TIKTOK, author_id)` under the ingestion identity lock. An unowned/same-owner stable channel
+   is linked/refreshed. If absent, create a minimal channel and reuse/create CreatorMaster atomically:
+
+   ```json
+   {"success":true,"data":{"sessionId":"<uuid>","status":"AUTHORIZED","creatorId":"<uuid>","masterId":"<uuid>"}}
+   ```
+
+   No metrics/posts/embedding are fabricated; later ingestion with that ID updates the same UUID.
+   The follower/type gatekeeper remains in ingestion. Different owner, unstable stored ID or conflicting
+   binding returns 409 and a rejection audit. No implicit merge, ID rewrite or transfer occurs.
+6. A specified channel/invitation must match the author ID. Otherwise callback returns `READY` and
+   GET `/api/v1/creators/portal/accounts/connect/tiktok/sessions/{id}` reports `TARGET_MISMATCH`,
+   without creating a channel or consuming the invitation. Completed sessions retain only linked IDs;
+   another user's session returns 404. Crawler HTTP/timeout/malformed/stale/mismatched results return
+   `502 TIKTOK_IDENTITY_RESOLUTION_FAILED`. There is no username-only fallback or automatic retry.
+
+V23 adds bindings scoped by `(SANDBOX, client key, open_id)` and prevents rebinding the identity or
+channel within the same app. Legacy/mock identities are never imported as trusted bindings. Old
+READY sessions do not gain ownership after upgrade: start new OAuth. There is no Sandbox-to-production
+migration or automatic app-namespace conversion. This resolver change adds no migration. Existing Facebook/Instagram ownership is preserved.
+
+State is hashed and consumed once before provider HTTP. HTTP runs outside DB locks: TikTok has five-second connect/read timeouts; crawler resolution has
+five-second connect and 25-second read timeouts. No automatic retries occur. The callback rechecks User/authVersion/permissions,
+invitation and ownership under locks before committing Master, binding, verification, shortlist/
+relationship synchronization, invitation acceptance and audit atomically. Audit failures roll back
+all ownership changes. Ingestion shares the TikTok gate and `TIKTOK:<author_id>` lock to prevent rename/insert races;
+it does not acquire a User lock or perform HTTP while holding that gate.
+
+No access/refresh token is persisted or returned. Unfinished sessions last ten minutes and expire
+with profile cleanup on read or the minute sweep. Completed sessions retain only non-sensitive
+result metadata. Replayed callback: 409 (expired state: 400); invalid/expired state: 400; wrong
+browser/denied consent: 403; provider error: 502. Proxy logs should exclude OAuth query strings
+and Authorization headers.
+
+Official TikTok cannot use the legacy username-matching callback. Explicit dev MOCK_FALLBACK and
+YouTube routing remain unchanged. Automated tests mock provider HTTP and use disposable PostgreSQL;
+real Sandbox consent requires user configuration and has not been performed in this implementation.
+
+References: [Login Kit Web](https://developers.tiktok.com/doc/login-kit-web),
+[User Info](https://developers.tiktok.com/doc/tiktok-api-v2-get-user-info),
+[Sandbox](https://developers.tiktok.com/doc/add-a-sandbox).
+
+
+### Brand Google Login (Google Identity Services)
+
+Backend supports Google Login only for BRAND. Creator invitation/password/OTP, existing platform verification and password setup remain unchanged. New Google users are verified BRAND accounts without passwords; they may use the existing password-setup OTP endpoints to set a first password. Brand Profile is completed through existing onboarding APIs. No automatic profile with invented business fields is created.
+
+Set `GOOGLE_LOGIN_ENABLED=true` and `GOOGLE_LOGIN_CLIENT_ID=<Web OAuth client ID>` on deployment. Default is disabled (503). This GIS ID-token flow does not require a client secret or a backend Google redirect URI. In Google Cloud, register the frontend origin under **Authorized JavaScript origins**. Use the official GIS script and popup callback, requesting no YouTube/other API scopes. Backend verifies Google's RS256 signature with its fixed JWKS endpoint, issuer, audience/authorized party, expiry, subject and verified email. Key retrieval uses 5-second timeouts; no Google token is persisted or logged.
+
+Frontend integration (frontend code is not implemented here):
+1. `POST /api/v1/auth/google/start`, with browser credentials enabled. Response: `data.sessionId`, `data.clientId`, `data.nonce`, `data.expiresAt`. Backend sets a HttpOnly SameSite=Lax cookie, Secure over HTTPS. Session lasts 10 minutes; nonce/browser values are stored only as hashes. The JSON nonce is intended for GIS, not the cookie value.
+2. Call `google.accounts.id.initialize({client_id: data.clientId, nonce: data.nonce, callback: ...})`, then render the Google button. Use a fresh start for each login attempt; do not cache credentials.
+3. In the GIS callback, send JSON `{ "sessionId": "<start ID>", "credential": "<GIS response.credential>" }` to `POST /api/v1/auth/google/login`, with browser credentials enabled. Do not send email, role or profile fields. For local GIS testing, use FE `http://localhost:5173` and BE `http://localhost:8080`, with the FE origin registered in Google Cloud; no ngrok redirect is required. Use the same browser and backend hostname for start/login; production FE/BE should be same-site HTTPS (e.g. influencermatch.site/api.influencermatch.site). Spring Security uses the existing explicit CORS origin list with credentials enabled; set CORS_ALLOWED_ORIGINS to the actual frontend origin. No wildcard CORS or cross-site cookies are introduced.
+4. Success returns the existing `LoginResponse` (access/refresh tokens and effective permissions). Store/use it exactly as password login, then check Brand onboarding. Google token must not be used as the application's API access token.
+
+Known Google identity is looked up by subject, not email. Existing password accounts (including verified accounts) are never linked automatically: 409 `GOOGLE_ACCOUNT_LINK_REQUIRED`; sign in with the existing password. An account waiting for OTP remains blocked with 403 `EMAIL_NOT_VERIFIED`. There is no new manual-link endpoint in this change. Known non-Brand Google users receive 403; locked/disabled accounts receive 401. Invalid credential/nonce/browser/expired session receives 401; reuse after successful login receives 409 `GOOGLE_LOGIN_REPLAY`.
+
+Migration V24 adds only `google_login_session`; existing identities/data and V1–V23 are retained. Apply migrations only in an authorized deployment. Automated tests use generated RSA signatures and mocked provider verification with disposable PostgreSQL; a real Google login requires frontend GIS setup and manual consent and has not been performed by these tests.
+
+Official integration reference: https://developers.google.com/identity/gsi/web/guides/verify-google-id-token

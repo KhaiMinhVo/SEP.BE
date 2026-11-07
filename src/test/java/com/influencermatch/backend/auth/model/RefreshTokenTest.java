@@ -2,8 +2,7 @@ package com.influencermatch.backend.auth.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.influencermatch.backend.auth.model.RefreshToken;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -13,8 +12,8 @@ class RefreshTokenTest {
   @DisplayName("Refresh Token Status - Should be active only when not expired and not revoked")
   void activeOnlyWhenNotExpiredOrRevoked() {
     // GIVEN
-    LocalDateTime now = LocalDateTime.now();
-    RefreshToken token = RefreshToken.builder().expiresAt(now.plusMinutes(1)).build();
+    Instant now = Instant.now();
+    RefreshToken token = RefreshToken.builder().expiresAt(now.plusSeconds(60)).build();
 
     // WHEN & THEN: Initial state is active
     assertThat(token.active(now)).isTrue();

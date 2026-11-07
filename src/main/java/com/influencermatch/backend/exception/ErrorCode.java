@@ -3,6 +3,7 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  POLICY_VERSION_CHANGED(HttpStatus.CONFLICT, "Policy version changed"),
   GOOGLE_LOGIN_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Google Login unavailable"),
   GOOGLE_ACCOUNT_LINK_REQUIRED(HttpStatus.CONFLICT, "Existing account requires explicit linking"),
   GOOGLE_LOGIN_REPLAY(HttpStatus.CONFLICT, "Google login session already used"),
@@ -17,20 +18,25 @@ public enum ErrorCode {
   CLAIM_EMAIL_NOT_RETRYABLE(HttpStatus.CONFLICT, "Claim email cannot be retried"),
   CLAIM_EMAIL_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Claim email retry limit exceeded"),
   CREATOR_INVITATION_PENDING(HttpStatus.CONFLICT, "A pending invitation already exists"),
-  SOCIAL_PROOF_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Social provider verification unavailable"),
+  SOCIAL_PROOF_UNAVAILABLE(
+      HttpStatus.SERVICE_UNAVAILABLE, "Social provider verification unavailable"),
   EMAIL_NOT_VERIFIED(HttpStatus.FORBIDDEN, "Email is not verified"),
   EMAIL_ALREADY_VERIFIED(HttpStatus.CONFLICT, "Email is already verified"),
   EMAIL_OTP_INVALID_OR_EXPIRED(HttpStatus.BAD_REQUEST, "OTP is invalid or expired"),
   EMAIL_OTP_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Email verification limit exceeded"),
   EMAIL_DELIVERY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Email delivery unavailable"),
-  CREATOR_INVITATION_INVALID(HttpStatus.BAD_REQUEST, "Invitation is invalid, expired or already used"),
+  CREATOR_INVITATION_INVALID(
+      HttpStatus.BAD_REQUEST, "Invitation is invalid, expired or already used"),
   DATA_QUALITY_REVIEW_CONFLICT(HttpStatus.CONFLICT, "Snapshot is no longer pending quality review"),
   CREATOR_CLAIM_CONFLICT(HttpStatus.CONFLICT, "Creator claim conflict"),
-  CREATOR_ALREADY_LINKED(HttpStatus.CONFLICT, "Creator account has already been claimed and linked"),
-  IDENTITY_MISMATCH(HttpStatus.CONFLICT, "Authenticated identity does not match target creator account"),
+  CREATOR_ALREADY_LINKED(
+      HttpStatus.CONFLICT, "Creator account has already been claimed and linked"),
+  IDENTITY_MISMATCH(
+      HttpStatus.CONFLICT, "Authenticated identity does not match target creator account"),
   INVITATION_ALREADY_PROCESSED(HttpStatus.CONFLICT, "Invitation has already been processed"),
   INVITATION_EXPIRED(HttpStatus.CONFLICT, "Invitation has expired"),
-  CREATOR_ROLE_CHANGE_CONFLICT(HttpStatus.CONFLICT, "Creator has active ownership or pending claims"),
+  CREATOR_ROLE_CHANGE_CONFLICT(
+      HttpStatus.CONFLICT, "Creator has active ownership or pending claims"),
   COLLABORATION_ALREADY_EXISTS(HttpStatus.CONFLICT, "Collaboration already exists"),
   OUTCOME_ALREADY_EXISTS(HttpStatus.CONFLICT, "Outcome already exists"),
   CREATOR_REVIEW_ALREADY_EXISTS(HttpStatus.CONFLICT, "Creator review already exists"),

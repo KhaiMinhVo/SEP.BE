@@ -22,7 +22,11 @@ public class GlobalExceptionHandler {
 
   @ExceptionHandler(BusinessException.class)
   ResponseEntity<ProblemDetail> business(BusinessException ex, HttpServletRequest req) {
-    return response(ex.code(), ex.getMessage(), req, Map.of());
+    return response(
+        ex.code(),
+        ex.getMessage(),
+        req,
+        ex instanceof ProfileIncompleteException p ? p.fields() : Map.of());
   }
 
   @ExceptionHandler(MethodArgumentNotValidException.class)

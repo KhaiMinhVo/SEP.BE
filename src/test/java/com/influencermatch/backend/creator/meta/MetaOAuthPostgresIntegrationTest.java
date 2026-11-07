@@ -40,6 +40,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
   @MockBean Clock clock;
   @Autowired MetaOAuthSessionRepository sessions;
   @Autowired MetaSessionStore store;
+  @Autowired com.influencermatch.backend.auth.service.AuthSessionStore loginSessions;
   @Autowired CreatorRepository creators;
   @Autowired CreatorMasterRepository masters;
   @Autowired CreatorInvitationRepository invitations;
@@ -135,6 +136,16 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
     assertThat(response.toString())
         .doesNotContain("private-user-token", "same-name", "accounts", "scope");
     return started;
+  }
+
+  @Test
+  void revokedLoginSessionCannotCompleteProviderCallback() throws Exception {
+    var started = start(creator, Map.of("platform", "FACEBOOK"));
+    UUID sid = sessions.findById(started.id()).orElseThrow().getAuthSessionId();
+    loginSessions.revoke(sid);
+    callback(started, 401);
+    verify(graph, never()).exchange(anyString(), anyString());
+    assertThat(creators.findById(channel.getId()).orElseThrow().getMaster()).isNull();
   }
 
   com.fasterxml.jackson.databind.JsonNode callback(Started s, int expected) throws Exception {

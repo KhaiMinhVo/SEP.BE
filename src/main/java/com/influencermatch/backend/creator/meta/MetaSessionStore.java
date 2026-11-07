@@ -38,6 +38,7 @@ public class MetaSessionStore {
   private final InstagramOAuthProperties instagram;
   private final MetaPayloadCipher cipher;
   private final Clock clock;
+  private final com.influencermatch.backend.auth.service.AuthSessionStore authSessions;
   private final SecureRandom random = new SecureRandom();
   @PersistenceContext private EntityManager em;
 
@@ -75,10 +76,12 @@ public class MetaSessionStore {
     var user = session.getUser();
     em.refresh(user);
     assertUser(user, session.getAuthVersion());
+    authSessions.require(session.getAuthSessionId(), user, false);
     return session;
   }
 
   public void requireReady(MetaOAuthSession session) {
+    authSessions.require(session.getAuthSessionId(), session.getUser(), false);
     if (!session.getExpiresAt().isAfter(now()))
       throw new ConflictException(
           ErrorCode.META_OAUTH_SESSION_EXPIRED, "Meta session expired; start again");
@@ -146,6 +149,7 @@ public class MetaSessionStore {
             MetaOAuthSession.builder()
                 .user(user)
                 .authVersion(version)
+                .authSessionId(authSessions.currentId())
                 .platform(request.platform())
                 .oauthFlow(flow)
                 .browserBindingHash(CreatorInvitationService.hashToken(browserBinding))
@@ -205,6 +209,7 @@ public class MetaSessionStore {
     var user = session.getUser();
     em.refresh(user);
     assertUser(user, session.getAuthVersion());
+    authSessions.require(session.getAuthSessionId(), user, false);
     session.setStatus("EXCHANGING");
     return new Exchange(session.getId(), session.getPlatform(), session.getOauthFlow());
   }
@@ -216,6 +221,7 @@ public class MetaSessionStore {
     var user = session.getUser();
     em.refresh(user);
     assertUser(user, session.getAuthVersion());
+    authSessions.require(session.getAuthSessionId(), user, false);
     if (!session.getExpiresAt().isAfter(now()) || !proof.tokenExpiresAt().isAfter(now()))
       throw new ConflictException(ErrorCode.META_OAUTH_SESSION_EXPIRED, "Meta session expired");
     if (!"EXCHANGING".equals(session.getStatus()))

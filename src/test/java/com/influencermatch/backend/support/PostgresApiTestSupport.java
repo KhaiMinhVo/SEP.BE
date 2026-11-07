@@ -90,10 +90,14 @@ public abstract class PostgresApiTestSupport {
     if (token != null) req.header("Authorization", "Bearer " + token);
     if (body != null)
       req.contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(body));
-    var result = mvc.perform(req).andExpect(status().is(expected)).andReturn().getResponse();
+    var result =
+        mvc.perform(req.with(TestAuthHttp.request(body)))
+            .andExpect(status().is(expected))
+            .andReturn()
+            .getResponse();
     return result.getContentAsString().isEmpty()
         ? json.nullNode()
-        : json.readTree(result.getContentAsString());
+        : TestAuthHttp.read(result, json);
   }
 
   protected JsonNode login(User user) throws Exception {

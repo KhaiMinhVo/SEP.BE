@@ -37,6 +37,7 @@ public class TikTokSessionStore {
   private final RolePermissionOverrideRepository overrides;
   private final TikTokLoginProperties config;
   private final Clock clock;
+  private final com.influencermatch.backend.auth.service.AuthSessionStore authSessions;
   private final SecureRandom random = new SecureRandom();
   @PersistenceContext private EntityManager em;
 
@@ -110,6 +111,7 @@ public class TikTokSessionStore {
   public void assertSession(TikTokOAuthSession session) {
     config.requireConfigured();
     assertUser(session.getUser(), session.getAuthVersion());
+    authSessions.require(session.getAuthSessionId(), session.getUser(), false);
     if (!Objects.equals(session.getClientKey(), config.clientKey()))
       throw new BusinessException(
           ErrorCode.TIKTOK_OAUTH_UNAVAILABLE, "TikTok configuration changed; start again");
@@ -155,6 +157,7 @@ public class TikTokSessionStore {
             TikTokOAuthSession.builder()
                 .user(user)
                 .authVersion(version)
+                .authSessionId(authSessions.currentId())
                 .clientKey(config.clientKey())
                 .stateHash(hash(state))
                 .browserBindingHash(hash(browserBinding))

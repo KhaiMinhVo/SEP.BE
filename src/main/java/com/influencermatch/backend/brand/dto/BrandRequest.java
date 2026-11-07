@@ -21,4 +21,32 @@ public record BrandRequest(
     @Size(max = 20) List<@NotBlank @Size(max = 150) String> targetAudiences,
     @Size(max = 150) String brandTone,
     @Size(max = 3) List<Platform> preferredPlatforms,
-    @Size(max = 1000) String description) {}
+    @Size(max = 1000) String description,
+    @Size(max = 30) String phoneNumber) {
+  public BrandRequest(
+      UUID userId,
+      String businessName,
+      String industry,
+      List<String> productCategories,
+      String website,
+      String location,
+      List<String> targetMarkets,
+      List<String> targetAudiences,
+      String brandTone,
+      List<Platform> preferredPlatforms,
+      String description) {
+    this(
+        userId,
+        businessName,
+        industry,
+        productCategories,
+        website,
+        location,
+        targetMarkets,
+        targetAudiences,
+        brandTone,
+        preferredPlatforms,
+        description,
+        null);
+  }
+}

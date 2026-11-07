@@ -21,6 +21,8 @@ public class MetaOAuthSession extends BaseEntity {
 
   private long authVersion;
 
+  private java.util.UUID authSessionId;
+
   @Column(nullable = false, length = 20)
   private String platform;
 

@@ -48,7 +48,12 @@ public class WebConfig implements WebMvcConfigurer {
             Arrays.stream(allowedOrigins.split(",")).map(String::trim).toArray(String[]::new))
         .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
         .allowedHeaders(
-            "Authorization", "Content-Type", "Accept", "X-Requested-With", "X-Correlation-ID")
+            "Authorization",
+            "Content-Type",
+            "Accept",
+            "X-Requested-With",
+            "X-Correlation-ID",
+            "X-CSRF-TOKEN")
         .exposedHeaders("Authorization", "X-Correlation-ID")
         .allowCredentials(true)
         .maxAge(3600);

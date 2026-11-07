@@ -28,11 +28,13 @@ public class BrandService {
   private final UserRepository users;
   private final ObjectMapper objectMapper;
 
+  @org.springframework.beans.factory.annotation.Autowired
+  private java.time.Clock clock = java.time.Clock.systemUTC();
+
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CREATE_BRAND_PROFILE')")
   public BrandResponse create(BrandRequest request, Authentication authentication) {
-    Permissions.require(
-        Permission.CREATE_BRAND_PROFILE);
+    Permissions.require(Permission.CREATE_BRAND_PROFILE);
     users.lockRoleChanges();
     User actor = actor(authentication);
     User owner = resolveOwner(request.userId(), actor);
@@ -121,10 +123,13 @@ public class BrandService {
   public BrandResponse update(UUID profileId, BrandRequest request, Authentication authentication) {
     com.influencermatch.backend.security.permission.Permissions.require(
         com.influencermatch.backend.security.permission.Permission.UPDATE_BRAND_PROFILE);
+    users.lockRoleChanges();
+    users.findLockedByEmail(actor(authentication).getEmail());
     BrandProfile profile = requireProfile(profileId);
     requireAccess(profile, actor(authentication));
     profile.setBusinessName(request.businessName().trim());
     applyProfile(profile, request);
+    if ("COMPLETED".equals(profile.getOnboardingStatus())) validateComplete(profile);
     profiles.save(profile);
     BrandContext context = requireContext(profileId);
     context.updateProfileContext(profileJson(profile));
@@ -137,6 +142,45 @@ public class BrandService {
     BrandProfile profile = requireProfile(profileId);
     requireAccess(profile, actor(authentication));
     return profile;
+  }
+
+  @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_BRAND_PROFILE')")
+  public BrandResponse complete(Authentication authentication) {
+    Permissions.require(Permission.UPDATE_BRAND_PROFILE);
+    users.lockRoleChanges();
+    User actor = actor(authentication);
+    if (actor.getRole() != Role.BRAND) throw new ForbiddenException("Brand required");
+    users.findLockedByEmail(actor.getEmail());
+    var p =
+        profiles.findByUserId(actor.getId()).orElseThrow(() -> notFound("Brand profile not found"));
+    validateComplete(p);
+    if (!"COMPLETED".equals(p.getOnboardingStatus())) {
+      p.setOnboardingStatus("COMPLETED");
+      p.setOnboardingCompletedAt(clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+      profiles.save(p);
+    }
+    return loadResponse(p);
+  }
+
+  private void validateComplete(BrandProfile p) {
+    var missing = new LinkedHashMap<String, List<String>>();
+    if (p.getBusinessName() == null || p.getBusinessName().isBlank())
+      missing.put("businessName", List.of("Required"));
+    if (p.getPhoneNumber() == null || p.getPhoneNumber().isBlank())
+      missing.put("phoneNumber", List.of("Required"));
+    if (p.getIndustry() == null || p.getIndustry().isBlank())
+      missing.put("industry", List.of("Required"));
+    if (p.getBrandTone() == null || p.getBrandTone().isBlank())
+      missing.put("brandTone", List.of("Required"));
+    if (p.getProductCategories() == null || p.getProductCategories().isEmpty())
+      missing.put("productCategories", List.of("At least one required"));
+    if (p.getTargetAudiences() == null || p.getTargetAudiences().isEmpty())
+      missing.put("targetAudiences", List.of("At least one required"));
+    if (p.getPreferredPlatforms() == null || p.getPreferredPlatforms().isEmpty())
+      missing.put("preferredPlatforms", List.of("At least one required"));
+    if (!missing.isEmpty())
+      throw new com.influencermatch.backend.exception.ProfileIncompleteException(missing);
   }
 
   private User resolveOwner(UUID requestedId, User actor) {
@@ -181,6 +225,10 @@ public class BrandService {
   }
 
   private void applyProfile(BrandProfile p, BrandRequest r) {
+    p.setPhoneNumber(
+        r.phoneNumber() == null
+            ? null
+            : com.influencermatch.backend.auth.service.RegistrationSupport.phone(r.phoneNumber()));
     p.setIndustry(r.industry());
     p.setProductCategories(strings(r.productCategories()));
     p.setWebsite(r.website());
@@ -205,6 +253,7 @@ public class BrandService {
     Map<String, Object> value = new LinkedHashMap<>();
     value.put("businessName", p.getBusinessName());
     value.put("industry", p.getIndustry());
+    value.put("phoneNumber", p.getPhoneNumber());
     value.put("productCategories", p.getProductCategories());
     value.put("website", p.getWebsite());
     value.put("location", p.getLocation());
@@ -236,7 +285,10 @@ public class BrandService {
         p.getDescription(),
         c.getContextVersion(),
         p.getCreatedAt(),
-        p.getUpdatedAt());
+        p.getUpdatedAt(),
+        p.getPhoneNumber(),
+        p.getOnboardingStatus(),
+        p.getOnboardingCompletedAt());
   }
 
   private BusinessException notFound(String detail) {

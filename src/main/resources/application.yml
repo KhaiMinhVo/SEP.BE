@@ -81,6 +81,9 @@ spring:
 #  JWT Security
 # ------------------------------------------------------------------------------------
 application:
+  policies:
+    terms-version: ${TERMS_VERSION:terms-v1}
+    privacy-version: ${PRIVACY_VERSION:privacy-v1}
   google-login:
     enabled: ${GOOGLE_LOGIN_ENABLED:false}
     client-id: ${GOOGLE_LOGIN_CLIENT_ID:}
@@ -110,6 +113,7 @@ application:
     encryption-key: ${EMAIL_OUTBOX_ENCRYPTION_KEY:}
     dispatch-enabled: ${CLAIM_EMAIL_DISPATCH_ENABLED:true}
   auth:
+    cookie-secure: ${AUTH_COOKIE_SECURE:false}
     email-verification:
       enabled: ${EMAIL_VERIFICATION_ENABLED:false}
       from: ${SMTP_FROM:}

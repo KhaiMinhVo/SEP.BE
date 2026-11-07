@@ -17,8 +17,8 @@ import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
 
 /**
- * Custom {@link AccessDeniedHandler} that returns a structured JSON ProblemDetail instead of
- * the default HTML 403 page when an authenticated but unauthorised request reaches a protected
+ * Custom {@link AccessDeniedHandler} that returns a structured JSON ProblemDetail instead of the
+ * default HTML 403 page when an authenticated but unauthorised request reaches a protected
  * endpoint.
  */
 @Slf4j
@@ -47,7 +47,11 @@ public class JwtAccessDeniedHandler implements AccessDeniedHandler {
     body.setTitle("Access denied");
     body.setType(URI.create("https://api.influencermatch/errors/access-denied"));
     body.setInstance(URI.create(request.getRequestURI()));
-    body.setProperty("code", "ACCESS_DENIED");
+    body.setProperty(
+        "code",
+        accessDeniedException instanceof org.springframework.security.web.csrf.CsrfException
+            ? "CSRF_INVALID"
+            : "ACCESS_DENIED");
     body.setProperty("traceId", MDC.get("traceId"));
     body.setProperty("timestamp", Instant.now());
 

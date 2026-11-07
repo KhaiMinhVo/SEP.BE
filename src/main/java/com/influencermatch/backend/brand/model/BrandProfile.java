@@ -31,6 +31,10 @@ public class BrandProfile extends BaseEntity {
   @Column(nullable = false, length = 200)
   private String businessName;
 
+  private String phoneNumber;
+  @Builder.Default private String onboardingStatus = "PENDING";
+  private java.time.Instant onboardingCompletedAt;
+
   @Column(length = 120)
   private String industry;
 

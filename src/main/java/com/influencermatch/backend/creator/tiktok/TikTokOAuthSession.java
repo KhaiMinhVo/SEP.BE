@@ -21,6 +21,8 @@ public class TikTokOAuthSession extends BaseEntity {
 
   private long authVersion;
 
+  private java.util.UUID authSessionId;
+
   @Column(nullable = false, length = 255)
   private String clientKey;
 

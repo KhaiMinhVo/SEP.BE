@@ -68,6 +68,13 @@ public class BrandController {
     return ApiResponse.ok(service.get(id, auth));
   }
 
+  @PostMapping("/me/onboarding/complete")
+  @Operation(summary = "Complete Brand onboarding after validating required profile fields")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_BRAND_PROFILE')")
+  public ApiResponse<BrandResponse> complete(Authentication auth) {
+    return ApiResponse.ok(service.complete(auth));
+  }
+
   @Operation(summary = "Update the current brand profile")
   @PutMapping("/me")
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_BRAND_PROFILE')")

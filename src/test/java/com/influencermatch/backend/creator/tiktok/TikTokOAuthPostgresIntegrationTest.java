@@ -20,6 +20,26 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class TikTokOAuthPostgresIntegrationTest extends TikTokTestSupport {
+  @org.springframework.beans.factory.annotation.Autowired
+  com.influencermatch.backend.auth.service.AuthSessionStore loginSessions;
+
+  @Test
+  void logoutDuringProviderRequestCannotGrantOwnership() throws Exception {
+    var s = start(Map.of("creatorId", channel.getId()));
+    UUID sid =
+        jdbc.queryForObject(
+            "select auth_session_id from tiktok_oauth_session where id=?", UUID.class, s.id());
+    String before = businessRows();
+    when(provider.verify(anyString()))
+        .thenAnswer(
+            i -> {
+              loginSessions.revoke(sid);
+              return new VerifiedAccount("app-scoped-id", "real_username", "Display");
+            });
+    callback(s, 401);
+    assertThat(businessRows()).isEqualTo(before);
+  }
+
   @Test
   void cleanupDuringProviderRequestReturns400WithoutGrant() throws Exception {
     var s = start(Map.of("creatorId", channel.getId()));

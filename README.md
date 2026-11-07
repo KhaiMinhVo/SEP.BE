@@ -160,6 +160,11 @@ docker compose logs --tail 200 api
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/auth/policies` and `GET /api/v1/auth/csrf`
+- `POST /api/v1/auth/logout-all`
+- `POST /api/v1/auth/google/start`, `/auth/google/login`, `/auth/google/registration/complete`
+- `POST /api/v1/auth/google/link/start` and `/auth/google/link/confirm`
+- `POST /api/v1/brands/me/onboarding/complete`
 - `POST /api/v1/auth/verify-email`
 - `POST /api/v1/auth/resend-verification`
 - `POST /api/v1/data/creator-invitations`
@@ -206,7 +211,7 @@ Migration V4 thêm `auth_version`, constraint role và một bản ghi khóa chu
 Mỗi thay đổi role/status thực sự tăng version, revoke refresh token và ghi audit trong cùng transaction.
 JWT kiểm tra role/status/version hiện tại từ database. JWT cũ thiếu claim coi là version 0;
 sau khi version tăng, mở khóa không làm token cũ hợp lệ lại. Thao tác không đổi giá trị không tăng version.
-Các API sử dụng JWT stateless; Google Login dành riêng cho Brand có thể bật qua GOOGLE_LOGIN_ENABLED; Google Login không cấp ownership kênh.
+Các API dùng JWT có `sid`, kiểm tra phiên trong database ở mỗi request; Google Login dành riêng cho Brand có thể bật qua GOOGLE_LOGIN_ENABLED; Google Login không cấp ownership kênh.
 
 ### Ingestion service key
 
@@ -537,18 +542,72 @@ References: [Login Kit Web](https://developers.tiktok.com/doc/login-kit-web),
 
 ### Brand Google Login (Google Identity Services)
 
-Backend supports Google Login only for BRAND. Creator invitation/password/OTP, existing platform verification and password setup remain unchanged. New Google users are verified BRAND accounts without passwords; they may use the existing password-setup OTP endpoints to set a first password. Brand Profile is completed through existing onboarding APIs. No automatic profile with invented business fields is created.
+Google Login only supports BRAND. Enable `GOOGLE_LOGIN_ENABLED` and set `GOOGLE_LOGIN_CLIENT_ID` to the Web OAuth client ID; the GIS ID-token flow needs no client secret or backend Google redirect URI. Register the FE origin in Google's Authorized JavaScript origins. Provider signature, issuer, audience/authorized party, expiry, subject and verified email are checked; Google credentials are never persisted or logged.
 
-Set `GOOGLE_LOGIN_ENABLED=true` and `GOOGLE_LOGIN_CLIENT_ID=<Web OAuth client ID>` on deployment. Default is disabled (503). This GIS ID-token flow does not require a client secret or a backend Google redirect URI. In Google Cloud, register the frontend origin under **Authorized JavaScript origins**. Use the official GIS script and popup callback, requesting no YouTube/other API scopes. Backend verifies Google's RS256 signature with its fixed JWKS endpoint, issuer, audience/authorized party, expiry, subject and verified email. Key retrieval uses 5-second timeouts; no Google token is persisted or logged.
+Use the browser cookie and CSRF contract below for every Google POST:
 
-Frontend integration (frontend code is not implemented here):
-1. `POST /api/v1/auth/google/start`, with browser credentials enabled. Response: `data.sessionId`, `data.clientId`, `data.nonce`, `data.expiresAt`. Backend sets a HttpOnly SameSite=Lax cookie, Secure over HTTPS. Session lasts 10 minutes; nonce/browser values are stored only as hashes. The JSON nonce is intended for GIS, not the cookie value.
-2. Call `google.accounts.id.initialize({client_id: data.clientId, nonce: data.nonce, callback: ...})`, then render the Google button. Use a fresh start for each login attempt; do not cache credentials.
-3. In the GIS callback, send JSON `{ "sessionId": "<start ID>", "credential": "<GIS response.credential>" }` to `POST /api/v1/auth/google/login`, with browser credentials enabled. Do not send email, role or profile fields. For local GIS testing, use FE `http://localhost:5173` and BE `http://localhost:8080`, with the FE origin registered in Google Cloud; no ngrok redirect is required. Use the same browser and backend hostname for start/login; production FE/BE should be same-site HTTPS (e.g. influencermatch.site/api.influencermatch.site). Spring Security uses the existing explicit CORS origin list with credentials enabled; set CORS_ALLOWED_ORIGINS to the actual frontend origin. No wildcard CORS or cross-site cookies are introduced.
-4. Success returns the existing `LoginResponse` (access/refresh tokens and effective permissions). Store/use it exactly as password login, then check Brand onboarding. Google token must not be used as the application's API access token.
+1. `POST /api/v1/auth/google/start` returns `sessionId`, `clientId`, `nonce`, `expiresAt` and sets a browser-binding HttpOnly cookie. Pass the nonce to `google.accounts.id.initialize` and obtain a GIS credential.
+2. `POST /api/v1/auth/google/login` accepts `{sessionId, credential}`. A previously linked, active verified Brand receives `status=AUTHENTICATED`, the access token/user response, and `IM_REFRESH` cookie.
+3. A new identity with an unused email receives `status=REGISTRATION_REQUIRED`, `sessionId`, verified email, suggested `fullName` and `expiresAt`. No User, profile, refresh token or login session exists yet. Preserve the original cookie.
+4. `POST /api/v1/auth/google/registration/complete` accepts `{sessionId, fullName, businessName, phoneNumber, policyAcceptance}`. Email/role cannot be selected. Successful completion atomically creates the verified Brand, initial Profile/Context, consent, identity and login session; response status is AUTHENTICATED. The original challenge still expires within ten minutes, including time spent filling the form. Reuse returns 409; a concurrently registered email returns 409.
+5. If email already belongs to a password account, login returns 409 `GOOGLE_ACCOUNT_LINK_REQUIRED` (pending email OTP returns 403). Sign in with the password first. Then call `POST /auth/google/link/start` with `{password}` using Bearer JWT and CSRF, obtain a fresh GIS credential with its nonce, and call `POST /auth/google/link/confirm` with `{sessionId, credential}` from the same browser/login session. Google email must match. Linking never creates another User, bypasses OTP or changes role. Identity, challenge consumption and audit commit together.
 
-Known Google identity is looked up by subject, not email. Existing password accounts (including verified accounts) are never linked automatically: 409 `GOOGLE_ACCOUNT_LINK_REQUIRED`; sign in with the existing password. An account waiting for OTP remains blocked with 403 `EMAIL_NOT_VERIFIED`. There is no new manual-link endpoint in this change. Known non-Brand Google users receive 403; locked/disabled accounts receive 401. Invalid credential/nonce/browser/expired session receives 401; reuse after successful login receives 409 `GOOGLE_LOGIN_REPLAY`.
+Creator invitation/password/OTP and platform verification remain independent. Google-only Brands may use the existing first-password OTP setup endpoints; successful setup invalidates their sessions. No unlink endpoint is implemented.
 
-Migration V24 adds only `google_login_session`; existing identities/data and V1–V23 are retained. Apply migrations only in an authorized deployment. Automated tests use generated RSA signatures and mocked provider verification with disposable PostgreSQL; a real Google login requires frontend GIS setup and manual consent and has not been performed by these tests.
+### Authentication contract V25: FE integration and deployment
 
-Official integration reference: https://developers.google.com/identity/gsi/web/guides/verify-google-id-token
+**Breaking change:** after applying V25 all users must sign in again. Old refresh tokens are revoked, each existing User's authVersion increases, and JWTs without a valid persisted `sid` are rejected. V1–V24 are unchanged. Historical accounts, identities, CreatorMaster, ownership and business data are preserved. Existing profiles become PENDING; historical consent or telephone numbers are not fabricated.
+
+Before showing registration, fetch `GET /api/v1/auth/policies` for current `termsVersion` and `privacyVersion`. The server uses `TERMS_VERSION`/`PRIVACY_VERSION`; these identifiers do not publish or supply legal text. The team must publish the corresponding Terms/Privacy separately.
+
+`POST /auth/register` requires:
+
+```json
+{
+  "fullName": "Brand Owner",
+  "email": "owner@example.com",
+  "password": "strong-password",
+  "businessName": "Example Brand",
+  "phoneNumber": "0912345678",
+  "policyAcceptance": {
+    "acceptedTerms": true,
+    "termsVersion": "terms-v1",
+    "acceptedPrivacy": true,
+    "privacyVersion": "privacy-v1"
+  }
+}
+```
+
+Both acceptance flags must be true. Missing/invalid fields return 400; outdated versions return 409 `POLICY_VERSION_CHANGED`, requiring a reload and renewed acceptance. Vietnamese numbers starting with 0 normalize to +84; international E.164 is supported, without telephone OTP. Passwords use BCrypt (minimum eight characters). Registration creates User, real initial Brand Profile, Context version 1, consent and email OTP atomically; SMTP failure rolls everything back. Response 201 contains no tokens. Verify email OTP, then log in.
+
+`POST /auth/creator/register` still requires a valid Admin/Data Manager registration invitation and `{invitationToken, password, fullName}`; add the same `policyAcceptance` object. Email comes only from the invitation; role is CREATOR. No phone/business fields or channel ownership are invented. OTP remains mandatory.
+
+Before authentication POSTs, call `GET /api/v1/auth/csrf` with browser credentials enabled. Keep its HttpOnly `IM_CSRF` cookie and send the returned `data.token` using `data.headerName` (`X-CSRF-TOKEN`). The endpoint returns the Spring Security 6.3 masked token; do not read cookies with JavaScript. This protects login, refresh, logout, logout-all, dev mock login and all Google POSTs; a missing/invalid token returns 403 `CSRF_INVALID`. Pure Bearer business APIs, provider callbacks, ingestion and VNPay keep their separate mechanisms. Use exact allowed CORS origins and credentials; no wildcard.
+
+FE request example:
+
+```javascript
+const base = 'https://api.influencermatch.site/api/v1';
+const csrf = (await (await fetch(base + '/auth/csrf', {
+  credentials: 'include'
+})).json()).data;
+const response = await fetch(base + '/auth/login', {
+  method: 'POST', credentials: 'include',
+  headers: {'Content-Type': 'application/json', [csrf.headerName]: csrf.token},
+  body: JSON.stringify({email, password})
+});
+```
+
+`IM_REFRESH` is host-only, HttpOnly, path `/api/v1/auth`, SameSite=Lax. Deploy same-site HTTPS FE/BE and `AUTH_COOKIE_SECURE=true`; prod profile refuses insecure auth cookies. Local HTTP must explicitly set false. Reverse proxies must preserve HTTPS forwarding. Refresh tokens never appear in JSON (including Google/dev responses) and FE must not store one in localStorage. Bruno/API clients must retain the cookie jar and send the CSRF header; no Bruno files were changed.
+
+- `POST /auth/login`: issues an independent seven-day absolute session. Access JWT lifetime is at most fifteen minutes and never exceeds session expiry.
+- `POST /auth/refresh`: no JSON body required; reads only IM_REFRESH and rotates it under lock. Every successor expires at the original session end. Invalid/expired refresh returns 401 and clears the cookie; refresh replay revokes all of that User's sessions/tokens and persists that decision even when returning 401. FE should serialize simultaneous refresh requests.
+- `POST /auth/logout`: refresh cookie + CSRF, no valid access JWT required, returns 204 and deletes cookie. Only this session/token family is revoked. Repeated logout remains harmless; the next request using its access token gets 401.
+- `POST /auth/logout-all`: live Bearer JWT + CSRF; increments authVersion and revokes all sessions/refresh tokens, returning 204 and deleting cookie. Other devices must log in again.
+- Role/status changes and password setup invalidate sessions atomically. Platform OAuth callbacks cannot complete against a revoked initiating session. Running requests/SSE streams are not interrupted; subsequent authentication, including SSE token authentication, checks the session.
+
+Login and `/auth/me` add `brandProfileId` when present and `onboardingStatus` for BRAND (PENDING when no profile). Update the initial profile through `PUT /brands/me`; this is a full profile update, so preserve the fields FE wants to retain. Legacy accounts without a profile can still use `POST /brands`.
+
+Call `POST /brands/me/onboarding/complete` with Brand JWT and effective `UPDATE_BRAND_PROFILE` after setting businessName, phoneNumber, industry, at least one productCategories item, targetAudiences item, brandTone and preferredPlatforms item. Missing fields return 400 with `fieldErrors`. Successful response includes COMPLETED/onboardingCompletedAt; repeats do not alter the timestamp. Completed profiles cannot be updated to remove required fields. This state guides navigation without introducing a global Brand business lock. Website, description/location remain optional. No AI/M4 embedding or SM4 behavior is implemented by this change.
+
+Automated checks use mock SMTP/provider and disposable PostgreSQL, not real consent or shared databases. See `docs/backend-test-cases.md` for actual run results.

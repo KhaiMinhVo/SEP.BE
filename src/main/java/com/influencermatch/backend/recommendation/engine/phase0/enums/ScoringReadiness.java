@@ -9,3 +9,4 @@ public enum ScoringReadiness {
   PROVISIONAL,       // Dữ liệu hợp lệ nhưng thiếu bằng chứng tối thiểu (m < 2 bài, thiếu STAB). Đánh giá sơ bộ/dự bị.
   INVALID_DATA       // Dữ liệu bị lỗi toán học hoặc vi phạm hợp đồng schema (số âm, ER > 1.0, không hợp lệ).
 }
+

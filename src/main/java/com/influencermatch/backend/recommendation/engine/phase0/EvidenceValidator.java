@@ -18,13 +18,17 @@ public class EvidenceValidator {
       double rawStab,
       int postCount,
       boolean canComputeStability,
-      boolean isStabImputed,
+      boolean stabilityEvidenceUnavailable,
       double evidenceReliabilityM2,
       ScoringReadiness scoringReadiness,
       List<String> dataQualityReasons
   ) {
+    public boolean isStabImputed() {
+      return stabilityEvidenceUnavailable;
+    }
+
     /**
-     * Constructor tương thích ngược không có 2 tham số mới.
+     * Constructor tương thích ngược cho các bộ test và caller cũ.
      */
     public EvidenceMetrics(
         ErMethod erMethod,
@@ -33,7 +37,7 @@ public class EvidenceValidator {
         double rawStab,
         int postCount,
         boolean canComputeStability,
-        boolean isStabImputed,
+        boolean stabilityEvidenceUnavailable,
         double evidenceReliabilityM2
     ) {
       this(
@@ -43,7 +47,7 @@ public class EvidenceValidator {
           rawStab,
           postCount,
           canComputeStability,
-          isStabImputed,
+          stabilityEvidenceUnavailable,
           evidenceReliabilityM2,
           canComputeStability ? ScoringReadiness.SCORE_READY : ScoringReadiness.PROVISIONAL,
           canComputeStability ? List.of() : List.of("SHORT_WINDOW_INSUFFICIENT_POSTS")
@@ -67,17 +71,17 @@ public class EvidenceValidator {
       throw new IllegalArgumentException("NEGATIVE_METRIC: avgLikes cannot be negative (" + cand.getAvgLikes() + ")");
     }
 
-    // Kiểm tra Hợp đồng Dữ liệu ER: engagementRate phải là Decimal Ratio trong [0.0, 1.0]
+    // Kiểm tra Hợp đồng Dữ liệu ER: Decimal Ratio không âm và hữu hạn
     double dbEr = 0.0;
     if (cand.getEngagementRate() != null) {
       double v = cand.getEngagementRate().doubleValue();
-      if (v < 0.0) {
-        throw new IllegalArgumentException("NEGATIVE_METRIC: engagementRate cannot be negative (" + v + ")");
+      if (Double.isNaN(v) || Double.isInfinite(v) || v < 0.0) {
+        throw new IllegalArgumentException("NEGATIVE_METRIC: engagementRate must be a non-negative finite number (" + v + ")");
       }
-      if (v > ScoringPolicyConfig.DATA_CONTRACT_ER_MAX) {
-        // Tuyệt đối không tự suy đoán chia 100 bằng ngưỡng 1.0; ném lỗi vi phạm schema contract rõ ràng
+      if (v > ScoringPolicyConfig.ER_EXTREME_OUTLIER_THRESHOLD) {
+        // Phân biệt Outlier Detection với Scale Validation: ER > 10.0 là dị thường cực đoan (1000% tương tác)
         throw new IllegalArgumentException(
-            String.format("INVALID_ER_SCALE: engagementRate exceeds 1.0 (%f). System contract requires decimal ratio in [0, 1]. E.g. 5.2%% must be stored as 0.0520.", v));
+            String.format("EXTREME_OUTLIER_ER: engagementRate exceeds sanity bound of 10.0 (%f).", v));
       }
       dbEr = v;
     }
@@ -111,7 +115,7 @@ public class EvidenceValidator {
     double rawEr;
 
     if (posts != null && !posts.isEmpty()) {
-      // Khi có posts: ER tính trực tiếp từ bài đăng (luôn luôn là tỷ lệ thập phân chính xác tuyệt đối)
+      // Khi có posts: ER tính trực tiếp từ bài đăng (luôn luôn là tỷ lệ thập phân chuẩn)
       if (totalViews > 0) {
         erMethod = ErMethod.BY_VIEWS;
         rawEr = totalInteractions / totalViews;
@@ -151,7 +155,7 @@ public class EvidenceValidator {
     // 4. Tính View Stability (STAB = 1 / (1 + CV))
     double rawStab;
     boolean canComputeStability = false;
-    boolean isStabImputed = false;
+    boolean stabilityEvidenceUnavailable = false;
     double evidenceReliabilityM2;
     ScoringReadiness scoringReadiness;
     List<String> dataQualityReasons;
@@ -166,19 +170,37 @@ public class EvidenceValidator {
       double cv = sV / avgViews;
       rawStab = 1.0 / (1.0 + cv);
       canComputeStability = true;
-      isStabImputed = false;
+      stabilityEvidenceUnavailable = false;
       evidenceReliabilityM2 = (postCount >= 10) ? 1.00 : ((postCount >= 3) ? 0.65 : 0.45);
+    } else {
+      // Thiếu bài đăng HOẶC avgViews == 0 (không tính được độ lệch chuẩn mẫu s_V)
+      rawStab = Double.NaN;
+      canComputeStability = false;
+      stabilityEvidenceUnavailable = true;
+      evidenceReliabilityM2 = 0.20; // Bằng chứng rất yếu
+    }
+
+    // ĐIỀU KIỆN SCORE_READY: Xác định dựa trên việc CẢ BA feature thực sự hợp lệ, không chỉ dựa trên postCount!
+    boolean erValid = !Double.isNaN(rawEr) && !Double.isInfinite(rawEr) && rawEr >= 0.0;
+    boolean vrValid = !Double.isNaN(rawVr) && !Double.isInfinite(rawVr) && rawVr >= 0.0;
+    boolean stabValid = canComputeStability && !Double.isNaN(rawStab) && !Double.isInfinite(rawStab) && rawStab > 0.0;
+
+    if (erValid && vrValid && stabValid) {
       scoringReadiness = ScoringReadiness.SCORE_READY;
       dataQualityReasons = List.of();
     } else {
-      // Thiếu bài đăng để tính mẫu số s_V -> Giữ Double.NaN, phân loại PROVISIONAL
-      rawStab = Double.NaN;
-      canComputeStability = false;
-      isStabImputed = true;
-      evidenceReliabilityM2 = 0.20; // Bằng chứng rất yếu
       scoringReadiness = ScoringReadiness.PROVISIONAL;
-      dataQualityReasons = List.of(
-          String.format("SHORT_WINDOW_INSUFFICIENT_POSTS: Post count %d < 2; stability unavailable", postCount));
+      List<String> reasons = new ArrayList<>();
+      if (!stabValid) {
+        if (avgViews == 0.0 && postCount >= 2) {
+          reasons.add("ZERO_VIEWS_FOR_STABILITY: Average views is 0 across posts, stability cannot be evaluated");
+        } else {
+          reasons.add(String.format("SHORT_WINDOW_INSUFFICIENT_POSTS: Post count %d < 2 for stability evaluation", postCount));
+        }
+      }
+      if (!erValid) reasons.add("INVALID_ER_FEATURE");
+      if (!vrValid) reasons.add("INVALID_VR_FEATURE");
+      dataQualityReasons = Collections.unmodifiableList(reasons);
     }
 
     return new EvidenceMetrics(
@@ -188,7 +210,7 @@ public class EvidenceValidator {
         rawStab,
         postCount,
         canComputeStability,
-        isStabImputed,
+        stabilityEvidenceUnavailable,
         evidenceReliabilityM2,
         scoringReadiness,
         dataQualityReasons

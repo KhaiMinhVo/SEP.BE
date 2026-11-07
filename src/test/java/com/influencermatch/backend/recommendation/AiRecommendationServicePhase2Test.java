@@ -254,6 +254,63 @@ class AiRecommendationServicePhase2Test {
     verify(subscriptionService).releaseRecommendationQuota(subscriptionId);
   }
 
+  @Test
+  @DisplayName("Phase 0 & TOPSIS: Provisional Creator có ER/VIEW cao không tham gia TOPSIS chính nếu chưa SCORE_READY")
+  void testProvisionalCreatorWithHighEr_doesNotPolluteMainTopsis() {
+    UUID readyId = UUID.randomUUID();
+    UUID provId = UUID.randomUUID();
+
+    // Creator 1: Đủ bài (Score-ready)
+    RecommendationCandidateProjection readyCand = mockCandidate(
+        readyId, null, "TIKTOK", "Ready KOC", 50_000L,
+        BigDecimal.valueOf(20_000), BigDecimal.valueOf(1_000), BigDecimal.valueOf(0.05),
+        "Beauty", "Skincare", 0.70
+    );
+
+    // Creator 2: Thiếu bài (Provisional) nhưng có ER và VIEW rất cao (0.20 và 40k views)
+    RecommendationCandidateProjection provCand = mockCandidate(
+        provId, null, "TIKTOK", "Viral Provisional KOC", 50_000L,
+        BigDecimal.valueOf(40_000), BigDecimal.valueOf(8_000), BigDecimal.valueOf(0.20),
+        "Beauty", "Skincare", 0.90
+    );
+
+    // Mock postRepository: chỉ readyId có 3 bài posts
+    com.influencermatch.backend.creator.repository.PostRepository mockPostRepo =
+        mock(com.influencermatch.backend.creator.repository.PostRepository.class);
+    com.influencermatch.backend.creator.model.Creator creatorEntity =
+        com.influencermatch.backend.creator.model.Creator.builder().id(readyId).build();
+    com.influencermatch.backend.creator.model.Post p1 =
+        com.influencermatch.backend.creator.model.Post.builder().creator(creatorEntity).views(18_000L).likes(900L).build();
+    com.influencermatch.backend.creator.model.Post p2 =
+        com.influencermatch.backend.creator.model.Post.builder().creator(creatorEntity).views(20_000L).likes(1_000L).build();
+    com.influencermatch.backend.creator.model.Post p3 =
+        com.influencermatch.backend.creator.model.Post.builder().creator(creatorEntity).views(22_000L).likes(1_100L).build();
+    when(mockPostRepo.findByCreatorIdIn(any())).thenReturn(List.of(p1, p2, p3));
+
+    service.setPostRepository(mockPostRepo);
+
+    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
+        anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+        .thenReturn(List.of(readyCand, provCand));
+
+    RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
+
+    assertThat(response.getRecommendations()).hasSize(2);
+
+    var readyItem = response.getRecommendations().stream()
+        .filter(r -> r.getCreatorId().equals(readyId)).findFirst().orElseThrow();
+    assertThat(readyItem.getIsScoreReady()).isTrue();
+    assertThat(readyItem.getIsProvisional()).isFalse();
+
+    var provItem = response.getRecommendations().stream()
+        .filter(r -> r.getCreatorId().equals(provId)).findFirst().orElseThrow();
+    assertThat(provItem.getIsScoreReady()).isFalse();
+    assertThat(provItem.getIsProvisional()).isTrue();
+
+    // Ready KOC được xếp đầu trong bảng xếp hạng chính vì đã SCORE_READY
+    assertThat(response.getRecommendations().get(0).getCreatorId()).isEqualTo(readyId);
+  }
+
   private RecommendationCandidateProjection mockCandidate(
       UUID creatorId, UUID masterId, String platform, String displayName, Long followers,
       BigDecimal avgViews, BigDecimal avgLikes, BigDecimal er, String niche, String cat, Double semantic) {
@@ -271,6 +328,7 @@ class AiRecommendationServicePhase2Test {
     when(m.getCategory()).thenReturn(cat);
     when(m.getCreatorType()).thenReturn("KOC");
     when(m.getSemanticScore()).thenReturn(semantic);
+    when(m.getAccountStatus()).thenReturn("ACTIVE");
     return m;
   }
 }

@@ -49,9 +49,9 @@ public class PublicPerformanceScorer {
         if (v < 0.0) {
           throw new IllegalArgumentException("NEGATIVE_METRIC: engagementRate cannot be negative (" + v + ")");
         }
-        if (v > ScoringPolicyConfig.DATA_CONTRACT_ER_MAX) {
+        if (v > ScoringPolicyConfig.ER_EXTREME_OUTLIER_THRESHOLD) {
           throw new IllegalArgumentException(
-              String.format("INVALID_ER_SCALE: engagementRate exceeds 1.0 (%f). System contract requires decimal ratio in [0, 1].", v));
+              String.format("INVALID_ER_OUTLIER: engagementRate exceeds 10.0 (%f). Sanity bound violated.", v));
         }
         rawEr = v;
       }

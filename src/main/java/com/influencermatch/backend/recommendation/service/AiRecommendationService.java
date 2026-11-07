@@ -36,6 +36,7 @@ import com.influencermatch.backend.security.permission.Permissions;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -60,6 +61,10 @@ public class AiRecommendationService {
 
   @org.springframework.beans.factory.annotation.Autowired(required = false)
   private com.influencermatch.backend.creator.repository.PostRepository postRepository;
+
+  public void setPostRepository(com.influencermatch.backend.creator.repository.PostRepository postRepository) {
+    this.postRepository = postRepository;
+  }
 
   private final Phase0Orchestrator phase0Orchestrator = new Phase0Orchestrator();
   private final FourMemoryTopsisEngine fourMemoryTopsisEngine = new FourMemoryTopsisEngine();
@@ -163,8 +168,10 @@ public class AiRecommendationService {
       Map<UUID, NormalizedCandidateContext> phase0Map = phase0Results.stream()
           .collect(Collectors.toMap(NormalizedCandidateContext::creatorId, r -> r, (a, b) -> a));
 
-      // Filter eligible candidates for ranking (tách biệt Campaign Eligibility và Data Quality)
-      List<RecommendationCandidateProjection> eligibleCandidates = new ArrayList<>();
+      // Filter candidates: Tách biệt hoàn toàn Main Ranking Pool (chỉ SCORE_READY) và Provisional Pool
+      List<RecommendationCandidateProjection> scoreReadyCandidates = new ArrayList<>();
+      List<RecommendationCandidateProjection> provisionalCandidates = new ArrayList<>();
+
       for (RecommendationCandidateProjection cand : rawCandidates) {
         NormalizedCandidateContext p0 = phase0Map.get(cand.getCreatorId());
         if (p0 != null) {
@@ -176,30 +183,47 @@ public class AiRecommendationService {
             log.warn("Candidate {} excluded: Data quality error (not a campaign violation): {}", cand.getCreatorId(), p0.dataQualityReasons());
             continue;
           }
+          if (p0.isScoreReady()) {
+            scoreReadyCandidates.add(cand);
+          } else {
+            log.info("Candidate {} routed to provisional pool (lacks full stability evidence): {}", cand.getCreatorId(), p0.dataQualityReasons());
+            provisionalCandidates.add(cand);
+          }
         }
-        eligibleCandidates.add(cand);
       }
 
-      // 6. Phase 1-5: Four-Memory Scoring, CRITIC, Blended Weights, Fixed-Ideal TOPSIS & Confidence
+      // 6. Phase 1-5: BẢNG XẾP HẠNG CHÍNH - Chỉ SCORE_READY được tham gia CRITIC Reference Pool & TOPSIS chính!
       List<BrandPattern> brandPatterns = brandPatternRepository.findByBrandProfileId(brandProfileId);
-      List<FourMemoryTopsisEngine.EvaluatedCandidate> evaluatedList =
-          fourMemoryTopsisEngine.evaluateAndRank(
-              eligibleCandidates,
-              phase0Map,
-              campaign,
-              cand -> {
-                List<HistoricalCampaign> past = historicalCampaignRepository.findByCreatorId(cand.getCreatorId());
-                if (past.isEmpty() && cand.getMasterId() != null) {
-                  past = historicalCampaignRepository.findByMasterId(cand.getMasterId());
-                }
-                return past;
-              },
-              brandPatterns
-          );
+      Function<RecommendationCandidateProjection, List<HistoricalCampaign>> historyProvider = cand -> {
+        List<HistoricalCampaign> past = historicalCampaignRepository.findByCreatorId(cand.getCreatorId());
+        if (past.isEmpty() && cand.getMasterId() != null) {
+          past = historicalCampaignRepository.findByMasterId(cand.getMasterId());
+        }
+        return past;
+      };
 
-      // 7. Master-aware Grouping (Khử trùng lặp đa kênh - Mỗi KOC chỉ lấy 1 kênh điểm cao nhất)
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> evaluatedReadyList = Collections.emptyList();
+      if (!scoreReadyCandidates.isEmpty()) {
+        evaluatedReadyList = fourMemoryTopsisEngine.evaluateAndRank(
+            scoreReadyCandidates,
+            phase0Map,
+            campaign,
+            historyProvider,
+            brandPatterns
+        );
+      }
+
+      // Đánh giá sơ bộ (Provisional Reference Score) độc lập ngoài bảng chính cho provisionalCandidates
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> evaluatedProvisionalList = new ArrayList<>();
+      for (RecommendationCandidateProjection cand : provisionalCandidates) {
+        NormalizedCandidateContext p0 = phase0Map.get(cand.getCreatorId());
+        List<HistoricalCampaign> past = historyProvider.apply(cand);
+        evaluatedProvisionalList.add(fourMemoryTopsisEngine.evaluateSingle(cand, p0, campaign, past, brandPatterns));
+      }
+
+      // 7. Master-aware Grouping trên Main Ranking Pool (SCORE_READY)
       Map<String, FourMemoryTopsisEngine.EvaluatedCandidate> uniqueKocs = new LinkedHashMap<>();
-      for (FourMemoryTopsisEngine.EvaluatedCandidate item : evaluatedList) {
+      for (FourMemoryTopsisEngine.EvaluatedCandidate item : evaluatedReadyList) {
         String masterKey = item.candidate().getMasterId() != null
             ? item.candidate().getMasterId().toString()
             : item.candidate().getCreatorId().toString();
@@ -214,13 +238,29 @@ public class AiRecommendationService {
         }
       }
 
-      // 8. Sắp xếp điểm FinalScore giảm dần (deterministic) và chọn Top N
+      // 8. Sắp xếp điểm FinalScore giảm dần (deterministic) trên bảng chính
       int effectiveLimit = limit > 0 ? Math.min(limit, 50) : 30;
       List<FourMemoryTopsisEngine.EvaluatedCandidate> sortedCandidates =
           displaySorter.sort(new ArrayList<>(uniqueKocs.values()), DisplayMode.BEST_MATCH);
-      List<FourMemoryTopsisEngine.EvaluatedCandidate> topList = sortedCandidates.stream()
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> topList = new ArrayList<>(sortedCandidates.stream()
           .limit(effectiveLimit)
-          .toList();
+          .toList());
+
+      // Nếu bảng chính chưa đủ limit, bổ sung ứng viên Provisional (đánh giá sơ bộ) ở cuối danh sách
+      if (topList.size() < effectiveLimit && !evaluatedProvisionalList.isEmpty()) {
+        List<FourMemoryTopsisEngine.EvaluatedCandidate> sortedProvisional =
+            displaySorter.sort(evaluatedProvisionalList, DisplayMode.BEST_MATCH);
+        for (FourMemoryTopsisEngine.EvaluatedCandidate item : sortedProvisional) {
+          if (topList.size() >= effectiveLimit) break;
+          String masterKey = item.candidate().getMasterId() != null
+              ? item.candidate().getMasterId().toString()
+              : item.candidate().getCreatorId().toString();
+          if (!uniqueKocs.containsKey(masterKey)) {
+            uniqueKocs.put(masterKey, item);
+            topList.add(item);
+          }
+        }
+      }
 
       // 9. Tích hợp XAI Engine (POST /api/v1/ai/explain kèm Circuit Breaker & Fallback)
       List<CreatorRecommendationItemDto> recommendationItems = new ArrayList<>();
@@ -232,6 +272,10 @@ public class AiRecommendationService {
             shortlistItemRepository.findByCampaignIdAndCreatorId(campaignId, item.candidate().getCreatorId());
         boolean inShortlist = shortlistItemOpt.isPresent() && shortlistItemOpt.get().getStatus() != ShortlistStatus.REMOVED;
         ShortlistStatus itemStatus = shortlistItemOpt.map(ShortlistItem::getStatus).orElse(null);
+
+        NormalizedCandidateContext p0 = phase0Map.get(item.candidate().getCreatorId());
+        boolean isScoreReady = p0 != null && p0.isScoreReady();
+        boolean isProvisional = p0 != null && p0.isProvisional();
 
         recommendationItems.add(
             CreatorRecommendationItemDto.builder()
@@ -254,6 +298,8 @@ public class AiRecommendationService {
                 .finalScore(breakdown.getFinalScore())
                 .scoreBreakdown(breakdown)
                 .reasoning(reasoning)
+                .isScoreReady(isScoreReady)
+                .isProvisional(isProvisional)
                 .build()
         );
       }

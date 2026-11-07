@@ -32,4 +32,6 @@ public class CreatorRecommendationItemDto {
   private Double finalScore;
   private ScoreBreakdownDto scoreBreakdown;
   private ReasoningCardDto reasoning;
+  private Boolean isScoreReady;
+  private Boolean isProvisional;
 }

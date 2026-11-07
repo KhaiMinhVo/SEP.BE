@@ -293,6 +293,7 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     when(tikTokCandidate.getAvgLikes()).thenReturn(BigDecimal.valueOf(6_000)); // ER = 6.0%
     when(tikTokCandidate.getSemanticScore()).thenReturn(0.80);
     when(tikTokCandidate.getNiche()).thenReturn("BEAUTY");
+    when(tikTokCandidate.getAccountStatus()).thenReturn("ACTIVE");
 
     // Ứng viên Instagram: Điểm tương tác thấp hơn
     RecommendationCandidateProjection instaCandidate = mock(RecommendationCandidateProjection.class);
@@ -305,6 +306,7 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     when(instaCandidate.getAvgLikes()).thenReturn(BigDecimal.valueOf(800)); // ER = 2.0%
     when(instaCandidate.getSemanticScore()).thenReturn(0.60);
     when(instaCandidate.getNiche()).thenReturn("BEAUTY");
+    when(instaCandidate.getAccountStatus()).thenReturn("ACTIVE");
 
     when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
         anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
@@ -352,6 +354,7 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     when(cand.getAvgLikes()).thenReturn(BigDecimal.valueOf(1_500));
     when(cand.getSemanticScore()).thenReturn(0.70);
     when(cand.getNiche()).thenReturn("BEAUTY");
+    when(cand.getAccountStatus()).thenReturn("ACTIVE");
 
     when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
         anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))

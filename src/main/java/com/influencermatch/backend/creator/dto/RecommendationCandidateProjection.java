@@ -19,4 +19,8 @@ public interface RecommendationCandidateProjection {
   String getCategory();
   String getCreatorType();
   Double getSemanticScore();
+
+  default String getAccountStatus() {
+    return "ACTIVE";
+  }
 }

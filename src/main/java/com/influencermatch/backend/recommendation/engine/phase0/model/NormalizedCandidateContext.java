@@ -18,7 +18,7 @@ public record NormalizedCandidateContext(
     CampaignEligibility campaignEligibility,
     ScoringReadiness scoringReadiness,
 
-    List<String> eligibilityReasons, // Lý do Campaign: PLATFORM_MISMATCH, EXCLUDED_BY_FEEDBACK
+    List<String> eligibilityReasons, // Lý do Campaign: PLATFORM_MISMATCH, EXCLUDED_BY_FEEDBACK, ACCOUNT_INACTIVE
     List<String> dataQualityReasons,  // Lý do Dữ liệu: INVALID_METRICS, SHORT_WINDOW_INSUFFICIENT_POSTS
 
     // Điểm chuẩn hóa [0, 1) sẵn sàng bàn giao cho Phase 1
@@ -34,10 +34,17 @@ public record NormalizedCandidateContext(
     // Metadata bằng chứng phục vụ Phase 5 tính Confidence
     ErMethod erMethod,
     int postCount,
-    boolean isStabImputed,
+    boolean stabilityEvidenceUnavailable, // Chuẩn hóa thuật ngữ: không có bằng chứng ổn định (không phải ước lượng từ dữ liệu)
     double evidenceReliabilityM2, // r_i2
     String calibrationVersion
 ) {
+
+  /**
+   * Alias tương thích ngược cho isStabImputed().
+   */
+  public boolean isStabImputed() {
+    return stabilityEvidenceUnavailable;
+  }
 
   /**
    * Constructor tương thích ngược với 16 tham số cũ.
@@ -56,7 +63,7 @@ public record NormalizedCandidateContext(
       double rawStab,
       ErMethod erMethod,
       int postCount,
-      boolean isStabImputed,
+      boolean stabilityEvidenceUnavailable,
       double evidenceReliabilityM2,
       String calibrationVersion
   ) {
@@ -76,7 +83,7 @@ public record NormalizedCandidateContext(
         rawStab,
         erMethod,
         postCount,
-        isStabImputed,
+        stabilityEvidenceUnavailable,
         evidenceReliabilityM2,
         calibrationVersion
     );
@@ -90,14 +97,14 @@ public record NormalizedCandidateContext(
   }
 
   /**
-   * Creator có đầy đủ dữ liệu và bằng chứng đo lường để vào Bảng xếp hạng chính.
+   * Creator có đầy đủ cả 3 tính năng và bằng chứng đo lường để vào Bảng xếp hạng chính.
    */
   public boolean isScoreReady() {
     return scoringReadiness == ScoringReadiness.SCORE_READY;
   }
 
   /**
-   * Creator thỏa điều kiện Campaign nhưng thiếu dữ liệu để tính ổn định (m < 2 bài).
+   * Creator thỏa điều kiện Campaign nhưng thiếu dữ liệu để tính ổn định (m < 2 bài hoặc views=0).
    */
   public boolean isProvisional() {
     return scoringReadiness == ScoringReadiness.PROVISIONAL;
@@ -118,7 +125,7 @@ public record NormalizedCandidateContext(
     if (scoringReadiness == ScoringReadiness.INVALID_DATA) {
       return Phase0Status.INELIGIBLE;
     }
-    if (scoringReadiness == ScoringReadiness.PROVISIONAL || campaignEligibility == CampaignEligibility.PENDING_PLATFORM) {
+    if (scoringReadiness == ScoringReadiness.PROVISIONAL || campaignEligibility == CampaignEligibility.PENDING_VERIFICATION) {
       return Phase0Status.PENDING_DATA;
     }
     return Phase0Status.ELIGIBLE;

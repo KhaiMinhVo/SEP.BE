@@ -51,7 +51,7 @@ public class Phase0Orchestrator {
       if (elig.isPendingData()) {
         results.add(new NormalizedCandidateContext(
             creatorId, cand.getMasterId(), platform,
-            CampaignEligibility.PENDING_PLATFORM, ScoringReadiness.PROVISIONAL,
+            CampaignEligibility.PENDING_VERIFICATION, ScoringReadiness.PROVISIONAL,
             elig.reasons(), List.of(),
             0.0, 0.0, Double.NaN, 0.0, 0.0, Double.NaN, null, 0, false, 0.0,
             ScoringPolicyConfig.CALIBRATION_VERSION

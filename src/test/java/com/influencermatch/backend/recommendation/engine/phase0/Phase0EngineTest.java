@@ -220,6 +220,7 @@ class Phase0EngineTest {
     when(invalidCand.getAvgViews()).thenReturn(BigDecimal.valueOf(10_000));
     when(invalidCand.getAvgLikes()).thenReturn(BigDecimal.valueOf(-500)); // Âm!
     when(invalidCand.getEngagementRate()).thenReturn(BigDecimal.valueOf(0.05));
+    when(invalidCand.getAccountStatus()).thenReturn("ACTIVE");
 
     List<NormalizedCandidateContext> results = orchestrator.execute(
         List.of(validCand, invalidCand),
@@ -276,17 +277,87 @@ class Phase0EngineTest {
   }
 
   @Test
-  @DisplayName("Luồng 2: Bỏ suy đoán ER - Từ chối giá trị > 1.0 (ví dụ 5.0) theo Hợp đồng Schema tỷ lệ thập phân")
-  void testEvidenceValidator_rejectsEngagementRateAboveOne() {
-    RecommendationCandidateProjection candWithPercentEr = mock(RecommendationCandidateProjection.class);
-    when(candWithPercentEr.getCreatorId()).thenReturn(UUID.randomUUID());
-    when(candWithPercentEr.getPlatform()).thenReturn("TIKTOK");
-    when(candWithPercentEr.getFollowers()).thenReturn(10_000L);
-    when(candWithPercentEr.getEngagementRate()).thenReturn(BigDecimal.valueOf(5.2)); // Vi phạm: > 1.0!
+  @DisplayName("Luồng 2: Hợp đồng ER - Tỷ lệ 1.20 (120% tương tác) là hợp lệ, không tự báo lỗi scale")
+  void testEvidenceValidator_erAboveOneIsValidDecimalRatio() {
+    RecommendationCandidateProjection cand = mock(RecommendationCandidateProjection.class);
+    when(cand.getCreatorId()).thenReturn(UUID.randomUUID());
+    when(cand.getPlatform()).thenReturn("TIKTOK");
+    when(cand.getFollowers()).thenReturn(10_000L);
+    when(cand.getAvgViews()).thenReturn(BigDecimal.valueOf(5_000));
+    when(cand.getAvgLikes()).thenReturn(BigDecimal.valueOf(6_000)); // 6000 / 5000 = 1.20
+    when(cand.getEngagementRate()).thenReturn(BigDecimal.valueOf(1.20)); // 120%
 
-    org.assertj.core.api.Assertions.assertThatThrownBy(() -> evidenceValidator.evaluate(candWithPercentEr, Collections.emptyList()))
+    var metrics = evidenceValidator.evaluate(cand, Collections.emptyList());
+    assertThat(metrics.rawEr()).isEqualTo(1.20);
+    // Khi chuẩn hóa qua hàm bão hòa: S = 1.20 / (1.20 + 0.05) = 1.20 / 1.25 = 0.96
+    double s = policyNormalizer.normalize(metrics.rawEr(), 0.05);
+    assertThat(s).isEqualTo(0.96);
+  }
+
+  @Test
+  @DisplayName("Luồng 2: Outlier Detection - Từ chối giá trị ER dị thường cực đoan > 10.0 (1000% tương tác)")
+  void testEvidenceValidator_rejectsExtremeOutlierErAboveTen() {
+    RecommendationCandidateProjection cand = mock(RecommendationCandidateProjection.class);
+    when(cand.getCreatorId()).thenReturn(UUID.randomUUID());
+    when(cand.getPlatform()).thenReturn("TIKTOK");
+    when(cand.getFollowers()).thenReturn(10_000L);
+    when(cand.getEngagementRate()).thenReturn(BigDecimal.valueOf(15.0)); // > 10.0
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> evidenceValidator.evaluate(cand, Collections.emptyList()))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("INVALID_ER_SCALE");
+        .hasMessageContaining("EXTREME_OUTLIER_ER");
+  }
+
+  @Test
+  @DisplayName("Luồng 2: Điều kiện SCORE_READY - 3 bài nhưng đều 0 views thì ra PROVISIONAL, không phải READY")
+  void testEvidenceValidator_zeroViewsWithPostsProducesProvisionalNotReady() {
+    RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
+
+    // 3 bài nhưng toàn bộ views = 0
+    Post p1 = Post.builder().views(0L).likes(10L).build();
+    Post p2 = Post.builder().views(0L).likes(15L).build();
+    Post p3 = Post.builder().views(0L).likes(20L).build();
+
+    var metrics = evidenceValidator.evaluate(cand, List.of(p1, p2, p3));
+    assertThat(metrics.canComputeStability()).isFalse();
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.PROVISIONAL);
+    assertThat(metrics.dataQualityReasons().get(0)).contains("ZERO_VIEWS_FOR_STABILITY");
+  }
+
+  @Test
+  @DisplayName("Luồng 1: Ràng buộc Account Status - SUSPENDED/DELETED bị loại INELIGIBLE, NULL/UNKNOWN ra PENDING")
+  void testEligibility_accountStatusValidation() {
+    Campaign campaign = Campaign.builder().platforms(List.of("TIKTOK")).build();
+
+    // 1. ACTIVE -> ELIGIBLE
+    RecommendationCandidateProjection activeCand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
+    when(activeCand.getAccountStatus()).thenReturn("ACTIVE");
+    var resActive = eligibilityChecker.check(activeCand, campaign, Collections.emptySet());
+    assertThat(resActive.eligible()).isTrue();
+    assertThat(resActive.reasons()).isEmpty();
+
+    // 2. SUSPENDED -> INELIGIBLE
+    RecommendationCandidateProjection suspendedCand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
+    when(suspendedCand.getAccountStatus()).thenReturn("SUSPENDED");
+    var resSuspended = eligibilityChecker.check(suspendedCand, campaign, Collections.emptySet());
+    assertThat(resSuspended.eligible()).isFalse();
+    assertThat(resSuspended.isExcluded()).isTrue();
+    assertThat(resSuspended.reasons()).contains("ACCOUNT_INACTIVE: Account status is SUSPENDED");
+
+    // 3. NULL / UNKNOWN -> PENDING_VERIFICATION
+    RecommendationCandidateProjection nullStatusCand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
+    when(nullStatusCand.getAccountStatus()).thenReturn(null);
+    var resNull = eligibilityChecker.check(nullStatusCand, campaign, Collections.emptySet());
+    assertThat(resNull.isPendingData()).isTrue();
+    assertThat(resNull.reasons()).contains("UNKNOWN_ACCOUNT_STATUS: Creator account status is unknown");
+
+    // 4. NULL status VÀ bị Brand Feedback loại trừ -> INELIGIBLE (Precedence INELIGIBLE > PENDING)
+    UUID rejectedId = UUID.randomUUID();
+    RecommendationCandidateProjection rejectedNullCand = mockCandidate(rejectedId, "TIKTOK", 50_000L);
+    when(rejectedNullCand.getAccountStatus()).thenReturn(null);
+    var resRejectedNull = eligibilityChecker.check(rejectedNullCand, campaign, Set.of(rejectedId));
+    assertThat(resRejectedNull.isExcluded()).isTrue();
+    assertThat(resRejectedNull.reasons()).contains("EXCLUDED_BY_FEEDBACK", "UNKNOWN_ACCOUNT_STATUS: Creator account status is unknown");
   }
 
   private RecommendationCandidateProjection mockCandidate(UUID id, String platform, Long followers) {
@@ -297,6 +368,7 @@ class Phase0EngineTest {
     when(c.getAvgViews()).thenReturn(BigDecimal.valueOf(10_000));
     when(c.getAvgLikes()).thenReturn(BigDecimal.valueOf(500));
     when(c.getEngagementRate()).thenReturn(BigDecimal.valueOf(0.05));
+    when(c.getAccountStatus()).thenReturn("ACTIVE");
     return c;
   }
 }

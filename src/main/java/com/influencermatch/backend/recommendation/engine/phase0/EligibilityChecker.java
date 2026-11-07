@@ -27,7 +27,7 @@ public class EligibilityChecker {
     }
 
     public boolean isPendingData() {
-      return campaignEligibility == CampaignEligibility.PENDING_PLATFORM;
+      return campaignEligibility == CampaignEligibility.PENDING_VERIFICATION;
     }
   }
 
@@ -38,7 +38,7 @@ public class EligibilityChecker {
 
     List<String> reasons = new ArrayList<>();
     boolean isHardIneligible = false;
-    boolean isPendingPlatform = false;
+    boolean isPendingVerification = false;
 
     // 1. Hard Exclusion: KOC nằm trong danh sách loại trừ (Negative Constraints từ Feedback)
     if (excludedIds != null && excludedIds.contains(cand.getCreatorId())) {
@@ -46,11 +46,24 @@ public class EligibilityChecker {
       isHardIneligible = true;
     }
 
-    // 2. Platform Validation (Tri-state)
+    // 2. Account Status Validation (Ràng buộc trạng thái tài khoản)
+    String accountStatus = cand.getAccountStatus() != null ? cand.getAccountStatus().trim().toUpperCase() : null;
+    if (accountStatus == null || accountStatus.isEmpty() || "UNKNOWN".equals(accountStatus)) {
+      reasons.add("UNKNOWN_ACCOUNT_STATUS: Creator account status is unknown");
+      isPendingVerification = true;
+    } else if ("SUSPENDED".equals(accountStatus) || "BANNED".equals(accountStatus) || "DELETED".equals(accountStatus) || "INACTIVE".equals(accountStatus)) {
+      reasons.add("ACCOUNT_INACTIVE: Account status is " + accountStatus);
+      isHardIneligible = true;
+    } else if (!"ACTIVE".equals(accountStatus)) {
+      reasons.add("UNRECOGNIZED_ACCOUNT_STATUS: " + accountStatus);
+      isHardIneligible = true;
+    }
+
+    // 3. Platform Validation (Tri-state)
     String candPlatform = cand.getPlatform() != null ? cand.getPlatform().trim().toUpperCase() : "";
     if (candPlatform.isEmpty()) {
       reasons.add("MISSING_PLATFORM: Creator platform is unknown");
-      isPendingPlatform = true;
+      isPendingVerification = true;
     } else {
       List<String> allowedPlatforms = (campaign != null && campaign.getPlatforms() != null)
           ? campaign.getPlatforms()
@@ -66,7 +79,7 @@ public class EligibilityChecker {
       }
     }
 
-    // 3. Soft: Follower range (Không làm loại, chỉ đánh dấu nhãn cảnh báo)
+    // 4. Soft: Follower range (Không làm loại, chỉ đánh dấu nhãn cảnh báo)
     boolean outsideFollowers = false;
     long followers = cand.getFollowers() != null ? cand.getFollowers() : 0L;
     if (campaign != null) {
@@ -78,17 +91,17 @@ public class EligibilityChecker {
       }
     }
 
-    // 4. Soft: Giá (Chưa có giá -> PRICE_UNKNOWN, không loại)
+    // 5. Soft: Giá (Chưa có giá -> PRICE_UNKNOWN, không loại)
     boolean priceUnknown = true;
 
-    // Quy tắc ưu tiên nghiêm ngặt cho Campaign: INELIGIBLE > PENDING_PLATFORM > ELIGIBLE
+    // Quy tắc ưu tiên nghiêm ngặt cho Campaign: INELIGIBLE > PENDING_VERIFICATION > ELIGIBLE
     CampaignEligibility campaignEligibility;
     Phase0Status status;
     if (isHardIneligible) {
       campaignEligibility = CampaignEligibility.INELIGIBLE;
       status = Phase0Status.INELIGIBLE;
-    } else if (isPendingPlatform) {
-      campaignEligibility = CampaignEligibility.PENDING_PLATFORM;
+    } else if (isPendingVerification) {
+      campaignEligibility = CampaignEligibility.PENDING_VERIFICATION;
       status = Phase0Status.PENDING_DATA;
     } else {
       campaignEligibility = CampaignEligibility.ELIGIBLE;

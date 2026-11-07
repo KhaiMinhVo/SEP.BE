@@ -37,6 +37,9 @@ public class CreatorDetailResponse {
     private String niche;
     private String category;
     private String contentSummary;
+    private BigDecimal estimatedFeeMin;
+    private BigDecimal estimatedFeeMax;
+    private BigDecimal actualFee;
 
     // Recent Posts
     private List<PostDto> recentPosts;

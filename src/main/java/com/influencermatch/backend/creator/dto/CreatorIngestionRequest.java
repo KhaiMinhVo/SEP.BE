@@ -28,6 +28,9 @@ public class CreatorIngestionRequest {
   private BigDecimal avgComments;
   private BigDecimal avgShares;
   private BigDecimal engagementRate;
+  private BigDecimal estimatedFeeMin;
+  private BigDecimal estimatedFeeMax;
+  private BigDecimal actualFee;
 
   // Additional data
   private String niche;

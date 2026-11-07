@@ -3,6 +3,8 @@ package com.influencermatch.backend.creator.service;
 import com.influencermatch.backend.creator.dto.CreatorDetailResponse;
 import com.influencermatch.backend.creator.dto.PostDto;
 import com.influencermatch.backend.creator.enums.CreatorSourceType;
+import com.influencermatch.backend.creator.enums.FollowerFeeTier;
+import java.math.BigDecimal;
 import com.influencermatch.backend.creator.model.Creator;
 import com.influencermatch.backend.creator.model.PublicCreatorMetric;
 import com.influencermatch.backend.creator.repository.CreatorRepository;
@@ -49,6 +51,17 @@ public class CreatorService {
             .build())
         .toList();
 
+    FollowerFeeTier feeTier =
+        FollowerFeeTier.fromFollowers(metric != null ? metric.getFollowers() : 0L);
+    BigDecimal feeMin =
+        (metric != null && metric.getEstimatedFeeMin() != null)
+            ? metric.getEstimatedFeeMin()
+            : feeTier.getMinFee();
+    BigDecimal feeMax =
+        (metric != null && metric.getEstimatedFeeMax() != null)
+            ? metric.getEstimatedFeeMax()
+            : feeTier.getMaxFee();
+
     return CreatorDetailResponse.builder()
         .id(c.getId())
         .platform(c.getPlatform())
@@ -70,6 +83,9 @@ public class CreatorService {
         .niche(metric != null ? metric.getNiche() : null)
         .category(metric != null ? metric.getCategory() : null)
         .contentSummary(metric != null ? metric.getContentSummary() : null)
+        .estimatedFeeMin(feeMin)
+        .estimatedFeeMax(feeMax)
+        .actualFee(metric != null ? metric.getActualFee() : null)
         .recentPosts(recentPosts)
         .build();
   }

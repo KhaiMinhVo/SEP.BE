@@ -152,6 +152,19 @@ public class CreatorIngestionService {
     metric.setContact(request.getContact());
     metric.setCategory(request.getCategory());
 
+    // Fee Benchmark (Declarative fallback if crawler didn't supply)
+    if (request.getEstimatedFeeMin() != null && request.getEstimatedFeeMax() != null) {
+      metric.setEstimatedFeeMin(request.getEstimatedFeeMin());
+      metric.setEstimatedFeeMax(request.getEstimatedFeeMax());
+    } else {
+      FollowerFeeTier feeTier = FollowerFeeTier.fromFollowers(request.getFollowers());
+      metric.setEstimatedFeeMin(feeTier.getMinFee());
+      metric.setEstimatedFeeMax(feeTier.getMaxFee());
+    }
+    if (request.getActualFee() != null) {
+      metric.setActualFee(request.getActualFee());
+    }
+
     metric = metricRepository.save(metric);
 
     if (request.getRecentPosts() != null && !request.getRecentPosts().isEmpty()) {

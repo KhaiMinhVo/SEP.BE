@@ -190,38 +190,47 @@ public class CampaignService {
     List<CreatorDiscoveryResponse> responses =
         finalCandidates.stream()
             .map(
-                metric ->
-                    CreatorDiscoveryResponse.builder()
-                        .creatorId(metric.getCreator().getId())
-                        .platform(metric.getCreator().getPlatform())
-                        .userName(metric.getCreator().getUserName())
-                        .profileUrl(metric.getCreator().getProfileUrl())
-                        .followers(metric.getFollowers())
-                        .engagementRate(metric.getEngagementRate())
-                        .niche(metric.getNiche())
-                        .location(metric.getCreator().getLocation())
-                        .contentSummary(metric.getContentSummary())
-                        .displayName(metric.getCreator().getDisplayName())
-                        .avatarUrl(metric.getCreator().getAvatarUrl())
-                        .creatorType(metric.getCreatorType())
-                        .recentPosts(
-                            postsByCreatorId
-                                .getOrDefault(metric.getCreator().getId(), new ArrayList<>())
-                                .stream()
-                                .map(
-                                    p ->
-                                        com.influencermatch.backend.creator.dto.PostDto.builder()
-                                            .platformPostId(p.getPlatformPostId())
-                                            .postUrl(p.getPostUrl())
-                                            .caption(p.getCaption())
-                                            .views(p.getViews())
-                                            .likes(p.getLikes())
-                                            .comments(p.getComments())
-                                            .shares(p.getShares())
-                                            .postedAt(p.getPostedAt())
-                                            .build())
-                                .toList())
-                        .build())
+                metric -> {
+                  com.influencermatch.backend.creator.enums.FollowerFeeTier feeTier =
+                      com.influencermatch.backend.creator.enums.FollowerFeeTier.fromFollowers(metric.getFollowers());
+                  java.math.BigDecimal feeMin = metric.getEstimatedFeeMin() != null ? metric.getEstimatedFeeMin() : feeTier.getMinFee();
+                  java.math.BigDecimal feeMax = metric.getEstimatedFeeMax() != null ? metric.getEstimatedFeeMax() : feeTier.getMaxFee();
+
+                  return CreatorDiscoveryResponse.builder()
+                      .creatorId(metric.getCreator().getId())
+                      .platform(metric.getCreator().getPlatform())
+                      .userName(metric.getCreator().getUserName())
+                      .profileUrl(metric.getCreator().getProfileUrl())
+                      .followers(metric.getFollowers())
+                      .engagementRate(metric.getEngagementRate())
+                      .niche(metric.getNiche())
+                      .location(metric.getCreator().getLocation())
+                      .contentSummary(metric.getContentSummary())
+                      .displayName(metric.getCreator().getDisplayName())
+                      .avatarUrl(metric.getCreator().getAvatarUrl())
+                      .creatorType(metric.getCreatorType())
+                      .estimatedFeeMin(feeMin)
+                      .estimatedFeeMax(feeMax)
+                      .actualFee(metric.getActualFee())
+                      .recentPosts(
+                          postsByCreatorId
+                              .getOrDefault(metric.getCreator().getId(), new ArrayList<>())
+                              .stream()
+                              .map(
+                                  p ->
+                                      com.influencermatch.backend.creator.dto.PostDto.builder()
+                                          .platformPostId(p.getPlatformPostId())
+                                          .postUrl(p.getPostUrl())
+                                          .caption(p.getCaption())
+                                          .views(p.getViews())
+                                          .likes(p.getLikes())
+                                          .comments(p.getComments())
+                                          .shares(p.getShares())
+                                          .postedAt(p.getPostedAt())
+                                          .build())
+                              .toList())
+                      .build();
+                })
             .toList();
 
     int start = (int) pageable.getOffset();

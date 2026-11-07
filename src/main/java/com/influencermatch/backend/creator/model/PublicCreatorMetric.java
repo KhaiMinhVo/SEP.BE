@@ -81,6 +81,15 @@ public class PublicCreatorMetric {
 
   @Column(length = 120)
   private String category;
+
+  @Column(name = "estimated_fee_min", precision = 19, scale = 2)
+  private BigDecimal estimatedFeeMin;
+
+  @Column(name = "estimated_fee_max", precision = 19, scale = 2)
+  private BigDecimal estimatedFeeMax;
+
+  @Column(name = "actual_fee", precision = 19, scale = 2)
+  private BigDecimal actualFee;
   
   // Maps the TSVECTOR column to JPA for use in Criteria API search queries
   @Column(name = "search_vector", columnDefinition = "tsvector", insertable = false, updatable = false)

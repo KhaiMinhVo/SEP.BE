@@ -18,5 +18,8 @@ public record CreatorDiscoveryResponse(
     String displayName,
     String avatarUrl,
     String creatorType,
+    BigDecimal estimatedFeeMin,
+    BigDecimal estimatedFeeMax,
+    BigDecimal actualFee,
     java.util.List<PostDto> recentPosts
 ) {}

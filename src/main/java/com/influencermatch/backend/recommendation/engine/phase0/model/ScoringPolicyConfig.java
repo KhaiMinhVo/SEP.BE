@@ -26,4 +26,15 @@ public final class ScoringPolicyConfig {
 
   // Default fallback nội bộ cho các trường hợp đặc biệt
   public static final double DEFAULT_FALLBACK_K = 0.05;
+
+  // 4. Hợp đồng dữ liệu hệ thống (System Data Contract)
+  // engagementRate trong toàn bộ hệ thống được định nghĩa là tỷ lệ thập phân (Decimal Ratio) trong [0.0, 1.0].
+  // Ví dụ: 5.2% là 0.0520; 2.5% là 0.0250. Tuyệt đối không chấp nhận giá trị > 1.0 (ví dụ 5.0).
+  public static final double DATA_CONTRACT_ER_MAX = 1.0;
+
+  // 5. Missing-Feature Policy cho SM2 trong Bảng xếp hạng chính:
+  // Định nghĩa chuẩn duy nhất cho SM2: SM2 = 1/3 ER* + 1/3 VIEW* + 1/3 STAB* (mẫu số luôn luôn là 3.0).
+  // Khi Creator thiếu bài đăng đo độ ổn định (m < 2 bài), STAB áp dụng sàn bảo thủ (Conservative Policy Floor = 0.0).
+  // Tuyệt đối không tự tiện chia 2 hoặc gán số giả (như 0.50 hay 0.25) làm biến dạng xếp hạng đa tiêu chí.
+  public static final double STAB_MISSING_POLICY_FLOOR = 0.0;
 }

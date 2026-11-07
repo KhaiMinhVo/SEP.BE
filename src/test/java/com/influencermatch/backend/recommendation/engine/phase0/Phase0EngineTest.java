@@ -204,7 +204,7 @@ class Phase0EngineTest {
   }
 
   @Test
-  @DisplayName("Luồng 3: Error Isolation - Creator có dữ liệu âm bị loại INELIGIBLE mà không làm sập cả Run")
+  @DisplayName("Luồng 3: Error Isolation & Decoupling - Creator có dữ liệu âm KHÔNG bị xem là vi phạm Campaign")
   void testPhase0Orchestrator_errorIsolation_negativeMetrics() {
     Campaign campaign = Campaign.builder().platforms(List.of("TIKTOK")).build();
     UUID validCreatorId = UUID.randomUUID();
@@ -219,7 +219,7 @@ class Phase0EngineTest {
     when(invalidCand.getFollowers()).thenReturn(50_000L);
     when(invalidCand.getAvgViews()).thenReturn(BigDecimal.valueOf(10_000));
     when(invalidCand.getAvgLikes()).thenReturn(BigDecimal.valueOf(-500)); // Âm!
-    when(invalidCand.getEngagementRate()).thenReturn(BigDecimal.valueOf(-5.0));
+    when(invalidCand.getEngagementRate()).thenReturn(BigDecimal.valueOf(0.05));
 
     List<NormalizedCandidateContext> results = orchestrator.execute(
         List.of(validCand, invalidCand),
@@ -231,16 +231,20 @@ class Phase0EngineTest {
     assertThat(results).hasSize(2);
 
     var validRes = results.stream().filter(r -> r.creatorId().equals(validCreatorId)).findFirst().orElseThrow();
-    assertThat(validRes.status()).isNotEqualTo(Phase0Status.INELIGIBLE);
+    assertThat(validRes.isCampaignEligible()).isTrue();
+    assertThat(validRes.isDataError()).isFalse();
 
     var invalidRes = results.stream().filter(r -> r.creatorId().equals(invalidCreatorId)).findFirst().orElseThrow();
-    assertThat(invalidRes.status()).isEqualTo(Phase0Status.INELIGIBLE);
-    assertThat(invalidRes.exclusionReasons().get(0)).contains("INVALID_METRICS");
+    // Tách biệt: Thỏa mãn Campaign nhưng bị lỗi dữ liệu!
+    assertThat(invalidRes.isCampaignEligible()).isTrue();
+    assertThat(invalidRes.eligibilityReasons()).isEmpty();
+    assertThat(invalidRes.isDataError()).isTrue();
+    assertThat(invalidRes.dataQualityReasons().get(0)).contains("DATA_QUALITY_ERROR: NEGATIVE_METRIC");
   }
 
   @Test
-  @DisplayName("Phase 1 - SM2: Khi STAB là Double.NaN, SM2 tính trung bình 2 tính năng (ER* + VR*) / 2.0")
-  void testPublicPerformanceScorer_missingStabilityCalculatesTwoFeatureMean() {
+  @DisplayName("Phase 1 - SM2: Chốt Missing-Feature Policy - Mẫu số luôn luôn là 3.0 với sàn bảo thủ STAB=0.0")
+  void testPublicPerformanceScorer_missingFeaturePolicy_consistentDefinition() {
     com.influencermatch.backend.recommendation.engine.memory.PublicPerformanceScorer scorer =
         new com.influencermatch.backend.recommendation.engine.memory.PublicPerformanceScorer();
 
@@ -264,11 +268,25 @@ class Phase0EngineTest {
     );
 
     var res = scorer.score(p0MissingStab, null);
-    // (0.60 + 0.80) / 2.0 = 0.70
-    assertThat(res.sm2Norm()).isEqualTo(0.70);
-    assertThat(res.score100()).isEqualTo(70.0);
+    // (0.60 + 0.80 + 0.0) / 3.0 = 1.40 / 3.0 ≈ 0.4667 (không chia 2, không gán 0.50)
+    assertThat(res.sm2Norm()).isCloseTo(1.40 / 3.0, org.assertj.core.data.Offset.offset(1e-4));
+    assertThat(res.score100()).isCloseTo((1.40 / 3.0) * 100.0, org.assertj.core.data.Offset.offset(1e-2));
     assertThat(res.isStabImputed()).isTrue();
     assertThat(res.stabNorm()).isNaN();
+  }
+
+  @Test
+  @DisplayName("Luồng 2: Bỏ suy đoán ER - Từ chối giá trị > 1.0 (ví dụ 5.0) theo Hợp đồng Schema tỷ lệ thập phân")
+  void testEvidenceValidator_rejectsEngagementRateAboveOne() {
+    RecommendationCandidateProjection candWithPercentEr = mock(RecommendationCandidateProjection.class);
+    when(candWithPercentEr.getCreatorId()).thenReturn(UUID.randomUUID());
+    when(candWithPercentEr.getPlatform()).thenReturn("TIKTOK");
+    when(candWithPercentEr.getFollowers()).thenReturn(10_000L);
+    when(candWithPercentEr.getEngagementRate()).thenReturn(BigDecimal.valueOf(5.2)); // Vi phạm: > 1.0!
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> evidenceValidator.evaluate(candWithPercentEr, Collections.emptyList()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("INVALID_ER_SCALE");
   }
 
   private RecommendationCandidateProjection mockCandidate(UUID id, String platform, Long followers) {
@@ -278,7 +296,7 @@ class Phase0EngineTest {
     when(c.getFollowers()).thenReturn(followers);
     when(c.getAvgViews()).thenReturn(BigDecimal.valueOf(10_000));
     when(c.getAvgLikes()).thenReturn(BigDecimal.valueOf(500));
-    when(c.getEngagementRate()).thenReturn(BigDecimal.valueOf(5.0));
+    when(c.getEngagementRate()).thenReturn(BigDecimal.valueOf(0.05));
     return c;
   }
 }

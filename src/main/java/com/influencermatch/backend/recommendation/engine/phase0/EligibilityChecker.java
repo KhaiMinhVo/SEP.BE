@@ -2,6 +2,7 @@ package com.influencermatch.backend.recommendation.engine.phase0;
 
 import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.creator.dto.RecommendationCandidateProjection;
+import com.influencermatch.backend.recommendation.engine.phase0.enums.CampaignEligibility;
 import com.influencermatch.backend.recommendation.engine.phase0.enums.Phase0Status;
 import java.util.ArrayList;
 import java.util.List;
@@ -11,21 +12,22 @@ import java.util.UUID;
 public class EligibilityChecker {
 
   public record Result(
+      CampaignEligibility campaignEligibility,
       Phase0Status status,
       List<String> reasons,
       boolean outsideFollowers,
       boolean priceUnknown
   ) {
     public boolean eligible() {
-      return status == Phase0Status.ELIGIBLE;
+      return campaignEligibility == CampaignEligibility.ELIGIBLE;
     }
 
     public boolean isExcluded() {
-      return status == Phase0Status.INELIGIBLE;
+      return campaignEligibility == CampaignEligibility.INELIGIBLE;
     }
 
     public boolean isPendingData() {
-      return status == Phase0Status.PENDING_DATA;
+      return campaignEligibility == CampaignEligibility.PENDING_PLATFORM;
     }
   }
 
@@ -36,7 +38,7 @@ public class EligibilityChecker {
 
     List<String> reasons = new ArrayList<>();
     boolean isHardIneligible = false;
-    boolean isPendingData = false;
+    boolean isPendingPlatform = false;
 
     // 1. Hard Exclusion: KOC nằm trong danh sách loại trừ (Negative Constraints từ Feedback)
     if (excludedIds != null && excludedIds.contains(cand.getCreatorId())) {
@@ -48,7 +50,7 @@ public class EligibilityChecker {
     String candPlatform = cand.getPlatform() != null ? cand.getPlatform().trim().toUpperCase() : "";
     if (candPlatform.isEmpty()) {
       reasons.add("MISSING_PLATFORM: Creator platform is unknown");
-      isPendingData = true;
+      isPendingPlatform = true;
     } else {
       List<String> allowedPlatforms = (campaign != null && campaign.getPlatforms() != null)
           ? campaign.getPlatforms()
@@ -79,16 +81,20 @@ public class EligibilityChecker {
     // 4. Soft: Giá (Chưa có giá -> PRICE_UNKNOWN, không loại)
     boolean priceUnknown = true;
 
-    // Quy tắc ưu tiên nghiêm ngặt: INELIGIBLE > PENDING_DATA > ELIGIBLE
+    // Quy tắc ưu tiên nghiêm ngặt cho Campaign: INELIGIBLE > PENDING_PLATFORM > ELIGIBLE
+    CampaignEligibility campaignEligibility;
     Phase0Status status;
     if (isHardIneligible) {
+      campaignEligibility = CampaignEligibility.INELIGIBLE;
       status = Phase0Status.INELIGIBLE;
-    } else if (isPendingData) {
+    } else if (isPendingPlatform) {
+      campaignEligibility = CampaignEligibility.PENDING_PLATFORM;
       status = Phase0Status.PENDING_DATA;
     } else {
+      campaignEligibility = CampaignEligibility.ELIGIBLE;
       status = Phase0Status.ELIGIBLE;
     }
 
-    return new Result(status, reasons, outsideFollowers, priceUnknown);
+    return new Result(campaignEligibility, status, reasons, outsideFollowers, priceUnknown);
   }
 }

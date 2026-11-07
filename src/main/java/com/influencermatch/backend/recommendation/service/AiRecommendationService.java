@@ -163,13 +163,19 @@ public class AiRecommendationService {
       Map<UUID, NormalizedCandidateContext> phase0Map = phase0Results.stream()
           .collect(Collectors.toMap(NormalizedCandidateContext::creatorId, r -> r, (a, b) -> a));
 
-      // Filter eligible candidates for ranking
+      // Filter eligible candidates for ranking (tách biệt Campaign Eligibility và Data Quality)
       List<RecommendationCandidateProjection> eligibleCandidates = new ArrayList<>();
       for (RecommendationCandidateProjection cand : rawCandidates) {
         NormalizedCandidateContext p0 = phase0Map.get(cand.getCreatorId());
-        if (p0 != null && p0.isExcluded()) {
-          log.info("Candidate {} excluded in Phase 0: {}", cand.getCreatorId(), p0.exclusionReasons());
-          continue;
+        if (p0 != null) {
+          if (!p0.isCampaignEligible()) {
+            log.info("Candidate {} excluded: Ineligible for campaign: {}", cand.getCreatorId(), p0.eligibilityReasons());
+            continue;
+          }
+          if (p0.isDataError()) {
+            log.warn("Candidate {} excluded: Data quality error (not a campaign violation): {}", cand.getCreatorId(), p0.dataQualityReasons());
+            continue;
+          }
         }
         eligibleCandidates.add(cand);
       }

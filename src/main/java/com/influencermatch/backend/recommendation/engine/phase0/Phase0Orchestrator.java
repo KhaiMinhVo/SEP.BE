@@ -3,7 +3,8 @@ package com.influencermatch.backend.recommendation.engine.phase0;
 import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.creator.dto.RecommendationCandidateProjection;
 import com.influencermatch.backend.creator.model.Post;
-import com.influencermatch.backend.recommendation.engine.phase0.enums.Phase0Status;
+import com.influencermatch.backend.recommendation.engine.phase0.enums.CampaignEligibility;
+import com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness;
 import com.influencermatch.backend.recommendation.engine.phase0.model.NormalizedCandidateContext;
 import com.influencermatch.backend.recommendation.engine.phase0.model.ScoringPolicyConfig;
 import java.util.ArrayList;
@@ -34,12 +35,14 @@ public class Phase0Orchestrator {
       UUID creatorId = cand.getCreatorId();
       String platform = cand.getPlatform() != null ? cand.getPlatform().trim().toUpperCase() : "";
 
-      // LUỒNG 1: Eligibility (Hard Constraints with Precedence INELIGIBLE > PENDING_DATA > ELIGIBLE)
+      // LUỒNG 1: Campaign Eligibility (Hard Constraints với Precedence INELIGIBLE > PENDING_PLATFORM > ELIGIBLE)
       var elig = eligibilityChecker.check(cand, campaign, excludedIds);
       if (elig.isExcluded()) {
         results.add(new NormalizedCandidateContext(
-            creatorId, cand.getMasterId(), platform, Phase0Status.INELIGIBLE,
-            elig.reasons(), 0.0, 0.0, Double.NaN, 0.0, 0.0, Double.NaN, null, 0, false, 0.0,
+            creatorId, cand.getMasterId(), platform,
+            CampaignEligibility.INELIGIBLE, ScoringReadiness.INVALID_DATA,
+            elig.reasons(), List.of(),
+            0.0, 0.0, Double.NaN, 0.0, 0.0, Double.NaN, null, 0, false, 0.0,
             ScoringPolicyConfig.CALIBRATION_VERSION
         ));
         continue;
@@ -47,20 +50,20 @@ public class Phase0Orchestrator {
 
       if (elig.isPendingData()) {
         results.add(new NormalizedCandidateContext(
-            creatorId, cand.getMasterId(), platform, Phase0Status.PENDING_DATA,
-            elig.reasons(), 0.0, 0.0, Double.NaN, 0.0, 0.0, Double.NaN, null, 0, false, 0.0,
+            creatorId, cand.getMasterId(), platform,
+            CampaignEligibility.PENDING_PLATFORM, ScoringReadiness.PROVISIONAL,
+            elig.reasons(), List.of(),
+            0.0, 0.0, Double.NaN, 0.0, 0.0, Double.NaN, null, 0, false, 0.0,
             ScoringPolicyConfig.CALIBRATION_VERSION
         ));
         continue;
       }
 
-      // LUỒNG 2 & 3: Evidence Validation & Policy-Based Saturation Normalization with Error Isolation
+      // LUỒNG 2 & 3: Evidence Validation & Policy-Based Saturation Normalization với Error Isolation
       try {
-        // LUỒNG 2: Evidence Validation (Crawler 3 bài gần nhất)
+        // LUỒNG 2: Evidence Validation
         List<Post> posts = postsByCreator != null ? postsByCreator.get(creatorId) : null;
         var ev = evidenceValidator.evaluate(cand, posts);
-
-        Phase0Status status = ev.canComputeStability() ? Phase0Status.ELIGIBLE : Phase0Status.PENDING_DATA;
 
         // LUỒNG 3: Policy-Based Saturation Normalization (x / (x + K))
         double kEr = policyNormalizer.resolveKEr(platform, ev.erMethod());
@@ -71,24 +74,30 @@ public class Phase0Orchestrator {
         double stabNorm = Double.isNaN(ev.rawStab()) ? Double.NaN : Math.max(0.0, Math.min(1.0, ev.rawStab()));
 
         results.add(new NormalizedCandidateContext(
-            creatorId, cand.getMasterId(), platform, status,
-            List.of(), erNorm, vrNorm, stabNorm,
+            creatorId, cand.getMasterId(), platform,
+            CampaignEligibility.ELIGIBLE, ev.scoringReadiness(),
+            List.of(), ev.dataQualityReasons(),
+            erNorm, vrNorm, stabNorm,
             ev.rawEr(), ev.rawVr(), ev.rawStab(),
             ev.erMethod(), ev.postCount(), ev.isStabImputed(), ev.evidenceReliabilityM2(),
             ScoringPolicyConfig.CALIBRATION_VERSION
         ));
       } catch (IllegalArgumentException ex) {
-        // Error isolation: Creator-level data error (e.g. negative numbers)
-        // Mark individual creator INELIGIBLE without crashing the entire run
+        // TÁCH BIỆT: Lỗi chất lượng dữ liệu (âm, ER vượt scale, dữ liệu lỗi)
+        // Creator này KHÔNG vi phạm điều kiện Campaign (campaignEligibility vẫn là ELIGIBLE!)
+        // Chỉ bị đánh dấu ScoringReadiness = INVALID_DATA
         results.add(new NormalizedCandidateContext(
-            creatorId, cand.getMasterId(), platform, Phase0Status.INELIGIBLE,
-            List.of("INVALID_METRICS: " + ex.getMessage()), 0.0, 0.0, Double.NaN,
-            0.0, 0.0, Double.NaN, null, 0, false, 0.0,
+            creatorId, cand.getMasterId(), platform,
+            CampaignEligibility.ELIGIBLE, ScoringReadiness.INVALID_DATA,
+            List.of(), List.of("DATA_QUALITY_ERROR: " + ex.getMessage()),
+            0.0, 0.0, Double.NaN,
+            0.0, 0.0, Double.NaN,
+            null, 0, false, 0.0,
             ScoringPolicyConfig.CALIBRATION_VERSION
         ));
       }
-      // Note: IllegalStateException (e.g. invalid system policy K <= 0) is intentionally unhandled
-      // so it halts the entire run if system policy configuration is broken.
+      // Note: IllegalStateException (lỗi cấu hình hệ thống K <= 0) cố ý KHÔNG bắt
+      // để dừng toàn bộ Run nếu hệ thống bị cấu hình sai.
     }
 
     return results;

@@ -140,14 +140,14 @@ class AiRecommendationServicePhase2Test {
     // Kênh 1: TikTok với ER thấp
     RecommendationCandidateProjection tiktokCand = mockCandidate(
         tiktokId, masterId, "TIKTOK", "Trang Dao TikTok", 50_000L,
-        BigDecimal.valueOf(10_000), BigDecimal.valueOf(200), BigDecimal.valueOf(2.0),
+        BigDecimal.valueOf(10_000), BigDecimal.valueOf(200), BigDecimal.valueOf(0.02),
         "Beauty", "Cosmetics", 0.70
     );
 
     // Kênh 2: Instagram cùng KOC nhưng ER và semantic cao hơn
     RecommendationCandidateProjection igCand = mockCandidate(
         instagramId, masterId, "INSTAGRAM", "Trang Dao IG", 80_000L,
-        BigDecimal.valueOf(20_000), BigDecimal.valueOf(1_500), BigDecimal.valueOf(7.5),
+        BigDecimal.valueOf(20_000), BigDecimal.valueOf(1_500), BigDecimal.valueOf(0.075),
         "Beauty", "Skincare", 0.82
     );
 
@@ -155,7 +155,7 @@ class AiRecommendationServicePhase2Test {
     UUID otherId = UUID.randomUUID();
     RecommendationCandidateProjection otherCand = mockCandidate(
         otherId, null, "TIKTOK", "Lan Anh Review", 30_000L,
-        BigDecimal.valueOf(15_000), BigDecimal.valueOf(900), BigDecimal.valueOf(6.0),
+        BigDecimal.valueOf(15_000), BigDecimal.valueOf(900), BigDecimal.valueOf(0.06),
         "Beauty", "Lifestyle", 0.75
     );
 
@@ -182,7 +182,7 @@ class AiRecommendationServicePhase2Test {
     UUID creatorId = UUID.randomUUID();
     RecommendationCandidateProjection cand = mockCandidate(
         creatorId, null, "TIKTOK", "Newbie KOC", 25_000L,
-        BigDecimal.valueOf(10_000), BigDecimal.valueOf(500), BigDecimal.valueOf(5.0),
+        BigDecimal.valueOf(10_000), BigDecimal.valueOf(500), BigDecimal.valueOf(0.05),
         "Beauty", "Skincare", 0.60
     );
 
@@ -199,7 +199,7 @@ class AiRecommendationServicePhase2Test {
     UUID normalId = UUID.randomUUID();
     RecommendationCandidateProjection cand = mockCandidate(
         normalId, null, "TIKTOK", "Fit KOC", 50_000L,
-        BigDecimal.valueOf(25_000), BigDecimal.valueOf(1_250), BigDecimal.valueOf(5.0),
+        BigDecimal.valueOf(25_000), BigDecimal.valueOf(1_250), BigDecimal.valueOf(0.05),
         "Beauty", "Skincare", 0.80
     );
     ScoreBreakdownDto score = service.calculateFourMemoryScores(cand, campaign, brandProfileId);
@@ -216,7 +216,7 @@ class AiRecommendationServicePhase2Test {
     UUID creatorId = UUID.randomUUID();
     RecommendationCandidateProjection cand = mockCandidate(
         creatorId, null, "TIKTOK", "Mai Anh", 20_000L,
-        BigDecimal.valueOf(10_000), BigDecimal.valueOf(500), BigDecimal.valueOf(5.0),
+        BigDecimal.valueOf(10_000), BigDecimal.valueOf(500), BigDecimal.valueOf(0.05),
         "Beauty", "Skincare", 0.65
     );
 

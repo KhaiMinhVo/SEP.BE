@@ -1,0 +1,69 @@
+package com.influencermatch.backend.recommendation.engine.critic;
+
+import com.influencermatch.backend.recommendation.engine.critic.model.EngineWeights;
+import java.util.Optional;
+
+/**
+ * Phase 3: Dynamic Weight Blender.
+ * Blends business priority weights b_g,j (based on Campaign Objective)
+ * with statistical objective weights q_j from CRITIC using parameter lambda:
+ * w_j = (1 - lambda) * b_g,j + lambda * q_j.
+ * Automatically engages BUSINESS_FALLBACK (lambda = 0) if statistical variance is absent.
+ */
+public class DynamicWeightBlender {
+
+  public static final double DEFAULT_LAMBDA = 0.30;
+
+  public EngineWeights blend(String objective, Optional<double[]> criticWeightsOpt) {
+    return blend(objective, criticWeightsOpt, DEFAULT_LAMBDA);
+  }
+
+  public EngineWeights blend(String objective, Optional<double[]> criticWeightsOpt, double lambda) {
+    double[] b = resolveBusinessWeights(objective);
+
+    if (criticWeightsOpt.isEmpty() || lambda <= 0.0) {
+      return new EngineWeights(
+          b[0], b[1], b[2], b[3],
+          "BUSINESS_FALLBACK",
+          0.0,
+          null,
+          b
+      );
+    }
+
+    double[] q = criticWeightsOpt.get();
+    double effectiveLambda = Math.max(0.0, Math.min(1.0, lambda));
+
+    double[] w = new double[4];
+    double sum = 0.0;
+    for (int j = 0; j < 4; j++) {
+      w[j] = (1.0 - effectiveLambda) * b[j] + effectiveLambda * q[j];
+      sum += w[j];
+    }
+
+    // Ensure unit sum
+    for (int j = 0; j < 4; j++) {
+      w[j] /= sum;
+    }
+
+    return new EngineWeights(
+        w[0], w[1], w[2], w[3],
+        "CRITIC_BLENDED",
+        effectiveLambda,
+        q,
+        b
+    );
+  }
+
+  public double[] resolveBusinessWeights(String objective) {
+    if (objective == null) {
+      return new double[] {0.15, 0.35, 0.35, 0.15};
+    }
+    return switch (objective.trim().toUpperCase()) {
+      case "CONVERSION" -> new double[] {0.40, 0.15, 0.30, 0.15};
+      case "ENGAGEMENT" -> new double[] {0.15, 0.35, 0.35, 0.15};
+      case "AWARENESS" -> new double[] {0.10, 0.35, 0.40, 0.15};
+      default -> new double[] {0.15, 0.35, 0.35, 0.15};
+    };
+  }
+}

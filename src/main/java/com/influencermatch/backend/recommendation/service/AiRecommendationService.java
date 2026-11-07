@@ -20,10 +20,13 @@ import com.influencermatch.backend.creator.repository.PublicCreatorMetricReposit
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.recommendation.dto.*;
+import com.influencermatch.backend.recommendation.engine.FourMemoryTopsisEngine;
+import com.influencermatch.backend.recommendation.engine.confidence.model.ConfidenceAssessment;
 import com.influencermatch.backend.recommendation.engine.phase0.Phase0Orchestrator;
-import com.influencermatch.backend.recommendation.engine.phase0.PolicyNormalizer;
-import com.influencermatch.backend.recommendation.engine.phase0.enums.ErMethod;
 import com.influencermatch.backend.recommendation.engine.phase0.model.NormalizedCandidateContext;
+import com.influencermatch.backend.recommendation.engine.presentation.DeterministicReasoningGenerator;
+import com.influencermatch.backend.recommendation.engine.presentation.DisplaySorter;
+import com.influencermatch.backend.recommendation.engine.presentation.enums.DisplayMode;
 import com.influencermatch.backend.relationship.enums.ShortlistStatus;
 import com.influencermatch.backend.relationship.model.ShortlistItem;
 import com.influencermatch.backend.relationship.repository.ShortlistItemRepository;
@@ -54,6 +57,11 @@ public class AiRecommendationService {
   private final RecommendationRunRepository recommendationRunRepository;
   private final AiServiceClient aiServiceClient;
   private final ObjectMapper objectMapper;
+
+  private final Phase0Orchestrator phase0Orchestrator = new Phase0Orchestrator();
+  private final FourMemoryTopsisEngine fourMemoryTopsisEngine = new FourMemoryTopsisEngine();
+  private final DisplaySorter displaySorter = new DisplaySorter();
+  private final DeterministicReasoningGenerator deterministicReasoningGenerator = new DeterministicReasoningGenerator();
 
   private static final UUID DUMMY_UUID = UUID.fromString("00000000-0000-0000-0000-000000000000");
 
@@ -132,80 +140,96 @@ public class AiRecommendationService {
       }
 
       // 5. Phase 0: Eligibility Checking, Evidence Validation & Policy-Based Normalization
-      Phase0Orchestrator phase0Orchestrator = new Phase0Orchestrator();
       List<NormalizedCandidateContext> phase0Results =
           phase0Orchestrator.execute(rawCandidates, campaign, excludedIds, null);
 
       Map<UUID, NormalizedCandidateContext> phase0Map = phase0Results.stream()
           .collect(Collectors.toMap(NormalizedCandidateContext::creatorId, r -> r, (a, b) -> a));
 
-      // 6. Four-Memory Feature Scorer & Fixed-Ideal TOPSIS Ranking
-      List<ScoredCandidate> scoredList = new ArrayList<>();
+      // Filter eligible candidates for ranking
+      List<RecommendationCandidateProjection> eligibleCandidates = new ArrayList<>();
       for (RecommendationCandidateProjection cand : rawCandidates) {
         NormalizedCandidateContext p0 = phase0Map.get(cand.getCreatorId());
         if (p0 != null && p0.isExcluded()) {
           log.info("Candidate {} excluded in Phase 0: {}", cand.getCreatorId(), p0.exclusionReasons());
           continue;
         }
-        ScoreBreakdownDto breakdown = calculateFourMemoryScores(cand, campaign, brandProfileId, p0);
-        scoredList.add(new ScoredCandidate(cand, breakdown));
+        eligibleCandidates.add(cand);
       }
 
+      // 6. Phase 1-5: Four-Memory Scoring, CRITIC, Blended Weights, Fixed-Ideal TOPSIS & Confidence
+      List<BrandPattern> brandPatterns = brandPatternRepository.findByBrandProfileId(brandProfileId);
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> evaluatedList =
+          fourMemoryTopsisEngine.evaluateAndRank(
+              eligibleCandidates,
+              phase0Map,
+              campaign,
+              cand -> {
+                List<HistoricalCampaign> past = historicalCampaignRepository.findByCreatorId(cand.getCreatorId());
+                if (past.isEmpty() && cand.getMasterId() != null) {
+                  past = historicalCampaignRepository.findByMasterId(cand.getMasterId());
+                }
+                return past;
+              },
+              brandPatterns
+          );
+
       // 7. Master-aware Grouping (Khử trùng lặp đa kênh - Mỗi KOC chỉ lấy 1 kênh điểm cao nhất)
-      Map<String, ScoredCandidate> uniqueKocs = new LinkedHashMap<>();
-      for (ScoredCandidate item : scoredList) {
-        String masterKey = item.candidate.getMasterId() != null
-            ? item.candidate.getMasterId().toString()
-            : item.candidate.getCreatorId().toString();
+      Map<String, FourMemoryTopsisEngine.EvaluatedCandidate> uniqueKocs = new LinkedHashMap<>();
+      for (FourMemoryTopsisEngine.EvaluatedCandidate item : evaluatedList) {
+        String masterKey = item.candidate().getMasterId() != null
+            ? item.candidate().getMasterId().toString()
+            : item.candidate().getCreatorId().toString();
 
         if (!uniqueKocs.containsKey(masterKey)) {
           uniqueKocs.put(masterKey, item);
         } else {
-          ScoredCandidate existing = uniqueKocs.get(masterKey);
-          if (item.breakdown.getFinalScore() > existing.breakdown.getFinalScore()) {
+          FourMemoryTopsisEngine.EvaluatedCandidate existing = uniqueKocs.get(masterKey);
+          if (item.matchScore() > existing.matchScore()) {
             uniqueKocs.put(masterKey, item);
           }
         }
       }
 
-      // 7. Sắp xếp điểm FinalScore giảm dần và chọn Top N (hoặc toàn bộ Shortlist nếu nhỏ hơn limit)
+      // 8. Sắp xếp điểm FinalScore giảm dần (deterministic) và chọn Top N
       int effectiveLimit = limit > 0 ? Math.min(limit, 50) : 30;
-      List<ScoredCandidate> topList =
-          uniqueKocs.values().stream()
-              .sorted(Comparator.comparingDouble((ScoredCandidate sc) -> sc.breakdown.getFinalScore()).reversed())
-              .limit(effectiveLimit)
-              .toList();
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> sortedCandidates =
+          displaySorter.sort(new ArrayList<>(uniqueKocs.values()), DisplayMode.BEST_MATCH);
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> topList = sortedCandidates.stream()
+          .limit(effectiveLimit)
+          .toList();
 
-      // 8. Tích hợp XAI Engine (POST /api/v1/ai/explain kèm Circuit Breaker)
+      // 9. Tích hợp XAI Engine (POST /api/v1/ai/explain kèm Circuit Breaker & Fallback)
       List<CreatorRecommendationItemDto> recommendationItems = new ArrayList<>();
-      for (ScoredCandidate item : topList) {
-        ReasoningCardDto reasoning = fetchReasoningCard(item.candidate, campaign, item.breakdown);
+      for (FourMemoryTopsisEngine.EvaluatedCandidate item : topList) {
+        ScoreBreakdownDto breakdown = fourMemoryTopsisEngine.toScoreBreakdownDto(item);
+        ReasoningCardDto reasoning = fetchReasoningCard(item.candidate(), campaign, breakdown, item.confidence());
 
         Optional<ShortlistItem> shortlistItemOpt =
-            shortlistItemRepository.findByCampaignIdAndCreatorId(campaignId, item.candidate.getCreatorId());
+            shortlistItemRepository.findByCampaignIdAndCreatorId(campaignId, item.candidate().getCreatorId());
         boolean inShortlist = shortlistItemOpt.isPresent() && shortlistItemOpt.get().getStatus() != ShortlistStatus.REMOVED;
         ShortlistStatus itemStatus = shortlistItemOpt.map(ShortlistItem::getStatus).orElse(null);
 
         recommendationItems.add(
             CreatorRecommendationItemDto.builder()
-                .creatorId(item.candidate.getCreatorId())
-                .masterId(item.candidate.getMasterId())
-                .platform(item.candidate.getPlatform())
-                .displayName(item.candidate.getDisplayName() != null ? item.candidate.getDisplayName() : item.candidate.getUserName())
-                .userName(item.candidate.getUserName())
-                .avatarUrl(item.candidate.getAvatarUrl())
-                .followers(item.candidate.getFollowers())
-                .avgViews(item.candidate.getAvgViews())
-                .avgLikes(item.candidate.getAvgLikes())
-                .engagementRate(item.candidate.getEngagementRate())
-                .niche(item.candidate.getNiche())
-                .category(item.candidate.getCategory())
-                .creatorType(item.candidate.getCreatorType())
-                .isClaimed(item.candidate.getMasterId() != null)
+                .creatorId(item.candidate().getCreatorId())
+                .masterId(item.candidate().getMasterId())
+                .platform(item.candidate().getPlatform())
+                .displayName(item.candidate().getDisplayName() != null ? item.candidate().getDisplayName() : item.candidate().getUserName())
+                .userName(item.candidate().getUserName())
+                .avatarUrl(item.candidate().getAvatarUrl())
+                .followers(item.candidate().getFollowers())
+                .avgViews(item.candidate().getAvgViews())
+                .avgLikes(item.candidate().getAvgLikes())
+                .engagementRate(item.candidate().getEngagementRate())
+                .niche(item.candidate().getNiche())
+                .category(item.candidate().getCategory())
+                .creatorType(item.candidate().getCreatorType())
+                .isClaimed(item.candidate().getMasterId() != null)
                 .isInShortlist(inShortlist)
                 .shortlistStatus(itemStatus)
-                .finalScore(roundToTwoDecimals(item.breakdown.getFinalScore()))
-                .scoreBreakdown(item.breakdown)
+                .finalScore(breakdown.getFinalScore())
+                .scoreBreakdown(breakdown)
                 .reasoning(reasoning)
                 .build()
         );
@@ -259,159 +283,31 @@ public class AiRecommendationService {
       UUID brandProfileId,
       NormalizedCandidateContext p0) {
 
-    // --- 1. Score M1 (Historical Reliability via Bayesian Beta-Binomial Smoothing) ---
     List<HistoricalCampaign> pastCampaigns = historicalCampaignRepository.findByCreatorId(cand.getCreatorId());
     if (pastCampaigns.isEmpty() && cand.getMasterId() != null) {
       pastCampaigns = historicalCampaignRepository.findByMasterId(cand.getMasterId());
     }
 
-    double p0Mean = 0.50; // prior mean
-    double kappa = 3.0; // prior strength
-    int n = pastCampaigns.size();
-    int s = 0;
-    double kpiSum = 0.0;
-    int kpiCount = 0;
+    List<BrandPattern> patterns = (brandProfileId != null)
+        ? brandPatternRepository.findByBrandProfileId(brandProfileId)
+        : Collections.emptyList();
 
-    for (HistoricalCampaign hist : pastCampaigns) {
-      if (hist.getOutcome() != null) {
-        BigDecimal roi = hist.getOutcome().getRoi();
-        if (roi != null && roi.doubleValue() >= 1.0) {
-          s++;
-        }
-        if (roi != null) {
-          double normRoi = Math.max(0.0, Math.min(1.0, roi.doubleValue() / 2.0));
-          kpiSum += normRoi;
-          kpiCount++;
-        }
-      } else {
-        s++; // mặc định hoàn thành hợp tác nếu không có outcome fail
-      }
-    }
+    FourMemoryTopsisEngine.EvaluatedCandidate evaluated =
+        fourMemoryTopsisEngine.evaluateSingle(cand, p0, campaign, pastCampaigns, patterns);
 
-    double pHat = (n == 0) ? p0Mean : (s + kappa * p0Mean) / (n + kappa);
-    double kpiScore = (kpiCount > 0) ? (kpiSum / kpiCount) : p0Mean;
-    double revScore = p0Mean; // fallback prior cho Brand Review
-
-    // Trọng số nội bộ SM1 (Objective-aware: Bayesian 0.30, KPI 0.50, Review 0.20)
-    double sm1Norm = (0.30 * pHat) + (0.50 * kpiScore) + (0.20 * revScore);
-    double m1Score = sm1Norm * 100.0;
-
-    // --- 2. Score M2 (Public Creator Intelligence: Equal-Weight Mean 1/3 ER* + 1/3 VIEW* + 1/3 STAB) ---
-    double erNorm;
-    double vrNorm;
-    double stabNorm;
-
-    if (p0 != null) {
-      erNorm = p0.erNormalized();
-      vrNorm = p0.vrNormalized();
-      stabNorm = p0.stabNormalized();
-    } else {
-      PolicyNormalizer normalizer = new PolicyNormalizer();
-      double rawEr = 0.0;
-      if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && cand.getAvgLikes() != null) {
-        rawEr = cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue();
-      } else if (cand.getEngagementRate() != null) {
-        rawEr = cand.getEngagementRate().doubleValue() / 100.0;
-      }
-      double kEr = normalizer.resolveKEr(cand.getPlatform(), ErMethod.BY_VIEWS);
-      erNorm = normalizer.normalize(rawEr, kEr);
-
-      double rawVr = 0.0;
-      long followers = cand.getFollowers() != null ? cand.getFollowers() : 0L;
-      double avgViews = cand.getAvgViews() != null ? cand.getAvgViews().doubleValue() : 0.0;
-      if (followers > 0 && avgViews > 0) {
-        rawVr = avgViews / followers;
-      }
-      double kVr = normalizer.resolveKVr(cand.getPlatform());
-      vrNorm = normalizer.normalize(rawVr, kVr);
-
-      stabNorm = (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0) ? 0.75 : 0.50;
-    }
-
-    // Equal-Weight Mean
-    double sm2Norm = (erNorm + vrNorm + stabNorm) / 3.0;
-    double m2Score = sm2Norm * 100.0;
-
-    // --- 3. Score M3 (Current Campaign Context: Semantic Relevance Cosine (c + 1)/2) ---
-    double rawCosine = cand.getSemanticScore() != null ? cand.getSemanticScore() : 0.50;
-    double clampedCosine = Math.max(-1.0, Math.min(1.0, rawCosine));
-    double sm3Norm = (clampedCosine + 1.0) / 2.0;
-    double m3Score = sm3Norm * 100.0;
-
-    // --- 4. Score M4 (Brand Context: Preference Coverage Tag Matching |B_b ∩ T_i| / |B_b|) ---
-    List<String> campaignNiches = campaign.getNiches() != null ? campaign.getNiches() : Collections.emptyList();
-    String candNiche = cand.getNiche() != null ? cand.getNiche().trim().toLowerCase() : "";
-    String candCat = cand.getCategory() != null ? cand.getCategory().trim().toLowerCase() : "";
-
-    double sm4Norm = 0.50;
-    if (!campaignNiches.isEmpty()) {
-      long matches = campaignNiches.stream()
-          .filter(niche -> {
-            String lowerN = niche.trim().toLowerCase();
-            return lowerN.equalsIgnoreCase(candNiche)
-                || lowerN.equalsIgnoreCase(candCat)
-                || (!candNiche.isEmpty() && candNiche.contains(lowerN))
-                || (!candCat.isEmpty() && candCat.contains(lowerN));
-          })
-          .count();
-      sm4Norm = (double) matches / campaignNiches.size();
-    }
-
-    // Kết hợp BrandPattern nếu có
-    List<BrandPattern> patterns = brandPatternRepository.findByBrandProfileId(brandProfileId);
-    if (!patterns.isEmpty()) {
-      BrandPattern pattern = patterns.get(0);
-      if (pattern.getPlatform() != null && pattern.getPlatform().equalsIgnoreCase(cand.getPlatform())) {
-        sm4Norm = Math.min(1.0, sm4Norm + 0.10);
-      }
-    }
-    double m4Score = sm4Norm * 100.0;
-
-    // --- 5. Context-Aware Dynamic Weights & Fixed-Ideal TOPSIS Ranking ---
-    // Business Priority Weights theo Campaign Objective
-    String objective = campaign.getObjective() != null ? campaign.getObjective().name() : "AWARENESS";
-    double w1, w2, w3, w4;
-    switch (objective) {
-      case "CONVERSION" -> { w1 = 0.40; w2 = 0.15; w3 = 0.30; w4 = 0.15; }
-      case "ENGAGEMENT" -> { w1 = 0.15; w2 = 0.35; w3 = 0.35; w4 = 0.15; }
-      case "AWARENESS" -> { w1 = 0.10; w2 = 0.35; w3 = 0.40; w4 = 0.15; }
-      default -> { w1 = 0.15; w2 = 0.35; w3 = 0.35; w4 = 0.15; }
-    }
-
-    // Fixed-Ideal TOPSIS: A+ = (1,1,1,1), A- = (0,0,0,0)
-    double dPos = Math.sqrt(
-        Math.pow(w1 * (1.0 - sm1Norm), 2) +
-        Math.pow(w2 * (1.0 - sm2Norm), 2) +
-        Math.pow(w3 * (1.0 - sm3Norm), 2) +
-        Math.pow(w4 * (1.0 - sm4Norm), 2)
-    );
-
-    double dNeg = Math.sqrt(
-        Math.pow(w1 * sm1Norm, 2) +
-        Math.pow(w2 * sm2Norm, 2) +
-        Math.pow(w3 * sm3Norm, 2) +
-        Math.pow(w4 * sm4Norm, 2)
-    );
-
-    double denom = dPos + dNeg;
-    double topsisCloseness = (denom > 1e-9) ? (dNeg / denom) : 0.50;
-    double finalScore = topsisCloseness * 100.0;
-
-    return ScoreBreakdownDto.builder()
-        .m1Score(roundToTwoDecimals(m1Score))
-        .m2Score(roundToTwoDecimals(m2Score))
-        .m3Score(roundToTwoDecimals(m3Score))
-        .m4Score(roundToTwoDecimals(m4Score))
-        .followerScore(roundToTwoDecimals(vrNorm * 100.0))
-        .engagementScore(roundToTwoDecimals(erNorm * 100.0))
-        .semanticMatchScore(roundToTwoDecimals(m3Score))
-        .nicheMatchScore(roundToTwoDecimals(m4Score))
-        .finalScore(roundToTwoDecimals(finalScore))
-        .build();
+    return fourMemoryTopsisEngine.toScoreBreakdownDto(evaluated);
   }
 
   private ReasoningCardDto fetchReasoningCard(
       RecommendationCandidateProjection cand, Campaign campaign, ScoreBreakdownDto breakdown) {
+    return fetchReasoningCard(cand, campaign, breakdown, null);
+  }
+
+  private ReasoningCardDto fetchReasoningCard(
+      RecommendationCandidateProjection cand,
+      Campaign campaign,
+      ScoreBreakdownDto breakdown,
+      ConfidenceAssessment confidence) {
 
     double candEr = cand.getEngagementRate() != null ? cand.getEngagementRate().doubleValue() : 0.0;
     Double erViews = (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && cand.getAvgLikes() != null)
@@ -433,13 +329,21 @@ public class AiRecommendationService {
         .campaignBrief(campaign.getProductService() != null ? campaign.getProductService() : campaign.getName())
         .build();
 
-    ExplainResponseDto response = aiServiceClient.getExplanation(explainReq);
+    try {
+      ExplainResponseDto response = aiServiceClient.getExplanation(explainReq);
+      if (response != null) {
+        return ReasoningCardDto.builder()
+            .summary(response.getSummary())
+            .reasons(response.getReasons())
+            .explanationAvailable(response.isExplanationAvailable())
+            .build();
+      }
+    } catch (Exception e) {
+      log.warn("AI service explanation call failed for creator {}, falling back to deterministic template: {}",
+          cand.getCreatorId(), e.getMessage());
+    }
 
-    return ReasoningCardDto.builder()
-        .summary(response.getSummary())
-        .reasons(response.getReasons())
-        .explanationAvailable(response.isExplanationAvailable())
-        .build();
+    return deterministicReasoningGenerator.generate(cand, campaign, breakdown, confidence);
   }
 
   /**

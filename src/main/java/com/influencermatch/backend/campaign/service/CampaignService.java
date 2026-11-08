@@ -245,6 +245,8 @@ public class CampaignService {
               .userName(metric.getCreator().getUserName())
               .profileUrl(metric.getCreator().getProfileUrl())
               .followers(metric.getFollowers())
+              .followerChange7d(metric.getFollowerChange7d())
+              .followerGrowthRate(metric.getFollowerGrowthRate())
               .engagementRate(metric.getEngagementRate())
               .niche(metric.getNiche())
               .location(metric.getCreator().getLocation())

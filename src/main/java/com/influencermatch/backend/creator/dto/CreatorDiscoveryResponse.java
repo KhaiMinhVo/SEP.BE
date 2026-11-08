@@ -11,6 +11,8 @@ public record CreatorDiscoveryResponse(
     String userName,
     String profileUrl,
     Long followers,
+    Long followerChange7d,
+    BigDecimal followerGrowthRate,
     BigDecimal engagementRate,
     String niche,
     String location,

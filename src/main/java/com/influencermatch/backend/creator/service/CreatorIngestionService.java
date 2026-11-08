@@ -135,6 +135,25 @@ public class CreatorIngestionService {
         metricRepository.findByCreatorId(savedCreator.getId()).orElseGet(
             () -> PublicCreatorMetric.builder().creator(savedCreator).build());
 
+    // Tính toán độ tăng trưởng follower (Follower Growth Tracking)
+    Long oldFollowers = metric.getFollowers();
+    Long newFollowers = request.getFollowers();
+    if (oldFollowers != null && newFollowers != null && oldFollowers > 0) {
+      long delta = newFollowers - oldFollowers;
+      metric.setPreviousFollowers(oldFollowers);
+      metric.setFollowerChange7d(delta);
+      double growth = ((double) delta / oldFollowers) * 100.0;
+      metric.setFollowerGrowthRate(java.math.BigDecimal.valueOf(growth).setScale(2, java.math.RoundingMode.HALF_UP));
+    } else if (request.getFollowerChange7d() != null) {
+      metric.setPreviousFollowers(request.getPreviousFollowers());
+      metric.setFollowerChange7d(request.getFollowerChange7d());
+      metric.setFollowerGrowthRate(request.getFollowerGrowthRate());
+    } else if (metric.getFollowers() == null && newFollowers != null) {
+      metric.setPreviousFollowers(newFollowers);
+      metric.setFollowerChange7d(0L);
+      metric.setFollowerGrowthRate(java.math.BigDecimal.ZERO);
+    }
+
     metric.setFollowers(request.getFollowers());
     metric.setAvgViews(request.getAvgViews());
     metric.setAvgLikes(request.getAvgLikes());

@@ -23,6 +23,9 @@ public class CreatorIngestionRequest {
 
   // Metrics
   private Long followers;
+  private Long previousFollowers;
+  private Long followerChange7d;
+  private BigDecimal followerGrowthRate;
   private BigDecimal avgViews;
   private BigDecimal avgLikes;
   private BigDecimal avgComments;

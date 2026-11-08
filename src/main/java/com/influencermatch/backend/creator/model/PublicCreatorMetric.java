@@ -36,6 +36,15 @@ public class PublicCreatorMetric {
 
   private Long followers;
 
+  @Column(name = "previous_followers")
+  private Long previousFollowers;
+
+  @Column(name = "follower_change_7d")
+  private Long followerChange7d;
+
+  @Column(name = "follower_growth_rate", precision = 7, scale = 2)
+  private BigDecimal followerGrowthRate;
+
   @Column(name = "avg_views", precision = 19, scale = 2)
   private BigDecimal avgViews;
 

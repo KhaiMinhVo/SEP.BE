@@ -21,7 +21,7 @@ public record NormalizedCandidateContext(
     List<String> eligibilityReasons, // Lý do Campaign: PLATFORM_MISMATCH, EXCLUDED_BY_FEEDBACK, ACCOUNT_INACTIVE
     List<String> dataQualityReasons,  // Lý do Dữ liệu: INVALID_METRICS, SHORT_WINDOW_INSUFFICIENT_POSTS
 
-    // Điểm chuẩn hóa [0, 1) sẵn sàng bàn giao cho Phase 1
+    // Điểm chuẩn hóa: ER*, VR* thuộc [0, 1) qua hàm bão hòa; STAB* thuộc (0, 1] (bằng 1.0 khi CV = 0), hoặc Double.NaN nội bộ khi thiếu dữ liệu
     double erNormalized,
     double vrNormalized,
     double stabNormalized,
@@ -38,6 +38,14 @@ public record NormalizedCandidateContext(
     double evidenceReliabilityM2, // r_i2
     String calibrationVersion
 ) {
+
+  /**
+   * Canonical constructor với defensive copy đảm bảo tính bất biến thực sự.
+   */
+  public NormalizedCandidateContext {
+    eligibilityReasons = eligibilityReasons != null ? List.copyOf(eligibilityReasons) : List.of();
+    dataQualityReasons = dataQualityReasons != null ? List.copyOf(dataQualityReasons) : List.of();
+  }
 
   /**
    * Alias tương thích ngược cho isStabImputed().

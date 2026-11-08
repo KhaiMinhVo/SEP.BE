@@ -131,6 +131,7 @@ public class AiRecommendationService {
         boolean hasPlatforms = campaign.getPlatforms() != null && !campaign.getPlatforms().isEmpty();
         Collection<String> safePlatforms = hasPlatforms ? campaign.getPlatforms() : List.of("TIKTOK");
 
+        int retrievalLimit = Math.max(limit * 3, 50);
         rawCandidates =
             publicCreatorMetricRepository.findTopCandidatesByEmbedding(
                 briefVectorStr,
@@ -140,7 +141,7 @@ public class AiRecommendationService {
                 safePlatforms,
                 campaign.getFollowerMin(),
                 campaign.getFollowerMax(),
-                50
+                retrievalLimit
             );
         log.info("Shortlist was empty. Retrieved {} raw candidates via pgvector search for campaign {}", rawCandidates.size(), campaignId);
       } else {
@@ -157,8 +158,23 @@ public class AiRecommendationService {
         List<com.influencermatch.backend.creator.model.Post> posts = postRepository.findByCreatorIdIn(candidateIds);
         if (posts != null && !posts.isEmpty()) {
           postsByCreator = posts.stream()
-              .filter(p -> p.getCreator() != null && p.getCreator().getId() != null)
-              .collect(Collectors.groupingBy(p -> p.getCreator().getId()));
+              .filter(p -> p != null && p.getCreator() != null && p.getCreator().getId() != null)
+              .filter(p -> p.getViews() != null && p.getViews() >= 0)
+              .collect(Collectors.groupingBy(
+                  p -> p.getCreator().getId(),
+                  Collectors.collectingAndThen(
+                      Collectors.toList(),
+                      list -> list.stream()
+                          .sorted((a, b) -> {
+                            if (a.getCreatedAt() != null && b.getCreatedAt() != null) {
+                              return b.getCreatedAt().compareTo(a.getCreatedAt());
+                            }
+                            return 0;
+                          })
+                          .limit(3)
+                          .toList()
+                  )
+              ));
         }
       }
 
@@ -213,12 +229,17 @@ public class AiRecommendationService {
         );
       }
 
-      // Đánh giá sơ bộ (Provisional Reference Score) độc lập ngoài bảng chính cho provisionalCandidates
+      // Lấy weight vector của run: nếu bảng chính có ứng viên thì dùng weights của run, ngược lại dùng fallback
+      com.influencermatch.backend.recommendation.engine.critic.model.EngineWeights runWeights = !evaluatedReadyList.isEmpty()
+          ? evaluatedReadyList.get(0).weights()
+          : fourMemoryTopsisEngine.getFallbackWeights(campaign != null && campaign.getObjective() != null ? campaign.getObjective().name() : "AWARENESS");
+
+      // Đánh giá sơ bộ (Provisional Reference Score) độc lập với cùng bộ trọng số runWeights
       List<FourMemoryTopsisEngine.EvaluatedCandidate> evaluatedProvisionalList = new ArrayList<>();
       for (RecommendationCandidateProjection cand : provisionalCandidates) {
         NormalizedCandidateContext p0 = phase0Map.get(cand.getCreatorId());
         List<HistoricalCampaign> past = historyProvider.apply(cand);
-        evaluatedProvisionalList.add(fourMemoryTopsisEngine.evaluateSingle(cand, p0, campaign, past, brandPatterns));
+        evaluatedProvisionalList.add(fourMemoryTopsisEngine.evaluateSingle(cand, p0, campaign, past, brandPatterns, runWeights));
       }
 
       // 7. Master-aware Grouping trên Main Ranking Pool (SCORE_READY)
@@ -304,6 +325,44 @@ public class AiRecommendationService {
         );
       }
 
+      // Xây dựng danh sách bổ sung Provisional (Additional Creators to Consider) tách bạch
+      List<CreatorRecommendationItemDto> provisionalItems = new ArrayList<>();
+      for (FourMemoryTopsisEngine.EvaluatedCandidate item : evaluatedProvisionalList) {
+        ScoreBreakdownDto breakdown = fourMemoryTopsisEngine.toScoreBreakdownDto(item);
+        ReasoningCardDto reasoning = fetchReasoningCard(item.candidate(), campaign, breakdown, item.confidence());
+
+        Optional<ShortlistItem> shortlistItemOpt =
+            shortlistItemRepository.findByCampaignIdAndCreatorId(campaignId, item.candidate().getCreatorId());
+        boolean inShortlist = shortlistItemOpt.isPresent() && shortlistItemOpt.get().getStatus() != ShortlistStatus.REMOVED;
+        ShortlistStatus itemStatus = shortlistItemOpt.map(ShortlistItem::getStatus).orElse(null);
+
+        provisionalItems.add(
+            CreatorRecommendationItemDto.builder()
+                .creatorId(item.candidate().getCreatorId())
+                .masterId(item.candidate().getMasterId())
+                .platform(item.candidate().getPlatform())
+                .displayName(item.candidate().getDisplayName() != null ? item.candidate().getDisplayName() : item.candidate().getUserName())
+                .userName(item.candidate().getUserName())
+                .avatarUrl(item.candidate().getAvatarUrl())
+                .followers(item.candidate().getFollowers())
+                .avgViews(item.candidate().getAvgViews())
+                .avgLikes(item.candidate().getAvgLikes())
+                .engagementRate(item.candidate().getEngagementRate())
+                .niche(item.candidate().getNiche())
+                .category(item.candidate().getCategory())
+                .creatorType(item.candidate().getCreatorType())
+                .isClaimed(item.candidate().getMasterId() != null)
+                .isInShortlist(inShortlist)
+                .shortlistStatus(itemStatus)
+                .finalScore(breakdown.getFinalScore())
+                .scoreBreakdown(breakdown)
+                .reasoning(reasoning)
+                .isScoreReady(false)
+                .isProvisional(true)
+                .build()
+        );
+      }
+
       // 9. Lưu vết RecommendationRun
       RecommendationRun run =
           recommendationRunRepository.save(
@@ -323,6 +382,7 @@ public class AiRecommendationService {
           .contextVersion(contextVersion)
           .totalCandidates(recommendationItems.size())
           .recommendations(recommendationItems)
+          .provisionalRecommendations(provisionalItems)
           .build();
 
     } catch (Exception e) {

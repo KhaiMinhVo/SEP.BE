@@ -141,12 +141,30 @@ public class FourMemoryTopsisEngine {
         ? campaign.getObjective().name()
         : "AWARENESS";
 
-    CandidateMemoryScores scores = fourMemoryScorer.evaluate(cand, p0, campaign, past, brandPatterns);
     EngineWeights weights = weightBlender.blend(objective, Optional.empty()); // Uses objective-specific business weights
+    return evaluateSingle(cand, p0, campaign, past, brandPatterns, weights);
+  }
+
+  /**
+   * Evaluates a single candidate using an explicitly provided weight vector (e.g. sharing the same run weights).
+   */
+  public EvaluatedCandidate evaluateSingle(
+      RecommendationCandidateProjection cand,
+      NormalizedCandidateContext p0,
+      Campaign campaign,
+      List<HistoricalCampaign> past,
+      List<BrandPattern> brandPatterns,
+      EngineWeights weights) {
+
+    CandidateMemoryScores scores = fourMemoryScorer.evaluate(cand, p0, campaign, past, brandPatterns);
     TopsisResult topsis = topsisEngine.compute(scores, weights);
     ConfidenceAssessment confidence = confidenceCalculator.calculate(scores, weights);
 
     return new EvaluatedCandidate(cand, scores, topsis, confidence, weights);
+  }
+
+  public EngineWeights getFallbackWeights(String objective) {
+    return weightBlender.blend(objective, Optional.empty());
   }
 
   /**
@@ -168,6 +186,9 @@ public class FourMemoryTopsisEngine {
   }
 
   private double roundTwoDecimals(double value) {
+    if (Double.isNaN(value) || Double.isInfinite(value)) {
+      return 0.0;
+    }
     return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).doubleValue();
   }
 

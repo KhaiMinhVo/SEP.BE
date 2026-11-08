@@ -360,6 +360,47 @@ class Phase0EngineTest {
     assertThat(resRejectedNull.reasons()).contains("EXCLUDED_BY_FEEDBACK", "UNKNOWN_ACCOUNT_STATUS: Creator account status is unknown");
   }
 
+  @Test
+  @DisplayName("Luồng 2: Cửa sổ 3 bài đo độ ổn định - DB có 20 bài, hệ thống chọn đúng 3 bài hợp lệ gần nhất")
+  void testEvidenceValidator_twentyPostsInDb_strictlySelectsLatestThreeValidPosts() {
+    UUID creatorId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(creatorId, "TIKTOK", 50_000L);
+
+    List<com.influencermatch.backend.creator.model.Post> posts = new ArrayList<>();
+    java.time.LocalDateTime now = java.time.LocalDateTime.now();
+
+    // 17 bài cũ với views = 1,000 (đăng từ 20 ngày trước đến 4 ngày trước)
+    for (int i = 20; i >= 4; i--) {
+      posts.add(com.influencermatch.backend.creator.model.Post.builder()
+          .views(1_000L).likes(50L).comments(10L).shares(5L)
+          .createdAt(now.minusDays(i))
+          .build());
+    }
+
+    // 3 bài gần nhất: views = 10,000, 20,000, 30,000 (mean = 20,000; s_V = 10,000; CV = 0.50; STAB = 1 / 1.50 = 0.6667)
+    posts.add(com.influencermatch.backend.creator.model.Post.builder()
+        .views(10_000L).likes(500L).comments(100L).shares(50L)
+        .createdAt(now.minusDays(3))
+        .build());
+    posts.add(com.influencermatch.backend.creator.model.Post.builder()
+        .views(20_000L).likes(1_000L).comments(200L).shares(100L)
+        .createdAt(now.minusDays(2))
+        .build());
+    posts.add(com.influencermatch.backend.creator.model.Post.builder()
+        .views(30_000L).likes(1_500L).comments(300L).shares(150L)
+        .createdAt(now.minusDays(1))
+        .build());
+
+    var metrics = evidenceValidator.evaluate(cand, posts);
+
+    assertThat(metrics.canComputeStability()).isTrue();
+    assertThat(metrics.isStabImputed()).isFalse();
+    // CV = 10,000 / 20,000 = 0.5; STAB = 1 / (1 + 0.5) = 2/3 ≈ 0.6667
+    assertThat(metrics.rawStab()).isCloseTo(2.0 / 3.0, org.assertj.core.data.Offset.offset(1e-4));
+    // Độ tin cậy r_i2 vẫn phản ánh lịch sử có 20 bài (>= 10 bài -> 1.00)
+    assertThat(metrics.evidenceReliabilityM2()).isEqualTo(1.00);
+  }
+
   private RecommendationCandidateProjection mockCandidate(UUID id, String platform, Long followers) {
     RecommendationCandidateProjection c = mock(RecommendationCandidateProjection.class);
     when(c.getCreatorId()).thenReturn(id);

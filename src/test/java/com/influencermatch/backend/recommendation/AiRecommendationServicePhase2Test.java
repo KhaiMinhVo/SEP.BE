@@ -309,6 +309,10 @@ class AiRecommendationServicePhase2Test {
 
     // Ready KOC được xếp đầu trong bảng xếp hạng chính vì đã SCORE_READY
     assertThat(response.getRecommendations().get(0).getCreatorId()).isEqualTo(readyId);
+
+    // Bể provisionalRecommendations được phân tách riêng biệt cho FE hiển thị Additional Creators to Consider
+    assertThat(response.getProvisionalRecommendations()).hasSize(1);
+    assertThat(response.getProvisionalRecommendations().get(0).getCreatorId()).isEqualTo(provId);
   }
 
   private RecommendationCandidateProjection mockCandidate(

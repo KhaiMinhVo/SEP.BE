@@ -59,6 +59,7 @@ public class EvidenceValidator {
   /**
    * Xác định thời điểm đăng bài thực tế: ưu tiên postedAt (ISO-8601 từ social platform),
    * nếu không có thì fallback sang createdAt (thời điểm crawler lưu vào CSDL).
+   * Chuẩn hóa timezone sang UTC để độc lập hoàn toàn với timezone của máy chủ Backend.
    */
   public static java.time.Instant resolvePostTime(Post p) {
     if (p == null) return java.time.Instant.EPOCH;
@@ -68,15 +69,35 @@ public class EvidenceValidator {
       } catch (Exception ignored) {
         try {
           return java.time.LocalDateTime.parse(p.getPostedAt())
-              .atZone(java.time.ZoneId.systemDefault())
+              .atZone(java.time.ZoneOffset.UTC)
               .toInstant();
         } catch (Exception ignored2) {}
       }
     }
     if (p.getCreatedAt() != null) {
-      return p.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant();
+      return p.getCreatedAt().atZone(java.time.ZoneOffset.UTC).toInstant();
     }
     return java.time.Instant.EPOCH;
+  }
+
+  /**
+   * Chọn cửa sổ N bài đăng gần nhất theo thời điểm đăng thực tế (postedAt ưu tiên hơn createdAt).
+   * Dùng chung một hàm duy nhất giữa Service và Validator, có tie-breaker theo Post ID để bảo đảm tính tất định.
+   */
+  public static List<Post> selectRecentWindow(List<Post> posts, int limit) {
+    if (posts == null || posts.isEmpty()) return Collections.emptyList();
+    return posts.stream()
+        .filter(Objects::nonNull)
+        .sorted((a, b) -> {
+          int cmp = resolvePostTime(b).compareTo(resolvePostTime(a));
+          if (cmp != 0) return cmp;
+          if (a.getId() != null && b.getId() != null) {
+            return b.getId().compareTo(a.getId());
+          }
+          return 0;
+        })
+        .limit(limit)
+        .toList();
   }
 
   public EvidenceMetrics evaluate(
@@ -139,46 +160,89 @@ public class EvidenceValidator {
     double rawEr;
 
     if (posts != null && !posts.isEmpty()) {
-      // Khi có posts: ER tính trực tiếp từ bài đăng (luôn luôn là tỷ lệ thập phân chuẩn)
-      if (totalViews > 0) {
+      // Khi có danh sách bài: Phân tách bài có views và bài không có views (bài ảnh)
+      List<Post> postsWithViews = posts.stream()
+          .filter(p -> p.getViews() != null && p.getViews() >= 0)
+          .toList();
+
+      if (!postsWithViews.isEmpty()) {
+        // Có bài đăng hỗ trợ Views: Chỉ tính ER trên chính tập bài có Views để tránh phóng đại tương tác
         erMethod = ErMethod.BY_VIEWS;
-        rawEr = totalInteractions / totalViews;
-      } else if (followers > 0) {
-        erMethod = ErMethod.BY_FOLLOWERS;
-        rawEr = (totalInteractions / postCount) / followers;
+        double viewsSum = postsWithViews.stream().mapToDouble(p -> p.getViews().doubleValue()).sum();
+        double interactionsOnViewPosts = postsWithViews.stream().mapToDouble(p ->
+            (p.getLikes() != null ? p.getLikes().doubleValue() : 0.0) +
+            (p.getComments() != null ? p.getComments().doubleValue() : 0.0) +
+            (p.getShares() != null ? p.getShares().doubleValue() : 0.0)
+        ).sum();
+
+        if (viewsSum > 0) {
+          rawEr = interactionsOnViewPosts / viewsSum;
+        } else {
+          // viewsSum == 0: Tất cả video đều có 0 lượt xem thực tế
+          if (interactionsOnViewPosts == 0) {
+            // Quan sát thật: 0 tương tác trên 0 lượt xem -> ER = 0.0 (KHÔNG tự chuyển sang BY_FOLLOWERS)
+            rawEr = 0.0;
+          } else if (followers > 0) {
+            // Có tương tác nhưng views = 0 (trễ crawler) -> fallback sang Followers
+            erMethod = ErMethod.BY_FOLLOWERS;
+            rawEr = (totalInteractions / postCount) / followers;
+          } else {
+            rawEr = Double.NaN;
+          }
+        }
       } else {
-        erMethod = ErMethod.BY_VIEWS;
-        rawEr = 0.0;
+        // TẤT CẢ bài đều không có trường views (ví dụ bài ảnh Facebook / Instagram photo)
+        erMethod = ErMethod.BY_FOLLOWERS;
+        if (followers > 0) {
+          rawEr = (totalInteractions / postCount) / followers;
+        } else {
+          rawEr = Double.NaN; // Không có followers để chia
+        }
       }
     } else {
-      // Khi không có posts: Dùng hợp đồng dữ liệu rõ ràng từ DB metric
-      if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0) {
-        erMethod = ErMethod.BY_VIEWS;
-        if (dbEr > 0) {
-          rawEr = dbEr;
+      // Khi không có posts:
+      if (cand.getEngagementRate() != null) {
+        // Giữ nguyên giá trị ER tổng hợp từ DB (kể cả 0.0 là quan sát thật)
+        rawEr = cand.getEngagementRate().doubleValue();
+        if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0) {
+          erMethod = ErMethod.BY_VIEWS;
         } else {
-          rawEr = (cand.getAvgLikes() != null) ? (cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue()) : 0.0;
-        }
-      } else if (followers > 0) {
-        erMethod = ErMethod.BY_FOLLOWERS;
-        if (dbEr > 0) {
-          rawEr = dbEr;
-        } else {
-          rawEr = (cand.getAvgLikes() != null) ? (cand.getAvgLikes().doubleValue() / followers) : 0.0;
+          erMethod = ErMethod.BY_FOLLOWERS;
         }
       } else {
-        erMethod = ErMethod.BY_VIEWS;
-        rawEr = 0.0;
+        // cand.getEngagementRate() == null (DB không có ER tổng hợp)
+        if (cand.getAvgLikes() != null) {
+          if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0) {
+            erMethod = ErMethod.BY_VIEWS;
+            rawEr = cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue(); // Like Rate proxy
+          } else if (followers > 0) {
+            erMethod = ErMethod.BY_FOLLOWERS;
+            rawEr = cand.getAvgLikes().doubleValue() / followers;
+          } else {
+            erMethod = ErMethod.BY_VIEWS;
+            rawEr = Double.NaN;
+          }
+        } else {
+          // Hoàn toàn không có dữ liệu để tính ER
+          erMethod = ErMethod.BY_VIEWS;
+          rawEr = Double.NaN;
+        }
       }
     }
 
     // 3. Tính View-to-Follower Ratio (VR)
-    double avgViews = (postCount > 0) ? (totalViews / postCount) : (cand.getAvgViews() != null ? cand.getAvgViews().doubleValue() : 0.0);
-    double rawVr = (followers > 0 && avgViews > 0) ? (avgViews / followers) : 0.0;
+    double rawVr;
+    if (postCount > 0) {
+      double avgViews = totalViews / postCount;
+      rawVr = (followers > 0) ? (avgViews / followers) : 0.0;
+    } else if (cand.getAvgViews() != null) {
+      rawVr = (followers > 0) ? (cand.getAvgViews().doubleValue() / followers) : 0.0;
+    } else {
+      rawVr = Double.NaN;
+    }
 
     // 4. Tính View Stability (STAB = 1 / (1 + CV)) trên CỬA SỔ 3 BÀI GẦN NHẤT
-    // Sắp xếp theo ngày đăng thực tế (postedAt ưu tiên hơn createdAt).
-    // Không nhảy cóc qua bài thiếu views sang bài cũ trong lịch sử để che giấu dữ liệu thiếu.
+    // Sử dụng chung hàm selectRecentWindow() với tie-breaker tất định theo Post ID.
     double rawStab;
     boolean canComputeStability = false;
     boolean stabilityEvidenceUnavailable = false;
@@ -186,21 +250,7 @@ public class EvidenceValidator {
     ScoringReadiness scoringReadiness;
     List<String> dataQualityReasons;
 
-    List<Post> recentThreePosts = Collections.emptyList();
-    if (posts != null && !posts.isEmpty()) {
-      recentThreePosts = posts.stream()
-          .filter(Objects::nonNull)
-          .sorted((a, b) -> {
-            int cmp = resolvePostTime(b).compareTo(resolvePostTime(a));
-            if (cmp != 0) return cmp;
-            if (a.getId() != null && b.getId() != null) {
-              return b.getId().compareTo(a.getId());
-            }
-            return 0;
-          })
-          .limit(3)
-          .toList();
-    }
+    List<Post> recentThreePosts = selectRecentWindow(posts, 3);
 
     // Lọc các bài có lượt xem hợp lệ trong chính cửa sổ 3 bài gần nhất
     List<Post> validWindowPosts = recentThreePosts.stream()
@@ -226,7 +276,7 @@ public class EvidenceValidator {
       rawStab = 1.0 / (1.0 + cv);
       canComputeStability = true;
       stabilityEvidenceUnavailable = false;
-      evidenceReliabilityM2 = (postCount >= 10) ? 1.00 : ((postCount >= 3) ? 0.65 : 0.45);
+      evidenceReliabilityM2 = (postCount >= 10) ? 1.00 : ((postCount >= 3) ? 0.65 : ((postCount == 2) ? 0.45 : 0.20));
     } else {
       // Trong cửa sổ 3 bài gần nhất có ít hơn 2 bài có views hợp lệ HOẶC views = 0
       rawStab = Double.NaN;
@@ -235,7 +285,7 @@ public class EvidenceValidator {
       evidenceReliabilityM2 = 0.20; // Bằng chứng rất yếu
     }
 
-    // ĐIỀU KIỆN SCORE_READY: Xác định dựa trên việc CẢ BA feature thực sự hợp lệ, không chỉ dựa trên postCount!
+    // 5. Xác định Scoring Readiness: Phân biệt rõ ràng giữa thiếu bằng chứng (PROVISIONAL) và lỗi dữ liệu (INVALID_DATA)
     boolean erValid = !Double.isNaN(rawEr) && !Double.isInfinite(rawEr) && rawEr >= 0.0;
     boolean vrValid = !Double.isNaN(rawVr) && !Double.isInfinite(rawVr) && rawVr >= 0.0;
     boolean stabValid = canComputeStability && !Double.isNaN(rawStab) && !Double.isInfinite(rawStab) && rawStab > 0.0;
@@ -243,18 +293,23 @@ public class EvidenceValidator {
     if (erValid && vrValid && stabValid) {
       scoringReadiness = ScoringReadiness.SCORE_READY;
       dataQualityReasons = List.of();
-    } else {
+    } else if (erValid && vrValid) {
+      // ER và VR hợp lệ, CHỈ thiếu bằng chứng STAB (cửa sổ bài < 2 hoặc views = 0)
       scoringReadiness = ScoringReadiness.PROVISIONAL;
       List<String> reasons = new ArrayList<>();
-      if (!stabValid) {
-        if (avgViews == 0.0 && postCount >= 2) {
-          reasons.add("ZERO_VIEWS_FOR_STABILITY: Average views is 0 across posts, stability cannot be evaluated");
-        } else {
-          reasons.add(String.format("SHORT_WINDOW_INSUFFICIENT_POSTS: Post count %d < 2 for stability evaluation", postCount));
-        }
+      if (stabAvgViews == 0.0 && validWindowPosts.size() >= 2) {
+        reasons.add("ZERO_VIEWS_FOR_STABILITY: Average views is 0 across posts, stability cannot be evaluated");
+      } else {
+        reasons.add(String.format("SHORT_WINDOW_INSUFFICIENT_POSTS: Valid posts in 3-post window %d < 2 for stability evaluation", validWindowPosts.size()));
       }
-      if (!erValid) reasons.add("INVALID_ER_FEATURE");
-      if (!vrValid) reasons.add("INVALID_VR_FEATURE");
+      dataQualityReasons = Collections.unmodifiableList(reasons);
+    } else {
+      // ER hoặc VR bị NaN / Infinite hoặc vi phạm hợp đồng dữ liệu
+      scoringReadiness = ScoringReadiness.INVALID_DATA;
+      List<String> reasons = new ArrayList<>();
+      if (!erValid) reasons.add("INVALID_OR_MISSING_ER_FEATURE");
+      if (!vrValid) reasons.add("INVALID_OR_MISSING_VR_FEATURE");
+      if (!stabValid) reasons.add("STABILITY_EVIDENCE_UNAVAILABLE");
       dataQualityReasons = Collections.unmodifiableList(reasons);
     }
 

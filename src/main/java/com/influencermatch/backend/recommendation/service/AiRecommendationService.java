@@ -159,19 +159,11 @@ public class AiRecommendationService {
             .toList();
         List<com.influencermatch.backend.creator.model.Post> posts = postRepository.findByCreatorIdIn(candidateIds);
         if (posts != null && !posts.isEmpty()) {
+          // Gom nhóm toàn bộ bài đăng theo creatorId để EvidenceValidator đánh giá đúng Historical Count
+          // và tự động chọn chính xác cửa sổ 3 bài gần nhất qua selectRecentWindow()
           postsByCreator = posts.stream()
               .filter(p -> p != null && p.getCreator() != null && p.getCreator().getId() != null)
-              .collect(Collectors.groupingBy(
-                  p -> p.getCreator().getId(),
-                  Collectors.collectingAndThen(
-                      Collectors.toList(),
-                      list -> list.stream()
-                          .sorted((a, b) -> com.influencermatch.backend.recommendation.engine.phase0.EvidenceValidator.resolvePostTime(b)
-                              .compareTo(com.influencermatch.backend.recommendation.engine.phase0.EvidenceValidator.resolvePostTime(a)))
-                          .limit(3)
-                          .toList()
-                  )
-              ));
+              .collect(Collectors.groupingBy(p -> p.getCreator().getId()));
         }
       }
 

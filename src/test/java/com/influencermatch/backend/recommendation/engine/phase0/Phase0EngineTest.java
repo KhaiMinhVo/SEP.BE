@@ -554,6 +554,91 @@ class Phase0EngineTest {
         .hasMessageContaining("Criteria weights must be non-negative");
   }
 
+  @Test
+  @DisplayName("Luồng 2: Video có Views = 0 thực tế - Giữ nguyên phương pháp BY_VIEWS và ER = 0, không tự chuyển sang BY_FOLLOWERS")
+  void testEvidenceValidator_zeroViewsVideos_preservesByViewsMethodAndZeroEr() {
+    RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
+    List<Post> posts = List.of(
+        Post.builder().id(UUID.randomUUID()).views(0L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-03T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(0L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-02T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(0L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-01T10:00:00Z").build()
+    );
+
+    var metrics = evidenceValidator.evaluate(cand, posts);
+
+    assertThat(metrics.erMethod()).isEqualTo(ErMethod.BY_VIEWS);
+    assertThat(metrics.rawEr()).isEqualTo(0.0);
+  }
+
+  @Test
+  @DisplayName("Luồng 2: Bài ảnh không có trường Views - Tự động tính ER theo BY_FOLLOWERS chuẩn xác")
+  void testEvidenceValidator_photoPostsWithoutViews_usesByFollowersMethod() {
+    RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "INSTAGRAM", 10_000L);
+    List<Post> posts = List.of(
+        Post.builder().id(UUID.randomUUID()).views(null).likes(100L).comments(20L).shares(5L).postedAt("2026-11-02T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(null).likes(100L).comments(20L).shares(5L).postedAt("2026-11-01T10:00:00Z").build()
+    );
+
+    var metrics = evidenceValidator.evaluate(cand, posts);
+
+    assertThat(metrics.erMethod()).isEqualTo(ErMethod.BY_FOLLOWERS);
+    // (125 + 125) / 2 = 125 interactions/post; ER = 125 / 10,000 = 0.0125
+    assertThat(metrics.rawEr()).isCloseTo(0.0125, org.assertj.core.data.Offset.offset(1e-5));
+  }
+
+  @Test
+  @DisplayName("Luồng 2: Bài hỗn hợp (Video có Views + Ảnh không Views) - Không cộng tương tác của bài ảnh vào tử số của BY_VIEWS")
+  void testEvidenceValidator_mixedPosts_doesNotInflateErByAddingPhotoLikesToVideoViews() {
+    RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "INSTAGRAM", 10_000L);
+    List<Post> posts = List.of(
+        Post.builder().id(UUID.randomUUID()).views(1_000L).likes(50L).comments(10L).shares(5L).postedAt("2026-11-02T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(null).likes(500L).comments(50L).shares(10L).postedAt("2026-11-01T10:00:00Z").build()
+    );
+
+    var metrics = evidenceValidator.evaluate(cand, posts);
+
+    assertThat(metrics.erMethod()).isEqualTo(ErMethod.BY_VIEWS);
+    // ER = 65 interactions trên video / 1,000 views = 0.065 (Không được cộng 560 tương tác của bài ảnh thành 625 / 1000 = 0.625)
+    assertThat(metrics.rawEr()).isCloseTo(0.065, org.assertj.core.data.Offset.offset(1e-4));
+  }
+
+  @Test
+  @DisplayName("Luồng 2: DB ER = 0.0 thực tế quan sát được - Giữ nguyên 0.0, không coi là missing để fallback sang likes/views")
+  void testEvidenceValidator_dbErZeroObserved_preservesZeroWithoutFallback() {
+    RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
+    when(cand.getEngagementRate()).thenReturn(BigDecimal.valueOf(0.0));
+    when(cand.getAvgLikes()).thenReturn(BigDecimal.valueOf(500));
+    when(cand.getAvgViews()).thenReturn(BigDecimal.valueOf(10_000));
+
+    var metrics = evidenceValidator.evaluate(cand, Collections.emptyList());
+
+    assertThat(metrics.rawEr()).isEqualTo(0.0);
+  }
+
+  @Test
+  @DisplayName("Luồng 2: Thiếu dữ liệu tính ER và VR - Xếp loại INVALID_DATA, không cho phép vào PROVISIONAL")
+  void testEvidenceValidator_missingErAndNoWayToCompute_classifiedAsInvalidData() {
+    RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
+    when(cand.getEngagementRate()).thenReturn(null);
+    when(cand.getAvgLikes()).thenReturn(null);
+    when(cand.getAvgViews()).thenReturn(null);
+
+    var metrics = evidenceValidator.evaluate(cand, Collections.emptyList());
+
+    assertThat(Double.isNaN(metrics.rawEr())).isTrue();
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.INVALID_DATA);
+    assertThat(metrics.dataQualityReasons()).contains("INVALID_OR_MISSING_ER_FEATURE");
+  }
+
+  @Test
+  @DisplayName("Luồng 2: Timezone ISO-8601 không offset được chuẩn hóa sang UTC - Không phụ thuộc timezone máy chủ Backend")
+  void testEvidenceValidator_resolvePostTime_handlesLocalDateTimeWithoutTimezoneAsUtc() {
+    Post post = Post.builder().postedAt("2026-11-05T12:00:00").build();
+    java.time.Instant resolved = EvidenceValidator.resolvePostTime(post);
+
+    assertThat(resolved).isEqualTo(java.time.Instant.parse("2026-11-05T12:00:00Z"));
+  }
+
   private RecommendationCandidateProjection mockCandidate(UUID id, String platform, Long followers) {
     RecommendationCandidateProjection c = mock(RecommendationCandidateProjection.class);
     when(c.getCreatorId()).thenReturn(id);

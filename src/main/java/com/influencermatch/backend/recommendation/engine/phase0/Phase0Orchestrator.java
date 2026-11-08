@@ -92,7 +92,7 @@ public class Phase0Orchestrator {
             List.of(), List.of("DATA_QUALITY_ERROR: " + ex.getMessage()),
             0.0, 0.0, Double.NaN,
             0.0, 0.0, Double.NaN,
-            null, 0, false, 0.0,
+            null, 0, true, 0.0,
             ScoringPolicyConfig.CALIBRATION_VERSION
         ));
       }

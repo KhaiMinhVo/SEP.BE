@@ -125,12 +125,19 @@ public record NormalizedCandidateContext(
     return scoringReadiness == ScoringReadiness.INVALID_DATA;
   }
 
+  /**
+   * Creator có nền tảng/loại nội dung không cung cấp đủ metric cho bộ nhớ SM2 (ví dụ bài ảnh không có Views).
+   */
+  public boolean isNotScorable() {
+    return scoringReadiness == ScoringReadiness.NOT_SCORABLE;
+  }
+
   // --- Hỗ trợ tương thích ngược cho các module cũ ---
   public Phase0Status status() {
     if (campaignEligibility == CampaignEligibility.INELIGIBLE) {
       return Phase0Status.INELIGIBLE;
     }
-    if (scoringReadiness == ScoringReadiness.INVALID_DATA) {
+    if (scoringReadiness == ScoringReadiness.INVALID_DATA || scoringReadiness == ScoringReadiness.NOT_SCORABLE) {
       return Phase0Status.INELIGIBLE;
     }
     if (scoringReadiness == ScoringReadiness.PROVISIONAL || campaignEligibility == CampaignEligibility.PENDING_VERIFICATION) {
@@ -151,6 +158,8 @@ public record NormalizedCandidateContext(
   }
 
   public boolean isExcluded() {
-    return campaignEligibility == CampaignEligibility.INELIGIBLE || scoringReadiness == ScoringReadiness.INVALID_DATA;
+    return campaignEligibility == CampaignEligibility.INELIGIBLE ||
+        scoringReadiness == ScoringReadiness.INVALID_DATA ||
+        scoringReadiness == ScoringReadiness.NOT_SCORABLE;
   }
 }

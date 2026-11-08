@@ -188,6 +188,10 @@ public class AiRecommendationService {
             log.warn("Candidate {} excluded: Data quality error (not a campaign violation): {}", cand.getCreatorId(), p0.dataQualityReasons());
             continue;
           }
+          if (p0.isNotScorable()) {
+            log.info("Candidate {} excluded: Unsupported metrics for SM2 scoring: {}", cand.getCreatorId(), p0.dataQualityReasons());
+            continue;
+          }
           if (p0.isScoreReady()) {
             scoreReadyCandidates.add(cand);
           } else {

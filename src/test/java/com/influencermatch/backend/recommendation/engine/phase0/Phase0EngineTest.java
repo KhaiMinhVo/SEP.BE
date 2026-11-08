@@ -72,13 +72,16 @@ class Phase0EngineTest {
     assertThat(metrics.rawStab()).isBetween(0.0, 1.0);
     assertThat(metrics.evidenceReliabilityM2()).isEqualTo(0.65); // Cửa sổ 3 bài (Short-Window)
 
-    // KOC chỉ có 1 bài -> không thể tính độ lệch chuẩn mẫu s_V
+    // KOC chỉ có 1 bài -> không thể tính độ lệch chuẩn mẫu s_V (nhưng ER và VR đầy đủ -> PROVISIONAL)
     Post singlePost = Post.builder().views(12_000L).likes(500L).build();
     var singleMetrics = evidenceValidator.evaluate(cand, List.of(singlePost));
     assertThat(singleMetrics.canComputeStability()).isFalse();
     assertThat(singleMetrics.isStabImputed()).isTrue();
     assertThat(singleMetrics.rawStab()).isNaN(); // Giữ Double.NaN, không gán số giả tùy tiện
     assertThat(singleMetrics.evidenceReliabilityM2()).isEqualTo(0.20);
+    assertThat(singleMetrics.scoringReadiness())
+        .isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.PROVISIONAL);
+    assertThat(singleMetrics.dataQualityReasons()).anyMatch(r -> r.contains("SHORT_WINDOW_INSUFFICIENT_POSTS"));
   }
 
   @Test
@@ -308,7 +311,7 @@ class Phase0EngineTest {
   }
 
   @Test
-  @DisplayName("Luồng 2: Điều kiện SCORE_READY - 3 bài nhưng đều 0 views thì ra PROVISIONAL, không phải READY")
+  @DisplayName("Luồng 2: Video có 3 bài nhưng đều 0 views - Mẫu số views = 0 không thể tính ER, xếp loại NOT_SCORABLE")
   void testEvidenceValidator_zeroViewsWithPostsProducesProvisionalNotReady() {
     RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
 
@@ -320,8 +323,8 @@ class Phase0EngineTest {
     var metrics = evidenceValidator.evaluate(cand, List.of(p1, p2, p3));
     assertThat(metrics.canComputeStability()).isFalse();
     assertThat(metrics.scoringReadiness())
-        .isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.PROVISIONAL);
-    assertThat(metrics.dataQualityReasons().get(0)).contains("ZERO_VIEWS_FOR_STABILITY");
+        .isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.NOT_SCORABLE);
+    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("ER_UNAVAILABLE_ZERO_VIEWS_DENOMINATOR"));
   }
 
   @Test
@@ -501,7 +504,7 @@ class Phase0EngineTest {
   }
 
   @Test
-  @DisplayName("Luồng 2: Cả 3 bài đều có Views = 0 thì V_mean = 0 - Trả NaN cho STAB và xếp vào PROVISIONAL")
+  @DisplayName("Luồng 2: Cả 3 bài đều có Views = 0 thì V_mean = 0 và ER = NaN - Xếp vào NOT_SCORABLE")
   void testEvidenceValidator_allZeroViewsInWindow_returnsProvisionalAndNanStability() {
     RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
     List<Post> posts = List.of(
@@ -514,8 +517,8 @@ class Phase0EngineTest {
 
     assertThat(metrics.canComputeStability()).isFalse();
     assertThat(Double.isNaN(metrics.rawStab())).isTrue();
-    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.PROVISIONAL);
-    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("ZERO_VIEWS_FOR_STABILITY"));
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.NOT_SCORABLE);
+    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("ER_UNAVAILABLE_ZERO_VIEWS_DENOMINATOR"));
   }
 
   @Test
@@ -555,8 +558,8 @@ class Phase0EngineTest {
   }
 
   @Test
-  @DisplayName("Luồng 2: Video có Views = 0 thực tế - Giữ nguyên phương pháp BY_VIEWS và ER = 0, không tự chuyển sang BY_FOLLOWERS")
-  void testEvidenceValidator_zeroViewsVideos_preservesByViewsMethodAndZeroEr() {
+  @DisplayName("Luồng 2: Video có tổng Views = 0 và Interactions = 0 - ER không xác định (0/0 là NaN), xếp vào NOT_SCORABLE thay vì tự gán 0.0")
+  void testEvidenceValidator_zeroViewsVideos_returnsIndeterminateErWhenTotalViewsZero() {
     RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
     List<Post> posts = List.of(
         Post.builder().id(UUID.randomUUID()).views(0L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-03T10:00:00Z").build(),
@@ -567,12 +570,32 @@ class Phase0EngineTest {
     var metrics = evidenceValidator.evaluate(cand, posts);
 
     assertThat(metrics.erMethod()).isEqualTo(ErMethod.BY_VIEWS);
-    assertThat(metrics.rawEr()).isEqualTo(0.0);
+    // 0 / 0 là bất định toán học (NaN), không được giả định bằng 0.0
+    assertThat(Double.isNaN(metrics.rawEr())).isTrue();
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.NOT_SCORABLE);
+    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("ER_UNAVAILABLE_ZERO_VIEWS_DENOMINATOR"));
   }
 
   @Test
-  @DisplayName("Luồng 2: Bài ảnh không có trường Views - Tự động tính ER theo BY_FOLLOWERS chuẩn xác")
-  void testEvidenceValidator_photoPostsWithoutViews_usesByFollowersMethod() {
+  @DisplayName("Luồng 2: Video có Views > 0 nhưng Interactions = 0 - ER = 0.0 hợp lệ thực tế")
+  void testEvidenceValidator_videoWithViewsAndZeroInteractions_returnsZeroEr() {
+    RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
+    List<Post> posts = List.of(
+        Post.builder().id(UUID.randomUUID()).views(100L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-03T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(100L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-02T10:00:00Z").build()
+    );
+
+    var metrics = evidenceValidator.evaluate(cand, posts);
+
+    assertThat(metrics.erMethod()).isEqualTo(ErMethod.BY_VIEWS);
+    // 0 tương tác trên 200 lượt xem = 0.0 (hợp lệ)
+    assertThat(metrics.rawEr()).isEqualTo(0.0);
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.SCORE_READY);
+  }
+
+  @Test
+  @DisplayName("Luồng 2: Bài ảnh không có trường Views - ER tính theo Followers, VR thiếu do đặc thù loại nội dung -> Xếp loại NOT_SCORABLE (không gọi là dữ liệu hỏng)")
+  void testEvidenceValidator_photoPostsWithoutViews_usesByFollowersMethodAndClassifiedNotScorable() {
     RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "INSTAGRAM", 10_000L);
     List<Post> posts = List.of(
         Post.builder().id(UUID.randomUUID()).views(null).likes(100L).comments(20L).shares(5L).postedAt("2026-11-02T10:00:00Z").build(),
@@ -584,6 +607,9 @@ class Phase0EngineTest {
     assertThat(metrics.erMethod()).isEqualTo(ErMethod.BY_FOLLOWERS);
     // (125 + 125) / 2 = 125 interactions/post; ER = 125 / 10,000 = 0.0125
     assertThat(metrics.rawEr()).isCloseTo(0.0125, org.assertj.core.data.Offset.offset(1e-5));
+    // Bài ảnh không có Views -> VR = NaN -> Xếp vào NOT_SCORABLE (không phải INVALID_DATA)
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.NOT_SCORABLE);
+    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("UNSUPPORTED_METRIC_VIEWS"));
   }
 
   @Test
@@ -616,8 +642,8 @@ class Phase0EngineTest {
   }
 
   @Test
-  @DisplayName("Luồng 2: Thiếu dữ liệu tính ER và VR - Xếp loại INVALID_DATA, không cho phép vào PROVISIONAL")
-  void testEvidenceValidator_missingErAndNoWayToCompute_classifiedAsInvalidData() {
+  @DisplayName("Luồng 2: Thiếu dữ liệu tính ER và VR - Xếp loại NOT_SCORABLE, không cho phép vào PROVISIONAL")
+  void testEvidenceValidator_missingErAndNoWayToCompute_classifiedAsNotScorable() {
     RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
     when(cand.getEngagementRate()).thenReturn(null);
     when(cand.getAvgLikes()).thenReturn(null);
@@ -626,17 +652,18 @@ class Phase0EngineTest {
     var metrics = evidenceValidator.evaluate(cand, Collections.emptyList());
 
     assertThat(Double.isNaN(metrics.rawEr())).isTrue();
-    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.INVALID_DATA);
-    assertThat(metrics.dataQualityReasons()).contains("INVALID_OR_MISSING_ER_FEATURE");
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.NOT_SCORABLE);
+    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("UNSUPPORTED_OR_MISSING_ER"));
   }
 
   @Test
-  @DisplayName("Luồng 2: Timezone ISO-8601 không offset được chuẩn hóa sang UTC - Không phụ thuộc timezone máy chủ Backend")
-  void testEvidenceValidator_resolvePostTime_handlesLocalDateTimeWithoutTimezoneAsUtc() {
+  @DisplayName("Luồng 2: Timezone ISO-8601 không offset được chuẩn hóa sang Asia/Ho_Chi_Minh mặc định của thị trường")
+  void testEvidenceValidator_resolvePostTime_handlesLocalDateTimeWithoutTimezoneAsTargetZone() {
     Post post = Post.builder().postedAt("2026-11-05T12:00:00").build();
     java.time.Instant resolved = EvidenceValidator.resolvePostTime(post);
 
-    assertThat(resolved).isEqualTo(java.time.Instant.parse("2026-11-05T12:00:00Z"));
+    // 12:00 tại GMT+7 tương ứng với 05:00:00Z UTC
+    assertThat(resolved).isEqualTo(java.time.Instant.parse("2026-11-05T05:00:00Z"));
   }
 
   private RecommendationCandidateProjection mockCandidate(UUID id, String platform, Long followers) {

@@ -56,10 +56,12 @@ public class EvidenceValidator {
     }
   }
 
+  public static final java.time.ZoneId DEFAULT_SOURCE_ZONE = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
+
   /**
    * Xác định thời điểm đăng bài thực tế: ưu tiên postedAt (ISO-8601 từ social platform),
    * nếu không có thì fallback sang createdAt (thời điểm crawler lưu vào CSDL).
-   * Chuẩn hóa timezone sang UTC để độc lập hoàn toàn với timezone của máy chủ Backend.
+   * Chuẩn hóa timezone sang múi giờ nguồn mặc định Asia/Ho_Chi_Minh (GMT+7) khi chuỗi thiếu offset.
    */
   public static java.time.Instant resolvePostTime(Post p) {
     if (p == null) return java.time.Instant.EPOCH;
@@ -69,13 +71,13 @@ public class EvidenceValidator {
       } catch (Exception ignored) {
         try {
           return java.time.LocalDateTime.parse(p.getPostedAt())
-              .atZone(java.time.ZoneOffset.UTC)
+              .atZone(DEFAULT_SOURCE_ZONE)
               .toInstant();
         } catch (Exception ignored2) {}
       }
     }
     if (p.getCreatedAt() != null) {
-      return p.getCreatedAt().atZone(java.time.ZoneOffset.UTC).toInstant();
+      return p.getCreatedAt().atZone(DEFAULT_SOURCE_ZONE).toInstant();
     }
     return java.time.Instant.EPOCH;
   }
@@ -158,45 +160,51 @@ public class EvidenceValidator {
     // 2. Xác định phương pháp tính ER và tính raw ER
     ErMethod erMethod;
     double rawEr;
+    List<Post> postsWithViews = Collections.emptyList();
+    double viewsSum = 0.0;
+    boolean isFacebook = cand.getPlatform() != null && "FACEBOOK".equalsIgnoreCase(cand.getPlatform().trim());
 
     if (posts != null && !posts.isEmpty()) {
-      // Khi có danh sách bài: Phân tách bài có views và bài không có views (bài ảnh)
-      List<Post> postsWithViews = posts.stream()
-          .filter(p -> p.getViews() != null && p.getViews() >= 0)
-          .toList();
-
-      if (!postsWithViews.isEmpty()) {
-        // Có bài đăng hỗ trợ Views: Chỉ tính ER trên chính tập bài có Views để tránh phóng đại tương tác
-        erMethod = ErMethod.BY_VIEWS;
-        double viewsSum = postsWithViews.stream().mapToDouble(p -> p.getViews().doubleValue()).sum();
-        double interactionsOnViewPosts = postsWithViews.stream().mapToDouble(p ->
-            (p.getLikes() != null ? p.getLikes().doubleValue() : 0.0) +
-            (p.getComments() != null ? p.getComments().doubleValue() : 0.0) +
-            (p.getShares() != null ? p.getShares().doubleValue() : 0.0)
-        ).sum();
-
-        if (viewsSum > 0) {
-          rawEr = interactionsOnViewPosts / viewsSum;
-        } else {
-          // viewsSum == 0: Tất cả video đều có 0 lượt xem thực tế
-          if (interactionsOnViewPosts == 0) {
-            // Quan sát thật: 0 tương tác trên 0 lượt xem -> ER = 0.0 (KHÔNG tự chuyển sang BY_FOLLOWERS)
-            rawEr = 0.0;
-          } else if (followers > 0) {
-            // Có tương tác nhưng views = 0 (trễ crawler) -> fallback sang Followers
-            erMethod = ErMethod.BY_FOLLOWERS;
-            rawEr = (totalInteractions / postCount) / followers;
-          } else {
-            rawEr = Double.NaN;
-          }
-        }
-      } else {
-        // TẤT CẢ bài đều không có trường views (ví dụ bài ảnh Facebook / Instagram photo)
+      if (isFacebook) {
+        // Facebook: Nền tảng hướng người theo dõi (Follower-based platform), bài đăng thường là text/ảnh
+        // Luôn tính ER theo Followers để đảm bảo tính nhất quán trên nền tảng Facebook
         erMethod = ErMethod.BY_FOLLOWERS;
         if (followers > 0) {
           rawEr = (totalInteractions / postCount) / followers;
         } else {
-          rawEr = Double.NaN; // Không có followers để chia
+          rawEr = Double.NaN;
+        }
+      } else {
+        // Các nền tảng video (TikTok, YouTube, Instagram Reels): Phân tách bài có views và bài không có views (bài ảnh)
+        postsWithViews = posts.stream()
+            .filter(p -> p.getViews() != null && p.getViews() >= 0)
+            .toList();
+
+        if (!postsWithViews.isEmpty()) {
+          // Có bài đăng hỗ trợ Views: Chỉ tính ER trên chính tập bài có Views để tránh phóng đại tương tác
+          erMethod = ErMethod.BY_VIEWS;
+          viewsSum = postsWithViews.stream().mapToDouble(p -> p.getViews().doubleValue()).sum();
+          double interactionsOnViewPosts = postsWithViews.stream().mapToDouble(p ->
+              (p.getLikes() != null ? p.getLikes().doubleValue() : 0.0) +
+              (p.getComments() != null ? p.getComments().doubleValue() : 0.0) +
+              (p.getShares() != null ? p.getShares().doubleValue() : 0.0)
+          ).sum();
+
+          if (viewsSum > 0) {
+            rawEr = interactionsOnViewPosts / viewsSum;
+          } else {
+            // viewsSum == 0: Tất cả video đều có 0 lượt xem thực tế
+            // Phép chia 0 / 0 là bất định toán học (indeterminate form), không được tự ý gán 0.0
+            rawEr = Double.NaN;
+          }
+        } else {
+          // TẤT CẢ bài đều không có trường views (ví dụ bài ảnh Instagram photo)
+          erMethod = ErMethod.BY_FOLLOWERS;
+          if (followers > 0) {
+            rawEr = (totalInteractions / postCount) / followers;
+          } else {
+            rawEr = Double.NaN; // Không có followers để chia
+          }
         }
       }
     } else {
@@ -204,7 +212,7 @@ public class EvidenceValidator {
       if (cand.getEngagementRate() != null) {
         // Giữ nguyên giá trị ER tổng hợp từ DB (kể cả 0.0 là quan sát thật)
         rawEr = cand.getEngagementRate().doubleValue();
-        if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0) {
+        if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && !isFacebook) {
           erMethod = ErMethod.BY_VIEWS;
         } else {
           erMethod = ErMethod.BY_FOLLOWERS;
@@ -212,19 +220,19 @@ public class EvidenceValidator {
       } else {
         // cand.getEngagementRate() == null (DB không có ER tổng hợp)
         if (cand.getAvgLikes() != null) {
-          if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0) {
+          if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && !isFacebook) {
             erMethod = ErMethod.BY_VIEWS;
             rawEr = cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue(); // Like Rate proxy
           } else if (followers > 0) {
             erMethod = ErMethod.BY_FOLLOWERS;
             rawEr = cand.getAvgLikes().doubleValue() / followers;
           } else {
-            erMethod = ErMethod.BY_VIEWS;
+            erMethod = isFacebook ? ErMethod.BY_FOLLOWERS : ErMethod.BY_VIEWS;
             rawEr = Double.NaN;
           }
         } else {
           // Hoàn toàn không có dữ liệu để tính ER
-          erMethod = ErMethod.BY_VIEWS;
+          erMethod = isFacebook ? ErMethod.BY_FOLLOWERS : ErMethod.BY_VIEWS;
           rawEr = Double.NaN;
         }
       }
@@ -232,10 +240,15 @@ public class EvidenceValidator {
 
     // 3. Tính View-to-Follower Ratio (VR)
     double rawVr;
-    if (postCount > 0) {
-      double avgViews = totalViews / postCount;
-      rawVr = (followers > 0) ? (avgViews / followers) : 0.0;
-    } else if (cand.getAvgViews() != null) {
+    if (posts != null && !posts.isEmpty()) {
+      if (!postsWithViews.isEmpty() && !isFacebook) {
+        double avgViews = viewsSum / postsWithViews.size();
+        rawVr = (followers > 0) ? (avgViews / followers) : 0.0;
+      } else {
+        // Không có bài nào hỗ trợ views (ví dụ bài ảnh hoặc Facebook không có video views)
+        rawVr = Double.NaN;
+      }
+    } else if (cand.getAvgViews() != null && !isFacebook) {
       rawVr = (followers > 0) ? (cand.getAvgViews().doubleValue() / followers) : 0.0;
     } else {
       rawVr = Double.NaN;
@@ -285,7 +298,7 @@ public class EvidenceValidator {
       evidenceReliabilityM2 = 0.20; // Bằng chứng rất yếu
     }
 
-    // 5. Xác định Scoring Readiness: Phân biệt rõ ràng giữa thiếu bằng chứng (PROVISIONAL) và lỗi dữ liệu (INVALID_DATA)
+    // 5. Xác định Scoring Readiness: Phân biệt rõ rệt giữa SCORE_READY, PROVISIONAL, NOT_SCORABLE và INVALID_DATA
     boolean erValid = !Double.isNaN(rawEr) && !Double.isInfinite(rawEr) && rawEr >= 0.0;
     boolean vrValid = !Double.isNaN(rawVr) && !Double.isInfinite(rawVr) && rawVr >= 0.0;
     boolean stabValid = canComputeStability && !Double.isNaN(rawStab) && !Double.isInfinite(rawStab) && rawStab > 0.0;
@@ -303,13 +316,27 @@ public class EvidenceValidator {
         reasons.add(String.format("SHORT_WINDOW_INSUFFICIENT_POSTS: Valid posts in 3-post window %d < 2 for stability evaluation", validWindowPosts.size()));
       }
       dataQualityReasons = Collections.unmodifiableList(reasons);
+    } else if (Double.isNaN(rawEr) || Double.isNaN(rawVr)) {
+      // Metric không khả dụng do đặc thù loại nội dung (ví dụ bài ảnh không có Views để tính VR/STAB) hoặc thiếu mẫu số (0/0)
+      scoringReadiness = ScoringReadiness.NOT_SCORABLE;
+      List<String> reasons = new ArrayList<>();
+      if (Double.isNaN(rawEr)) {
+        if (!postsWithViews.isEmpty() && viewsSum == 0.0) {
+          reasons.add("ER_UNAVAILABLE_ZERO_VIEWS_DENOMINATOR: Video views sum is 0, 0/0 is mathematically indeterminate");
+        } else {
+          reasons.add("UNSUPPORTED_OR_MISSING_ER: Engagement Rate cannot be calculated (lacks followers or interactions)");
+        }
+      }
+      if (Double.isNaN(rawVr)) {
+        reasons.add("UNSUPPORTED_METRIC_VIEWS: Platform or content type does not provide Views required for VR and STAB in SM2");
+      }
+      dataQualityReasons = Collections.unmodifiableList(reasons);
     } else {
-      // ER hoặc VR bị NaN / Infinite hoặc vi phạm hợp đồng dữ liệu
+      // Dữ liệu bị lỗi toán học (số âm, Infinite, vi phạm schema)
       scoringReadiness = ScoringReadiness.INVALID_DATA;
       List<String> reasons = new ArrayList<>();
-      if (!erValid) reasons.add("INVALID_OR_MISSING_ER_FEATURE");
-      if (!vrValid) reasons.add("INVALID_OR_MISSING_VR_FEATURE");
-      if (!stabValid) reasons.add("STABILITY_EVIDENCE_UNAVAILABLE");
+      if (!erValid) reasons.add("INVALID_ER_FEATURE");
+      if (!vrValid) reasons.add("INVALID_VR_FEATURE");
       dataQualityReasons = Collections.unmodifiableList(reasons);
     }
 

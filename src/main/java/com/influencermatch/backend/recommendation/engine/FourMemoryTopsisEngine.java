@@ -109,10 +109,15 @@ public class FourMemoryTopsisEngine {
         matrix.add(scores.asVector());
       } catch (IllegalArgumentException ex) {
         // Cách ly lỗi cấp ứng viên (Fault Isolation):
-        // Không để một ứng viên có dữ liệu lỗi/NaN làm sập toàn bộ Recommendation Run của các ứng viên khác
+        // Chỉ cách ly lỗi dữ liệu của từng Creator; không che giấu lỗi cấu hình hệ thống (IllegalStateException).
         log.warn("Candidate {} isolated during Phase 1 scoring due to data validation error: {}",
             cand.getCreatorId(), ex.getMessage());
       }
+    }
+
+    if (!candidates.isEmpty() && intermediateList.isEmpty()) {
+      throw new IllegalStateException("ALL_CANDIDATES_CORRUPTED: All " + candidates.size()
+          + " candidates failed Phase 1 scoring validation. Check systemic configuration or data source integrity.");
     }
 
     // 2. Phase 2 & 3: CRITIC Weighting & Dynamic Weight Blending

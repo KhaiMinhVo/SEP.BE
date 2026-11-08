@@ -124,18 +124,25 @@ public class BayesianHistoryScorer {
       }
     }
 
-    // Nếu không có bất kỳ bằng chứng nào -> UNKNOWN (Missing data)
-    if (!hasOutcomeData && !hasReviewData) {
-      return OutcomeClassification.UNKNOWN;
+    // THỨ TỰ ƯU TIÊN XÁC MINH (Evidence Precedence Contract):
+    // 1. Nếu có dữ liệu KPI/ROI kinh doanh xác minh được: Ưu tiên tuyệt đối KPI/ROI.
+    //    Review tích cực KHÔNG được phép đảo ngược kết luận khi KPI kinh doanh bị thất bại.
+    if (hasOutcomeData) {
+      return isPositiveRoiOrKpi ? OutcomeClassification.SUCCESS : OutcomeClassification.FAILURE;
     }
 
-    // Nếu có bằng chứng tích cực và không bị tín hiệu tiêu cực áp đảo -> SUCCESS
-    if ((isPositiveRoiOrKpi || isPositiveReview) && !isNegativeRoiOrKpi) {
-      return OutcomeClassification.SUCCESS;
+    // 2. Nếu không có KPI/ROI kinh doanh nhưng có Brand Review hợp lệ:
+    //    Dùng Brand Review làm bằng chứng thay thế (Proxy Evidence) cho chất lượng hợp tác.
+    if (hasReviewData) {
+      if (isPositiveReview && !isNegativeReview) {
+        return OutcomeClassification.SUCCESS;
+      } else if (isNegativeReview) {
+        return OutcomeClassification.FAILURE;
+      }
     }
 
-    // Có kết quả nhưng tiêu cực hoặc không đạt tiêu chí thành công -> FAILURE
-    return OutcomeClassification.FAILURE;
+    // 3. Nếu không có bất kỳ bằng chứng nào đủ tin cậy -> UNKNOWN (không tăng n và s)
+    return OutcomeClassification.UNKNOWN;
   }
 
   public Result score(List<HistoricalCampaign> pastCampaigns, String objective) {

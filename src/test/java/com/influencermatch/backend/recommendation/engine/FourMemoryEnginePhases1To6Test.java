@@ -322,6 +322,52 @@ class FourMemoryEnginePhases1To6Test {
   }
 
   @Test
+  @DisplayName("P0 Test: KPI thất bại nhưng Review tích cực -> Ưu tiên KPI, phân loại FAILURE (Review không đảo ngược KPI)")
+  void testP0_kpiFailureWithPositiveReview_precedenceFollowsKpiFailure() {
+    BayesianHistoryScorer scorer = new BayesianHistoryScorer();
+
+    com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    com.fasterxml.jackson.databind.node.ObjectNode positiveReview = mapper.createObjectNode();
+    positiveReview.put("overallRating", 5.0);
+    positiveReview.put("reliabilityScore", 0.95);
+    positiveReview.put("wouldCollaborateAgain", true);
+
+    // Campaign có KPI Conversion Target = 500 nhưng Actual = 150 (Thất bại nặng về mục tiêu kinh doanh)
+    HistoricalCampaign histConflict = HistoricalCampaign.builder()
+        .outcome(CampaignOutcome.builder()
+            .kpiType("CONVERSIONS")
+            .kpiTarget(BigDecimal.valueOf(500))
+            .kpiActual(BigDecimal.valueOf(150))
+            .build())
+        .evidenceValue(positiveReview)
+        .build();
+
+    // Theo Evidence Precedence Contract: Kết quả kinh doanh (KPI) được ưu tiên tuyệt đối
+    assertThat(scorer.classifyOutcome(histConflict)).isEqualTo(BayesianHistoryScorer.OutcomeClassification.FAILURE);
+  }
+
+  @Test
+  @DisplayName("P0 Test: Tất cả Creator lỗi hoặc cấu hình sai -> Ném IllegalStateException, không âm thầm trả về rỗng")
+  void testP0_systemicFailureOrAllCandidatesCorrupted_throwsIllegalStateException() {
+    FourMemoryTopsisEngine engine = new FourMemoryTopsisEngine();
+    Campaign campaign = Campaign.builder().id(UUID.randomUUID()).platforms(List.of("TIKTOK")).build();
+
+    RecommendationCandidateProjection candCorrupted = Mockito.mock(RecommendationCandidateProjection.class);
+    Mockito.when(candCorrupted.getCreatorId()).thenReturn(UUID.randomUUID());
+    Mockito.when(candCorrupted.getEngagementRate()).thenReturn(BigDecimal.valueOf(-2.0)); // Gây IllegalArgumentException
+
+    // Khi tất cả ứng viên bị lỗi dữ liệu hoặc cấu hình chung bị sai:
+    assertThatThrownBy(() -> engine.evaluateAndRank(
+        List.of(candCorrupted),
+        Collections.emptyMap(),
+        campaign,
+        c -> Collections.emptyList(),
+        Collections.emptyList()
+    )).isInstanceOf(IllegalStateException.class)
+      .hasMessageContaining("ALL_CANDIDATES_CORRUPTED");
+  }
+
+  @Test
   @DisplayName("P0 Test: Fault Isolation - Một ứng viên ném lỗi không làm sập Recommendation Run của các ứng viên khác")
   void testP0_faultIsolation_corruptedCandidateDoesNotCrashRun() {
     FourMemoryTopsisEngine engine = new FourMemoryTopsisEngine();

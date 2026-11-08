@@ -104,8 +104,24 @@ public class EvidenceValidator {
 
   public static List<Post> selectRecentWindow(List<Post> posts, int limit, java.time.ZoneId fallbackSourceZone) {
     if (posts == null || posts.isEmpty() || limit <= 0) return Collections.emptyList();
-    return posts.stream()
-        .filter(Objects::nonNull)
+
+    // 1. Lọc bỏ null và khử trùng lặp theo platformPostId (tránh duplicate làm sai lệch STAB)
+    java.util.Set<String> seenPids = new java.util.HashSet<>();
+    List<Post> uniquePosts = new ArrayList<>();
+    for (Post p : posts) {
+      if (p == null) continue;
+      String pid = p.getPlatformPostId() != null ? p.getPlatformPostId().trim() : "";
+      if (!pid.isEmpty()) {
+        if (seenPids.contains(pid)) {
+          continue; // Bỏ qua bản ghi trùng lặp platformPostId
+        }
+        seenPids.add(pid);
+      }
+      uniquePosts.add(p);
+    }
+
+    // 2. Bảo đảm tính tất định và tôn trọng Current Post Snapshot hợp đồng tối đa limit bài
+    return uniquePosts.stream()
         .sorted((a, b) -> {
           int cmp = resolvePostTime(b, fallbackSourceZone).compareTo(resolvePostTime(a, fallbackSourceZone));
           if (cmp != 0) return cmp;
@@ -317,7 +333,12 @@ public class EvidenceValidator {
       rawStab = 1.0 / (1.0 + cv);
       canComputeStability = true;
       stabilityEvidenceUnavailable = false;
-      evidenceReliabilityM2 = (postCount >= 10) ? 1.00 : ((postCount >= 3) ? 0.65 : ((postCount == 2) ? 0.45 : 0.20));
+      // Thang Evidence Reliability M2 chuẩn hóa theo hợp đồng Current Post Snapshot tối đa 3 bài:
+      // - 3 bài có Views hợp lệ, tính được STAB: 0.65
+      // - 2 bài có Views hợp lệ, tính được STAB: 0.45
+      // - Không thể tính STAB: 0.20
+      // Loại bỏ nhánh dead code postCount >= 10 của kiến trúc cũ
+      evidenceReliabilityM2 = (validWindowPosts.size() >= 3) ? 0.65 : 0.45;
     } else {
       // Trong cửa sổ 3 bài gần nhất có ít hơn 2 bài có views hợp lệ HOẶC views = 0
       rawStab = Double.NaN;

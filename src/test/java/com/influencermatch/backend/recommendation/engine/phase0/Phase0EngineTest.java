@@ -407,8 +407,8 @@ class Phase0EngineTest {
     assertThat(metrics.isStabImputed()).isFalse();
     // CV = 10,000 / 20,000 = 0.5; STAB = 1 / (1 + 0.5) = 2/3 ≈ 0.6667
     assertThat(metrics.rawStab()).isCloseTo(2.0 / 3.0, org.assertj.core.data.Offset.offset(1e-4));
-    // Độ tin cậy r_i2 vẫn phản ánh lịch sử có 20 bài (>= 10 bài -> 1.00)
-    assertThat(metrics.evidenceReliabilityM2()).isEqualTo(1.00);
+    // Độ tin cậy r_i2 theo chính sách Current Post Snapshot tối đa 3 bài có views hợp lệ đạt mức trần chuẩn 0.65
+    assertThat(metrics.evidenceReliabilityM2()).isEqualTo(0.65);
   }
 
   @Test
@@ -877,6 +877,117 @@ class Phase0EngineTest {
     var metrics = evidenceValidator.evaluate(cand, List.of(p4, p3, p1, p2), DataSourceContract.resolveSourceZone("TIKTOK"));
     assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.SCORE_READY);
     assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("TIMEZONE_UNVERIFIED"));
+  }
+
+  @Test
+  @DisplayName("Section IV Test 3: Views = [0, 100, 100] -> STAB ≈ 0.536")
+  void testSectionIV_test03_viewsZeroHundredHundred_calculatesCorrectStab() {
+    UUID cId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(cId, "TIKTOK", 50_000L);
+
+    Post p1 = Post.builder().id(UUID.randomUUID()).platformPostId("p1").views(0L).likes(0L).postedAt("2026-11-08T10:00:00Z").build();
+    Post p2 = Post.builder().id(UUID.randomUUID()).platformPostId("p2").views(100L).likes(10L).postedAt("2026-11-08T11:00:00Z").build();
+    Post p3 = Post.builder().id(UUID.randomUUID()).platformPostId("p3").views(100L).likes(10L).postedAt("2026-11-08T12:00:00Z").build();
+
+    var metrics = evidenceValidator.evaluate(cand, List.of(p1, p2, p3));
+
+    // MeanViews = (0 + 100 + 100) / 3 = 66.6667
+    // SampleVariance = ((0 - 66.6667)^2 + 2*(100 - 66.6667)^2) / 2 = (4444.45 + 2222.22) / 2 = 3333.33
+    // SampleSD ≈ 57.735
+    // CV = 57.735 / 66.6667 ≈ 0.866
+    // STAB = 1 / (1 + 0.866) ≈ 0.536
+    assertThat(metrics.canComputeStability()).isTrue();
+    assertThat(metrics.rawStab()).isCloseTo(0.536, org.assertj.core.data.Offset.offset(0.005));
+    // 3 bài có views hợp lệ tính được STAB -> Evidence Reliability M2 = 0.65
+    assertThat(metrics.evidenceReliabilityM2()).isEqualTo(0.65);
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.SCORE_READY);
+  }
+
+  @Test
+  @DisplayName("Section IV Test 4: Views = [0, 0, 0] -> ER theo Views và STAB không xác định; không tạo điểm 0 giả")
+  void testSectionIV_test04_viewsAllZero_erAndStabIndeterminate_noFakeZero() {
+    UUID cId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(cId, "TIKTOK", 50_000L);
+
+    Post p1 = Post.builder().id(UUID.randomUUID()).platformPostId("p1").views(0L).likes(0L).build();
+    Post p2 = Post.builder().id(UUID.randomUUID()).platformPostId("p2").views(0L).likes(0L).build();
+    Post p3 = Post.builder().id(UUID.randomUUID()).platformPostId("p3").views(0L).likes(0L).build();
+
+    var metrics = evidenceValidator.evaluate(cand, List.of(p1, p2, p3));
+
+    // 0/0 views -> ER là NaN, STAB là NaN
+    assertThat(Double.isNaN(metrics.rawEr())).isTrue();
+    assertThat(Double.isNaN(metrics.rawStab())).isTrue();
+    assertThat(metrics.canComputeStability()).isFalse();
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.NOT_SCORABLE);
+    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("ER_UNAVAILABLE_ZERO_VIEWS_DENOMINATOR"));
+  }
+
+  @Test
+  @DisplayName("Section IV Test 7 & 8: Evidence Reliability M2 = 0.65 cho 3 bài và 0.45 cho 2 bài có views")
+  void testSectionIV_test07_and_08_evidenceReliabilityScale() {
+    UUID cId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(cId, "TIKTOK", 50_000L);
+
+    Post p1 = Post.builder().id(UUID.randomUUID()).platformPostId("p1").views(1_000L).likes(50L).build();
+    Post p2 = Post.builder().id(UUID.randomUUID()).platformPostId("p2").views(2_000L).likes(100L).build();
+    Post p3 = Post.builder().id(UUID.randomUUID()).platformPostId("p3").views(3_000L).likes(150L).build();
+
+    // 3 bài -> r_i2 = 0.65
+    var metrics3 = evidenceValidator.evaluate(cand, List.of(p1, p2, p3));
+    assertThat(metrics3.evidenceReliabilityM2()).isEqualTo(0.65);
+
+    // 2 bài -> r_i2 = 0.45
+    var metrics2 = evidenceValidator.evaluate(cand, List.of(p1, p2));
+    assertThat(metrics2.evidenceReliabilityM2()).isEqualTo(0.45);
+    assertThat(metrics2.canComputeStability()).isTrue();
+  }
+
+  @Test
+  @DisplayName("Section IV Test 10: Trùng platformPostId -> Khử trùng lặp, không dùng bài trùng để tính sai STAB")
+  void testSectionIV_test10_duplicatePlatformPostId_deduplicatedBeforeStab() {
+    UUID cId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(cId, "TIKTOK", 50_000L);
+
+    // Hai bài có cùng platformPostId = "dup_01" nhưng khác ID bản ghi
+    Post p1 = Post.builder().id(UUID.randomUUID()).platformPostId("dup_01").views(10_000L).likes(500L).postedAt("2026-11-08T10:00:00Z").build();
+    Post p1Duplicate = Post.builder().id(UUID.randomUUID()).platformPostId("dup_01").views(999_999L).likes(50_000L).postedAt("2026-11-08T09:00:00Z").build();
+    Post p2 = Post.builder().id(UUID.randomUUID()).platformPostId("p2").views(12_000L).likes(600L).postedAt("2026-11-08T11:00:00Z").build();
+    Post p3 = Post.builder().id(UUID.randomUUID()).platformPostId("p3").views(15_000L).likes(750L).postedAt("2026-11-08T12:00:00Z").build();
+
+    List<Post> selected = EvidenceValidator.selectRecentWindow(List.of(p1, p1Duplicate, p2, p3), 3);
+
+    // Bản ghi trùng platformPostId bị lọc bỏ, đúng 3 bài độc nhất p1, p2, p3 được giữ lại
+    assertThat(selected).hasSize(3);
+    assertThat(selected).noneMatch(p -> p.getViews() != null && p.getViews() == 999_999L);
+
+    var metrics = evidenceValidator.evaluate(cand, List.of(p1, p1Duplicate, p2, p3));
+    assertThat(metrics.canComputeStability()).isTrue();
+    // STAB được tính trên p1 (10k), p2 (12k), p3 (15k), không bị thổi phồng bởi 999k
+    assertThat(metrics.rawStab()).isGreaterThan(0.70);
+  }
+
+  @Test
+  @DisplayName("Section IV Test 13: Lượt tương tác bằng 0 nhưng Views > 0 -> ER = 0.0 hợp lệ, không nhầm zero với missing")
+  void testSectionIV_test13_zeroInteractionsWithPositiveViews_legitimateZeroErNotMissing() {
+    UUID cId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(cId, "TIKTOK", 50_000L);
+
+    Post p1 = Post.builder().id(UUID.randomUUID()).platformPostId("p1").views(10_000L).likes(0L).comments(0L).shares(0L).build();
+    Post p2 = Post.builder().id(UUID.randomUUID()).platformPostId("p2").views(12_000L).likes(0L).comments(0L).shares(0L).build();
+    Post p3 = Post.builder().id(UUID.randomUUID()).platformPostId("p3").views(14_000L).likes(0L).comments(0L).shares(0L).build();
+
+    var metrics = evidenceValidator.evaluate(cand, List.of(p1, p2, p3));
+
+    // ER = 0 / 36,000 = 0.0 (Số 0 quan sát thật, hợp lệ)
+    assertThat(metrics.rawEr()).isEqualTo(0.0);
+    assertThat(Double.isNaN(metrics.rawEr())).isFalse();
+    // VR = (12,000 / 50,000) = 0.24 (Hợp lệ)
+    assertThat(metrics.rawVr()).isCloseTo(0.24, org.assertj.core.data.Offset.offset(1e-4));
+    // STAB > 0
+    assertThat(metrics.rawStab()).isGreaterThan(0.0);
+    // Trạng thái đạt chuẩn SCORE_READY
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.SCORE_READY);
   }
 
   private RecommendationCandidateProjection mockCandidate(UUID id, String platform, Long followers) {

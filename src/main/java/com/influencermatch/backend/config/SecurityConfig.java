@@ -111,9 +111,7 @@ public class SecurityConfig {
                 auth.requestMatchers(org.springframework.http.HttpMethod.POST,"/admin/creator-conflicts/*/resolve").authenticated();
                 auth.requestMatchers(PUBLIC_ENDPOINTS)
                     .permitAll()
-                    .requestMatchers(org.springframework.http.HttpMethod.GET, "/admin/data-quality/pending")
-                    .hasAuthority("REVIEW_CREATOR_CLASSIFICATION")
-                    .requestMatchers(org.springframework.http.HttpMethod.PUT, "/admin/data-quality/{id}/approve")
+                    .requestMatchers("/admin/data-quality/**")
                     .hasAuthority("REVIEW_CREATOR_CLASSIFICATION")
                     .requestMatchers("/data/crawler/**", "/admin/crawler/**")
                     .hasAnyRole("DATA_MANAGER", "ADMIN")

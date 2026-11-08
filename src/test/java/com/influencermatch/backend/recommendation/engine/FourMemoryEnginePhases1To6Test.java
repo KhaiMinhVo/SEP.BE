@@ -10,6 +10,7 @@ import com.influencermatch.backend.campaign.model.HistoricalCampaign;
 import com.influencermatch.backend.collaboration.model.CampaignOutcome;
 import com.influencermatch.backend.creator.dto.RecommendationCandidateProjection;
 import com.influencermatch.backend.creator.model.Post;
+import com.influencermatch.backend.recommendation.dto.ReasoningCardDto;
 import com.influencermatch.backend.recommendation.dto.ScoreBreakdownDto;
 import com.influencermatch.backend.recommendation.engine.confidence.ConfidenceCalculator;
 import com.influencermatch.backend.recommendation.engine.confidence.enums.ConfidenceTier;
@@ -1263,6 +1264,126 @@ class FourMemoryEnginePhases1To6Test {
     assertThat(confRes.evidenceWarnings().get(0)).contains("Cold-start");
 
     // Khẳng định: MatchScore không hề bị nhân với hệ số phạt do Cold-Start
+  }
+
+  @Test
+  @DisplayName("Phase 5: XAI bảo toàn 100% tất cả Evidence Warnings trong ReasoningCardDto thay vì chỉ lấy phần tử đầu")
+  void testPhase5_xai_preservesAllEvidenceWarnings() {
+    DeterministicReasoningGenerator generator = new DeterministicReasoningGenerator();
+
+    RecommendationCandidateProjection cand = org.mockito.Mockito.mock(RecommendationCandidateProjection.class);
+    org.mockito.Mockito.when(cand.getDisplayName()).thenReturn("KOC Multi-Warning");
+    org.mockito.Mockito.when(cand.getPlatform()).thenReturn("TIKTOK");
+
+    Campaign campaign = new Campaign();
+    campaign.setName("Summer Awareness");
+
+    ScoreBreakdownDto breakdown = ScoreBreakdownDto.builder()
+        .m1Score(50.0).m2Score(50.0).m3Score(50.0).m4Score(50.0)
+        .finalScore(50.0)
+        .build();
+
+    // Creator có đồng thời 3 cảnh báo bằng chứng
+    List<String> threeWarnings = List.of(
+        "Chưa có kết quả chiến dịch quá khứ được xác minh trên nền tảng (Cold-start)",
+        "Số lượng bài đăng hạn chế (chỉ số ổn định chưa khả dụng hoặc ước lượng)",
+        "Chưa có vector nội dung chi tiết"
+    );
+
+    ConfidenceAssessment confidence = new ConfidenceAssessment(
+        ConfidenceTier.LOW, 0.35, 0.20, 0.20, 0.30, 1.00, threeWarnings
+    );
+
+    ReasoningCardDto card = generator.generate(cand, campaign, breakdown, confidence);
+
+    // Xác nhận: evidenceWarnings trong DTO chứa trọn vẹn cả 3 cảnh báo
+    assertThat(card.getEvidenceWarnings()).containsExactlyElementsOf(threeWarnings);
+
+    // Xác nhận: danh sách reasons hiển thị cũng chứa đầy đủ cả 3 cảnh báo với tiền tố "Lưu ý: "
+    for (String warn : threeWarnings) {
+      assertThat(card.getReasons()).contains("Lưu ý: " + warn);
+    }
+  }
+
+  @Test
+  @DisplayName("Phase 5: Kiểm chứng ví dụ Reviewer P0 - Creator 3 bài, chưa có outcome nhưng đạt HIGH vẫn hiển thị cảnh báo")
+  void testPhase5_reviewerP0_constructValidity_and_warningPreservation() {
+    ConfidenceCalculator calculator = new ConfidenceCalculator();
+    DeterministicReasoningGenerator generator = new DeterministicReasoningGenerator();
+
+    // Chiến dịch AWARENESS với Business Weights [0.10, 0.35, 0.40, 0.15]
+    EngineWeights awarenessWeights = new EngineWeights(0.10, 0.35, 0.40, 0.15, "TEST", 0.0, null, null);
+
+    // Creator: chưa có outcome (r1=0.20), 3 bài đăng snapshot chuẩn (r2=0.65), embedding có (r3=1.0), niches có (r4=1.0)
+    CandidateMemoryScores scores = new CandidateMemoryScores(
+        0.50, 0.70, 0.85, 0.90,
+        50.0, 70.0, 85.0, 90.0,
+        0.70, 0.70, 0.70,
+        0, 0, true,
+        3, false,
+        true,
+        true,
+        3, 3
+    );
+
+    ConfidenceAssessment conf = calculator.calculate(scores, awarenessWeights);
+
+    // Tính toán số học: 0.10*0.20 + 0.35*0.65 + 0.40*1.0 + 0.15*1.0 = 0.02 + 0.2275 + 0.40 + 0.15 = 0.7975
+    assertThat(conf.compositeConfidence()).isCloseTo(0.7975, offset(1e-4));
+    assertThat(conf.tier()).isEqualTo(ConfidenceTier.HIGH);
+
+    // ĐIỂM CỐT LÕI: Dù đạt nhãn HIGH (do Evidence Coverage theo trọng số AWARENESS), cảnh báo thiếu kết quả xác minh VẪN hiện diện!
+    assertThat(conf.evidenceWarnings()).hasSize(1);
+    assertThat(conf.evidenceWarnings().get(0)).contains("Chưa có kết quả chiến dịch quá khứ được xác minh");
+
+    // XAI Card giữ nguyên cảnh báo này cho Marketer
+    RecommendationCandidateProjection cand = org.mockito.Mockito.mock(RecommendationCandidateProjection.class);
+    org.mockito.Mockito.when(cand.getDisplayName()).thenReturn("Creator Snapshot");
+    org.mockito.Mockito.when(cand.getPlatform()).thenReturn("TIKTOK");
+    Campaign campaign = new Campaign();
+    campaign.setName("Brand Awareness 2026");
+
+    ReasoningCardDto card = generator.generate(cand, campaign, ScoreBreakdownDto.builder().finalScore(78.5).build(), conf);
+    assertThat(card.getEvidenceWarnings()).containsExactlyElementsOf(conf.evidenceWarnings());
+    assertThat(card.getReasons().stream().anyMatch(r -> r.contains("Chưa có kết quả chiến dịch quá khứ được xác minh"))).isTrue();
+  }
+
+  @Test
+  @DisplayName("Phase 5: Confidence là Campaign-weighted Coverage - Cùng Creator nhưng Confidence thay đổi theo Objective")
+  void testPhase5_confidenceContextDependence_acrossObjectives() {
+    ConfidenceCalculator calculator = new ConfidenceCalculator();
+
+    // Cùng một KOC: chưa có outcome (r1=0.20), 3 bài đăng (r2=0.65), embedding có (r3=1.00), niches có (r4=1.00)
+    CandidateMemoryScores scores = new CandidateMemoryScores(
+        0.50, 0.70, 0.85, 0.90,
+        50.0, 70.0, 85.0, 90.0,
+        0.70, 0.70, 0.70,
+        0, 0, true,
+        3, false,
+        true,
+        true,
+        3, 3
+    );
+
+    // Objective AWARENESS: chú trọng M2, M3 -> w1=0.10, w2=0.35, w3=0.40, w4=0.15
+    EngineWeights awarenessWeights = new EngineWeights(0.10, 0.35, 0.40, 0.15, "TEST", 0.0, null, null);
+    ConfidenceAssessment awarenessConf = calculator.calculate(scores, awarenessWeights);
+    // Conf = 0.7975 -> HIGH
+    assertThat(awarenessConf.compositeConfidence()).isCloseTo(0.7975, offset(1e-4));
+    assertThat(awarenessConf.tier()).isEqualTo(ConfidenceTier.HIGH);
+
+    // Objective CONVERSION: chú trọng M1 (Historical) -> w1=0.40, w2=0.15, w3=0.30, w4=0.15
+    EngineWeights conversionWeights = new EngineWeights(0.40, 0.15, 0.30, 0.15, "TEST", 0.0, null, null);
+    ConfidenceAssessment conversionConf = calculator.calculate(scores, conversionWeights);
+    // Conf = 0.40*0.20 + 0.15*0.65 + 0.30*1.0 + 0.15*1.0 = 0.08 + 0.0975 + 0.30 + 0.15 = 0.6275 -> MEDIUM
+    assertThat(conversionConf.compositeConfidence()).isCloseTo(0.6275, offset(1e-4));
+    assertThat(conversionConf.tier()).isEqualTo(ConfidenceTier.MEDIUM);
+
+    // Chứng minh: Confidence đo lường mức độ bao phủ dữ liệu the nhu cầu Campaign cụ thể:
+    // Với Conversion đòi hỏi lịch sử chuyển đổi thì Creator này chỉ đạt MEDIUM độ tin cậy dữ liệu,
+    // trong khi với Awareness đòi hỏi nội dung thì dữ liệu đã đủ bao phủ (HIGH),
+    // và cả hai trường hợp đều minh bạch lưu ý thiếu kết quả lịch sử.
+    assertThat(awarenessConf.compositeConfidence()).isNotEqualTo(conversionConf.compositeConfidence());
   }
 
   // =========================================================================

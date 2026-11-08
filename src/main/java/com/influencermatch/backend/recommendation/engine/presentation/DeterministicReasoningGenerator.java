@@ -6,6 +6,7 @@ import com.influencermatch.backend.recommendation.dto.ReasoningCardDto;
 import com.influencermatch.backend.recommendation.dto.ScoreBreakdownDto;
 import com.influencermatch.backend.recommendation.engine.confidence.model.ConfidenceAssessment;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -55,9 +56,12 @@ public class DeterministicReasoningGenerator {
       reasons.add("Đáp ứng đầy đủ các điều kiện tiên quyết của chiến dịch.");
     }
 
-    // Add confidence or caution notes if available
-    if (confidence != null && !confidence.evidenceWarnings().isEmpty()) {
-      reasons.add("Lưu ý: " + confidence.evidenceWarnings().get(0));
+    // Add all confidence or caution notes if available to ensure full evidence transparency
+    List<String> warnings = (confidence != null && confidence.evidenceWarnings() != null)
+        ? confidence.evidenceWarnings()
+        : Collections.emptyList();
+    for (String warning : warnings) {
+      reasons.add("Lưu ý: " + warning);
     }
 
     double finalScore = (breakdown != null && breakdown.getFinalScore() != null) ? breakdown.getFinalScore() : 50.0;
@@ -72,6 +76,7 @@ public class DeterministicReasoningGenerator {
         .summary(summary)
         .reasons(reasons)
         .explanationAvailable(true)
+        .evidenceWarnings(warnings)
         .build();
   }
 }

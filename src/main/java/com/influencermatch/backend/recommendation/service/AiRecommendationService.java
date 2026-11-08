@@ -474,10 +474,21 @@ public class AiRecommendationService {
     try {
       ExplainResponseDto response = aiServiceClient.getExplanation(explainReq);
       if (response != null) {
+        List<String> combinedReasons = new ArrayList<>();
+        if (response.getReasons() != null) {
+          combinedReasons.addAll(response.getReasons());
+        }
+        List<String> warnings = (confidence != null && confidence.evidenceWarnings() != null)
+            ? confidence.evidenceWarnings()
+            : Collections.emptyList();
+        for (String warning : warnings) {
+          combinedReasons.add("Lưu ý: " + warning);
+        }
         return ReasoningCardDto.builder()
             .summary(response.getSummary())
-            .reasons(response.getReasons())
+            .reasons(combinedReasons)
             .explanationAvailable(response.isExplanationAvailable())
+            .evidenceWarnings(warnings)
             .build();
       }
     } catch (Exception e) {

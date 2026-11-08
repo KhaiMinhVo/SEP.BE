@@ -842,26 +842,59 @@ class FourMemoryEnginePhases1To6Test {
   @DisplayName("P0 Test: Khi W thay đổi do CRITIC tính lại trên tập mẫu mới -> MatchScore và thứ hạng có thể dịch chuyển")
   void testP0_topsis_rankShift_whenWeightChanges_dueToCriticRecalculation() {
     TopsisRankingEngine topsis = new TopsisRankingEngine();
+    com.influencermatch.backend.recommendation.engine.critic.CriticWeightCalculator criticCalc =
+        new com.influencermatch.backend.recommendation.engine.critic.CriticWeightCalculator();
+    com.influencermatch.backend.recommendation.engine.critic.DynamicWeightBlender blender =
+        new com.influencermatch.backend.recommendation.engine.critic.DynamicWeightBlender();
 
-    // Điểm của hai Creator A và B không thay đổi
+    // Điểm của hai Creator A và B không thay đổi qua hai lần chạy:
     // Creator A: Mạnh SM1 (0.80), yếu SM2 (0.20)
     // Creator B: Yếu SM1 (0.20), mạnh SM2 (0.80)
     double[] scoresA = new double[] {0.80, 0.20, 0.50, 0.50};
     double[] scoresB = new double[] {0.20, 0.80, 0.50, 0.50};
 
-    // Run 1: Trọng số ưu tiên SM1 (W1 = [0.40, 0.15, 0.30, 0.15])
-    EngineWeights wSm1Priority = new EngineWeights(0.40, 0.15, 0.30, 0.15, "TEST", 0.0, null, null);
-    TopsisResult resA1 = topsis.compute(scoresA[0], scoresA[1], scoresA[2], scoresA[3], wSm1Priority);
-    TopsisResult resB1 = topsis.compute(scoresB[0], scoresB[1], scoresB[2], scoresB[3], wSm1Priority);
-    assertThat(resA1.matchScore()).isGreaterThan(resB1.matchScore()); // A xếp trên B
+    // Pool 1 (10 candidates): SM1 biến thiên rất mạnh (sigma1 cao), SM3 có biến thiên phụ (đủ >= 2 tiêu chí active cho CRITIC), SM2 cố định 0.50
+    List<double[]> pool1 = new ArrayList<>(List.of(
+        new double[] {0.10, 0.50, 0.40, 0.50},
+        new double[] {0.90, 0.50, 0.60, 0.50},
+        new double[] {0.20, 0.50, 0.45, 0.50},
+        new double[] {0.80, 0.50, 0.55, 0.50},
+        new double[] {0.15, 0.50, 0.42, 0.50},
+        new double[] {0.85, 0.50, 0.58, 0.50},
+        new double[] {0.25, 0.50, 0.48, 0.50},
+        new double[] {0.75, 0.50, 0.52, 0.50},
+        new double[] {0.10, 0.50, 0.40, 0.50},
+        new double[] {0.90, 0.50, 0.60, 0.50}
+    ));
 
-    // Run 2: Trọng số ưu tiên SM2 (W2 = [0.15, 0.40, 0.30, 0.15])
-    EngineWeights wSm2Priority = new EngineWeights(0.15, 0.40, 0.30, 0.15, "TEST", 0.0, null, null);
-    TopsisResult resA2 = topsis.compute(scoresA[0], scoresA[1], scoresA[2], scoresA[3], wSm2Priority);
-    TopsisResult resB2 = topsis.compute(scoresB[0], scoresB[1], scoresB[2], scoresB[3], wSm2Priority);
-    assertThat(resB2.matchScore()).isGreaterThan(resA2.matchScore()); // B đảo lên trên A
+    // CRITIC tính toán trên Pool 1 -> Q1 ưu tiên SM1 -> Blended W1 có w1 > w2
+    Optional<double[]> q1Opt = criticCalc.calculate(pool1);
+    assertThat(q1Opt).isPresent();
+    EngineWeights w1 = blender.blend("COMMUNITY_GROWTH", q1Opt, 0.50);
+    assertThat(w1.w1()).isGreaterThan(w1.w2());
 
-    // Xác nhận: Rank Invariance chỉ giữ vững khi W cố định; khi CRITIC thay đổi W, thứ hạng dịch chuyển hợp lý theo W mới
+    TopsisResult resA1 = topsis.compute(scoresA[0], scoresA[1], scoresA[2], scoresA[3], w1);
+    TopsisResult resB1 = topsis.compute(scoresB[0], scoresB[1], scoresB[2], scoresB[3], w1);
+    assertThat(resA1.matchScore()).isGreaterThan(resB1.matchScore()); // Creator A xếp trên Creator B
+
+    // Pool 2: Mở rộng thêm 15 ứng viên với SM2 biến thiên cực đoan (0.05 và 0.95) trong khi SM1 cố định 0.50
+    List<double[]> pool2 = new ArrayList<>(pool1);
+    for (int i = 0; i < 15; i++) {
+      double val = (i % 2 == 0) ? 0.05 : 0.95;
+      pool2.add(new double[] {0.50, val, 0.50, 0.50});
+    }
+
+    // CRITIC tính toán lại trên Pool 2 -> Q2 đảo chiều ưu tiên SM2 -> Blended W2 có w2 > w1
+    Optional<double[]> q2Opt = criticCalc.calculate(pool2);
+    assertThat(q2Opt).isPresent();
+    EngineWeights w2 = blender.blend("COMMUNITY_GROWTH", q2Opt, 0.50);
+    assertThat(w2.w2()).isGreaterThan(w2.w1());
+
+    TopsisResult resA2 = topsis.compute(scoresA[0], scoresA[1], scoresA[2], scoresA[3], w2);
+    TopsisResult resB2 = topsis.compute(scoresB[0], scoresB[1], scoresB[2], scoresB[3], w2);
+    assertThat(resB2.matchScore()).isGreaterThan(resA2.matchScore()); // Creator B đảo lên trên Creator A!
+
+    // Chứng minh chuỗi tích hợp thực tế: Pool thay đổi -> CRITIC tính lại Q -> Blender tính lại W -> TOPSIS đảo thứ hạng
     assertThat(resA1.matchScore()).isNotEqualTo(resA2.matchScore());
   }
 
@@ -910,17 +943,28 @@ class FourMemoryEnginePhases1To6Test {
   }
 
   @Test
-  @DisplayName("P1 Test: Tính đơn điệu (Monotonicity) - Nếu mọi SM của A >= B với W cố định thì MatchScore A >= B")
+  @DisplayName("P1 Test: Tính đơn điệu (Monotonicity) - X_A >= X_B => T_A >= T_B; T_A > T_B khi có cải thiện trên tiêu chí w_j > 0")
   void testP1_topsis_monotonicity() {
     TopsisRankingEngine topsis = new TopsisRankingEngine();
     EngineWeights weights = new EngineWeights(0.30, 0.30, 0.20, 0.20, "TEST", 0.0, null, null);
 
-    TopsisResult resA = topsis.compute(0.80, 0.75, 0.70, 0.85, weights);
-    TopsisResult resB = topsis.compute(0.70, 0.65, 0.60, 0.75, weights); // Mọi chiều đều <= A
+    // 1. Khi X_A == X_B -> T_A == T_B (Bằng nhau tuyệt đối)
+    TopsisResult resEqualA = topsis.compute(0.70, 0.65, 0.60, 0.75, weights);
+    TopsisResult resEqualB = topsis.compute(0.70, 0.65, 0.60, 0.75, weights);
+    assertThat(resEqualA.matchScore()).isEqualTo(resEqualB.matchScore());
 
-    assertThat(resA.matchScore()).isGreaterThan(resB.matchScore());
-    assertThat(resA.distancePositive()).isLessThan(resB.distancePositive());
-    assertThat(resA.distanceNegative()).isGreaterThan(resB.distanceNegative());
+    // 2. Khi X_A >= X_B và có ít nhất một tiêu chí w_j > 0 lớn hơn hẳn -> T_A > T_B
+    TopsisResult resStrictA = topsis.compute(0.80, 0.75, 0.70, 0.85, weights);
+    TopsisResult resStrictB = topsis.compute(0.70, 0.65, 0.60, 0.75, weights);
+    assertThat(resStrictA.matchScore()).isGreaterThan(resStrictB.matchScore());
+    assertThat(resStrictA.distancePositive()).isLessThan(resStrictB.distancePositive());
+    assertThat(resStrictA.distanceNegative()).isGreaterThan(resStrictB.distanceNegative());
+
+    // 3. Khi X_A > X_B chỉ ở tiêu chí có trọng số bằng 0 (w3 = w4 = 0) -> T_A == T_B
+    EngineWeights zeroWeights = new EngineWeights(0.50, 0.50, 0.00, 0.00, "TEST", 0.0, null, null);
+    TopsisResult resZeroA = topsis.compute(0.70, 0.60, 0.99, 0.99, zeroWeights); // SM3, SM4 cực cao nhưng w3=w4=0
+    TopsisResult resZeroB = topsis.compute(0.70, 0.60, 0.10, 0.10, zeroWeights); // SM3, SM4 rất thấp
+    assertThat(resZeroA.matchScore()).isCloseTo(resZeroB.matchScore(), offset(1e-6));
   }
 
   @Test
@@ -1051,6 +1095,174 @@ class FourMemoryEnginePhases1To6Test {
     assertThat(lowConf.compositeConfidence()).isLessThan(0.50);
     assertThat(lowConf.evidenceWarnings()).hasSize(4);
     assertThat(lowConf.evidenceWarnings().get(0)).contains("Cold-start");
+  }
+
+  @Test
+  @DisplayName("Phase 5: M1 Reliability theo số lượng hợp tác quá khứ và loại trừ hoàn toàn outcome UNKNOWN")
+  void testPhase5_m1_evidenceReliability_sampleSizes_and_unknownExclusion() {
+    ConfidenceCalculator calculator = new ConfidenceCalculator();
+    EngineWeights weights = new EngineWeights(0.25, 0.25, 0.25, 0.25, "TEST", 0.0, null, null);
+
+    java.util.function.Function<Integer, CandidateMemoryScores> makeScores = sampleSize ->
+        new CandidateMemoryScores(
+            0.6, 0.6, 0.6, 0.6,
+            60.0, 60.0, 60.0, 60.0,
+            0.6, 0.6, 0.6,
+            sampleSize, sampleSize, sampleSize == 0,
+            5, false,
+            true, true, 2, 2
+        );
+
+    // n >= 5 -> r1 = 1.00
+    assertThat(calculator.calculate(makeScores.apply(5), weights).reliabilityM1()).isEqualTo(1.00);
+    assertThat(calculator.calculate(makeScores.apply(10), weights).reliabilityM1()).isEqualTo(1.00);
+
+    // n in [2, 4] -> r1 = 0.80
+    assertThat(calculator.calculate(makeScores.apply(2), weights).reliabilityM1()).isEqualTo(0.80);
+    assertThat(calculator.calculate(makeScores.apply(4), weights).reliabilityM1()).isEqualTo(0.80);
+
+    // n == 1 -> r1 = 0.50
+    assertThat(calculator.calculate(makeScores.apply(1), weights).reliabilityM1()).isEqualTo(0.50);
+
+    // n == 0 -> r1 = 0.20 kèm cảnh báo Cold-start
+    ConfidenceAssessment coldConf = calculator.calculate(makeScores.apply(0), weights);
+    assertThat(coldConf.reliabilityM1()).isEqualTo(0.20);
+    assertThat(coldConf.evidenceWarnings()).anyMatch(w -> w.contains("Cold-start"));
+
+    // Kiểm chứng tích hợp với BayesianHistoryScorer:
+    // 3 Campaign SUCCESS + 10 Campaign UNKNOWN -> evaluatedCount (n) phải bằng đúng 3 (không phải 13)
+    BayesianHistoryScorer historyScorer = new BayesianHistoryScorer();
+    List<HistoricalCampaign> pastWithUnknowns = new ArrayList<>();
+    for (int i = 0; i < 3; i++) {
+      HistoricalCampaign h = new HistoricalCampaign();
+      CampaignOutcome out = new CampaignOutcome();
+      out.setRoi(BigDecimal.valueOf(1.5));
+      h.setOutcome(out);
+      pastWithUnknowns.add(h);
+    }
+    for (int i = 0; i < 10; i++) {
+      pastWithUnknowns.add(new HistoricalCampaign()); // UNKNOWN: không có outcome lẫn review
+    }
+    BayesianHistoryScorer.Result histResult = historyScorer.score(pastWithUnknowns, "CONVERSION");
+    assertThat(histResult.sampleSize()).isEqualTo(3); // n = 3, UNKNOWN hoàn toàn không được tính vào mẫu số
+    assertThat(histResult.successCount()).isEqualTo(3);
+  }
+
+  @Test
+  @DisplayName("Phase 5: M2 Reliability theo số lượng bài đăng và trạng thái Imputed của Stability")
+  void testPhase5_m2_evidenceReliability_postCount_and_stabilityHeuristics() {
+    ConfidenceCalculator calculator = new ConfidenceCalculator();
+    EngineWeights weights = new EngineWeights(0.25, 0.25, 0.25, 0.25, "TEST", 0.0, null, null);
+
+    // >= 10 posts & không imputed -> r2 = 1.00
+    CandidateMemoryScores s10 = new CandidateMemoryScores(
+        0.5, 0.5, 0.5, 0.5, 50, 50, 50, 50, 0.5, 0.5, 0.5, 5, 5, false, 12, false, true, true, 1, 1);
+    assertThat(calculator.calculate(s10, weights).reliabilityM2()).isEqualTo(1.00);
+
+    // 3-9 posts & không imputed -> r2 = 0.65
+    CandidateMemoryScores s5 = new CandidateMemoryScores(
+        0.5, 0.5, 0.5, 0.5, 50, 50, 50, 50, 0.5, 0.5, 0.5, 5, 5, false, 5, false, true, true, 1, 1);
+    assertThat(calculator.calculate(s5, weights).reliabilityM2()).isEqualTo(0.65);
+
+    // 2 posts & không imputed -> r2 = 0.45
+    CandidateMemoryScores s2 = new CandidateMemoryScores(
+        0.5, 0.5, 0.5, 0.5, 50, 50, 50, 50, 0.5, 0.5, 0.5, 5, 5, false, 2, false, true, true, 1, 1);
+    assertThat(calculator.calculate(s2, weights).reliabilityM2()).isEqualTo(0.45);
+
+    // 10 posts nhưng stability bị imputed (unavailable) -> r2 = 0.20 + warning
+    CandidateMemoryScores sImputed = new CandidateMemoryScores(
+        0.5, 0.5, 0.5, 0.5, 50, 50, 50, 50, 0.5, 0.5, 0.5, 5, 5, false, 10, true, true, true, 1, 1);
+    ConfidenceAssessment confImputed = calculator.calculate(sImputed, weights);
+    assertThat(confImputed.reliabilityM2()).isEqualTo(0.20);
+    assertThat(confImputed.evidenceWarnings()).anyMatch(w -> w.contains("chỉ số ổn định"));
+
+    // < 2 posts -> r2 = 0.20 + warning
+    CandidateMemoryScores s1 = new CandidateMemoryScores(
+        0.5, 0.5, 0.5, 0.5, 50, 50, 50, 50, 0.5, 0.5, 0.5, 5, 5, false, 1, false, true, true, 1, 1);
+    ConfidenceAssessment conf1 = calculator.calculate(s1, weights);
+    assertThat(conf1.reliabilityM2()).isEqualTo(0.20);
+    assertThat(conf1.evidenceWarnings()).anyMatch(w -> w.contains("Số lượng bài đăng hạn chế"));
+  }
+
+  @Test
+  @DisplayName("Phase 5: M3 và M4 Reliability và phát sinh cảnh báo thiếu dữ liệu")
+  void testPhase5_m3_and_m4_evidenceReliability_and_warnings() {
+    ConfidenceCalculator calculator = new ConfidenceCalculator();
+    EngineWeights weights = new EngineWeights(0.25, 0.25, 0.25, 0.25, "TEST", 0.0, null, null);
+
+    // M3: embeddingAvailable == true -> 1.00; false -> 0.30 + warning
+    CandidateMemoryScores noEmb = new CandidateMemoryScores(
+        0.5, 0.5, 0.5, 0.5, 50, 50, 50, 50, 0.5, 0.5, 0.5, 5, 5, false, 10, false, false, true, 1, 1);
+    ConfidenceAssessment confNoEmb = calculator.calculate(noEmb, weights);
+    assertThat(confNoEmb.reliabilityM3()).isEqualTo(0.30);
+    assertThat(confNoEmb.evidenceWarnings()).anyMatch(w -> w.contains("vector nội dung"));
+
+    // M4: brandNichesConfigured == true -> 1.00; false -> 0.50 + warning
+    CandidateMemoryScores noNiche = new CandidateMemoryScores(
+        0.5, 0.5, 0.5, 0.5, 50, 50, 50, 50, 0.5, 0.5, 0.5, 5, 5, false, 10, false, true, false, 0, 0);
+    ConfidenceAssessment confNoNiche = calculator.calculate(noNiche, weights);
+    assertThat(confNoNiche.reliabilityM4()).isEqualTo(0.50);
+    assertThat(confNoNiche.evidenceWarnings()).anyMatch(w -> w.contains("lĩnh vực chi tiết"));
+  }
+
+  @Test
+  @DisplayName("Phase 5: Phân cấp Confidence Tier (HIGH, MEDIUM, LOW) tại các ngưỡng biên 0.75 và 0.50")
+  void testPhase5_compositeConfidence_tierThresholds() {
+    ConfidenceCalculator calculator = new ConfidenceCalculator();
+    EngineWeights weights = new EngineWeights(0.25, 0.25, 0.25, 0.25, "TEST", 0.0, null, null);
+
+    // composite >= 0.75 -> HIGH
+    // r1=1.0, r2=0.65, r3=1.0, r4=1.0 -> 0.25 * (1 + 0.65 + 1 + 1) = 0.25 * 3.65 = 0.9125
+    CandidateMemoryScores sHigh = new CandidateMemoryScores(
+        0.7, 0.7, 0.7, 0.7, 70, 70, 70, 70, 0.7, 0.7, 0.7, 5, 5, false, 5, false, true, true, 1, 1);
+    assertThat(calculator.calculate(sHigh, weights).tier()).isEqualTo(ConfidenceTier.HIGH);
+
+    // composite in [0.50, 0.75) -> MEDIUM
+    // r1=0.50, r2=0.65, r3=1.0, r4=0.50 -> 0.25 * (0.50 + 0.65 + 1.0 + 0.50) = 0.25 * 2.65 = 0.6625
+    CandidateMemoryScores sMed = new CandidateMemoryScores(
+        0.6, 0.6, 0.6, 0.6, 60, 60, 60, 60, 0.6, 0.6, 0.6, 1, 1, false, 5, false, true, false, 0, 0);
+    assertThat(calculator.calculate(sMed, weights).tier()).isEqualTo(ConfidenceTier.MEDIUM);
+
+    // composite < 0.50 -> LOW
+    // r1=0.20, r2=0.20, r3=0.30, r4=0.50 -> 0.25 * (0.2 + 0.2 + 0.3 + 0.5) = 0.25 * 1.2 = 0.30
+    CandidateMemoryScores sLow = new CandidateMemoryScores(
+        0.5, 0.5, 0.5, 0.5, 50, 50, 50, 50, 0.5, 0.5, 0.5, 0, 0, true, 1, true, false, false, 0, 0);
+    assertThat(calculator.calculate(sLow, weights).tier()).isEqualTo(ConfidenceTier.LOW);
+  }
+
+  @Test
+  @DisplayName("Phase 5: Cold-Start Fairness - Creator mới có điểm hiệu suất thực tế cao vẫn đạt MatchScore cao")
+  void testPhase5_coldStartFairness_highPerformanceCreator_notPenalizedInMatchScore() {
+    TopsisRankingEngine topsis = new TopsisRankingEngine();
+    ConfidenceCalculator confidenceCalc = new ConfidenceCalculator();
+    EngineWeights weights = new EngineWeights(0.20, 0.35, 0.30, 0.15, "TEST", 0.0, null, null);
+
+    // Cold-start creator: chưa có campaign nào trên nền tảng (n=0, Bayesian smoothed sm1=0.50)
+    // Nhưng có thông số công khai xuất sắc (sm2=0.92), độ liên quan nội dung xuất sắc (sm3=0.88), niche khớp (sm4=0.90)
+    CandidateMemoryScores coldStartStarScores = new CandidateMemoryScores(
+        0.50, 0.92, 0.88, 0.90,
+        50.0, 92.0, 88.0, 90.0,
+        0.90, 0.94, 0.92,
+        0, 0, true,
+        25, false,
+        true,
+        true,
+        3, 3
+    );
+
+    TopsisResult topsisRes = topsis.compute(coldStartStarScores, weights);
+    ConfidenceAssessment confRes = confidenceCalc.calculate(coldStartStarScores, weights);
+
+    // MatchScore phản ánh đúng năng lực tương thích và đạt điểm rất cao (> 80/100)
+    assertThat(topsisRes.matchScore()).isGreaterThan(80.0);
+
+    // Confidence phản ánh độ tin cậy của bằng chứng: r1 = 0.20 kéo nhẹ composite nhưng vẫn minh bạch
+    // composite = 0.20*0.20 + 0.35*1.0 + 0.30*1.0 + 0.15*1.0 = 0.04 + 0.35 + 0.30 + 0.15 = 0.84
+    assertThat(confRes.reliabilityM1()).isEqualTo(0.20);
+    assertThat(confRes.evidenceWarnings()).hasSize(1);
+    assertThat(confRes.evidenceWarnings().get(0)).contains("Cold-start");
+
+    // Khẳng định: MatchScore không hề bị nhân với hệ số phạt do Cold-Start
   }
 
   // =========================================================================

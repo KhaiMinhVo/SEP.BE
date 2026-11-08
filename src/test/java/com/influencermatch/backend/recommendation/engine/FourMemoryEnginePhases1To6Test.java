@@ -999,10 +999,17 @@ class FourMemoryEnginePhases1To6Test {
     assertThat(wCommunity).containsExactly(0.20, 0.30, 0.30, 0.20);
     assertThat(DoubleStream.of(wCommunity).sum()).isCloseTo(1.0, offset(1e-6));
 
-    // 3. Null and default
+    // 3. Null returns default; unknown objective throws IllegalArgumentException (Fail-Fast)
     double[] wDefault = blender.resolveBusinessWeights(null);
     assertThat(wDefault).containsExactly(0.15, 0.35, 0.35, 0.15);
-    assertThat(blender.resolveBusinessWeights("UNKNOWN_OBJ")).containsExactly(wDefault);
+
+    assertThatThrownBy(() -> blender.resolveBusinessWeights("UNKNOWN_OBJ"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("UNKNOWN_CAMPAIGN_OBJECTIVE");
+
+    assertThatThrownBy(() -> blender.resolveBusinessWeights("CONVERSIONS"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("UNKNOWN_CAMPAIGN_OBJECTIVE");
   }
 
   @Test
@@ -1054,6 +1061,39 @@ class FourMemoryEnginePhases1To6Test {
         new double[] {-0.1, 0.4, 0.4, 0.3},
         new double[] {0.25, 0.25, 0.25, 0.25}
     )).isInstanceOf(IllegalStateException.class).hasMessageContaining("must be a finite number in [0.0, 1.0]");
+
+    // 6. Metadata validation: CRITIC_BLENDED requires lambda > 0 and non-null criticWeights
+    assertThatThrownBy(() -> new EngineWeights(
+        0.25, 0.25, 0.25, 0.25, "CRITIC_BLENDED", 0.0,
+        new double[] {0.25, 0.25, 0.25, 0.25},
+        new double[] {0.25, 0.25, 0.25, 0.25}
+    )).isInstanceOf(IllegalStateException.class).hasMessageContaining("requires lambdaUsed > 0.0");
+
+    assertThatThrownBy(() -> new EngineWeights(
+        0.25, 0.25, 0.25, 0.25, "CRITIC_BLENDED", 0.30,
+        null,
+        new double[] {0.25, 0.25, 0.25, 0.25}
+    )).isInstanceOf(IllegalStateException.class).hasMessageContaining("requires non-null criticWeights");
+
+    // 7. Metadata validation: BUSINESS_FALLBACK requires lambda == 0.0 and matching weights
+    assertThatThrownBy(() -> new EngineWeights(
+        0.25, 0.25, 0.25, 0.25, "BUSINESS_FALLBACK", 0.30,
+        null,
+        new double[] {0.25, 0.25, 0.25, 0.25}
+    )).isInstanceOf(IllegalStateException.class).hasMessageContaining("requires lambdaUsed == 0.0");
+
+    assertThatThrownBy(() -> new EngineWeights(
+        0.40, 0.20, 0.20, 0.20, "BUSINESS_FALLBACK", 0.0,
+        null,
+        new double[] {0.25, 0.25, 0.25, 0.25} // mismatch with w1=0.40
+    )).isInstanceOf(IllegalStateException.class).hasMessageContaining("INCONSISTENT_FALLBACK_WEIGHTS");
+
+    // 8. Unsupported mode rejected
+    assertThatThrownBy(() -> new EngineWeights(
+        0.25, 0.25, 0.25, 0.25, "INVALID_MODE", 0.0,
+        new double[] {0.25, 0.25, 0.25, 0.25},
+        new double[] {0.25, 0.25, 0.25, 0.25}
+    )).isInstanceOf(IllegalStateException.class).hasMessageContaining("Unsupported engine mode");
   }
 
   @Test

@@ -19,6 +19,46 @@ public record EngineWeights(
     double[] businessWeights // Raw b_g,j business weights
 ) {
   public EngineWeights {
+    // 1. Kiểm tra tính hợp lệ của chế độ và lambdaUsed
+    if (mode == null || mode.trim().isEmpty()) {
+      throw new IllegalStateException("INVALID_MODE: mode must not be null or blank");
+    }
+    String normMode = mode.trim().toUpperCase();
+    if (!normMode.equals("CRITIC_BLENDED")
+        && !normMode.equals("BUSINESS_FALLBACK")
+        && !normMode.equals("TEST")
+        && !normMode.equals("EQUAL")
+        && !normMode.equals("CRITIC_DYNAMIC")) {
+      throw new IllegalStateException("INVALID_MODE: Unsupported engine mode: " + mode);
+    }
+    if (!Double.isFinite(lambdaUsed) || lambdaUsed < 0.0 || lambdaUsed > 1.0) {
+      throw new IllegalStateException("INVALID_LAMBDA: lambdaUsed must be a finite number in [0.0, 1.0], but got: " + lambdaUsed);
+    }
+
+    // 2. Kiểm tra tính nhất quán giữa mode, lambdaUsed và các mảng trọng số
+    if (normMode.equals("CRITIC_BLENDED") || normMode.equals("CRITIC_DYNAMIC")) {
+      if (lambdaUsed <= 0.0) {
+        throw new IllegalStateException("INVALID_METADATA: " + normMode + " requires lambdaUsed > 0.0, but got: " + lambdaUsed);
+      }
+      if (criticWeights == null) {
+        throw new IllegalStateException("MISSING_CRITIC_WEIGHTS: " + normMode + " requires non-null criticWeights");
+      }
+    } else if (normMode.equals("BUSINESS_FALLBACK")) {
+      if (lambdaUsed != 0.0) {
+        throw new IllegalStateException("INVALID_METADATA: BUSINESS_FALLBACK requires lambdaUsed == 0.0, but got: " + lambdaUsed);
+      }
+      if (businessWeights == null) {
+        throw new IllegalStateException("MISSING_BUSINESS_WEIGHTS: BUSINESS_FALLBACK requires non-null businessWeights");
+      }
+      if (Math.abs(w1 - businessWeights[0]) > 1e-4
+          || Math.abs(w2 - businessWeights[1]) > 1e-4
+          || Math.abs(w3 - businessWeights[2]) > 1e-4
+          || Math.abs(w4 - businessWeights[3]) > 1e-4) {
+        throw new IllegalStateException("INCONSISTENT_FALLBACK_WEIGHTS: In BUSINESS_FALLBACK, w_j must match businessWeights");
+      }
+    }
+
+    // 3. Kiểm tra từng trọng số thành phần w1..w4: hữu hạn, trong [0.0, 1.0]
     validateWeight(w1, "w1");
     validateWeight(w2, "w2");
     validateWeight(w3, "w3");
@@ -28,10 +68,11 @@ public record EngineWeights(
       throw new IllegalStateException("INVALID_WEIGHT_SUM: Weights must sum to 1.0, but got: " + sum);
     }
 
+    // 4. Xác thực cấu trúc mảng đính kèm (criticWeights, businessWeights)
     validateWeightArray(criticWeights, "criticWeights");
     validateWeightArray(businessWeights, "businessWeights");
 
-    // Defensive copy on construction
+    // 5. Defensive copy on construction
     criticWeights = (criticWeights != null) ? criticWeights.clone() : null;
     businessWeights = (businessWeights != null) ? businessWeights.clone() : null;
   }

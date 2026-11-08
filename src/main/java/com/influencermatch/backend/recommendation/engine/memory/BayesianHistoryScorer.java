@@ -226,7 +226,7 @@ public class BayesianHistoryScorer {
     double wKpi = 0.50;
     double wRev = 0.20;
 
-    if (objective != null) {
+    if (objective != null && !objective.trim().isEmpty()) {
       switch (objective.trim().toUpperCase()) {
         case "AWARENESS", "BRAND_AWARENESS" -> {
           wBayes = 0.40;
@@ -253,9 +253,8 @@ public class BayesianHistoryScorer {
           wKpi = 0.40;
           wRev = 0.25;
         }
-        default -> {
-          // Standard default weights: wBayes=0.30, wKpi=0.50, wRev=0.20
-        }
+        default -> throw new IllegalArgumentException(
+            "UNKNOWN_CAMPAIGN_OBJECTIVE: Unsupported objective '" + objective + "' in BayesianHistoryScorer");
       }
     }
 

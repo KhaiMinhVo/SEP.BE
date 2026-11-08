@@ -64,7 +64,7 @@ public class DynamicWeightBlender {
   }
 
   public double[] resolveBusinessWeights(String objective) {
-    if (objective == null) {
+    if (objective == null || objective.trim().isEmpty()) {
       return new double[] {0.15, 0.35, 0.35, 0.15};
     }
     String normalized = objective.trim().toUpperCase();
@@ -74,7 +74,9 @@ public class DynamicWeightBlender {
       case "TRAFFIC" -> new double[] {0.20, 0.35, 0.30, 0.15};
       case "CONVERSION", "CONVERSION_SALES", "SALES" -> new double[] {0.40, 0.15, 0.30, 0.15};
       case "COMMUNITY_GROWTH" -> new double[] {0.20, 0.30, 0.30, 0.20};
-      default -> new double[] {0.15, 0.35, 0.35, 0.15};
+      default -> throw new IllegalArgumentException(
+          "UNKNOWN_CAMPAIGN_OBJECTIVE: Unsupported objective '" + objective
+              + "'. Supported canonical: AWARENESS, ENGAGEMENT, TRAFFIC, CONVERSION");
     };
   }
 }

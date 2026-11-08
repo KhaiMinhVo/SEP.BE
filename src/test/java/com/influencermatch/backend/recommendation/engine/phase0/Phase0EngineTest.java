@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.creator.dto.RecommendationCandidateProjection;
 import com.influencermatch.backend.creator.model.Post;
+import com.influencermatch.backend.recommendation.engine.phase0.enums.CampaignEligibility;
 import com.influencermatch.backend.recommendation.engine.phase0.enums.ErMethod;
 import com.influencermatch.backend.recommendation.engine.phase0.enums.Phase0Status;
 import com.influencermatch.backend.recommendation.engine.phase0.model.NormalizedCandidateContext;
@@ -338,25 +339,30 @@ class Phase0EngineTest {
     // 2. SUSPENDED -> INELIGIBLE
     RecommendationCandidateProjection suspendedCand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
     when(suspendedCand.getAccountStatus()).thenReturn("SUSPENDED");
-    var resSuspended = eligibilityChecker.check(suspendedCand, campaign, Collections.emptySet());
+    EligibilityChecker.Result resSuspended = eligibilityChecker.check(suspendedCand, campaign, Collections.emptySet());
     assertThat(resSuspended.eligible()).isFalse();
     assertThat(resSuspended.isExcluded()).isTrue();
+    assertThat(resSuspended.status()).isEqualTo(Phase0Status.INELIGIBLE);
+    assertThat(resSuspended.campaignEligibility()).isEqualTo(CampaignEligibility.INELIGIBLE);
     assertThat(resSuspended.reasons()).contains("ACCOUNT_INACTIVE: Account status is SUSPENDED");
 
     // 3. NULL / UNKNOWN -> PENDING_VERIFICATION
     RecommendationCandidateProjection nullStatusCand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
     when(nullStatusCand.getAccountStatus()).thenReturn(null);
-    var resNull = eligibilityChecker.check(nullStatusCand, campaign, Collections.emptySet());
+    EligibilityChecker.Result resNull = eligibilityChecker.check(nullStatusCand, campaign, Collections.emptySet());
     assertThat(resNull.isPendingData()).isTrue();
+    assertThat(resNull.status()).isEqualTo(Phase0Status.PENDING_DATA);
+    assertThat(resNull.campaignEligibility()).isEqualTo(CampaignEligibility.PENDING_VERIFICATION);
     assertThat(resNull.reasons()).contains("UNKNOWN_ACCOUNT_STATUS: Creator account status is unknown");
 
-    // 4. NULL status VÀ bị Brand Feedback loại trừ -> INELIGIBLE (Precedence
-    // INELIGIBLE > PENDING)
+    // 4. NULL status VÀ bị Brand Feedback loại trừ -> INELIGIBLE (Precedence INELIGIBLE > PENDING)
     UUID rejectedId = UUID.randomUUID();
     RecommendationCandidateProjection rejectedNullCand = mockCandidate(rejectedId, "TIKTOK", 50_000L);
     when(rejectedNullCand.getAccountStatus()).thenReturn(null);
-    var resRejectedNull = eligibilityChecker.check(rejectedNullCand, campaign, Set.of(rejectedId));
+    EligibilityChecker.Result resRejectedNull = eligibilityChecker.check(rejectedNullCand, campaign, Set.of(rejectedId));
     assertThat(resRejectedNull.isExcluded()).isTrue();
+    assertThat(resRejectedNull.status()).isEqualTo(Phase0Status.INELIGIBLE);
+    assertThat(resRejectedNull.campaignEligibility()).isEqualTo(CampaignEligibility.INELIGIBLE);
     assertThat(resRejectedNull.reasons()).contains("EXCLUDED_BY_FEEDBACK",
         "UNKNOWN_ACCOUNT_STATUS: Creator account status is unknown");
   }

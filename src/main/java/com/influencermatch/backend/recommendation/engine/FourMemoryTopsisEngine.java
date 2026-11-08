@@ -139,6 +139,7 @@ public class FourMemoryTopsisEngine {
       ));
     }
 
+    evaluatedList.sort(topsisEngine.deterministicComparator());
     return evaluatedList;
   }
 

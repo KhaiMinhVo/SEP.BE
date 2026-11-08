@@ -87,7 +87,11 @@ public class TopsisRankingEngine {
     );
 
     double denom = dPos + dNeg;
-    double closeness = (denom > EPSILON) ? (dNeg / denom) : 0.50;
+    if (denom <= EPSILON) {
+      throw new IllegalStateException(
+          "TOPSIS_SINGULARITY_VIOLATION: D+ + D- cannot be <= 0 under unit-sum non-negative weights");
+    }
+    double closeness = dNeg / denom;
     double matchScore = closeness * 100.0;
 
     return new TopsisResult(dPos, dNeg, closeness, matchScore);

@@ -816,6 +816,197 @@ class FourMemoryEnginePhases1To6Test {
     assertThat(resA.distanceNegative()).isGreaterThan(resB.distanceNegative());
   }
 
+  @Test
+  @DisplayName("P0 Test: Giữ nguyên W và điểm của Creator cũ -> Thêm ứng viên mới không làm trôi MatchScore cũ (Fixed-Ideal Invariance)")
+  void testP0_topsis_rankReversalResistance_whenWeightFixed() {
+    TopsisRankingEngine topsis = new TopsisRankingEngine();
+    EngineWeights fixedWeights = new EngineWeights(0.40, 0.15, 0.30, 0.15, "TEST", 0.0, null, null);
+
+    // Điểm ban đầu của Creator A
+    TopsisResult initialResultA = topsis.compute(0.70, 0.60, 0.80, 0.75, fixedWeights);
+
+    // Thêm các ứng viên B, C, D vào pool nhưng giữ nguyên W
+    TopsisResult resB = topsis.compute(0.95, 0.90, 0.92, 0.88, fixedWeights);
+    TopsisResult resC = topsis.compute(0.10, 0.20, 0.15, 0.30, fixedWeights);
+
+    // Tính lại cho Creator A với cùng W
+    TopsisResult recomputedResultA = topsis.compute(0.70, 0.60, 0.80, 0.75, fixedWeights);
+
+    // Khẳng định: MatchScore và khoảng cách của A bất biến 100%
+    assertThat(recomputedResultA.matchScore()).isEqualTo(initialResultA.matchScore());
+    assertThat(recomputedResultA.distancePositive()).isEqualTo(initialResultA.distancePositive());
+    assertThat(recomputedResultA.distanceNegative()).isEqualTo(initialResultA.distanceNegative());
+  }
+
+  @Test
+  @DisplayName("P0 Test: Khi W thay đổi do CRITIC tính lại trên tập mẫu mới -> MatchScore và thứ hạng có thể dịch chuyển")
+  void testP0_topsis_rankShift_whenWeightChanges_dueToCriticRecalculation() {
+    TopsisRankingEngine topsis = new TopsisRankingEngine();
+
+    // Điểm của hai Creator A và B không thay đổi
+    // Creator A: Mạnh SM1 (0.80), yếu SM2 (0.20)
+    // Creator B: Yếu SM1 (0.20), mạnh SM2 (0.80)
+    double[] scoresA = new double[] {0.80, 0.20, 0.50, 0.50};
+    double[] scoresB = new double[] {0.20, 0.80, 0.50, 0.50};
+
+    // Run 1: Trọng số ưu tiên SM1 (W1 = [0.40, 0.15, 0.30, 0.15])
+    EngineWeights wSm1Priority = new EngineWeights(0.40, 0.15, 0.30, 0.15, "TEST", 0.0, null, null);
+    TopsisResult resA1 = topsis.compute(scoresA[0], scoresA[1], scoresA[2], scoresA[3], wSm1Priority);
+    TopsisResult resB1 = topsis.compute(scoresB[0], scoresB[1], scoresB[2], scoresB[3], wSm1Priority);
+    assertThat(resA1.matchScore()).isGreaterThan(resB1.matchScore()); // A xếp trên B
+
+    // Run 2: Trọng số ưu tiên SM2 (W2 = [0.15, 0.40, 0.30, 0.15])
+    EngineWeights wSm2Priority = new EngineWeights(0.15, 0.40, 0.30, 0.15, "TEST", 0.0, null, null);
+    TopsisResult resA2 = topsis.compute(scoresA[0], scoresA[1], scoresA[2], scoresA[3], wSm2Priority);
+    TopsisResult resB2 = topsis.compute(scoresB[0], scoresB[1], scoresB[2], scoresB[3], wSm2Priority);
+    assertThat(resB2.matchScore()).isGreaterThan(resA2.matchScore()); // B đảo lên trên A
+
+    // Xác nhận: Rank Invariance chỉ giữ vững khi W cố định; khi CRITIC thay đổi W, thứ hạng dịch chuyển hợp lý theo W mới
+    assertThat(resA1.matchScore()).isNotEqualTo(resA2.matchScore());
+  }
+
+  @Test
+  @DisplayName("P0 Test: Mẫu số D+ + D- luôn >= 0.5 > 0 với mọi trọng số hợp lệ theo bất đẳng thức tam giác")
+  void testP0_topsis_positiveDenom_triangleInequality_strictlyGreaterThanZero() {
+    TopsisRankingEngine topsis = new TopsisRankingEngine();
+    EngineWeights weights = new EngineWeights(0.40, 0.20, 0.20, 0.20, "TEST", 0.0, null, null);
+
+    // Test trên các điểm biên khắc nghiệt: cực tiểu (0), cực đại (1), và hỗn hợp
+    List<double[]> testPoints = List.of(
+        new double[] {0.0, 0.0, 0.0, 0.0},
+        new double[] {1.0, 1.0, 1.0, 1.0},
+        new double[] {0.5, 0.5, 0.5, 0.5},
+        new double[] {0.0, 1.0, 0.0, 1.0},
+        new double[] {0.99, 0.01, 0.50, 0.50}
+    );
+
+    for (double[] pt : testPoints) {
+      TopsisResult res = topsis.compute(pt[0], pt[1], pt[2], pt[3], weights);
+      double denom = res.distancePositive() + res.distanceNegative();
+      assertThat(denom).isGreaterThanOrEqualTo(0.50 - 1e-6);
+      assertThat(Double.isFinite(res.closeness())).isTrue();
+      assertThat(Double.isFinite(res.matchScore())).isTrue();
+    }
+  }
+
+  @Test
+  @DisplayName("P0 Test: Khớp chuẩn xác công thức Weighted-Coordinate TOPSIS trên vector và trọng số không đồng đều")
+  void testP0_topsis_weightedCoordinateConvention_exactVerification() {
+    TopsisRankingEngine topsis = new TopsisRankingEngine();
+    // Trọng số kinh doanh: W = [0.40, 0.15, 0.30, 0.15]
+    EngineWeights weights = new EngineWeights(0.40, 0.15, 0.30, 0.15, "TEST", 0.0, null, null);
+
+    // Creator A: [0.48, 0.56, 0.91, 0.24]
+    TopsisResult resA = topsis.compute(0.48, 0.56, 0.91, 0.24, weights);
+
+    // Creator B: [0.32, 0.87, 0.89, 0.80]
+    TopsisResult resB = topsis.compute(0.32, 0.87, 0.89, 0.80, weights);
+
+    // Khớp kết quả giải tích Weighted-Coordinate TOPSIS (w_j nhân vào tọa độ trước khi bình phương):
+    // MatchScore A ≈ 58.28, MatchScore B ≈ 55.53
+    assertThat(resA.matchScore()).isCloseTo(58.28, offset(0.05));
+    assertThat(resB.matchScore()).isCloseTo(55.53, offset(0.05));
+    assertThat(resA.matchScore()).isGreaterThan(resB.matchScore());
+  }
+
+  @Test
+  @DisplayName("P1 Test: Tính đơn điệu (Monotonicity) - Nếu mọi SM của A >= B với W cố định thì MatchScore A >= B")
+  void testP1_topsis_monotonicity() {
+    TopsisRankingEngine topsis = new TopsisRankingEngine();
+    EngineWeights weights = new EngineWeights(0.30, 0.30, 0.20, 0.20, "TEST", 0.0, null, null);
+
+    TopsisResult resA = topsis.compute(0.80, 0.75, 0.70, 0.85, weights);
+    TopsisResult resB = topsis.compute(0.70, 0.65, 0.60, 0.75, weights); // Mọi chiều đều <= A
+
+    assertThat(resA.matchScore()).isGreaterThan(resB.matchScore());
+    assertThat(resA.distancePositive()).isLessThan(resB.distancePositive());
+    assertThat(resA.distanceNegative()).isGreaterThan(resB.distanceNegative());
+  }
+
+  @Test
+  @DisplayName("P1 Test: Vector trung hòa [0.50, 0.50, 0.50, 0.50] luôn đạt đúng MatchScore = 50.0 với mọi W hợp lệ")
+  void testP1_topsis_neutralVector_alwaysScoresExactFifty() {
+    TopsisRankingEngine topsis = new TopsisRankingEngine();
+
+    List<EngineWeights> arbitraryWeights = List.of(
+        new EngineWeights(0.25, 0.25, 0.25, 0.25, "TEST", 0.0, null, null),
+        new EngineWeights(0.70, 0.10, 0.10, 0.10, "TEST", 0.0, null, null),
+        new EngineWeights(0.10, 0.40, 0.40, 0.10, "TEST", 0.0, null, null),
+        new EngineWeights(0.40, 0.15, 0.30, 0.15, "TEST", 0.0, null, null)
+    );
+
+    for (EngineWeights w : arbitraryWeights) {
+      TopsisResult res = topsis.compute(0.50, 0.50, 0.50, 0.50, w);
+      assertThat(res.matchScore()).isCloseTo(50.00, offset(1e-6));
+      assertThat(res.distancePositive()).isCloseTo(res.distanceNegative(), offset(1e-6));
+    }
+  }
+
+  @Test
+  @DisplayName("P1 Test: Tie-breaker của Deterministic Comparator ưu tiên SM3 -> SM2 -> CreatorId")
+  void testP1_topsis_deterministicComparator_tieBreakers() {
+    TopsisRankingEngine topsis = new TopsisRankingEngine();
+    EngineWeights weights = new EngineWeights(0.25, 0.25, 0.25, 0.25, "TEST", 0.0, null, null);
+
+    UUID id1 = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    UUID id2 = UUID.fromString("00000000-0000-0000-0000-000000000002");
+
+    // Hai ứng viên có cùng MatchScore chính xác (tổng các bình phương bằng nhau)
+    // Cand 1: SM1=0.8, SM2=0.4, SM3=0.7, SM4=0.5
+    // Cand 2: SM1=0.8, SM2=0.5, SM3=0.6, SM4=0.5
+    // Ở đây Cand 1 có SM3=0.7 > Cand 2 có SM3=0.6 -> Cand 1 phải xếp trước
+    record MockCand(UUID creatorId, double matchScore, CandidateMemoryScores memoryScores) implements TopsisRankingEngine.RankableCandidate {}
+
+    CandidateMemoryScores mem1 = new CandidateMemoryScores(0.8, 0.4, 0.7, 0.5, 80, 40, 70, 50, 0.4, 0.4, 0.4, 1, 1, false, 3, false, true, true, 2, 2);
+    CandidateMemoryScores mem2 = new CandidateMemoryScores(0.8, 0.5, 0.6, 0.5, 80, 50, 60, 50, 0.5, 0.5, 0.5, 1, 1, false, 3, false, true, true, 2, 2);
+
+    MockCand c1 = new MockCand(id2, 70.0, mem1);
+    MockCand c2 = new MockCand(id1, 70.0, mem2);
+
+    List<MockCand> list = new ArrayList<>(List.of(c2, c1));
+    list.sort(topsis.deterministicComparator());
+
+    // c1 phải xếp trước c2 do SM3 (0.7 > 0.6) dù id2 > id1
+    assertThat(list.get(0)).isSameAs(c1);
+    assertThat(list.get(1)).isSameAs(c2);
+  }
+
+  @Test
+  @DisplayName("P1 Test: Confidence Score thay đổi không bao giờ làm thay đổi TOPSIS MatchScore")
+  void testP1_topsis_confidenceDoesNotAlterMatchScore() {
+    TopsisRankingEngine topsis = new TopsisRankingEngine();
+    ConfidenceCalculator confidenceCalc = new ConfidenceCalculator();
+    EngineWeights weights = new EngineWeights(0.25, 0.25, 0.25, 0.25, "TEST", 0.0, null, null);
+
+    // KOC A: Cold-start (0 campaign lịch sử)
+    CandidateMemoryScores coldScores = new CandidateMemoryScores(
+        0.50, 0.80, 0.85, 0.90,
+        50.0, 80.0, 85.0, 90.0,
+        0.80, 0.80, 0.80,
+        0, 0, true, 3, false, true, true, 3, 3
+    );
+
+    // KOC B: Dữ liệu dồi dào (15 campaign lịch sử), nhưng cùng điểm Four-Memory
+    CandidateMemoryScores richScores = new CandidateMemoryScores(
+        0.50, 0.80, 0.85, 0.90,
+        50.0, 80.0, 85.0, 90.0,
+        0.80, 0.80, 0.80,
+        15, 14, false, 3, false, true, true, 3, 3
+    );
+
+    TopsisResult resA = topsis.compute(coldScores, weights);
+    TopsisResult resB = topsis.compute(richScores, weights);
+
+    // MatchScore giống hệt nhau
+    assertThat(resA.matchScore()).isEqualTo(resB.matchScore());
+
+    // Trong khi Confidence khác biệt hoàn toàn
+    ConfidenceAssessment confA = confidenceCalc.calculate(coldScores, weights);
+    ConfidenceAssessment confB = confidenceCalc.calculate(richScores, weights);
+    assertThat(confA.compositeConfidence()).isLessThan(confB.compositeConfidence());
+    assertThat(confA.tier()).isNotEqualTo(confB.tier());
+  }
+
   // =========================================================================
   // Phase 5: Recommendation Confidence Assessment
   // =========================================================================

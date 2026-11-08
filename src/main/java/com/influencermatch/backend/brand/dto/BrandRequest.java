@@ -22,7 +22,39 @@ public record BrandRequest(
     @Size(max = 150) String brandTone,
     @Size(max = 3) List<Platform> preferredPlatforms,
     @Size(max = 1000) String description,
-    @Size(max = 30) String phoneNumber) {
+    @Size(max = 30) String phoneNumber,
+    @Size(max = 1000) String positioning,
+    @Size(max = 4000) String guidelines) {
+  public BrandRequest(
+      UUID userId,
+      String businessName,
+      String industry,
+      List<String> productCategories,
+      String website,
+      String location,
+      List<String> targetMarkets,
+      List<String> targetAudiences,
+      String brandTone,
+      List<Platform> preferredPlatforms,
+      String description,
+      String phoneNumber) {
+    this(
+        userId,
+        businessName,
+        industry,
+        productCategories,
+        website,
+        location,
+        targetMarkets,
+        targetAudiences,
+        brandTone,
+        preferredPlatforms,
+        description,
+        phoneNumber,
+        null,
+        null);
+  }
+
   public BrandRequest(
       UUID userId,
       String businessName,
@@ -47,6 +79,8 @@ public record BrandRequest(
         brandTone,
         preferredPlatforms,
         description,
+        null,
+        null,
         null);
   }
 }

@@ -289,6 +289,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
     String updatedBrand = brandBody.replace("Friendly", "Expert");
     mvc.perform(
             put("/brands/" + brandId)
+                .with(com.influencermatch.backend.support.TestBrandHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(updatedBrand))
@@ -300,7 +301,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
 {"name":"Summer Awareness","productService":"Daily Serum","objective":"AWARENESS",
  "targetAudiences":["Gen Z"],"contentType":"SHORT_VIDEO","startDate":"2026-10-01","endDate":"2026-10-31",
  "platforms":["TIKTOK"],"niches":["skincare"],"locations":["HCMC"],
- "followerMin":10000,"followerMax":50000,"budgetMin":3000000,"budgetMax":5000000}
+ "followerMin":10000,"followerMax":50000,"totalBudget":5000000,"currency":"VND","brief":"Serum launch","creatorMode":"SINGLE","targetCreatorCount":1,"deliverables":[{"platform":"TIKTOK","contentType":"Review","quantity":1}]}
 """;
     String invalidCampaignBody =
         campaignBody.replace(
@@ -330,16 +331,19 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
         .andExpect(status().isForbidden());
     mvc.perform(
             patch("/campaigns/" + campaignId + "/archive")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("ARCHIVED"));
     mvc.perform(
             patch("/campaigns/" + campaignId + "/archive")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("ARCHIVED"));
     mvc.perform(
             put("/campaigns/" + campaignId)
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(campaignBody))
@@ -368,9 +372,9 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
             .asText();
     String campaignBody =
         """
-        {"name":"Workflow Campaign","productService":"Serum","objective":"AWARENESS",
-         "platforms":["TIKTOK"],"niches":["skincare"],"locations":["HCMC"]}
-        """;
+{"name":"Workflow Campaign","productService":"Serum","objective":"AWARENESS",
+ "platforms":["TIKTOK"],"niches":["skincare"],"locations":["HCMC"],"brief":"Workflow brief","startDate":"2026-11-01","endDate":"2026-12-01","totalBudget":1000000,"currency":"VND","creatorMode":"SINGLE","targetCreatorCount":1,"deliverables":[{"platform":"TIKTOK","contentType":"Review","quantity":1}]}
+""";
     String campaignId =
         json(mvc.perform(
                     post("/brands/" + brandId + "/campaigns")
@@ -386,6 +390,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
 
     mvc.perform(
             patch("/campaigns/" + campaignId + "/status")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"ACTIVE\"}"))
@@ -393,6 +398,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
         .andExpect(jsonPath("$.code").value("INVALID_CAMPAIGN_TRANSITION"));
     mvc.perform(
             patch("/campaigns/" + campaignId + "/status")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"READY_FOR_DISCOVERY\"}"))
@@ -409,12 +415,14 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
             });
     mvc.perform(
             patch("/campaigns/" + campaignId + "/status")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"ACTIVE\"}"))
         .andExpect(status().isOk());
     mvc.perform(
             patch("/campaigns/" + campaignId + "/status")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"COMPLETED\"}"))

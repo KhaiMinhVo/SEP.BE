@@ -24,6 +24,9 @@ public class RegistrationSupport {
   private final ObjectMapper mapper;
   private final Clock clock;
 
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.brand.service.BrandContextLifecycle lifecycle;
+
   @Value("${application.policies.terms-version:terms-v1}")
   private String terms;
 
@@ -73,19 +76,7 @@ public class RegistrationSupport {
                 .businessName(name.trim())
                 .phoneNumber(normalized)
                 .build());
-    var data =
-        mapper
-            .createObjectNode()
-            .put("businessName", p.getBusinessName())
-            .put("phoneNumber", normalized);
-    contexts.save(
-        BrandContext.builder()
-            .brandProfile(p)
-            .contextVersion(1)
-            .profileContext(data)
-            .learnedPatterns(mapper.createArrayNode())
-            .evidenceRefs(mapper.createArrayNode())
-            .build());
+    lifecycle.initial(p);
   }
 
   public static String phone(String raw) {

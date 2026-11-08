@@ -33,6 +33,19 @@ public class RecommendationRun {
   @Column(name = "context_version", nullable = false)
   private int contextVersion = 1;
 
+  private UUID campaignContextId;
+  private UUID embeddingContextId;
+  private UUID embeddingJobId;
+  private String embeddingModel;
+  private String embeddingModelVersion;
+  private String candidateSource;
+  private UUID brandContextId;
+  private Integer brandContextVersion;
+  private String scoringPolicyVersion;
+
+  @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+  private com.fasterxml.jackson.databind.JsonNode scoringSnapshot;
+
   @Builder.Default
   @Column(nullable = false, length = 32)
   private String status = "COMPLETED";

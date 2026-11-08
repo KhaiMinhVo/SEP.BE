@@ -16,26 +16,31 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ShortlistItemDto {
-    private UUID id;
-    private UUID campaignId;
-    private UUID creatorId;
-    private UUID masterId;
-    private String creatorName;
-    private String platform;
-    private String avatarUrl;
-    private Long followers;
-    private BigDecimal engagementRate;
-    private String niche;
-    private ShortlistPriority priority;
-    private ShortlistStatus status;
-    private ShortlistSource source;
-    private UUID recommendationRunId;
-    private String note;
-    private LocalDateTime addedAt;
+  private UUID id;
+  private UUID campaignId;
+  private UUID creatorId;
+  private UUID masterId;
+  private String creatorName;
+  private String platform;
+  private String avatarUrl;
+  private UUID metricId;
+  private LocalDateTime collectedAt;
+  private BigDecimal dataConfidence;
+  private com.influencermatch.backend.creator.enums.MetricDataStatus freshnessStatus;
+  private String refreshRequestStatus;
+  private Long followers;
+  private BigDecimal engagementRate;
+  private String niche;
+  private ShortlistPriority priority;
+  private ShortlistStatus status;
+  private ShortlistSource source;
+  private UUID recommendationRunId;
+  private String note;
+  private LocalDateTime addedAt;
 
-    // Idempotent Shortlist Cart Response attributes
-    private String action; // "ADDED" or "ALREADY_EXISTS"
-    private Boolean isInShortlist;
-    private Long totalShortlistCount;
-    private String message;
+  // Idempotent Shortlist Cart Response attributes
+  private String action; // "ADDED" or "ALREADY_EXISTS"
+  private Boolean isInShortlist;
+  private Long totalShortlistCount;
+  private String message;
 }

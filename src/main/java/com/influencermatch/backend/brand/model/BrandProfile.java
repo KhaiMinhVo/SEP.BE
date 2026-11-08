@@ -32,6 +32,14 @@ public class BrandProfile extends BaseEntity {
   private String businessName;
 
   private String phoneNumber;
+  private long profileRevision;
+
+  @Column(length = 1000)
+  private String positioning;
+
+  @Column(length = 4000)
+  private String guidelines;
+
   @Builder.Default private String onboardingStatus = "PENDING";
   private java.time.Instant onboardingCompletedAt;
 

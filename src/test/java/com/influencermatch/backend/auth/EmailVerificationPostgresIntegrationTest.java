@@ -377,6 +377,10 @@ class EmailVerificationPostgresIntegrationTest extends PostgresApiTestSupport {
   // V25 registration now creates one, so explicitly reproduce that historical fixture.
   void historicalAccountWithoutBrandProfile(UUID userId) {
     jdbc.update(
+        "delete from brand_embedding_job where context_id in (select c.id from brand_context c join"
+            + " brand_profile p on p.id=c.brand_profile_id where p.user_id=?)",
+        userId);
+    jdbc.update(
         "delete from brand_context where brand_profile_id in (select id from brand_profile where"
             + " user_id=?)",
         userId);

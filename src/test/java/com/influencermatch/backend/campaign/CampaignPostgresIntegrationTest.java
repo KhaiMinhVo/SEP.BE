@@ -65,11 +65,11 @@ class CampaignPostgresIntegrationTest extends PostgresApiTestSupport {
         body.put("followerMax", 9);
       }
       case "budget" -> {
-        body.put("budgetMin", 10);
-        body.put("budgetMax", 9);
+        body.put("creatorFeeMin", 10);
+        body.put("creatorFeeMax", 9);
       }
-      case "negative" -> body.put("budgetMin", -1);
-      case "platforms" -> body.put("platforms", List.of());
+      case "negative" -> body.put("creatorFeeMin", -1);
+      case "platforms" -> body.put("platforms", List.of("UNKNOWN"));
       case "blankName" -> body.put("name", " ");
     }
     var result = call(owner, post("/brands/" + brand + "/campaigns"), body, 400);

@@ -53,8 +53,9 @@ public class WebConfig implements WebMvcConfigurer {
             "Accept",
             "X-Requested-With",
             "X-Correlation-ID",
-            "X-CSRF-TOKEN")
-        .exposedHeaders("Authorization", "X-Correlation-ID")
+            "X-CSRF-TOKEN",
+            "If-Match")
+        .exposedHeaders("Authorization", "X-Correlation-ID", "ETag")
         .allowCredentials(true)
         .maxAge(3600);
   }

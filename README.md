@@ -606,8 +606,180 @@ const response = await fetch(base + '/auth/login', {
 - `POST /auth/logout-all`: live Bearer JWT + CSRF; increments authVersion and revokes all sessions/refresh tokens, returning 204 and deleting cookie. Other devices must log in again.
 - Role/status changes and password setup invalidate sessions atomically. Platform OAuth callbacks cannot complete against a revoked initiating session. Running requests/SSE streams are not interrupted; subsequent authentication, including SSE token authentication, checks the session.
 
-Login and `/auth/me` add `brandProfileId` when present and `onboardingStatus` for BRAND (PENDING when no profile). Update the initial profile through `PUT /brands/me`; this is a full profile update, so preserve the fields FE wants to retain. Legacy accounts without a profile can still use `POST /brands`.
+Login and `/auth/me` add `brandProfileId` when present and `onboardingStatus` for BRAND (PENDING when no profile). Update the initial profile through ETag-protected PUT/PATCH `/brands/me` as described in the V26 contract below; PUT replaces all profile fields. Legacy accounts without a profile can still use `POST /brands`.
 
-Call `POST /brands/me/onboarding/complete` with Brand JWT and effective `UPDATE_BRAND_PROFILE` after setting businessName, phoneNumber, industry, at least one productCategories item, targetAudiences item, brandTone and preferredPlatforms item. Missing fields return 400 with `fieldErrors`. Successful response includes COMPLETED/onboardingCompletedAt; repeats do not alter the timestamp. Completed profiles cannot be updated to remove required fields. This state guides navigation without introducing a global Brand business lock. Website, description/location remain optional. No AI/M4 embedding or SM4 behavior is implemented by this change.
+Call `POST /brands/me/onboarding/complete` with Brand JWT, current `If-Match` and effective `UPDATE_BRAND_PROFILE` after setting businessName, phoneNumber, industry, at least one productCategories item, targetAudiences item, brandTone and preferredPlatforms item. Missing fields return 400 with `fieldErrors`. Successful response includes COMPLETED/onboardingCompletedAt; repeats do not alter the timestamp. Completed profiles cannot be updated to remove required fields. This state guides navigation without introducing a global Brand business lock. Website, description/location remain optional. V26 adds the embedding and M4 behaviors described below; onboarding never waits for AI.
 
 Automated checks use mock SMTP/provider and disposable PostgreSQL, not real consent or shared databases. See `docs/backend-test-cases.md` for actual run results.
+
+
+## Brand Profile and M4 contract (V26)
+
+New Brand registration still creates Profile + Context version 1 and PENDING onboarding. Legacy Brands without a profile can use POST /brands. V26 preserves existing context IDs and counters as the first available historical versions; missing earlier versions are not invented. Explicit context rows are now append-only, unique by Brand/version, and a database trigger rejects in-place updates. Legacy learned JSON/patterns and historical runs are retained.
+
+### Revision and partial update
+
+GET /brands/me and GET /brands/{id}, profile creation and successful writes return ETag `"brand:<profile UUID>:r<profileRevision>"`. The revision is separate from `m4Version`: it changes for a real profile change or first onboarding completion, while M4 versions change only for semantic preferences. Repeated identical requests keep both versions unchanged. Reordering a list or repeating its entries does not change its canonical semantic content.
+
+PUT /brands/me, PUT /brands/{id}, PATCH /brands/me and POST /brands/me/onboarding/complete require the current If-Match. Missing header returns 428 PRECONDITION_REQUIRED; malformed header 400; stale or foreign revision 409 BRAND_REVISION_CONFLICT. On conflict, fetch/reconcile with the current profile rather than silently overwriting it. Exact CORS origins remain required; If-Match is allowed and ETag exposed.
+
+PATCH changes supplied fields only. Omitted fields remain intact, null clears optional strings/lists, and [] clears a list. Unsupported fields and wrong JSON types return 400; ownership/userId cannot be patched. PUT retains full replacement semantics. Completed profiles cannot lose required onboarding fields through either API.
+
+`positioning` (up to 1,000 characters) and `guidelines` (up to 4,000) are optional. No Brand budget field was added; budget remains a Campaign responsibility.
+
+```javascript
+const profileResponse = await fetch(base + '/brands/me', {headers: {Authorization: `Bearer ${accessToken}`}});
+const revision = profileResponse.headers.get('ETag');
+const updated = await fetch(base + '/brands/me', {
+  method: 'PATCH',
+  headers: {'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}`, 'If-Match': revision},
+  body: JSON.stringify({positioning: 'Natural skincare', guidelines: 'Avoid unsupported medical claims'})
+});
+```
+
+Only industry, productCategories, targetMarkets, targetAudiences, brandTone, preferredPlatforms, description, positioning and guidelines create a new M4 version. Name, phone, website, address and onboarding state affect profile revision without re-embedding. Profile/context/job changes commit together; enqueue failure rolls them back. Explicit context and embedding text exclude contact data/account IDs. The profile itself continues to hold authorized contact data; historical contexts are preserved as originally stored.
+
+### Durable embedding
+
+Set deployment variables when the existing Python /api/v1/ai/embed service is ready:
+
+```dotenv
+BRAND_EMBEDDING_ENABLED=true
+BRAND_EMBEDDING_MODEL=bkai-foundation-models/vietnamese-bi-encoder
+BRAND_EMBEDDING_MODEL_VERSION=m4-embed-v1
+```
+
+Default is disabled: saved jobs remain PENDING until enabled. `AI_SERVICE_URL` is the existing AI base/embed URL. Model version is an operator-controlled deployment revision, not a provider-attested checkpoint. Bump it when the provider embedding contract/model deployment changes. The scheduler ensures a configured-model job exists for each current context, including preserved contexts and a newly configured model revision.
+
+A bounded two-thread executor wakes AFTER_COMMIT; a ten-second scheduler recovers missed events. Jobs are unique by context/model/version, use a two-minute lease and processing token, and make AI calls outside database transactions. Five attempts maximum per cycle with 15/30/60/120-second delays. Losing a lease prevents a stale worker from saving its result. Network errors and malformed vectors never become READY.
+
+The strict provider response must have status success, the configured model name, dimensions 768, and 768 finite float-compatible components with a nonzero vector. The inherited client timeout is 5 seconds connect/15 seconds read. Errors are recorded through retry state and safe job/attempt logging, without raw provider payloads.
+
+Brand responses include embeddingStatus PENDING/PROCESSING/READY/FAILED, embeddingModel, embeddingModelVersion and embeddingReadyAt when ready. They never expose the vector. POST /brands/me/context/embedding/retry requires Brand ownership and UPDATE_BRAND_PROFILE, only requeues a FAILED job for the current context/model, and returns 409 otherwise. Changing a profile does not discard older context/model results; they cannot replace the current context's embedding.
+
+READY means a representation was stored. Brand vectors are not directly compared with Creator vectors lacking compatible model metadata; this release does not claim semantic SM4 is complete. AI failure does not roll back an already saved profile or block onboarding.
+
+### Recommendation and learned evidence
+
+Each run captures one immutable Brand Context and a cohort snapshot before scoring all candidates. New Campaign Context rows also record their Brand Context reference. RecommendationRun persists Brand Context ID/version, scoringPolicyVersion and the returned candidate breakdowns/weights/evidence IDs. Existing runs without those fields remain historical, not reconstructed or recalculated.
+
+Campaign preferences take priority. Only missing campaign preferences are supplemented from the captured Brand context as soft matching/query text; Brand attributes never add hard discovery filters. Tone, positioning and guidelines supply textual context, not independently proven Creator attributes.
+
+Policy `m4-evidence-v1` derives BRAND_FIT_BY_PLATFORM_NICHE aggregates from actual Brand-owned reviews of COMPLETED collaborations with matching Outcomes. Review IDs are deduplicated, and edits rebuild the aggregate rather than incrementing a stored count. Niche attribution uses the latest public snapshot at or before the review time, when available; otherwise same-platform evidence remains usable. Matching platform+niche is preferred, then same-platform evidence. No other platform or arbitrary first pattern is used.
+
+A cohort requires five distinct reviews and confidence >= 0.75. Coverage heuristic: min(1, 0.50 + 0.05 * count); this is not an accuracy probability. Learned M4 is clamp(25 * (mean brandFitRating - 1), 0, 100), including low ratings. Unchanged aggregates retain their stored identity/time. Legacy patterns without evidence provenance and rejection feedback are retained but cannot establish a learned success score.
+
+Original M2/M1/M4 weights are 0.50/0.30/0.20. M1 requires VERIFIED historical evidence and retains its previous formula when available. Missing M1/M4 returns null with availability/reason/evidence metadata, not fabricated 50/0. Available components receive originalWeight/sumAvailableWeights. Response breakdown includes originalWeights, effectiveWeights, evidence counts, M4 review IDs/confidence and scoringPolicyVersion. Coverage is distinct from the match score; these rules have not been empirically calibrated.
+
+No changes to quota behavior, candidate limit or CreatorMaster deduplication are intended. Automated checks use mock AI and disposable PostgreSQL; production deployment, migration and real model verification are separate authorized actions.
+
+
+## Campaign Brief and M3 contract (V27)
+
+New Campaigns always start DRAFT. Only name is required for draft creation; supplied optional fields must still be valid. READY_FOR_DISCOVERY requires productService, brief, objective, platforms, startDate/endDate, totalBudget, creatorMode, targetCreatorCount and deliverables. Lifecycle remains DRAFT -> READY_FOR_DISCOVERY -> ACTIVE -> COMPLETED, or DRAFT -> ARCHIVED. Brief editing remains DRAFT-only. Saving/activating never runs Recommendation automatically.
+
+### Campaign form and currency
+
+- brief: maximum 10,000 characters; creatorMode: SINGLE or MULTI; SINGLE targetCreatorCount=1, MULTI >=2.
+- deliverables: [{platform, contentType, quantity}], applying to **each Creator**. Quantity is positive, contentType max 100 characters, platform must be in Campaign platforms. These are planned requirements, not a Shortlist limit or automatic Collaboration allocation.
+- totalBudget: positive total Campaign amount. currency: VND only. creatorFeeMin/creatorFeeMax: optional nonnegative per-Creator preference, ordered range. No division of total budget by target count, no hard fee constraint and no fee score/filter. feeAssessmentStatus=UNAVAILABLE: comparable deliverable/scope pricing is not yet available.
+- Existing budgetMin/budgetMax remain historical read-only values, deprecated in Swagger. Requests containing those keys are rejected (including explicit null); no migration guesses their meaning. PUT preserves historical legacy amounts while replacing supported brief fields.
+- Existing targetAudiences, contentType, niches, locations and follower ranges remain supported. TRAFFIC remains a valid objective. Autofill returns editable suggestions in the new form shape and never saves/activates a Campaign.
+
+### ETag and request changes
+
+GET /campaigns/{id}, create, update and status/archive responses return ETag: `"campaign:<id>:r<campaignRevision>"`. PUT /campaigns/{id}, PATCH /campaigns/{id}/status and PATCH /campaigns/{id}/archive require current If-Match. Missing header returns 428 PRECONDITION_REQUIRED, malformed 400, stale 409 CAMPAIGN_REVISION_CONFLICT. GET/reconcile after a conflict; do not blindly retry overwrites. PUT replaces the complete editable brief; omitted optional fields clear. No-op does not increment revision. Archiving an already archived Campaign with current ETag is idempotent. Existing credentials/ownership and CORS restrictions still apply.
+
+Example request body (prefix /api/v1):
+
+```json
+{
+  "name": "Serum launch",
+  "productService": "Daily Serum",
+  "brief": "Demonstrate the product in a short review. Avoid medical claims.",
+  "objective": "AWARENESS",
+  "platforms": ["TIKTOK"],
+  "startDate": "2026-12-01",
+  "endDate": "2026-12-31",
+  "creatorMode": "MULTI",
+  "targetCreatorCount": 3,
+  "deliverables": [{"platform":"TIKTOK","contentType":"Review video","quantity":1}],
+  "totalBudget": 15000000,
+  "currency": "VND",
+  "creatorFeeMin": 1000000,
+  "creatorFeeMax": 3000000
+}
+```
+
+### Frozen context and durable embedding
+
+READY atomically saves a complete Campaign Context, its frozen Brand Context reference and a durable M3 job. Explicit Campaign values take precedence over Brand fallback. Later Brand updates do not rewrite the M3 input. Feedback creates another Context version containing exclusions/history while reusing the same embedding source; private feedback text is excluded from embedding. The database prevents editing historical context content; active/archive metadata can change.
+
+Campaign response exposes contextVersion, embeddingContextId, embeddingStatus (NOT_REQUESTED before preparation; PENDING/PROCESSING/READY/FAILED for a tracked source), embeddingModel, embeddingModelVersion and embeddingReadyAt. No vector is exposed. POST /campaigns/{id}/context/embedding/retry requires ownership and UPDATE_CAMPAIGN; only the current FAILED source/model job can be retried.
+
+Enable the durable worker on the deployed process only after AI is configured:
+
+```dotenv
+CAMPAIGN_EMBEDDING_ENABLED=true
+CAMPAIGN_EMBEDDING_MODEL=bkai-foundation-models/vietnamese-bi-encoder
+CAMPAIGN_EMBEDDING_MODEL_VERSION=m3-embed-v1
+```
+
+Default is false; queued jobs remain pending while disabled. modelVersion is an operator-defined deployment revision, not a provider checkpoint claim. Worker dispatches after commit with two threads/queue 100 and a 10-second recovery sweep. Lease=2 minutes, processing-token fencing, maximum five attempts with 15/30/60/120-second backoff; AI requests hold no DB transaction. Response must report success, matching model, dimensions 768 and a finite nonzero vector. Failure leaves the saved Campaign intact. Changing model/version makes a different job namespace; do not call old-model vectors current-model results.
+
+### Recommendation source and quota
+
+POST /campaigns/{id}/ai-recommendations?candidateSource=SHORTLIST|DISCOVERY defaults to SHORTLIST. SHORTLIST never silently falls back to Discovery. Empty eligible source returns 409 RECOMMENDATION_NO_CANDIDATES. Campaign not ready or embedding not READY returns 409 (CAMPAIGN_EMBEDDING_NOT_READY includes embeddingStatus). These failures do not reserve recommendation quota or create a Run. Recommendation reads persisted M3; no synchronous embedding request or zero-vector fallback remains.
+
+Each Run stores candidateSource, Campaign Context/version, embedding source/job/model/version and the existing Brand/M4 evidence/score snapshot. Brand/M4 rules, quota amounts, candidate retrieval limits and CreatorMaster deduplication remain unchanged. Stored 768-dimensional M3 vectors still depend on the existing Creator embedding pipeline: legacy Creator vectors without model metadata are not independently proven compatible merely by having the same dimensions.
+
+### Migration and legacy Campaigns
+
+V27 leaves V1-V26 unchanged, preserves legacy budgets/contexts/runs and does not invent historical brief, deliverables, currency, target counts or embedding provenance. Old DRAFT Campaigns must supply the new READY fields. Existing READY/ACTIVE/COMPLETED Campaigns keep their lifecycle. The first new Recommendation without a tracked M3 source commits an idempotent LEGACY_SNAPSHOT from currently persisted facts and queues embedding; the response waits with 409. Missing fields remain missing. This preparation uses a short separate transaction so its job survives the waiting response; business/history Run data is not overwritten.
+
+Only backend integration is supplied. FE must update form shape, ETag handling, source selection and pending/failed embedding display. No real .env, Bruno, shared DB migration or backend restart is part of this change.
+
+
+## Shortlist batch, Compare and best-effort refresh
+
+Shortlist stores **channels** by creatorId, not a single row per CreatorMaster. Multiple channels of one Master can be shortlisted/compared. Campaign targetCreatorCount does not cap Shortlist size. Adding/restoring does not book, reserve fees, create Relationship/Collaboration or send collaboration invitations. Outreach remains a separate explicit action.
+
+### Add and batch
+
+POST /api/v1/campaigns/{campaignId}/shortlist (alias /items) retains the single-add shape: creatorId, optional priority/note/source/recommendationRunId. creatorAccountId is a compatible alias; sending both with different values returns 400. A referenced RecommendationRun must exist and belong to the same Campaign/Brand; invalid references are rejected, not silently dropped.
+
+POST /api/v1/campaigns/{campaignId}/shortlist/batch accepts:
+
+```json
+{"creatorIds":["<channel-uuid-1>","<channel-uuid-2>"],"priority":"HIGH","note":"Consider for launch","source":"MANUAL_DISCOVERY"}
+```
+
+Provide 1-100 distinct non-null UUIDs. Invalid batch structure/duplicate IDs reject the whole request before writes. Permission and Campaign ownership are checked before processing. Valid batches return HTTP 200 with ordered results, counts by action, and totalShortlistCount (excluding REMOVED):
+
+- ADDED: a new item committed.
+- ALREADY_EXISTS: active item returned unchanged, including existing priority/note/source. Use PATCH to edit metadata; repeating Add no longer overwrites it.
+- RESTORED: REMOVED item becomes SAVED, preserving ID/addedAt/source history; supplied priority/note update during restore.
+- INVALID: unknown channel or invalid RecommendationRun; other items continue.
+- FAILED: an item transaction failed internally; response contains only a safe errorCode.
+
+Each item has its own transaction. User -> Campaign -> item locks serialize Add with update/remove/batch-status, while the existing unique Campaign/channel constraint remains the final guard. A batch is not all-or-nothing: successful items remain if another fails. If infrastructure prevents completing the overall response, a 5xx may follow earlier commits; reread/retry safely rather than assuming nothing was saved.
+
+### Snapshots and Compare
+
+List/readiness/outreach read latest public snapshots by collectedAt DESC, id DESC; multi-row reads are batched. Shortlist DTO adds metricId, collectedAt, dataConfidence and freshnessStatus. Missing data stays nullable, never fabricated zero. masterId reflects the channel's current CreatorMaster, not an outdated copy on the item.
+
+POST /campaigns/{campaignId}/shortlist/compare accepts 2-5 distinct creatorIds in display order. Every item must belong to the authorized Campaign/Brand and not be REMOVED. Invalid selections return 400; inaccessible Campaign returns 404. Response adds masterId, item status and feeAssessmentStatus=UNAVAILABLE. Metrics are public inputs for M2, not an already-computed M2/Four-Memory score. metrics remains explicitly null if absent. Compare is read-only and returns no contacts, price amounts, ranking or rateCard. The InfluencerMatch verification indicator is not a platform-issued verification badge.
+
+Recommendation continues to take Campaign ID plus candidateSource=SHORTLIST and obtains eligible candidates server-side. Master deduplication and existing M1/M4/M3 gates remain unchanged. CRITIC/reference candidate pool is not implemented; current fixed/renormalized scoring policy remains in force.
+
+### Crawl and SSE are best effort
+
+ADDED/RESTORED registers an after-commit refresh event; ALREADY_EXISTS does not trigger another crawl. Add DTO reports refreshRequestStatus=PENDING_DISPATCH or NOT_REQUESTED. PENDING_DISPATCH is a local best-effort dispatch intention, not proof the crawler accepted or updated data.
+
+A dedicated bounded executor (2 threads, queue 100) calls the fixed crawler /shortlist-trigger endpoint outside a database transaction. SSE emits CRAWL_REQUESTED only after a successful HTTP response, or CRAWL_REQUEST_FAILED on rejection/transport/executor failure. Failure does not roll back the committed item. No durable job, restart recovery, automatic retry or exactly-once delivery is promised.
+
+Ingestion emits CRAWL_COMPLETED only after its transaction commits, using the saved metric ID, collection time and public metric values. Rollback emits no completion. SSE subscription checks effective MANAGE_OWN_SHORTLIST plus Campaign ownership, and messages contain no private contacts or raw provider errors. Streams remain per-instance, in-memory notifications: reread the Shortlist after reconnect and do not treat missed events as authoritative state.
+
+No migration, outbox or new environment secret is required for this change. Existing V1-V27, real .env, Bruno and diagrams/SDD remain untouched.
+
+Shortlist refreshRequestStatus describes the current Add response only; it is not persisted job state. GET/list does not report the last dispatch result. New addedAt values keep the existing local timestamp convention while using Clock for deterministic creation; restore preserves the original value.

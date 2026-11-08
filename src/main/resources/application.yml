@@ -81,6 +81,14 @@ spring:
 #  JWT Security
 # ------------------------------------------------------------------------------------
 application:
+  campaign-embedding:
+    enabled: ${CAMPAIGN_EMBEDDING_ENABLED:false}
+    model: ${CAMPAIGN_EMBEDDING_MODEL:bkai-foundation-models/vietnamese-bi-encoder}
+    model-version: ${CAMPAIGN_EMBEDDING_MODEL_VERSION:m3-embed-v1}
+  brand-embedding:
+    enabled: ${BRAND_EMBEDDING_ENABLED:false}
+    model: ${BRAND_EMBEDDING_MODEL:bkai-foundation-models/vietnamese-bi-encoder}
+    model-version: ${BRAND_EMBEDDING_MODEL_VERSION:m4-embed-v1}
   policies:
     terms-version: ${TERMS_VERSION:terms-v1}
     privacy-version: ${PRIVACY_VERSION:privacy-v1}

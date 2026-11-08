@@ -54,7 +54,9 @@ class AuthTargetPostgresIntegrationTest extends PostgresApiTestSupport {
     if (body != null) r.content(json.writeValueAsBytes(body));
     if (token != null) r.header("Authorization", "Bearer " + token);
     if (refresh != null) r.cookie(new Cookie("IM_REFRESH", refresh));
-    return mvc.perform(r).andExpect(status().is(code)).andReturn();
+    return mvc.perform(r.with(TestBrandHttp.revision(mvc)))
+        .andExpect(status().is(code))
+        .andReturn();
   }
 
   Session session(User u) throws Exception {

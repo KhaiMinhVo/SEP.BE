@@ -66,6 +66,7 @@ class ShortlistPhase3ContactReadinessTest {
             recommendationRunRepository,
             publicCreatorMetricRepository,
             relationshipRepository);
+    com.influencermatch.backend.support.TestShortlistFixtures.wire(service);
 
     brandUser = TestActors.user(Role.BRAND);
     TestActors.authenticate(brandUser);

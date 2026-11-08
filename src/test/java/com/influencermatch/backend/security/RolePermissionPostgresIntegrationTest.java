@@ -106,7 +106,9 @@ class RolePermissionPostgresIntegrationTest {
     if (body != null)
       req.contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(body));
     var response =
-        mvc.perform(req.with(com.influencermatch.backend.support.TestAuthHttp.request(body)))
+        mvc.perform(
+                req.with(com.influencermatch.backend.support.TestAuthHttp.request(body))
+                    .with(com.influencermatch.backend.support.TestBrandHttp.revision(mvc)))
             .andExpect(status().is(status))
             .andReturn()
             .getResponse();

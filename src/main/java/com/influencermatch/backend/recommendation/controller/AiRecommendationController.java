@@ -34,8 +34,11 @@ public class AiRecommendationController {
       security = @SecurityRequirement(name = "BearerAuth"))
   public ResponseEntity<ApiResponse<RecommendationResponseDto>> recommendKocs(
       @PathVariable UUID campaignId,
-      @RequestParam(defaultValue = "30") int limit) {
-    RecommendationResponseDto result = recommendationService.recommendKocs(campaignId, limit);
+      @RequestParam(defaultValue = "30") int limit,
+      @RequestParam(defaultValue = "SHORTLIST")
+          com.influencermatch.backend.campaign.enums.CandidateSource candidateSource) {
+    RecommendationResponseDto result =
+        recommendationService.recommendKocs(campaignId, limit, candidateSource);
     return ResponseEntity.ok(ApiResponse.ok("KOC recommendations generated successfully", result));
   }
 
@@ -58,8 +61,7 @@ public class AiRecommendationController {
       summary = "Submit feedback on recommended candidate (e.g. REJECT with reasonCode)",
       security = @SecurityRequirement(name = "BearerAuth"))
   public ResponseEntity<ApiResponse<RecommendationFeedbackResponse>> processFeedback(
-      @PathVariable UUID campaignId,
-      @Valid @RequestBody RecommendationFeedbackRequest request) {
+      @PathVariable UUID campaignId, @Valid @RequestBody RecommendationFeedbackRequest request) {
     RecommendationFeedbackResponse response =
         recommendationService.processFeedback(campaignId, request);
     return ResponseEntity.ok(ApiResponse.ok("Feedback processed successfully", response));

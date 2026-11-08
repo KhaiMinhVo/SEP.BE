@@ -33,11 +33,11 @@ public class Campaign extends BaseEntity {
   @Column(nullable = false, length = 200)
   private String name;
 
-  @Column(nullable = false, length = 500)
+  @Column(length = 500)
   private String productService;
 
   @Enumerated(EnumType.STRING)
-  @Column(nullable = false, length = 32)
+  @Column(length = 32)
   private CampaignObjective objective;
 
   @Builder.Default
@@ -72,6 +72,35 @@ public class Campaign extends BaseEntity {
 
   @Column(precision = 19, scale = 2)
   private BigDecimal budgetMax;
+
+  @Column(columnDefinition = "text")
+  private String brief;
+
+  @Enumerated(EnumType.STRING)
+  private CreatorMode creatorMode;
+
+  private Integer targetCreatorCount;
+
+  @Builder.Default
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(columnDefinition = "jsonb", nullable = false)
+  private List<com.influencermatch.backend.campaign.dto.CampaignDeliverable> deliverables =
+      new ArrayList<>();
+
+  @Column(precision = 19, scale = 2)
+  private BigDecimal totalBudget;
+
+  @Column(length = 3)
+  private String currency;
+
+  @Column(precision = 19, scale = 2)
+  private BigDecimal creatorFeeMin;
+
+  @Column(precision = 19, scale = 2)
+  private BigDecimal creatorFeeMax;
+
+  @Column(nullable = false)
+  private long campaignRevision;
 
   @Column private LocalDate startDate;
 

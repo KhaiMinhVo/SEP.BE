@@ -11,11 +11,29 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class ScoreBreakdownDto {
   private Double m2Score;
+
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
   private Double m1Score;
+
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
   private Double m4Score;
+
   private Double followerScore;
   private Double engagementScore;
   private Double semanticMatchScore;
   private Double nicheMatchScore;
   private Double finalScore;
+  private boolean m1Available;
+  private boolean m4Available;
+  private String m1UnavailableReason;
+  private String m4UnavailableReason;
+  private int m1EvidenceCount;
+  private int m4EvidenceCount;
+  private Double m4Confidence;
+  private java.util.List<java.util.UUID> m4ReviewIds;
+  private java.util.Map<String, Double> originalWeights;
+  private java.util.Map<String, Double> effectiveWeights;
+  private String scoringPolicyVersion;
 }

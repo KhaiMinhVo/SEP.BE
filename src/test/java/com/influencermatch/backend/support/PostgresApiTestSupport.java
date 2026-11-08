@@ -42,6 +42,11 @@ import org.testcontainers.utility.DockerImageName;
 @ActiveProfiles("dev")
 @AutoConfigureMockMvc
 public abstract class PostgresApiTestSupport {
+  // This unrelated periodic job must not observe a Clock mock after per-test reset.
+  // Real session validation/expiry and Google request-time cleanup remain enabled.
+  @org.springframework.boot.test.mock.mockito.MockBean
+  protected com.influencermatch.backend.auth.service.AuthSessionCleanup authCleanup;
+
   // No domain suite may dispatch a real crawler job; TikTok fixtures stub resolver responses.
   @org.springframework.boot.test.mock.mockito.MockBean
   protected com.influencermatch.backend.creator.client.CrawlerServiceClient crawler;
@@ -91,7 +96,10 @@ public abstract class PostgresApiTestSupport {
     if (body != null)
       req.contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(body));
     var result =
-        mvc.perform(req.with(TestAuthHttp.request(body)))
+        mvc.perform(
+                req.with(TestAuthHttp.request(body))
+                    .with(TestBrandHttp.revision(mvc))
+                    .with(TestCampaignHttp.revision(mvc)))
             .andExpect(status().is(expected))
             .andReturn()
             .getResponse();
@@ -125,6 +133,16 @@ public abstract class PostgresApiTestSupport {
     var body = new HashMap<String, Object>();
     body.put("name", "Test Campaign");
     body.put("productService", "Product");
+    body.put("brief", "Campaign brief");
+    body.put("creatorMode", "SINGLE");
+    body.put("targetCreatorCount", 1);
+    body.put("totalBudget", 1000000);
+    body.put("currency", "VND");
+    body.put("startDate", "2026-11-01");
+    body.put("endDate", "2026-12-01");
+    body.put(
+        "deliverables",
+        List.of(Map.of("platform", "TIKTOK", "contentType", "Review", "quantity", 1)));
     body.put("objective", "AWARENESS");
     body.put("platforms", List.of("TIKTOK"));
     return body;

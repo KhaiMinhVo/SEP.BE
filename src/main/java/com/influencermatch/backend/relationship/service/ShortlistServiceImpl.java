@@ -2,7 +2,6 @@ package com.influencermatch.backend.relationship.service;
 
 import com.influencermatch.backend.brand.model.BrandProfile;
 import com.influencermatch.backend.campaign.model.Campaign;
-import com.influencermatch.backend.campaign.model.RecommendationRun;
 import com.influencermatch.backend.campaign.repository.RecommendationRunRepository;
 import com.influencermatch.backend.creator.client.CrawlerServiceClient;
 import com.influencermatch.backend.creator.dto.InvitationResponse;
@@ -19,7 +18,6 @@ import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.relationship.dto.*;
 import com.influencermatch.backend.relationship.enums.RelationshipStage;
 import com.influencermatch.backend.relationship.enums.ShortlistPriority;
-import com.influencermatch.backend.relationship.enums.ShortlistSource;
 import com.influencermatch.backend.relationship.enums.ShortlistStatus;
 import com.influencermatch.backend.relationship.model.BrandCreatorRelationship;
 import com.influencermatch.backend.relationship.model.ShortlistItem;
@@ -30,7 +28,6 @@ import com.influencermatch.backend.security.permission.Permissions;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
 import jakarta.persistence.criteria.Predicate;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -61,6 +58,10 @@ public class ShortlistServiceImpl implements ShortlistService {
   private final CreatorInvitationRepository creatorInvitationRepository;
   private final CrawlerServiceClient crawlerServiceClient;
   private final ShortlistNotificationService notificationService;
+
+  @Autowired private ShortlistItemWriter writer;
+  @Autowired private ShortlistProjectionService projection;
+  @Autowired private com.influencermatch.backend.campaign.service.CampaignWriteLock writeLocks;
 
   @Autowired
   public ShortlistServiceImpl(
@@ -159,129 +160,60 @@ public class ShortlistServiceImpl implements ShortlistService {
         null);
   }
 
-  /** FLOW SL-01: 1-Click Add to Shortlist Cart (Idempotent Handling) */
   @Override
-  @Transactional
-  public ShortlistItemDto addCreatorToShortlist(UUID campaignId, AddShortlistItemRequest request) {
-    Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
-    Campaign campaign = ownership.requireOwned(campaignId);
-    UUID userId = Permissions.actor().getId();
+  public ShortlistItemDto addCreatorToShortlist(UUID id, AddShortlistItemRequest request) {
+    return writer.add(id, request);
+  }
 
-    UUID targetCreatorId = request.getEffectiveCreatorId();
-    if (targetCreatorId == null) {
-      throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Creator ID is required");
-    }
-
-    ShortlistPriority priority =
-        request.getPriority() != null ? request.getPriority() : ShortlistPriority.MEDIUM;
-    ShortlistSource source =
-        request.getSource() != null ? request.getSource() : ShortlistSource.MANUAL_DISCOVERY;
-
-    // Idempotent Shortlist Cart Check (Chống lỗi 409)
-    Optional<ShortlistItem> existingOpt =
-        shortlistItemRepository.findByCampaignIdAndCreatorId(campaignId, targetCreatorId);
-    if (existingOpt.isPresent()) {
-      ShortlistItem existing = existingOpt.get();
-      if (!hasMatchingOwner(existing))
-        throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Shortlist item not found");
-      // Nếu trước đó bị REMOVED, phục hồi về SAVED
-      if (existing.getStatus() == ShortlistStatus.REMOVED) {
-        existing.setStatus(ShortlistStatus.SAVED);
-        if (request.getNote() != null) {
-          existing.setNote(request.getNote());
-        }
-        if (request.getPriority() != null) {
-          existing.setPriority(request.getPriority());
-        }
-        existing = shortlistItemRepository.save(existing);
-      } else if (request.getPriority() != null) {
-        existing.setPriority(request.getPriority());
-        existing = shortlistItemRepository.save(existing);
-      }
-
-      long totalCount =
-          shortlistItemRepository.countByCampaignIdAndStatusNot(
-              campaignId, ShortlistStatus.REMOVED);
-
-      ShortlistItemDto dto = mapToDto(existing);
-      dto.setAction("ALREADY_EXISTS");
-      dto.setIsInShortlist(true);
-      dto.setTotalShortlistCount(totalCount);
-      dto.setMessage("Ứng viên đã có sẵn trong Shortlist");
-      return dto;
-    }
-
-    Creator creator =
-        creatorRepository
-            .findById(targetCreatorId)
-            .orElseThrow(
-                () -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Creator not found"));
-
-    User user =
-        userRepository
-            .findById(userId)
-            .orElseThrow(
-                () -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "User not found"));
-
-    RecommendationRun run = null;
-    if (request.getRecommendationRunId() != null) {
-      run = recommendationRunRepository.findById(request.getRecommendationRunId()).orElse(null);
-    }
-
-    ShortlistItem item =
-        ShortlistItem.builder()
-            .campaign(campaign)
-            .creator(creator)
-            .master(creator.getMaster())
-            .user(user)
-            .priority(priority)
-            .status(ShortlistStatus.SAVED)
-            .source(source)
-            .recommendationRun(run)
-            .note(request.getNote())
-            .addedAt(LocalDateTime.now())
-            .build();
-
-    item = shortlistItemRepository.save(item);
-
-    long totalCount =
-        shortlistItemRepository.countByCampaignIdAndStatusNot(campaignId, ShortlistStatus.REMOVED);
-    String creatorName =
-        creator.getDisplayName() != null ? creator.getDisplayName() : creator.getUserName();
-
-    if (crawlerServiceClient != null) {
+  @Override
+  public BatchAddShortlistResponse addBatch(UUID id, BatchAddShortlistRequest request) {
+    writer.preflight(id);
+    if (request == null
+        || request.creatorIds() == null
+        || request.creatorIds().isEmpty()
+        || request.creatorIds().size() > 100
+        || request.creatorIds().stream().anyMatch(Objects::isNull)
+        || new HashSet<>(request.creatorIds()).size() != request.creatorIds().size())
+      throw new com.influencermatch.backend.exception.ValidationException(
+          "Batch requires 1-100 distinct Creator IDs");
+    var results = new ArrayList<BatchAddShortlistResponse.Result>();
+    var counts = new LinkedHashMap<String, Long>();
+    for (String action : List.of("ADDED", "ALREADY_EXISTS", "RESTORED", "INVALID", "FAILED"))
+      counts.put(action, 0L);
+    for (UUID creator : request.creatorIds()) {
+      BatchAddShortlistResponse.Result result;
       try {
-        crawlerServiceClient.triggerShortlistCrawlAsync(
-            creator.getPlatform(),
-            creator.getUserName(),
-            creator.getId(),
-            campaignId
-        );
-      } catch (Exception e) {
-        log.warn("Could not trigger async shortlist crawl for creator {}: {}", creator.getId(), e.getMessage());
+        var dto =
+            writer.add(
+                id,
+                AddShortlistItemRequest.builder()
+                    .creatorId(creator)
+                    .priority(request.priority())
+                    .note(request.note())
+                    .source(request.source())
+                    .recommendationRunId(request.recommendationRunId())
+                    .build());
+        result = new BatchAddShortlistResponse.Result(creator, dto.getAction(), dto, null);
+      } catch (BusinessException ex) {
+        if (ex.code() == ErrorCode.ACCESS_DENIED || ex.code() == ErrorCode.UNAUTHENTICATED)
+          throw ex;
+        result = new BatchAddShortlistResponse.Result(creator, "INVALID", null, ex.code().name());
+      } catch (Exception ex) {
+        log.error(
+            "Shortlist batch item failed campaignId={} creatorId={} errorType={}",
+            id,
+            creator,
+            ex.getClass().getSimpleName());
+        result = new BatchAddShortlistResponse.Result(creator, "FAILED", null, "INTERNAL_ERROR");
       }
+      results.add(result);
+      counts.compute(result.action(), (k, v) -> v + 1);
     }
-
-    if (notificationService != null) {
-      try {
-        notificationService.notifyCrawlStarted(
-            campaignId,
-            creator.getId(),
-            creatorName,
-            creator.getPlatform(),
-            creator.getUserName()
-        );
-      } catch (Exception e) {
-        log.warn("Could not emit SSE crawl started event for creator {}: {}", creator.getId(), e.getMessage());
-      }
-    }
-
-    ShortlistItemDto dto = mapToDto(item);
-    dto.setAction("ADDED");
-    dto.setIsInShortlist(true);
-    dto.setTotalShortlistCount(totalCount);
-    dto.setMessage("Đã thêm " + creatorName + " vào Shortlist");
-    return dto;
+    return new BatchAddShortlistResponse(
+        id,
+        List.copyOf(results),
+        counts,
+        shortlistItemRepository.countByCampaignIdAndStatusNot(id, ShortlistStatus.REMOVED));
   }
 
   /** FLOW SL-02: View Shortlist by Campaign with filtering */
@@ -327,7 +259,9 @@ public class ShortlistServiceImpl implements ShortlistService {
           return cb.and(predicates.toArray(new Predicate[0]));
         };
 
-    return shortlistItemRepository.findAll(spec, pageable).map(this::mapToDto);
+    var page = shortlistItemRepository.findAll(spec, pageable);
+    var snapshots = projection.latest(page.getContent());
+    return page.map(i -> projection.map(i, snapshots.get(i.getCreator().getId())));
   }
 
   /** FLOW SL-02: Update Shortlist Item Priority, Note, or Status */
@@ -337,10 +271,11 @@ public class ShortlistServiceImpl implements ShortlistService {
       UUID campaignId, UUID shortlistItemId, UpdateShortlistItemRequest request) {
     Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
     ownership.requireOwned(campaignId);
+    writeLocks.owned(campaignId);
 
     ShortlistItem item =
         shortlistItemRepository
-            .findByIdAndCampaignId(shortlistItemId, campaignId)
+            .findLockedByIdAndCampaignId(shortlistItemId, campaignId)
             .filter(this::hasMatchingOwner)
             .orElseThrow(
                 () ->
@@ -376,19 +311,21 @@ public class ShortlistServiceImpl implements ShortlistService {
       UUID campaignId, BatchUpdateStatusRequest request) {
     Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
     ownership.requireOwned(campaignId);
+    writeLocks.owned(campaignId);
 
     List<ShortlistItem> items =
         shortlistItemRepository.findByCampaignIdAndIdIn(campaignId, request.getItemIds()).stream()
             .filter(this::hasMatchingOwner)
             .toList();
-    for (ShortlistItem item : items) {
+    for (ShortlistItem item :
+        items.stream().sorted(Comparator.comparing(ShortlistItem::getId)).toList()) {
       if (item.getStatus() != ShortlistStatus.REMOVED
           || request.getStatus() == ShortlistStatus.SAVED) {
         item.setStatus(request.getStatus());
         shortlistItemRepository.save(item);
       }
     }
-    return items.stream().map(this::mapToDto).toList();
+    return projection.list(items);
   }
 
   /** FLOW SL-02: Soft remove khỏi Shortlist đang hoạt động */
@@ -397,10 +334,11 @@ public class ShortlistServiceImpl implements ShortlistService {
   public void removeCreatorFromShortlist(UUID campaignId, UUID shortlistItemId) {
     Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
     ownership.requireOwned(campaignId);
+    writeLocks.owned(campaignId);
 
     ShortlistItem item =
         shortlistItemRepository
-            .findByIdAndCampaignId(shortlistItemId, campaignId)
+            .findLockedByIdAndCampaignId(shortlistItemId, campaignId)
             .filter(this::hasMatchingOwner)
             .orElseThrow(
                 () ->
@@ -437,6 +375,7 @@ public class ShortlistServiceImpl implements ShortlistService {
               campaignId, ShortlistStatus.READY_TO_CONTACT);
     }
 
+    var snapshots = projection.latest(candidates);
     int readyCount = 0;
     int manualCount = 0;
     int unavailableCount = 0;
@@ -495,8 +434,7 @@ public class ShortlistServiceImpl implements ShortlistService {
       }
 
       // Case 2: Chưa Claim, nhưng có Email Booking hợp lệ
-      Optional<PublicCreatorMetric> metricOpt =
-          publicCreatorMetricRepository.findByCreatorId(creatorId);
+      Optional<PublicCreatorMetric> metricOpt = Optional.ofNullable(snapshots.get(creatorId));
       String bookingEmail = null;
       if (metricOpt.isPresent()) {
         bookingEmail = extractEmail(metricOpt.get().getContact());
@@ -587,58 +525,7 @@ public class ShortlistServiceImpl implements ShortlistService {
   }
 
   private ShortlistItemDto mapToDto(ShortlistItem item) {
-    UUID masterId = null;
-    if (item.getMaster() != null) {
-      masterId = item.getMaster().getId();
-    } else if (item.getCreator() != null && item.getCreator().getMaster() != null) {
-      masterId = item.getCreator().getMaster().getId();
-    }
-
-    String creatorName = null;
-    String platform = null;
-    String avatarUrl = null;
-    if (item.getCreator() != null) {
-      creatorName =
-          item.getCreator().getDisplayName() != null
-              ? item.getCreator().getDisplayName()
-              : item.getCreator().getUserName();
-      platform = item.getCreator().getPlatform();
-      avatarUrl = item.getCreator().getAvatarUrl();
-    }
-
-    Long followers = null;
-    BigDecimal engagementRate = null;
-    String niche = null;
-    if (item.getCreator() != null) {
-      Optional<PublicCreatorMetric> metricOpt =
-          publicCreatorMetricRepository.findByCreatorId(item.getCreator().getId());
-      if (metricOpt.isPresent()) {
-        followers = metricOpt.get().getFollowers();
-        engagementRate = metricOpt.get().getEngagementRate();
-        niche = metricOpt.get().getNiche();
-      }
-    }
-
-    return ShortlistItemDto.builder()
-        .id(item.getId())
-        .campaignId(item.getCampaign().getId())
-        .creatorId(item.getCreator().getId())
-        .masterId(masterId)
-        .creatorName(creatorName)
-        .platform(platform)
-        .avatarUrl(avatarUrl)
-        .followers(followers)
-        .engagementRate(engagementRate)
-        .niche(niche)
-        .priority(item.getPriority())
-        .status(item.getStatus())
-        .source(item.getSource())
-        .recommendationRunId(
-            item.getRecommendationRun() != null ? item.getRecommendationRun().getId() : null)
-        .note(item.getNote())
-        .addedAt(item.getAddedAt())
-        .isInShortlist(item.getStatus() != ShortlistStatus.REMOVED)
-        .build();
+    return projection.one(item);
   }
 
   @Override
@@ -666,6 +553,7 @@ public class ShortlistServiceImpl implements ShortlistService {
           ErrorCode.RESOURCE_NOT_FOUND, "No shortlist items found for campaign " + campaignId);
     }
 
+    var snapshots = projection.latest(items);
     List<UUID> relationshipIds = new ArrayList<>();
     List<UUID> dispatchedInvitationIds = new ArrayList<>();
     List<ShortlistOutreachResponse.OutreachItemResult> itemResults = new ArrayList<>();
@@ -749,8 +637,7 @@ public class ShortlistServiceImpl implements ShortlistService {
       } else {
         // Creator chưa Claim (PUBLIC) -> Tìm email và gửi lời mời
         String bookingEmail = null;
-        Optional<PublicCreatorMetric> metricOpt =
-            publicCreatorMetricRepository.findByCreatorId(creatorId);
+        Optional<PublicCreatorMetric> metricOpt = Optional.ofNullable(snapshots.get(creatorId));
         if (metricOpt.isPresent()) {
           bookingEmail = extractEmail(metricOpt.get().getContact());
           if (bookingEmail == null) {

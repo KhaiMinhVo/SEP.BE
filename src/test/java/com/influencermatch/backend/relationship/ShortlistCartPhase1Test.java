@@ -37,8 +37,10 @@ class ShortlistCartPhase1Test {
   private CreatorRepository creatorRepository;
   private UserRepository userRepository;
   private RecommendationRunRepository recommendationRunRepository;
-  private com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository publicCreatorMetricRepository;
-  private com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository relationshipRepository;
+  private com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository
+      publicCreatorMetricRepository;
+  private com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository
+      relationshipRepository;
   private ShortlistServiceImpl shortlistService;
 
   private User brandUser;
@@ -54,18 +56,23 @@ class ShortlistCartPhase1Test {
     creatorRepository = mock(CreatorRepository.class);
     userRepository = mock(UserRepository.class);
     recommendationRunRepository = mock(RecommendationRunRepository.class);
-    publicCreatorMetricRepository = mock(com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository.class);
-    relationshipRepository = mock(com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository.class);
+    publicCreatorMetricRepository =
+        mock(com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository.class);
+    relationshipRepository =
+        mock(
+            com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository
+                .class);
 
-    shortlistService = new ShortlistServiceImpl(
-        shortlistItemRepository,
-        ownership,
-        creatorRepository,
-        userRepository,
-        recommendationRunRepository,
-        publicCreatorMetricRepository,
-        relationshipRepository
-    );
+    shortlistService =
+        new ShortlistServiceImpl(
+            shortlistItemRepository,
+            ownership,
+            creatorRepository,
+            userRepository,
+            recommendationRunRepository,
+            publicCreatorMetricRepository,
+            relationshipRepository);
+    com.influencermatch.backend.support.TestShortlistFixtures.wire(shortlistService);
 
     brandUser = TestActors.user(Role.BRAND);
     TestActors.authenticate(brandUser);
@@ -73,15 +80,14 @@ class ShortlistCartPhase1Test {
     campaignId = UUID.randomUUID();
     creatorId = UUID.randomUUID();
 
-    campaign = Campaign.builder()
-        .id(campaignId)
-        .build();
+    campaign = Campaign.builder().id(campaignId).build();
 
-    creator = Creator.builder()
-        .id(creatorId)
-        .displayName("Trang Dao")
-        .userName("trangdao_review")
-        .build();
+    creator =
+        Creator.builder()
+            .id(creatorId)
+            .displayName("Trang Dao")
+            .userName("trangdao_review")
+            .build();
 
     when(ownership.requireOwned(campaignId)).thenReturn(campaign);
   }
@@ -101,18 +107,21 @@ class ShortlistCartPhase1Test {
     when(shortlistItemRepository.countByCampaignIdAndStatusNot(campaignId, ShortlistStatus.REMOVED))
         .thenReturn(1L);
 
-    when(shortlistItemRepository.save(any(ShortlistItem.class))).thenAnswer(inv -> {
-      ShortlistItem item = inv.getArgument(0);
-      item.setId(UUID.randomUUID());
-      return item;
-    });
+    when(shortlistItemRepository.save(any(ShortlistItem.class)))
+        .thenAnswer(
+            inv -> {
+              ShortlistItem item = inv.getArgument(0);
+              item.setId(UUID.randomUUID());
+              return item;
+            });
 
-    AddShortlistItemRequest req = AddShortlistItemRequest.builder()
-        .creatorId(creatorId)
-        .priority(ShortlistPriority.HIGH)
-        .source(ShortlistSource.AI_RECOMMENDATION)
-        .note("Promising lifestyle creator")
-        .build();
+    AddShortlistItemRequest req =
+        AddShortlistItemRequest.builder()
+            .creatorId(creatorId)
+            .priority(ShortlistPriority.HIGH)
+            .source(ShortlistSource.AI_RECOMMENDATION)
+            .note("Promising lifestyle creator")
+            .build();
 
     ShortlistItemDto result = shortlistService.addCreatorToShortlist(campaignId, req);
 
@@ -127,40 +136,45 @@ class ShortlistCartPhase1Test {
   }
 
   @Test
-  @DisplayName("Cart Add Idempotent: Second time adding already existing creator returns ALREADY_EXISTS, does NOT throw 409")
+  @DisplayName(
+      "Cart Add Idempotent: Second time adding already existing creator returns ALREADY_EXISTS,"
+          + " does NOT throw 409")
   void testAddCreatorToShortlist_idempotentSecondTime() {
-    ShortlistItem existing = ShortlistItem.builder()
-        .id(UUID.randomUUID())
-        .campaign(campaign)
-        .creator(creator)
-        .user(brandUser)
-        .priority(ShortlistPriority.MEDIUM)
-        .status(ShortlistStatus.SAVED)
-        .source(ShortlistSource.AI_RECOMMENDATION)
-        .note("Existing note from brand")
-        .addedAt(LocalDateTime.now().minusHours(2))
-        .build();
+    ShortlistItem existing =
+        ShortlistItem.builder()
+            .id(UUID.randomUUID())
+            .campaign(campaign)
+            .creator(creator)
+            .user(brandUser)
+            .priority(ShortlistPriority.MEDIUM)
+            .status(ShortlistStatus.SAVED)
+            .source(ShortlistSource.AI_RECOMMENDATION)
+            .note("Existing note from brand")
+            .addedAt(LocalDateTime.now().minusHours(2))
+            .build();
 
     when(shortlistItemRepository.findByCampaignIdAndCreatorId(campaignId, creatorId))
         .thenReturn(Optional.of(existing));
     when(shortlistItemRepository.countByCampaignIdAndStatusNot(campaignId, ShortlistStatus.REMOVED))
         .thenReturn(5L);
-    when(shortlistItemRepository.save(any(ShortlistItem.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(shortlistItemRepository.save(any(ShortlistItem.class)))
+        .thenAnswer(inv -> inv.getArgument(0));
 
-    AddShortlistItemRequest req = AddShortlistItemRequest.builder()
-        .creatorId(creatorId)
-        .priority(ShortlistPriority.HIGH)
-        .build();
+    AddShortlistItemRequest req =
+        AddShortlistItemRequest.builder()
+            .creatorId(creatorId)
+            .priority(ShortlistPriority.HIGH)
+            .build();
 
     ShortlistItemDto result = shortlistService.addCreatorToShortlist(campaignId, req);
 
     assertThat(result.getAction()).isEqualTo("ALREADY_EXISTS");
     assertThat(result.getIsInShortlist()).isTrue();
-    assertThat(result.getPriority()).isEqualTo(ShortlistPriority.HIGH);
+    assertThat(result.getPriority()).isEqualTo(ShortlistPriority.MEDIUM);
     assertThat(result.getTotalShortlistCount()).isEqualTo(5L);
     assertThat(result.getMessage()).isEqualTo("Ứng viên đã có sẵn trong Shortlist");
 
-    verify(shortlistItemRepository).save(existing);
+    verify(shortlistItemRepository, never()).save(existing);
     verifyNoInteractions(creatorRepository);
   }
 
@@ -168,14 +182,15 @@ class ShortlistCartPhase1Test {
   @DisplayName("Cart Remove: Soft delete sets status to REMOVED instead of hard deleting")
   void testRemoveCreatorFromShortlist_softRemove() {
     UUID shortlistItemId = UUID.randomUUID();
-    ShortlistItem item = ShortlistItem.builder()
-        .id(shortlistItemId)
-        .campaign(campaign)
-        .creator(creator)
-        .user(brandUser)
-        .status(ShortlistStatus.SAVED)
-        .addedAt(LocalDateTime.now())
-        .build();
+    ShortlistItem item =
+        ShortlistItem.builder()
+            .id(shortlistItemId)
+            .campaign(campaign)
+            .creator(creator)
+            .user(brandUser)
+            .status(ShortlistStatus.SAVED)
+            .addedAt(LocalDateTime.now())
+            .build();
 
     when(shortlistItemRepository.findByIdAndCampaignId(shortlistItemId, campaignId))
         .thenReturn(Optional.of(item));
@@ -190,33 +205,36 @@ class ShortlistCartPhase1Test {
   @Test
   @DisplayName("Cart Resurrect: Adding an item previously REMOVED sets status back to SAVED")
   void testAddCreatorToShortlist_resurrectRemovedItem() {
-    ShortlistItem removedItem = ShortlistItem.builder()
-        .id(UUID.randomUUID())
-        .campaign(campaign)
-        .creator(creator)
-        .user(brandUser)
-        .priority(ShortlistPriority.LOW)
-        .status(ShortlistStatus.REMOVED)
-        .addedAt(LocalDateTime.now().minusDays(1))
-        .build();
+    ShortlistItem removedItem =
+        ShortlistItem.builder()
+            .id(UUID.randomUUID())
+            .campaign(campaign)
+            .creator(creator)
+            .user(brandUser)
+            .priority(ShortlistPriority.LOW)
+            .status(ShortlistStatus.REMOVED)
+            .addedAt(LocalDateTime.now().minusDays(1))
+            .build();
 
     when(shortlistItemRepository.findByCampaignIdAndCreatorId(campaignId, creatorId))
         .thenReturn(Optional.of(removedItem));
     when(shortlistItemRepository.countByCampaignIdAndStatusNot(campaignId, ShortlistStatus.REMOVED))
         .thenReturn(3L);
-    when(shortlistItemRepository.save(any(ShortlistItem.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(shortlistItemRepository.save(any(ShortlistItem.class)))
+        .thenAnswer(inv -> inv.getArgument(0));
 
-    AddShortlistItemRequest req = AddShortlistItemRequest.builder()
-        .creatorId(creatorId)
-        .priority(ShortlistPriority.MEDIUM)
-        .note("Re-adding to campaign")
-        .build();
+    AddShortlistItemRequest req =
+        AddShortlistItemRequest.builder()
+            .creatorId(creatorId)
+            .priority(ShortlistPriority.MEDIUM)
+            .note("Re-adding to campaign")
+            .build();
 
     ShortlistItemDto result = shortlistService.addCreatorToShortlist(campaignId, req);
 
     assertThat(removedItem.getStatus()).isEqualTo(ShortlistStatus.SAVED);
     assertThat(removedItem.getNote()).isEqualTo("Re-adding to campaign");
-    assertThat(result.getAction()).isEqualTo("ALREADY_EXISTS");
+    assertThat(result.getAction()).isEqualTo("RESTORED");
     assertThat(result.getIsInShortlist()).isTrue();
     verify(shortlistItemRepository).save(removedItem);
   }

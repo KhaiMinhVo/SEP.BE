@@ -22,11 +22,15 @@ public class GlobalExceptionHandler {
 
   @ExceptionHandler(BusinessException.class)
   ResponseEntity<ProblemDetail> business(BusinessException ex, HttpServletRequest req) {
-    return response(
-        ex.code(),
-        ex.getMessage(),
-        req,
-        ex instanceof ProfileIncompleteException p ? p.fields() : Map.of());
+    var result =
+        response(
+            ex.code(),
+            ex.getMessage(),
+            req,
+            ex instanceof ProfileIncompleteException p ? p.fields() : Map.of());
+    if (ex instanceof CampaignEmbeddingPendingException pending)
+      result.getBody().setProperty("embeddingStatus", pending.status());
+    return result;
   }
 
   @ExceptionHandler(MethodArgumentNotValidException.class)

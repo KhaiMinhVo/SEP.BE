@@ -41,7 +41,11 @@ public class CampaignController {
             .path("/campaigns/{id}")
             .buildAndExpand(result.id())
             .toUri();
-    return ResponseEntity.created(location).body(ApiResponse.ok(result));
+    return ResponseEntity.created(location)
+        .eTag(
+            com.influencermatch.backend.campaign.service.CampaignRevision.tag(
+                result.id(), result.campaignRevision()))
+        .body(ApiResponse.ok(result));
   }
 
   @Operation(summary = "List campaigns owned by a brand profile")
@@ -62,16 +66,20 @@ public class CampaignController {
   @GetMapping("/campaigns/{id}")
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('VIEW_OWN_CAMPAIGN') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
-  public ApiResponse<CampaignResponse> get(@PathVariable UUID id, Authentication auth) {
-    return ApiResponse.ok(service.get(id, auth));
+  public ResponseEntity<ApiResponse<CampaignResponse>> get(
+      @PathVariable UUID id, Authentication auth) {
+    return ok(service.get(id, auth));
   }
 
   @Operation(summary = "Update a draft campaign")
   @PutMapping("/campaigns/{id}")
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
-  public ApiResponse<CampaignResponse> update(
-      @PathVariable UUID id, @Valid @RequestBody CampaignRequest request, Authentication auth) {
-    return ApiResponse.ok(service.update(id, request, auth));
+  public ResponseEntity<ApiResponse<CampaignResponse>> update(
+      @PathVariable UUID id,
+      @Valid @RequestBody CampaignRequest request,
+      Authentication auth,
+      @RequestHeader(value = "If-Match", required = false) String revision) {
+    return ok(service.update(id, request, auth, revision));
   }
 
   @Operation(
@@ -81,19 +89,39 @@ public class CampaignController {
   @PatchMapping("/campaigns/{id}/status")
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('CHANGE_CAMPAIGN_STATUS')")
-  public ApiResponse<CampaignResponse> status(
+  public ResponseEntity<ApiResponse<CampaignResponse>> status(
       @PathVariable UUID id,
       @Valid @RequestBody CampaignStatusRequest request,
-      Authentication auth) {
-    return ApiResponse.ok(service.changeStatus(id, request, auth));
+      Authentication auth,
+      @RequestHeader(value = "If-Match", required = false) String revision) {
+    return ok(service.changeStatus(id, request, auth, revision));
   }
 
   @Operation(summary = "Archive a draft campaign")
   @PatchMapping("/campaigns/{id}/archive")
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('CHANGE_CAMPAIGN_STATUS')")
-  public ApiResponse<CampaignResponse> archive(@PathVariable UUID id, Authentication auth) {
-    return ApiResponse.ok(service.archive(id, auth));
+  public ResponseEntity<ApiResponse<CampaignResponse>> archive(
+      @PathVariable UUID id,
+      Authentication auth,
+      @RequestHeader(value = "If-Match", required = false) String revision) {
+    return ok(service.archive(id, auth, revision));
+  }
+
+  private ResponseEntity<ApiResponse<CampaignResponse>> ok(CampaignResponse r) {
+    return ResponseEntity.ok()
+        .eTag(
+            com.influencermatch.backend.campaign.service.CampaignRevision.tag(
+                r.id(), r.campaignRevision()))
+        .body(ApiResponse.ok(r));
+  }
+
+  @PostMapping("/campaigns/{id}/context/embedding/retry")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
+  @Operation(summary = "Retry FAILED M3 embedding of current Campaign context")
+  public ResponseEntity<ApiResponse<CampaignResponse>> retry(
+      @PathVariable UUID id, Authentication auth) {
+    return ok(service.retryEmbedding(id, auth));
   }
 
   @Operation(summary = "Discover creators for a campaign")
@@ -112,9 +140,9 @@ public class CampaignController {
   @Operation(
       summary = "AI-assisted campaign form autofill",
       description =
-          "Brand provides a short natural-language description of the campaign. "
-              + "Gemini AI parses it and returns suggested values for all campaign fields. "
-              + "The response is a non-binding suggestion; the brand should review and adjust before submitting.")
+          "Brand provides a short natural-language description of the campaign. Gemini AI parses it"
+              + " and returns suggested values for all campaign fields. The response is a"
+              + " non-binding suggestion; the brand should review and adjust before submitting.")
   @PostMapping("/ai/campaign-autofill")
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CREATE_CAMPAIGN')")
   public ApiResponse<CampaignAutofillResponse> autofill(
@@ -122,5 +150,3 @@ public class CampaignController {
     return ApiResponse.ok(autofillService.autofill(request));
   }
 }
-
-

@@ -57,6 +57,21 @@ public enum ErrorCode {
   RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "Resource not found"),
   RESOURCE_ALREADY_EXISTS(HttpStatus.CONFLICT, "Resource already exists"),
   BRAND_NOT_FOUND(HttpStatus.NOT_FOUND, "Brand not found"),
+  PRECONDITION_REQUIRED(
+      org.springframework.http.HttpStatus.PRECONDITION_REQUIRED, "If-Match is required"),
+  CAMPAIGN_REVISION_CONFLICT(
+      org.springframework.http.HttpStatus.CONFLICT, "Campaign revision changed"),
+  CAMPAIGN_EMBEDDING_NOT_READY(
+      org.springframework.http.HttpStatus.CONFLICT, "Campaign embedding is not ready"),
+  CAMPAIGN_EMBEDDING_RETRY_CONFLICT(
+      org.springframework.http.HttpStatus.CONFLICT, "Campaign embedding cannot be retried"),
+  RECOMMENDATION_NO_CANDIDATES(
+      org.springframework.http.HttpStatus.CONFLICT, "No eligible recommendation candidates"),
+  BRAND_REVISION_CONFLICT(
+      org.springframework.http.HttpStatus.CONFLICT, "Brand profile revision changed"),
+  BRAND_EMBEDDING_RETRY_CONFLICT(
+      org.springframework.http.HttpStatus.CONFLICT,
+      "Embedding cannot be retried in its current state"),
   BRAND_ALREADY_EXISTS(HttpStatus.CONFLICT, "Brand already exists"),
   CAMPAIGN_NOT_FOUND(HttpStatus.NOT_FOUND, "Campaign not found"),
   CAMPAIGN_NOT_EDITABLE(HttpStatus.CONFLICT, "Campaign is not editable"),

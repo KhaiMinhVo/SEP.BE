@@ -121,6 +121,7 @@ class Flow3ComprehensiveAcceptancePhase6Test {
             recommendationRunRepository,
             aiServiceClient,
             objectMapper);
+    com.influencermatch.backend.support.TestM4Fixtures.wire(aiRecommendationService);
 
     creatorRepository = mock(CreatorRepository.class);
     userRepository = mock(UserRepository.class);
@@ -135,6 +136,7 @@ class Flow3ComprehensiveAcceptancePhase6Test {
             recommendationRunRepository,
             publicCreatorMetricRepository,
             relationshipRepository);
+    com.influencermatch.backend.support.TestShortlistFixtures.wire(shortlistService);
 
     Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
     shortlistCompareService =
@@ -238,10 +240,21 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     when(subscriptionService.reserveRecommendationQuota(brandProfileId)).thenReturn(subscriptionId);
     when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
         .thenReturn(Collections.emptyList());
-    when(aiServiceClient.getEmbedding(anyString()))
-        .thenThrow(new RuntimeException("Connection timed out to Python AI microservice"));
+    var failCandidate = mock(RecommendationCandidateProjection.class);
+    when(failCandidate.getCreatorId()).thenReturn(UUID.randomUUID());
+    when(failCandidate.getPlatform()).thenReturn("TIKTOK");
+    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
+            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+        .thenReturn(List.of(failCandidate));
+    when(historicalCampaignRepository.findByCreatorId(any()))
+        .thenThrow(new RuntimeException("Downstream history unavailable"));
 
-    assertThatThrownBy(() -> aiRecommendationService.recommendKocs(campaignId, 10))
+    assertThatThrownBy(
+            () ->
+                aiRecommendationService.recommendKocs(
+                    campaignId,
+                    10,
+                    com.influencermatch.backend.campaign.enums.CandidateSource.DISCOVERY))
         .isInstanceOf(BusinessException.class);
 
     // Verify Quota được rollback ngay lập tức, không trừ lượt của Brand
@@ -329,7 +342,9 @@ class Flow3ComprehensiveAcceptancePhase6Test {
                 .explanationAvailable(true)
                 .build());
 
-    RecommendationResponseDto response = aiRecommendationService.recommendKocs(campaignId, 10);
+    RecommendationResponseDto response =
+        aiRecommendationService.recommendKocs(
+            campaignId, 10, com.influencermatch.backend.campaign.enums.CandidateSource.DISCOVERY);
 
     // KOC chỉ xuất hiện duy nhất 1 lần trong Top (Kênh TikTok được giữ lại)
     assertThat(response.getRecommendations()).hasSize(1);
@@ -338,13 +353,12 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   }
 
   // =========================================================================
-  // TEST-05: Phase 2 M1 Neutral Default (50.0 điểm cho KOC mới)
+  // TEST-05: Missing M1 evidence does not fabricate a neutral historical score
   // =========================================================================
   @Test
   @DisplayName(
-      "TEST-05 [Phase 2]: KOC chưa từng có lịch sử hợp tác -> Điểm M1 tự động gán trung tính 50.0"
-          + " điểm")
-  void test05_newCreatorHistoricalReliability_receivesNeutral50() {
+      "TEST-05: A new Creator has unavailable M1 and renormalized available weights" + " điểm")
+  void test05_missingHistoricalEvidenceIsUnavailable() {
     when(subscriptionService.reserveRecommendationQuota(brandProfileId)).thenReturn(subscriptionId);
     when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
         .thenReturn(Collections.emptyList());
@@ -377,11 +391,15 @@ class Flow3ComprehensiveAcceptancePhase6Test {
                 .explanationAvailable(true)
                 .build());
 
-    RecommendationResponseDto response = aiRecommendationService.recommendKocs(campaignId, 10);
+    RecommendationResponseDto response =
+        aiRecommendationService.recommendKocs(
+            campaignId, 10, com.influencermatch.backend.campaign.enums.CandidateSource.DISCOVERY);
 
     assertThat(response.getRecommendations()).hasSize(1);
     ScoreBreakdownDto breakdown = response.getRecommendations().get(0).getScoreBreakdown();
-    assertThat(breakdown.getM1Score()).isEqualTo(50.0);
+    assertThat(breakdown.getM1Score()).isNull();
+    assertThat(breakdown.isM1Available()).isFalse();
+    assertThat(breakdown.getEffectiveWeights().get("M1")).isZero();
   }
 
   // =========================================================================
@@ -424,7 +442,7 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     assertThat(dto.getAction()).isEqualTo("ALREADY_EXISTS");
     assertThat(dto.getIsInShortlist()).isTrue();
     assertThat(dto.getNote()).isEqualTo("Ghi chú cá nhân của Brand không được bị ghi đè");
-    assertThat(dto.getPriority()).isEqualTo(ShortlistPriority.HIGH); // Cập nhật priority mới
+    assertThat(dto.getPriority()).isEqualTo(ShortlistPriority.MEDIUM); // Cập nhật priority mới
     assertThat(dto.getTotalShortlistCount()).isEqualTo(7L);
     verify(shortlistItemRepository, never()).delete(any(ShortlistItem.class));
   }
@@ -586,9 +604,9 @@ class Flow3ComprehensiveAcceptancePhase6Test {
 
     // Context v2 được tạo mới và chứa rejectedKocId
     ArgumentCaptor<CampaignContext> captor = ArgumentCaptor.forClass(CampaignContext.class);
-    verify(campaignContextRepository, times(2)).save(captor.capture());
+    verify(campaignContextRepository, times(1)).save(captor.capture());
 
-    CampaignContext savedV2 = captor.getAllValues().get(1);
+    CampaignContext savedV2 = captor.getAllValues().get(0);
     assertThat(savedV2.getContextVersion()).isEqualTo(2);
     assertThat(savedV2.isActive()).isTrue();
     assertThat(savedV2.getContextData().get("excludedCreatorIds").get(0).asText())
@@ -612,7 +630,15 @@ class Flow3ComprehensiveAcceptancePhase6Test {
             anyInt()))
         .thenReturn(Collections.emptyList());
 
-    aiRecommendationService.recommendKocs(campaignId, 10);
+    assertThatThrownBy(
+            () ->
+                aiRecommendationService.recommendKocs(
+                    campaignId,
+                    10,
+                    com.influencermatch.backend.campaign.enums.CandidateSource.DISCOVERY))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            e -> assertThat(e.code()).isEqualTo(ErrorCode.RECOMMENDATION_NO_CANDIDATES));
 
     // Xác nhận danh sách loại trừ trong truy vấn SQL chứa chính xác rejectedKocId
     assertThat(excludedCaptor.getValue()).contains(rejectedKocId);

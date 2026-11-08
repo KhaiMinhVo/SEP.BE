@@ -85,6 +85,7 @@ class ShortlistOutreachPhase4Test {
             relationshipRepository,
             creatorInvitationService,
             creatorInvitationRepository);
+    com.influencermatch.backend.support.TestShortlistFixtures.wire(shortlistService);
 
     relationshipService =
         new RelationshipServiceImpl(

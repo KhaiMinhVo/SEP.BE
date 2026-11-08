@@ -475,6 +475,79 @@ class Phase0EngineTest {
         .hasMessageContaining("TOPSIS_INVALID_INPUT");
   }
 
+  @Test
+  @DisplayName("Luồng 2: Giá trị Views = 0 là quan sát thực tế hợp lệ - Không bị loại bỏ, tính đúng CV ~ 0.866 và STAB ~ 0.536")
+  void testEvidenceValidator_zeroViewsIncludedInStabilitySample_calculatesAccurateCv() {
+    RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
+    List<Post> posts = List.of(
+        Post.builder().id(UUID.randomUUID()).views(0L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-03T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(100L).likes(10L).comments(2L).shares(1L).postedAt("2026-11-02T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(100L).likes(10L).comments(2L).shares(1L).postedAt("2026-11-01T10:00:00Z").build()
+    );
+
+    var metrics = evidenceValidator.evaluate(cand, posts);
+
+    // Mẫu: [0, 100, 100], N = 3, Mean = 66.667, sV = 57.735, CV = 0.866, STAB = 1 / (1 + 0.866) = 0.535898
+    // Nếu loại bỏ 0, mẫu thành [100, 100] thì STAB sẽ sai lệch thành 1.0
+    assertThat(metrics.canComputeStability()).isTrue();
+    assertThat(metrics.rawStab()).isCloseTo(0.535898, org.assertj.core.data.Offset.offset(1e-4));
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.SCORE_READY);
+  }
+
+  @Test
+  @DisplayName("Luồng 2: Cả 3 bài đều có Views = 0 thì V_mean = 0 - Trả NaN cho STAB và xếp vào PROVISIONAL")
+  void testEvidenceValidator_allZeroViewsInWindow_returnsProvisionalAndNanStability() {
+    RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
+    List<Post> posts = List.of(
+        Post.builder().id(UUID.randomUUID()).views(0L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-03T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(0L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-02T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(0L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-01T10:00:00Z").build()
+    );
+
+    var metrics = evidenceValidator.evaluate(cand, posts);
+
+    assertThat(metrics.canComputeStability()).isFalse();
+    assertThat(Double.isNaN(metrics.rawStab())).isTrue();
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.PROVISIONAL);
+    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("ZERO_VIEWS_FOR_STABILITY"));
+  }
+
+  @Test
+  @DisplayName("Phase 4: TOPSIS từ chối điểm ngoài miền [0, 1] - ném ngoại lệ khi score > 1.0 hoặc < 0.0")
+  void testTopsisEngine_rejectsOutOfBoundDomainScores_greaterThanOneOrNegative() {
+    var topsisEngine = new com.influencermatch.backend.recommendation.engine.topsis.TopsisRankingEngine();
+    var weights = new com.influencermatch.backend.recommendation.engine.critic.model.EngineWeights(
+        0.25, 0.25, 0.25, 0.25, "TEST", 0.0);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> topsisEngine.compute(1.5, 0.5, 0.8, 0.6, weights))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("TOPSIS_INVALID_INPUT");
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> topsisEngine.compute(0.5, -0.2, 0.8, 0.6, weights))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("TOPSIS_INVALID_INPUT");
+  }
+
+  @Test
+  @DisplayName("Phase 4: TOPSIS từ chối trọng số không hợp lệ - ném ngoại lệ khi tổng trọng số != 1.0 hoặc trọng số âm")
+  void testTopsisEngine_rejectsInvalidWeights_notSumToOneOrNegative() {
+    var topsisEngine = new com.influencermatch.backend.recommendation.engine.topsis.TopsisRankingEngine();
+
+    // Tổng trọng số 0.3 * 4 = 1.2 (!= 1.0)
+    var weightsOver1 = new com.influencermatch.backend.recommendation.engine.critic.model.EngineWeights(
+        0.30, 0.30, 0.30, 0.30, "TEST", 0.0);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> topsisEngine.compute(0.5, 0.5, 0.8, 0.6, weightsOver1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Criteria weights sum must equal 1.0");
+
+    // Trọng số âm
+    var negativeWeight = new com.influencermatch.backend.recommendation.engine.critic.model.EngineWeights(
+        -0.10, 0.40, 0.40, 0.30, "TEST", 0.0);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> topsisEngine.compute(0.5, 0.5, 0.8, 0.6, negativeWeight))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Criteria weights must be non-negative");
+  }
+
   private RecommendationCandidateProjection mockCandidate(UUID id, String platform, Long followers) {
     RecommendationCandidateProjection c = mock(RecommendationCandidateProjection.class);
     when(c.getCreatorId()).thenReturn(id);

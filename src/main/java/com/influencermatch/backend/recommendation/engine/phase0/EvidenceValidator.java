@@ -190,7 +190,14 @@ public class EvidenceValidator {
     if (posts != null && !posts.isEmpty()) {
       recentThreePosts = posts.stream()
           .filter(Objects::nonNull)
-          .sorted((a, b) -> resolvePostTime(b).compareTo(resolvePostTime(a)))
+          .sorted((a, b) -> {
+            int cmp = resolvePostTime(b).compareTo(resolvePostTime(a));
+            if (cmp != 0) return cmp;
+            if (a.getId() != null && b.getId() != null) {
+              return b.getId().compareTo(a.getId());
+            }
+            return 0;
+          })
           .limit(3)
           .toList();
     }

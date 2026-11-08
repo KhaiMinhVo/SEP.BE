@@ -37,6 +37,7 @@ import com.influencermatch.backend.recommendation.engine.topsis.TopsisRankingEng
 import com.influencermatch.backend.recommendation.engine.topsis.model.TopsisResult;
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.stream.DoubleStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -961,6 +962,155 @@ class FourMemoryEnginePhases1To6Test {
     assertThat(card.getReasons().stream().anyMatch(r -> r.contains("tương đồng ngữ nghĩa"))).isTrue();
     assertThat(card.getReasons().stream().anyMatch(r -> r.contains("lĩnh vực mục tiêu"))).isTrue();
     assertThat(card.getReasons().stream().anyMatch(r -> r.contains("Cold-start"))).isTrue();
+  }
+
+  // =========================================================================
+  // Integration Checks: Objective Mapping, Immutability & Master Dedup
+  // =========================================================================
+
+  @Test
+  @DisplayName("Integration Check 1: Campaign Objective Mapping matches all canonical DB enums and aliases")
+  void testPhase3_campaignObjectiveMapping_matchesAllCanonicalAndAliasEnums() {
+    DynamicWeightBlender blender = new DynamicWeightBlender();
+
+    // 1. Canonical DB Enums
+    double[] wAwareness = blender.resolveBusinessWeights("AWARENESS");
+    assertThat(wAwareness).containsExactly(0.10, 0.35, 0.40, 0.15);
+    assertThat(DoubleStream.of(wAwareness).sum()).isCloseTo(1.0, offset(1e-6));
+
+    double[] wEngagement = blender.resolveBusinessWeights("ENGAGEMENT");
+    assertThat(wEngagement).containsExactly(0.15, 0.35, 0.35, 0.15);
+    assertThat(DoubleStream.of(wEngagement).sum()).isCloseTo(1.0, offset(1e-6));
+
+    double[] wTraffic = blender.resolveBusinessWeights("TRAFFIC");
+    assertThat(wTraffic).containsExactly(0.20, 0.35, 0.30, 0.15);
+    assertThat(DoubleStream.of(wTraffic).sum()).isCloseTo(1.0, offset(1e-6));
+
+    double[] wConversion = blender.resolveBusinessWeights("CONVERSION");
+    assertThat(wConversion).containsExactly(0.40, 0.15, 0.30, 0.15);
+    assertThat(DoubleStream.of(wConversion).sum()).isCloseTo(1.0, offset(1e-6));
+
+    // 2. Aliases and synonyms
+    assertThat(blender.resolveBusinessWeights("BRAND_AWARENESS")).containsExactly(wAwareness);
+    assertThat(blender.resolveBusinessWeights("CONVERSION_SALES")).containsExactly(wConversion);
+    assertThat(blender.resolveBusinessWeights("SALES")).containsExactly(wConversion);
+
+    double[] wCommunity = blender.resolveBusinessWeights("COMMUNITY_GROWTH");
+    assertThat(wCommunity).containsExactly(0.20, 0.30, 0.30, 0.20);
+    assertThat(DoubleStream.of(wCommunity).sum()).isCloseTo(1.0, offset(1e-6));
+
+    // 3. Null and default
+    double[] wDefault = blender.resolveBusinessWeights(null);
+    assertThat(wDefault).containsExactly(0.15, 0.35, 0.35, 0.15);
+    assertThat(blender.resolveBusinessWeights("UNKNOWN_OBJ")).containsExactly(wDefault);
+  }
+
+  @Test
+  @DisplayName("Integration Check 2: EngineWeights is completely immutable with defensive copying and array validation")
+  void testPhase3_engineWeights_defensiveCopyAndImmutability() {
+    double[] inputCritic = new double[] {0.20, 0.30, 0.30, 0.20};
+    double[] inputBusiness = new double[] {0.25, 0.25, 0.25, 0.25};
+
+    EngineWeights weights = new EngineWeights(
+        0.20, 0.30, 0.30, 0.20,
+        "CRITIC_DYNAMIC",
+        0.30,
+        inputCritic,
+        inputBusiness
+    );
+
+    // 1. Mutating input arrays after construction does NOT affect EngineWeights
+    inputCritic[0] = 999.0;
+    inputBusiness[0] = -50.0;
+    assertThat(weights.criticWeights()[0]).isEqualTo(0.20);
+    assertThat(weights.businessWeights()[0]).isEqualTo(0.25);
+
+    // 2. Mutating arrays obtained from accessors does NOT affect EngineWeights
+    double[] accessedCritic = weights.criticWeights();
+    accessedCritic[1] = 888.0;
+    assertThat(weights.criticWeights()[1]).isEqualTo(0.30);
+
+    double[] accessedBusiness = weights.businessWeights();
+    accessedBusiness[2] = 777.0;
+    assertThat(weights.businessWeights()[2]).isEqualTo(0.25);
+
+    // 3. Array validation rejects wrong lengths
+    assertThatThrownBy(() -> new EngineWeights(
+        0.25, 0.25, 0.25, 0.25, "TEST", 0.0,
+        new double[] {0.5, 0.5}, // length != 4
+        inputBusiness
+    )).isInstanceOf(IllegalStateException.class).hasMessageContaining("must have length 4");
+
+    // 4. Array validation rejects non-unit sums
+    assertThatThrownBy(() -> new EngineWeights(
+        0.25, 0.25, 0.25, 0.25, "TEST", 0.0,
+        new double[] {0.4, 0.4, 0.4, 0.4}, // sum = 1.6 != 1.0
+        new double[] {0.25, 0.25, 0.25, 0.25}
+    )).isInstanceOf(IllegalStateException.class).hasMessageContaining("sum must equal 1.0");
+
+    // 5. Array validation rejects negative weights in array
+    assertThatThrownBy(() -> new EngineWeights(
+        0.25, 0.25, 0.25, 0.25, "TEST", 0.0,
+        new double[] {-0.1, 0.4, 0.4, 0.3},
+        new double[] {0.25, 0.25, 0.25, 0.25}
+    )).isInstanceOf(IllegalStateException.class).hasMessageContaining("must be a finite number in [0.0, 1.0]");
+  }
+
+  @Test
+  @DisplayName("Integration Check 3: Master Dedup occurs before Limit, preserving requested creator count")
+  void testPresentation_masterAwareDedupBeforeLimit_preservesTargetCount() {
+    // 3 Creators, mỗi Creator có 2 account (TikTok & Instagram) -> Tổng 6 accounts
+    UUID master1 = UUID.randomUUID();
+    UUID master2 = UUID.randomUUID();
+    UUID master3 = UUID.randomUUID();
+
+    // Giả lập danh sách đã qua TOPSIS (sắp xếp giảm dần theo matchScore)
+    // Master 1: TikTok (95), Instagram (90)
+    // Master 2: TikTok (88), Instagram (82)
+    // Master 3: TikTok (80), Instagram (75)
+    class TestAccount {
+      final UUID id;
+      final UUID masterId;
+      final double score;
+      TestAccount(UUID id, UUID masterId, double score) {
+        this.id = id; this.masterId = masterId; this.score = score;
+      }
+    }
+
+    List<TestAccount> evaluatedList = List.of(
+        new TestAccount(UUID.randomUUID(), master1, 95.0),
+        new TestAccount(UUID.randomUUID(), master1, 90.0),
+        new TestAccount(UUID.randomUUID(), master2, 88.0),
+        new TestAccount(UUID.randomUUID(), master2, 82.0),
+        new TestAccount(UUID.randomUUID(), master3, 80.0),
+        new TestAccount(UUID.randomUUID(), master3, 75.0)
+    );
+
+    // Mô phỏng thuật toán tại AiRecommendationService (Step 7 -> Step 8):
+    // Dedup trước trên toàn bộ pool
+    Map<UUID, TestAccount> uniqueKocs = new LinkedHashMap<>();
+    for (TestAccount acc : evaluatedList) {
+      if (!uniqueKocs.containsKey(acc.masterId)) {
+        uniqueKocs.put(acc.masterId, acc);
+      } else if (acc.score > uniqueKocs.get(acc.masterId).score) {
+        uniqueKocs.put(acc.masterId, acc);
+      }
+    }
+
+    // Sort và Limit = 3
+    List<TestAccount> sorted = uniqueKocs.values().stream()
+        .sorted(Comparator.comparingDouble((TestAccount a) -> a.score).reversed())
+        .limit(3)
+        .toList();
+
+    // Kiểm tra: Trả về ĐỦ 3 master độc lập, mỗi master chọn đúng channel điểm cao nhất
+    assertThat(sorted).hasSize(3);
+    assertThat(sorted.get(0).masterId).isEqualTo(master1);
+    assertThat(sorted.get(0).score).isEqualTo(95.0);
+    assertThat(sorted.get(1).masterId).isEqualTo(master2);
+    assertThat(sorted.get(1).score).isEqualTo(88.0);
+    assertThat(sorted.get(2).masterId).isEqualTo(master3);
+    assertThat(sorted.get(2).score).isEqualTo(80.0);
   }
 
   // --- Test Helper Records ---

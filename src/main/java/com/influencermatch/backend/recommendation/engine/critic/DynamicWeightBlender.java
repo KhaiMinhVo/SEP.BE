@@ -67,10 +67,13 @@ public class DynamicWeightBlender {
     if (objective == null) {
       return new double[] {0.15, 0.35, 0.35, 0.15};
     }
-    return switch (objective.trim().toUpperCase()) {
-      case "CONVERSION" -> new double[] {0.40, 0.15, 0.30, 0.15};
+    String normalized = objective.trim().toUpperCase();
+    return switch (normalized) {
+      case "AWARENESS", "BRAND_AWARENESS" -> new double[] {0.10, 0.35, 0.40, 0.15};
       case "ENGAGEMENT" -> new double[] {0.15, 0.35, 0.35, 0.15};
-      case "AWARENESS" -> new double[] {0.10, 0.35, 0.40, 0.15};
+      case "TRAFFIC" -> new double[] {0.20, 0.35, 0.30, 0.15};
+      case "CONVERSION", "CONVERSION_SALES", "SALES" -> new double[] {0.40, 0.15, 0.30, 0.15};
+      case "COMMUNITY_GROWTH" -> new double[] {0.20, 0.30, 0.30, 0.20};
       default -> new double[] {0.15, 0.35, 0.35, 0.15};
     };
   }

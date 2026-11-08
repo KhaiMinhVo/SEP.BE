@@ -228,7 +228,7 @@ public class BayesianHistoryScorer {
 
     if (objective != null) {
       switch (objective.trim().toUpperCase()) {
-        case "AWARENESS" -> {
+        case "AWARENESS", "BRAND_AWARENESS" -> {
           wBayes = 0.40;
           wKpi = 0.40;
           wRev = 0.20;
@@ -238,13 +238,23 @@ public class BayesianHistoryScorer {
           wKpi = 0.45;
           wRev = 0.20;
         }
-        case "CONVERSION" -> {
+        case "TRAFFIC" -> {
+          wBayes = 0.35;
+          wKpi = 0.45;
+          wRev = 0.20;
+        }
+        case "CONVERSION", "CONVERSION_SALES", "SALES" -> {
           wBayes = 0.30;
           wKpi = 0.50;
           wRev = 0.20;
         }
+        case "COMMUNITY_GROWTH" -> {
+          wBayes = 0.35;
+          wKpi = 0.40;
+          wRev = 0.25;
+        }
         default -> {
-          // Standard default weights
+          // Standard default weights: wBayes=0.30, wKpi=0.50, wRev=0.20
         }
       }
     }

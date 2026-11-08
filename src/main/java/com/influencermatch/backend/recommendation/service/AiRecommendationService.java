@@ -167,9 +167,8 @@ public class AiRecommendationService {
         }
       }
 
-      java.time.ZoneId sourceZone = resolveSourceZone(campaign);
       List<NormalizedCandidateContext> phase0Results =
-          phase0Orchestrator.execute(rawCandidates, campaign, excludedIds, postsByCreator, sourceZone);
+          phase0Orchestrator.execute(rawCandidates, campaign, excludedIds, postsByCreator);
 
       Map<UUID, NormalizedCandidateContext> phase0Map = phase0Results.stream()
           .collect(Collectors.toMap(NormalizedCandidateContext::creatorId, r -> r, (a, b) -> a));
@@ -303,13 +302,45 @@ public class AiRecommendationService {
         );
       }
 
-      // 10. Xây dựng danh sách Provisional tách bạch hoàn toàn (Additional Creators to Consider)
+      // 10. Master-aware Grouping trên Provisional Pool & Xây dựng danh sách Provisional tách bạch hoàn toàn
       // Hợp đồng DTO: provisionalRecommendations CHỈ chứa ứng viên PROVISIONAL (đánh giá sơ bộ thiếu STAB)
-      // Bảo đảm tính không giao nhau: recommendations ∩ provisionalRecommendations = ∅
+      // Bảo đảm tính không giao nhau:
+      // 1. Về creatorId: recommendations ∩ provisionalRecommendations = ∅
+      // 2. Về masterId: Creator Master đã có kênh đại diện trong Bảng chính (SCORE_READY) thì không xuất hiện lại trong Provisional
+      Set<String> recommendedMasterKeys = topList.stream()
+          .map(item -> item.candidate().getMasterId() != null
+              ? item.candidate().getMasterId().toString()
+              : item.candidate().getCreatorId().toString())
+          .collect(Collectors.toSet());
+
+      Map<String, FourMemoryTopsisEngine.EvaluatedCandidate> uniqueProvisionalKocs = new LinkedHashMap<>();
+      for (FourMemoryTopsisEngine.EvaluatedCandidate item : evaluatedProvisionalList) {
+        String masterKey = item.candidate().getMasterId() != null
+            ? item.candidate().getMasterId().toString()
+            : item.candidate().getCreatorId().toString();
+
+        if (recommendedMasterKeys.contains(masterKey)) {
+          continue; // Creator Master này đã có kênh đại diện trong Bảng chính
+        }
+
+        if (!uniqueProvisionalKocs.containsKey(masterKey)) {
+          uniqueProvisionalKocs.put(masterKey, item);
+        } else {
+          FourMemoryTopsisEngine.EvaluatedCandidate existing = uniqueProvisionalKocs.get(masterKey);
+          if (item.matchScore() > existing.matchScore()) {
+            uniqueProvisionalKocs.put(masterKey, item);
+          }
+        }
+      }
+
       List<FourMemoryTopsisEngine.EvaluatedCandidate> sortedProvisional =
-          displaySorter.sort(evaluatedProvisionalList, DisplayMode.BEST_MATCH);
+          displaySorter.sort(new ArrayList<>(uniqueProvisionalKocs.values()), DisplayMode.BEST_MATCH);
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> topProvisional = sortedProvisional.stream()
+          .limit(effectiveLimit)
+          .toList();
+
       List<CreatorRecommendationItemDto> provisionalItems = new ArrayList<>();
-      for (FourMemoryTopsisEngine.EvaluatedCandidate item : sortedProvisional) {
+      for (FourMemoryTopsisEngine.EvaluatedCandidate item : topProvisional) {
         ScoreBreakdownDto breakdown = fourMemoryTopsisEngine.toScoreBreakdownDto(item);
         ReasoningCardDto reasoning = fetchReasoningCard(item.candidate(), campaign, breakdown, item.confidence());
 
@@ -636,22 +667,6 @@ public class AiRecommendationService {
 
   private double roundToTwoDecimals(double val) {
     return Math.round(val * 100.0) / 100.0;
-  }
-
-  /**
-   * Xác định múi giờ nguồn (Source Timezone) theo hợp đồng chiến dịch:
-   * Nếu chiến dịch định vị địa lý tại Việt Nam (locations chứa VIETNAM/VN) thì áp dụng VN_SOURCE_ZONE.
-   * Ngược lại, áp dụng chuẩn quốc tế DEFAULT_SOURCE_ZONE (UTC).
-   */
-  private java.time.ZoneId resolveSourceZone(Campaign campaign) {
-    if (campaign != null && campaign.getLocations() != null) {
-      boolean isVietnamTarget = campaign.getLocations().stream()
-          .anyMatch(loc -> loc != null && (loc.equalsIgnoreCase("VIETNAM") || loc.equalsIgnoreCase("VN")));
-      if (isVietnamTarget) {
-        return com.influencermatch.backend.recommendation.engine.phase0.EvidenceValidator.VN_SOURCE_ZONE;
-      }
-    }
-    return com.influencermatch.backend.recommendation.engine.phase0.EvidenceValidator.DEFAULT_SOURCE_ZONE;
   }
 
   private record ScoredCandidate(RecommendationCandidateProjection candidate, ScoreBreakdownDto breakdown) {}

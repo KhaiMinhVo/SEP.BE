@@ -24,7 +24,7 @@ public class Phase0Orchestrator {
       Campaign campaign,
       Set<UUID> excludedIds,
       Map<UUID, List<Post>> postsByCreator) {
-    return execute(candidates, campaign, excludedIds, postsByCreator, EvidenceValidator.DEFAULT_SOURCE_ZONE);
+    return execute(candidates, campaign, excludedIds, postsByCreator, null);
   }
 
   public List<NormalizedCandidateContext> execute(
@@ -70,9 +70,12 @@ public class Phase0Orchestrator {
 
       // LUỒNG 2 & 3: Evidence Validation & Policy-Based Saturation Normalization với Error Isolation
       try {
-        // LUỒNG 2: Evidence Validation (truyền timezone nguồn đã xác nhận)
+        // LUỒNG 2: Evidence Validation (truyền timezone nguồn xác định theo Data Source Contract)
+        java.time.ZoneId zone = (fallbackSourceZone != null)
+            ? fallbackSourceZone
+            : DataSourceContract.resolveSourceZone(platform);
         List<Post> posts = postsByCreator != null ? postsByCreator.get(creatorId) : null;
-        var ev = evidenceValidator.evaluate(cand, posts, fallbackSourceZone);
+        var ev = evidenceValidator.evaluate(cand, posts, zone);
 
         // Phân luồng xử lý trước bước chuẩn hóa:
         // 1. NOT_SCORABLE: Giữ nguyên trạng thái và mã lý do, không thực hiện chuẩn hóa, không gọi resolveKEr

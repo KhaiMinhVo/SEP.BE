@@ -805,6 +805,80 @@ class Phase0EngineTest {
     assertThat(windowUtc.get(0).getId()).isEqualTo(idA);
   }
 
+  @Test
+  @DisplayName("Reviewer Test 1: Campaign Location = VN, nhưng Source Timestamp = UTC -> Giữ đúng UTC, không dịch sang giờ VN")
+  void testReviewerItem1_campaignLocationVn_doesNotShiftUtcSourceTimestamp() {
+    Campaign campaignVn = Campaign.builder()
+        .locations(List.of("VIETNAM", "VN"))
+        .platforms(List.of("TIKTOK"))
+        .build();
+
+    UUID creatorId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(creatorId, "TIKTOK", 50_000L);
+
+    // Post 1: 10:00 UTC (có Z rõ ràng)
+    // Post 2: 15:00 GMT+7 (có offset +07:00 rõ ràng = 08:00 UTC)
+    Post post1 = Post.builder()
+        .id(UUID.randomUUID())
+        .postedAt("2026-11-08T10:00:00Z")
+        .views(10_000L).likes(500L).comments(50L).shares(10L)
+        .build();
+    Post post2 = Post.builder()
+        .id(UUID.randomUUID())
+        .postedAt("2026-11-08T15:00:00+07:00")
+        .views(12_000L).likes(600L).comments(60L).shares(12L)
+        .build();
+
+    // Verify resolvePostTime bảo toàn chính xác thời điểm thực UTC:
+    // Post 1 (10:00 UTC) mới hơn Post 2 (08:00 UTC), bất kể Campaign có nhắm mục tiêu Việt Nam hay không
+    assertThat(EvidenceValidator.resolvePostTime(post1)).isEqualTo(java.time.Instant.parse("2026-11-08T10:00:00Z"));
+    assertThat(EvidenceValidator.resolvePostTime(post2)).isEqualTo(java.time.Instant.parse("2026-11-08T08:00:00Z"));
+    assertThat(EvidenceValidator.resolvePostTime(post1)).isAfter(EvidenceValidator.resolvePostTime(post2));
+
+    // Orchestrator thực thi với campaignVn: thứ tự bài đăng và đánh giá ổn định độc lập hoàn toàn với Campaign Location
+    List<NormalizedCandidateContext> results = orchestrator.execute(
+        List.of(cand), campaignVn, Collections.emptySet(), Map.of(creatorId, List.of(post2, post1))
+    );
+
+    assertThat(results).hasSize(1);
+    var res = results.get(0);
+    assertThat(res.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.SCORE_READY); // 2 bài hợp lệ có views > 0 trong window -> tính được STAB -> SCORE_READY
+    assertThat(res.rawStab()).isGreaterThan(0.0);
+  }
+
+  @Test
+  @DisplayName("Reviewer Test 4: Có offset, không offset và timestamp lỗi trong cùng tập Posts -> Chọn cửa sổ ba bài theo đúng Data Source Contract")
+  void testReviewerItem4_mixedOffsetNaiveAndMalformedTimestamps_selectsWindowCorrectly() {
+    UUID cId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(cId, "TIKTOK", 50_000L);
+
+    // P1: 12:00 UTC
+    Post p1 = Post.builder().id(UUID.randomUUID()).postedAt("2026-11-08T12:00:00Z").views(20_000L).likes(1_000L).build();
+    // P2: 18:00 GMT+7 (= 11:00 UTC)
+    Post p2 = Post.builder().id(UUID.randomUUID()).postedAt("2026-11-08T18:00:00+07:00").views(18_000L).likes(900L).build();
+    // P3: 10:00 Naive (không offset -> Data Source Contract UTC = 10:00 UTC)
+    Post p3 = Post.builder().id(UUID.randomUUID()).postedAt("2026-11-08T10:00:00").views(15_000L).likes(750L).build();
+    // P4: Lỗi format postedAt, fallback createdAt = 2026-11-01T00:00:00 (cũ hơn nhiều)
+    Post p4 = Post.builder().id(UUID.randomUUID()).postedAt("invalid-timestamp-string")
+        .createdAt(java.time.LocalDateTime.of(2026, 11, 1, 0, 0))
+        .views(5_000L).likes(250L).build();
+
+    // Chọn cửa sổ 3 bài: Thứ tự thời gian phải là P1 (12:00 UTC) > P2 (11:00 UTC) > P3 (10:00 UTC). P4 bị loại vì cũ nhất.
+    List<Post> selected = EvidenceValidator.selectRecentWindow(
+        List.of(p4, p3, p1, p2), 3, DataSourceContract.resolveSourceZone("TIKTOK")
+    );
+
+    assertThat(selected).hasSize(3);
+    assertThat(selected.get(0).getId()).isEqualTo(p1.getId());
+    assertThat(selected.get(1).getId()).isEqualTo(p2.getId());
+    assertThat(selected.get(2).getId()).isEqualTo(p3.getId());
+
+    // EvidenceValidator đánh giá tập bài hỗn hợp này an toàn, không ném exception và ghi nhận cảnh báo chất lượng
+    var metrics = evidenceValidator.evaluate(cand, List.of(p4, p3, p1, p2), DataSourceContract.resolveSourceZone("TIKTOK"));
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.SCORE_READY);
+    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("TIMEZONE_UNVERIFIED"));
+  }
+
   private RecommendationCandidateProjection mockCandidate(UUID id, String platform, Long followers) {
     RecommendationCandidateProjection c = mock(RecommendationCandidateProjection.class);
     when(c.getCreatorId()).thenReturn(id);

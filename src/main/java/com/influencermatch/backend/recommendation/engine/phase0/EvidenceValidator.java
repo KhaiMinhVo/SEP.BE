@@ -330,6 +330,45 @@ public class EvidenceValidator {
       evidenceReliabilityM2 = 0.20; // Bằng chứng yếu do dùng fallback cấp kênh khác cửa sổ đo lường
     }
 
+    // Kiểm tra chất lượng thời gian (Time Quality & Zone Verification) trên cửa sổ 3 bài gần nhất
+    boolean hasUnverifiedTimezone = false;
+    boolean hasCreatedAtFallback = false;
+    boolean hasMalformedTimestamp = false;
+    for (Post p : recentThreePosts) {
+      if (p == null) continue;
+      if (p.getPostedAt() == null || p.getPostedAt().isBlank()) {
+        if (p.getCreatedAt() != null) {
+          hasCreatedAtFallback = true;
+        }
+      } else {
+        String raw = p.getPostedAt().trim();
+        try {
+          java.time.OffsetDateTime.parse(raw);
+        } catch (Exception e1) {
+          try {
+            java.time.LocalDateTime.parse(raw);
+            hasUnverifiedTimezone = true;
+          } catch (Exception e2) {
+            hasMalformedTimestamp = true;
+            if (p.getCreatedAt() != null) {
+              hasCreatedAtFallback = true;
+            }
+          }
+        }
+      }
+    }
+
+    List<String> timingWarnings = new ArrayList<>();
+    if (hasUnverifiedTimezone) {
+      timingWarnings.add("TIMEZONE_UNVERIFIED: Timestamp lacks offset; interpreted using Data Source Contract (" + (fallbackSourceZone != null ? fallbackSourceZone : DEFAULT_SOURCE_ZONE) + ")");
+    }
+    if (hasCreatedAtFallback) {
+      timingWarnings.add("TIMESTAMP_FALLBACK_CREATED_AT: Post lacks postedAt; fell back to database createdAt");
+    }
+    if (hasMalformedTimestamp) {
+      timingWarnings.add("TIMESTAMP_PARSE_FALLBACK: Malformed postedAt format; fell back to alternative timestamp");
+    }
+
     // 5. Xác định Scoring Readiness: Phân biệt rõ rệt giữa SCORE_READY, PROVISIONAL, NOT_SCORABLE và INVALID_DATA
     boolean erValid = !Double.isNaN(rawEr) && !Double.isInfinite(rawEr) && rawEr >= 0.0;
     boolean vrValid = !Double.isNaN(rawVr) && !Double.isInfinite(rawVr) && rawVr >= 0.0;
@@ -337,7 +376,7 @@ public class EvidenceValidator {
 
     if (erValid && vrValid && stabValid) {
       scoringReadiness = ScoringReadiness.SCORE_READY;
-      dataQualityReasons = List.of();
+      dataQualityReasons = Collections.unmodifiableList(timingWarnings);
     } else if (erValid && vrValid) {
       // ER và VR hợp lệ, CHỈ thiếu bằng chứng STAB (cửa sổ bài < 2 hoặc views = 0)
       scoringReadiness = ScoringReadiness.PROVISIONAL;
@@ -350,6 +389,7 @@ public class EvidenceValidator {
       if (unverifiedViewProvenance) {
         reasons.add("UNVERIFIED_AGGREGATE_VIEW_PROVENANCE: Channel avgViews used as fallback for photo content; measurement window unverified");
       }
+      reasons.addAll(timingWarnings);
       dataQualityReasons = Collections.unmodifiableList(reasons);
     } else if (Double.isNaN(rawEr) || Double.isNaN(rawVr)) {
       // Metric không khả dụng do đặc thù loại nội dung (ví dụ bài ảnh không có Views để tính VR/STAB),
@@ -380,6 +420,7 @@ public class EvidenceValidator {
           }
         }
       }
+      reasons.addAll(timingWarnings);
       dataQualityReasons = Collections.unmodifiableList(reasons);
     } else {
       // Dữ liệu bị lỗi toán học (số âm, Infinite, vi phạm schema)

@@ -464,6 +464,125 @@ class AiRecommendationServicePhase2Test {
     assertThat(response.getProvisionalRecommendations().get(0).getIsProvisional()).isTrue();
   }
 
+  @Test
+  @DisplayName("Reviewer Test 2: Một Master Creator có hai Platform Accounts, một thuộc Main và một thuộc Provisional -> Master-aware deduplication xuyên hai pool")
+  void testReviewerItem2_masterCreatorWithAccountsInBothPools_masterAwareDeduplicationAcrossPools() {
+    UUID masterX = UUID.randomUUID();
+    UUID readyId = UUID.randomUUID();
+    UUID provId = UUID.randomUUID();
+    UUID indepProvId = UUID.randomUUID();
+
+    // Tài khoản 1 của Master X (TikTok, điểm cao, 3 bài views > 0) -> SCORE_READY
+    RecommendationCandidateProjection readyCand = mockCandidate(
+        readyId, masterX, "TIKTOK", "Master X TikTok", 100_000L,
+        BigDecimal.valueOf(25_000), BigDecimal.valueOf(1_500), BigDecimal.valueOf(0.06),
+        "Beauty", "Skincare", 0.85
+    );
+
+    // Tài khoản 2 của Master X (Instagram, chỉ 1 bài -> PROVISIONAL)
+    RecommendationCandidateProjection provCand = mockCandidate(
+        provId, masterX, "INSTAGRAM", "Master X Instagram", 60_000L,
+        BigDecimal.valueOf(12_000), BigDecimal.valueOf(600), BigDecimal.valueOf(0.05),
+        "Beauty", "Skincare", 0.70
+    );
+
+    // KOC độc lập khác (chỉ 1 bài -> PROVISIONAL)
+    RecommendationCandidateProjection indepCand = mockCandidate(
+        indepProvId, null, "TIKTOK", "Independent Provisional KOC", 40_000L,
+        BigDecimal.valueOf(10_000), BigDecimal.valueOf(500), BigDecimal.valueOf(0.05),
+        "Beauty", "Skincare", 0.65
+    );
+
+    com.influencermatch.backend.creator.repository.PostRepository mockPostRepo =
+        mock(com.influencermatch.backend.creator.repository.PostRepository.class);
+    com.influencermatch.backend.creator.model.Creator readyEntity =
+        com.influencermatch.backend.creator.model.Creator.builder().id(readyId).build();
+    com.influencermatch.backend.creator.model.Creator provEntity =
+        com.influencermatch.backend.creator.model.Creator.builder().id(provId).build();
+    com.influencermatch.backend.creator.model.Creator indepEntity =
+        com.influencermatch.backend.creator.model.Creator.builder().id(indepProvId).build();
+
+    when(mockPostRepo.findByCreatorIdIn(any())).thenReturn(List.of(
+        // ready: 3 bài có views
+        com.influencermatch.backend.creator.model.Post.builder().creator(readyEntity).views(20_000L).likes(1_000L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(readyEntity).views(22_000L).likes(1_100L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(readyEntity).views(25_000L).likes(1_250L).build(),
+        // prov: 1 bài
+        com.influencermatch.backend.creator.model.Post.builder().creator(provEntity).views(12_000L).likes(600L).build(),
+        // indep: 1 bài
+        com.influencermatch.backend.creator.model.Post.builder().creator(indepEntity).views(10_000L).likes(500L).build()
+    ));
+    service.setPostRepository(mockPostRepo);
+
+    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
+        anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+        .thenReturn(List.of(readyCand, provCand, indepCand));
+
+    RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
+
+    // 1. recommendations CHỈ chứa tài khoản TikTok của Master X (SCORE_READY)
+    assertThat(response.getRecommendations()).hasSize(1);
+    assertThat(response.getRecommendations().get(0).getCreatorId()).isEqualTo(readyId);
+    assertThat(response.getRecommendations().get(0).getMasterId()).isEqualTo(masterX);
+
+    // 2. provisionalRecommendations CHỈ chứa KOC độc lập
+    // Tài khoản Instagram của Master X đã bị deduplicate xuyên pool (vì Master X đã xuất hiện ở Main)
+    assertThat(response.getProvisionalRecommendations()).hasSize(1);
+    assertThat(response.getProvisionalRecommendations().get(0).getCreatorId()).isEqualTo(indepProvId);
+
+    // 3. Hai danh sách hoàn toàn không giao nhau theo cả creatorId lẫn masterId
+    assertThat(response.getProvisionalRecommendations())
+        .noneMatch(r -> masterX.equals(r.getMasterId()) || readyId.equals(r.getCreatorId()) || provId.equals(r.getCreatorId()));
+  }
+
+  @Test
+  @DisplayName("Reviewer Test 3: Zero SCORE_READY, nhiều PROVISIONAL -> Sử dụng Business Fallback Weights và giới hạn đúng effectiveLimit")
+  void testReviewerItem3_zeroScoreReadyCandidates_multipleProvisional_usesBusinessFallbackWeightsAndLimitsOutput() {
+    campaign.setObjective(com.influencermatch.backend.campaign.enums.CampaignObjective.CONVERSION);
+
+    // Tạo 4 ứng viên Provisional độc lập
+    UUID id1 = UUID.randomUUID();
+    UUID id2 = UUID.randomUUID();
+    UUID id3 = UUID.randomUUID();
+    UUID id4 = UUID.randomUUID();
+
+    RecommendationCandidateProjection c1 = mockCandidate(id1, null, "TIKTOK", "Prov KOC 1", 30_000L, BigDecimal.valueOf(10_000), BigDecimal.valueOf(500), BigDecimal.valueOf(0.05), "Beauty", "Skincare", 0.70);
+    RecommendationCandidateProjection c2 = mockCandidate(id2, null, "TIKTOK", "Prov KOC 2", 35_000L, BigDecimal.valueOf(12_000), BigDecimal.valueOf(600), BigDecimal.valueOf(0.05), "Beauty", "Skincare", 0.75);
+    RecommendationCandidateProjection c3 = mockCandidate(id3, null, "TIKTOK", "Prov KOC 3", 40_000L, BigDecimal.valueOf(14_000), BigDecimal.valueOf(700), BigDecimal.valueOf(0.05), "Beauty", "Skincare", 0.80);
+    RecommendationCandidateProjection c4 = mockCandidate(id4, null, "TIKTOK", "Prov KOC 4", 45_000L, BigDecimal.valueOf(16_000), BigDecimal.valueOf(800), BigDecimal.valueOf(0.05), "Beauty", "Skincare", 0.85);
+
+    com.influencermatch.backend.creator.repository.PostRepository mockPostRepo =
+        mock(com.influencermatch.backend.creator.repository.PostRepository.class);
+    // Mỗi ứng viên chỉ có 1 bài -> tất cả đều rơi vào PROVISIONAL (thiếu STAB)
+    when(mockPostRepo.findByCreatorIdIn(any())).thenReturn(List.of(
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(id1).build()).views(10_000L).likes(500L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(id2).build()).views(12_000L).likes(600L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(id3).build()).views(14_000L).likes(700L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(id4).build()).views(16_000L).likes(800L).build()
+    ));
+    service.setPostRepository(mockPostRepo);
+
+    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
+        anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+        .thenReturn(List.of(c1, c2, c3, c4));
+
+    // Yêu cầu limit = 2
+    RecommendationResponseDto response = service.recommendKocs(campaignId, 2);
+
+    // 1. recommendations rỗng hoàn toàn do 0 ứng viên SCORE_READY
+    assertThat(response.getRecommendations()).isEmpty();
+
+    // 2. provisionalRecommendations bị giới hạn đúng effectiveLimit = 2 (thay vì trả về tràn lan cả 4)
+    assertThat(response.getProvisionalRecommendations()).hasSize(2);
+
+    // 3. Mỗi phần tử trong provisional được gắn nhãn sơ bộ rõ ràng
+    for (var item : response.getProvisionalRecommendations()) {
+      assertThat(item.getIsScoreReady()).isFalse();
+      assertThat(item.getIsProvisional()).isTrue();
+      assertThat(item.getFinalScore()).isNotNull().isBetween(0.0, 100.0);
+    }
+  }
+
   private RecommendationCandidateProjection mockCandidate(
       UUID creatorId, UUID masterId, String platform, String displayName, Long followers,
       BigDecimal avgViews, BigDecimal avgLikes, BigDecimal er, String niche, String cat, Double semantic) {

@@ -21,6 +21,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
 import java.util.function.Function;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * End-to-end engine orchestrating:
@@ -30,6 +31,7 @@ import java.util.function.Function;
  * - Phase 4: Fixed-Ideal TOPSIS Ranking
  * - Phase 5: Recommendation Confidence Assessment
  */
+@Slf4j
 public class FourMemoryTopsisEngine {
 
   private final FourMemoryScorer fourMemoryScorer = new FourMemoryScorer();
@@ -90,19 +92,27 @@ public class FourMemoryTopsisEngine {
         ? campaign.getObjective().name()
         : "AWARENESS";
 
-    // 1. Phase 1: Evaluate 4 Memories for each candidate
+    // 1. Phase 1: Evaluate 4 Memories for each candidate with Fault Isolation
     List<IntermediateEvaluation> intermediateList = new ArrayList<>(candidates.size());
     List<double[]> matrix = new ArrayList<>(candidates.size());
 
     for (RecommendationCandidateProjection cand : candidates) {
-      NormalizedCandidateContext p0 = (phase0Map != null) ? phase0Map.get(cand.getCreatorId()) : null;
-      List<HistoricalCampaign> past = (historyProvider != null) ? historyProvider.apply(cand) : Collections.emptyList();
+      if (cand == null) continue;
+      try {
+        NormalizedCandidateContext p0 = (phase0Map != null) ? phase0Map.get(cand.getCreatorId()) : null;
+        List<HistoricalCampaign> past = (historyProvider != null) ? historyProvider.apply(cand) : Collections.emptyList();
 
-      CandidateMemoryScores scores =
-          fourMemoryScorer.evaluate(cand, p0, campaign, past, brandPatterns);
+        CandidateMemoryScores scores =
+            fourMemoryScorer.evaluate(cand, p0, campaign, past, brandPatterns);
 
-      intermediateList.add(new IntermediateEvaluation(cand, scores));
-      matrix.add(scores.asVector());
+        intermediateList.add(new IntermediateEvaluation(cand, scores));
+        matrix.add(scores.asVector());
+      } catch (IllegalArgumentException ex) {
+        // Cách ly lỗi cấp ứng viên (Fault Isolation):
+        // Không để một ứng viên có dữ liệu lỗi/NaN làm sập toàn bộ Recommendation Run của các ứng viên khác
+        log.warn("Candidate {} isolated during Phase 1 scoring due to data validation error: {}",
+            cand.getCreatorId(), ex.getMessage());
+      }
     }
 
     // 2. Phase 2 & 3: CRITIC Weighting & Dynamic Weight Blending

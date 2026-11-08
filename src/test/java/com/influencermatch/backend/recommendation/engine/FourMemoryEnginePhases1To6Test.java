@@ -10,6 +10,7 @@ import com.influencermatch.backend.campaign.model.HistoricalCampaign;
 import com.influencermatch.backend.collaboration.model.CampaignOutcome;
 import com.influencermatch.backend.creator.dto.RecommendationCandidateProjection;
 import com.influencermatch.backend.creator.model.Post;
+import com.influencermatch.backend.recommendation.dto.ScoreBreakdownDto;
 import com.influencermatch.backend.recommendation.engine.confidence.ConfidenceCalculator;
 import com.influencermatch.backend.recommendation.engine.confidence.enums.ConfidenceTier;
 import com.influencermatch.backend.recommendation.engine.confidence.model.ConfidenceAssessment;
@@ -257,25 +258,182 @@ class FourMemoryEnginePhases1To6Test {
   }
 
   @Test
-  @DisplayName("P0 Test: Campaign lịch sử thiếu ROI -> Không tự chuyển Missing thành ROI = 0 hoặc Success")
-  void testP0_historicalCampaign_missingRoiDoesNotInventFakeSuccessOrZero() {
+  @DisplayName("P0 Test: 10 Campaign, chỉ 2 có verified outcome -> Bayesian dùng mẫu số n=2, không phạt thiếu dữ liệu thành thất bại")
+  void testP0_bayesianEvaluatedCountExcludesUnknownOutcomes() {
     BayesianHistoryScorer scorer = new BayesianHistoryScorer();
 
-    // 1 campaign có bản ghi nhưng thiếu outcome (hoặc outcome thiếu ROI và KPI)
-    HistoricalCampaign missingHist = HistoricalCampaign.builder()
+    List<HistoricalCampaign> campaigns = new ArrayList<>();
+    // 2 campaign thành công có ROI >= 1.0
+    for (int i = 0; i < 2; i++) {
+      campaigns.add(HistoricalCampaign.builder()
+          .outcome(CampaignOutcome.builder().roi(BigDecimal.valueOf(1.5)).build())
+          .build());
+    }
+    // 8 campaign thiếu dữ liệu hoàn toàn (UNKNOWN)
+    for (int i = 0; i < 8; i++) {
+      campaigns.add(HistoricalCampaign.builder().outcome(null).evidenceValue(null).build());
+    }
+
+    BayesianHistoryScorer.Result res = scorer.score(campaigns, "CONVERSION");
+
+    // Chỉ có 2 campaign có outcome xác định được tính vào mẫu số Bayesian (n = 2, s = 2)
+    assertThat(res.sampleSize()).isEqualTo(2);
+    assertThat(res.successCount()).isEqualTo(2);
+    // pHat = (2 + 3 * 0.5) / (2 + 3) = 3.5 / 5 = 0.70
+    // Khẳng định KHÔNG bị tính n = 10 làm điểm tụt xuống 0.269
+    assertThat(res.pHat()).isEqualTo(0.70);
+    assertThat(res.isColdStart()).isFalse();
+  }
+
+  @Test
+  @DisplayName("P0 Test: KPI nhóm lower-is-better (ví dụ CPA, COST) phân loại thành công chính xác")
+  void testP0_kpiLowerIsBetter_evaluatesCorrectly() {
+    BayesianHistoryScorer scorer = new BayesianHistoryScorer();
+
+    // 1. CPA Target = 50,000, Actual = 40,000 (Thấp hơn là Tốt -> Thành công)
+    HistoricalCampaign histGoodCpa = HistoricalCampaign.builder()
+        .outcome(CampaignOutcome.builder()
+            .kpiType("CPA")
+            .kpiTarget(BigDecimal.valueOf(50_000))
+            .kpiActual(BigDecimal.valueOf(40_000))
+            .build())
+        .build();
+    assertThat(scorer.classifyOutcome(histGoodCpa)).isEqualTo(BayesianHistoryScorer.OutcomeClassification.SUCCESS);
+
+    // 2. CPA Target = 50,000, Actual = 60,000 (Vượt ngân sách -> Thất bại)
+    HistoricalCampaign histBadCpa = HistoricalCampaign.builder()
+        .outcome(CampaignOutcome.builder()
+            .kpiType("CPA")
+            .kpiTarget(BigDecimal.valueOf(50_000))
+            .kpiActual(BigDecimal.valueOf(60_000))
+            .build())
+        .build();
+    assertThat(scorer.classifyOutcome(histBadCpa)).isEqualTo(BayesianHistoryScorer.OutcomeClassification.FAILURE);
+
+    // 3. Views Target = 100,000, Actual = 120,000 (Cao hơn là Tốt -> Thành công)
+    HistoricalCampaign histGoodViews = HistoricalCampaign.builder()
+        .outcome(CampaignOutcome.builder()
+            .kpiType("VIEWS")
+            .kpiTarget(BigDecimal.valueOf(100_000))
+            .kpiActual(BigDecimal.valueOf(120_000))
+            .build())
+        .build();
+    assertThat(scorer.classifyOutcome(histGoodViews)).isEqualTo(BayesianHistoryScorer.OutcomeClassification.SUCCESS);
+  }
+
+  @Test
+  @DisplayName("P0 Test: Fault Isolation - Một ứng viên ném lỗi không làm sập Recommendation Run của các ứng viên khác")
+  void testP0_faultIsolation_corruptedCandidateDoesNotCrashRun() {
+    FourMemoryTopsisEngine engine = new FourMemoryTopsisEngine();
+    Campaign campaign = Campaign.builder().id(UUID.randomUUID()).platforms(List.of("TIKTOK")).build();
+
+    RecommendationCandidateProjection cand1 = Mockito.mock(RecommendationCandidateProjection.class);
+    UUID id1 = UUID.randomUUID();
+    Mockito.when(cand1.getCreatorId()).thenReturn(id1);
+    Mockito.when(cand1.getFollowers()).thenReturn(20_000L);
+    Mockito.when(cand1.getPlatform()).thenReturn("TIKTOK");
+    Mockito.when(cand1.getAccountStatus()).thenReturn("ACTIVE");
+
+    RecommendationCandidateProjection cand2Corrupted = Mockito.mock(RecommendationCandidateProjection.class);
+    UUID id2 = UUID.randomUUID();
+    Mockito.when(cand2Corrupted.getCreatorId()).thenReturn(id2);
+    // cand2 có engagementRate âm, sẽ gây IllegalArgumentException khi Phase 1 validate
+    Mockito.when(cand2Corrupted.getEngagementRate()).thenReturn(BigDecimal.valueOf(-1.5));
+    Mockito.when(cand2Corrupted.getPlatform()).thenReturn("TIKTOK");
+    Mockito.when(cand2Corrupted.getAccountStatus()).thenReturn("ACTIVE");
+
+    RecommendationCandidateProjection cand3 = Mockito.mock(RecommendationCandidateProjection.class);
+    UUID id3 = UUID.randomUUID();
+    Mockito.when(cand3.getCreatorId()).thenReturn(id3);
+    Mockito.when(cand3.getFollowers()).thenReturn(50_000L);
+    Mockito.when(cand3.getPlatform()).thenReturn("TIKTOK");
+    Mockito.when(cand3.getAccountStatus()).thenReturn("ACTIVE");
+
+    NormalizedCandidateContext p0_1 = new NormalizedCandidateContext(
+        id1, null, "TIKTOK", Phase0Status.ELIGIBLE, Collections.emptyList(),
+        0.60, 0.70, 0.80, 0.05, 0.50, 0.75, ErMethod.BY_VIEWS, 3, false, 0.65, "V1"
+    );
+    NormalizedCandidateContext p0_3 = new NormalizedCandidateContext(
+        id3, null, "TIKTOK", Phase0Status.ELIGIBLE, Collections.emptyList(),
+        0.50, 0.60, 0.70, 0.04, 0.40, 0.65, ErMethod.BY_VIEWS, 3, false, 0.65, "V1"
+    );
+
+    Map<UUID, NormalizedCandidateContext> phase0Map = Map.of(
+        id1, p0_1,
+        id3, p0_3
+    );
+
+    // Chạy evaluateAndRank với cả 3 ứng viên
+    List<FourMemoryTopsisEngine.EvaluatedCandidate> evaluated = engine.evaluateAndRank(
+        List.of(cand1, cand2Corrupted, cand3),
+        phase0Map,
+        campaign,
+        c -> Collections.emptyList(),
+        Collections.emptyList()
+    );
+
+    // Run không bị sập; cand2 bị cô lập, cand1 và cand3 được đánh giá và xếp hạng bình thường
+    assertThat(evaluated).hasSize(2);
+    assertThat(evaluated).extracting(e -> e.candidate().getCreatorId()).containsExactlyInAnyOrder(id1, id3);
+  }
+
+  @Test
+  @DisplayName("P1 Test: Provisional thiếu STAB -> toScoreBreakdownDto không chứa NaN, chuyển đổi thành công")
+  void testP1_provisionalScoreBreakdown_noNanInDto() {
+    FourMemoryTopsisEngine engine = new FourMemoryTopsisEngine();
+    UUID cId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = Mockito.mock(RecommendationCandidateProjection.class);
+    Mockito.when(cand.getCreatorId()).thenReturn(cId);
+
+    // Candidate Provisional có stabNorm là NaN nhưng sm2Norm là hữu hạn (nhờ sàn 0.0)
+    CandidateMemoryScores memoryScores = new CandidateMemoryScores(
+        0.50, 0.45, 0.80, 0.60,
+        50.0, 45.0, 80.0, 60.0,
+        0.65, 0.70, Double.NaN, // stabNorm là NaN
+        0, 0, true,
+        1, true, true, true, 1, 1
+    );
+
+    TopsisResult topsis = new TopsisResult(0.35, 0.55, 0.62, 62.0);
+    ConfidenceAssessment conf = new ConfidenceAssessment(ConfidenceTier.LOW, 0.35, 0.50, 0.20, 1.0, 0.50, List.of("SHORT_WINDOW"));
+    EngineWeights weights = new EngineWeights(0.25, 0.25, 0.25, 0.25, "EQUAL", 0.0);
+
+    FourMemoryTopsisEngine.EvaluatedCandidate evaluated =
+        new FourMemoryTopsisEngine.EvaluatedCandidate(cand, memoryScores, topsis, conf, weights);
+
+    ScoreBreakdownDto dto = engine.toScoreBreakdownDto(evaluated);
+    assertThat(dto).isNotNull();
+    assertThat(dto.getM2Score()).isEqualTo(45.0);
+    assertThat(dto.getFollowerScore()).isEqualTo(70.0);
+    assertThat(dto.getEngagementScore()).isEqualTo(65.0);
+    assertThat(dto.getFinalScore()).isEqualTo(62.0);
+    // Tuyệt đối không có trường nào mang giá trị NaN
+    assertThat(Double.isNaN(dto.getM1Score())).isFalse();
+    assertThat(Double.isNaN(dto.getM2Score())).isFalse();
+    assertThat(Double.isNaN(dto.getFinalScore())).isFalse();
+  }
+
+  @Test
+  @DisplayName("P1 Test: Review JSON lỗi hoặc rỗng -> Fallback an toàn về prior 0.50, không sinh điểm 0 giả tạo")
+  void testP1_reviewJsonMalformedOrMissingRatings_fallsBackGracefully() {
+    BayesianHistoryScorer scorer = new BayesianHistoryScorer();
+
+    com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    com.fasterxml.jackson.databind.node.ObjectNode malformedNode = mapper.createObjectNode();
+    malformedNode.put("invalidField", "text");
+
+    HistoricalCampaign histWithEmptyJson = HistoricalCampaign.builder()
         .outcome(null)
-        .evidenceValue(null)
+        .evidenceValue(malformedNode)
         .build();
 
-    BayesianHistoryScorer.Result res = scorer.score(List.of(missingHist), "CONVERSION");
+    BayesianHistoryScorer.Result res = scorer.score(List.of(histWithEmptyJson), "AWARENESS");
 
-    // n = 1, nhưng s = 0 (Không tự động biến thành 1 thành công giả tạo)
-    assertThat(res.sampleSize()).isEqualTo(1);
-    assertThat(res.successCount()).isEqualTo(0);
-    // Posterior pHat = (0 + 3 * 0.5) / (1 + 3) = 1.5 / 4 = 0.375
-    assertThat(res.pHat()).isEqualTo(0.375);
-    // kpiScore giữ nguyên prior 0.50 (không bị ép về 0.0)
-    assertThat(res.isColdStart()).isFalse();
+    // JSON không có rating hợp lệ -> classifyOutcome là UNKNOWN -> mẫu số không tăng
+    assertThat(res.sampleSize()).isEqualTo(0);
+    assertThat(res.isColdStart()).isTrue();
+    // revScore giữ prior 0.50 (không bị ép về 0.0)
+    assertThat(res.sm1Norm()).isEqualTo(0.50);
   }
 
   @Test

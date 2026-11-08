@@ -1,18 +1,25 @@
 package com.influencermatch.backend.recommendation.engine.memory;
 
 import com.influencermatch.backend.campaign.model.HistoricalCampaign;
+import com.influencermatch.backend.collaboration.model.CampaignOutcome;
 import java.math.BigDecimal;
 import java.util.List;
 
 /**
  * Phase 1: SM1 - Historical Campaign Performance Scorer.
- * Uses Bayesian Beta-Binomial smoothing to handle sparse historical collaboration data,
+ * Uses Bayesian Beta-Binomial smoothing on verified collaboration outcomes,
  * combined with objective-specific KPI achievement and brand review ratings.
  */
 public class BayesianHistoryScorer {
 
   public static final double DEFAULT_PRIOR_MEAN = 0.50; // p0
   public static final double DEFAULT_PRIOR_STRENGTH = 3.0; // kappa
+
+  public enum OutcomeClassification {
+    SUCCESS,
+    FAILURE,
+    UNKNOWN
+  }
 
   public record Result(
       double sm1Norm,
@@ -23,9 +30,117 @@ public class BayesianHistoryScorer {
       boolean isColdStart
   ) {}
 
+  /**
+   * Phân loại outcome duy nhất theo nguyên tắc Composite Collaboration Success:
+   * - SUCCESS: Có bằng chứng thành công từ ROI >= 1.0, KPI đạt chỉ tiêu (có hỗ trợ lower-is-better), hoặc Review tích cực.
+   * - FAILURE: Có kết quả nhưng ROI < 1.0, KPI trượt chỉ tiêu, hoặc Review tiêu cực.
+   * - UNKNOWN: Hoàn toàn không có dữ liệu outcome lẫn review (không tính vào n và không tính vào s).
+   */
+  public OutcomeClassification classifyOutcome(HistoricalCampaign hist) {
+    if (hist == null) {
+      return OutcomeClassification.UNKNOWN;
+    }
+
+    boolean hasOutcomeData = false;
+    boolean isPositiveRoiOrKpi = false;
+    boolean isNegativeRoiOrKpi = false;
+
+    // 1. Kiểm tra ROI hoặc KPI từ CampaignOutcome
+    if (hist.getOutcome() != null) {
+      CampaignOutcome outcome = hist.getOutcome();
+      BigDecimal roi = outcome.getRoi();
+      if (roi != null) {
+        hasOutcomeData = true;
+        if (roi.doubleValue() >= 1.0) {
+          isPositiveRoiOrKpi = true;
+        } else {
+          isNegativeRoiOrKpi = true;
+        }
+      } else if (outcome.getKpiTarget() != null
+          && outcome.getKpiActual() != null
+          && outcome.getKpiTarget().doubleValue() > 0) {
+        hasOutcomeData = true;
+        double actual = outcome.getKpiActual().doubleValue();
+        double target = outcome.getKpiTarget().doubleValue();
+        String kpiType = outcome.getKpiType() != null ? outcome.getKpiType().trim().toUpperCase() : "";
+
+        // Hỗ trợ cả nhóm chỉ số lower-is-better (ví dụ chi phí hoặc độ trễ)
+        boolean isLowerBetter = kpiType.contains("COST")
+            || kpiType.contains("CPA")
+            || kpiType.contains("CPC")
+            || kpiType.contains("CAC")
+            || kpiType.contains("DELAY");
+
+        if (isLowerBetter) {
+          if (actual <= target) {
+            isPositiveRoiOrKpi = true;
+          } else {
+            isNegativeRoiOrKpi = true;
+          }
+        } else {
+          if (actual >= target) {
+            isPositiveRoiOrKpi = true;
+          } else {
+            isNegativeRoiOrKpi = true;
+          }
+        }
+      }
+    }
+
+    // 2. Kiểm tra Brand Review Ratings từ evidenceValue (JSON do CollaborationCompletedEventListener lưu)
+    boolean hasReviewData = false;
+    boolean isPositiveReview = false;
+    boolean isNegativeReview = false;
+
+    if (hist.getEvidenceValue() != null && !hist.getEvidenceValue().isNull()) {
+      var evNode = hist.getEvidenceValue();
+      if (evNode.has("reliabilityScore") && !evNode.get("reliabilityScore").isNull()) {
+        hasReviewData = true;
+        double r = evNode.get("reliabilityScore").asDouble();
+        if (Double.isFinite(r)) {
+          if (r >= 0.70) {
+            isPositiveReview = true;
+          } else if (r < 0.40) {
+            isNegativeReview = true;
+          }
+        }
+      } else if (evNode.has("overallRating") && !evNode.get("overallRating").isNull()) {
+        hasReviewData = true;
+        double rating = evNode.get("overallRating").asDouble();
+        if (Double.isFinite(rating)) {
+          if (rating >= 4.0) {
+            isPositiveReview = true;
+          } else if (rating <= 2.0) {
+            isNegativeReview = true;
+          }
+        }
+      }
+
+      if (evNode.has("wouldCollaborateAgain") && !evNode.get("wouldCollaborateAgain").isNull()) {
+        hasReviewData = true;
+        if (evNode.get("wouldCollaborateAgain").asBoolean()) {
+          isPositiveReview = true;
+        }
+      }
+    }
+
+    // Nếu không có bất kỳ bằng chứng nào -> UNKNOWN (Missing data)
+    if (!hasOutcomeData && !hasReviewData) {
+      return OutcomeClassification.UNKNOWN;
+    }
+
+    // Nếu có bằng chứng tích cực và không bị tín hiệu tiêu cực áp đảo -> SUCCESS
+    if ((isPositiveRoiOrKpi || isPositiveReview) && !isNegativeRoiOrKpi) {
+      return OutcomeClassification.SUCCESS;
+    }
+
+    // Có kết quả nhưng tiêu cực hoặc không đạt tiêu chí thành công -> FAILURE
+    return OutcomeClassification.FAILURE;
+  }
+
   public Result score(List<HistoricalCampaign> pastCampaigns, String objective) {
-    int n = (pastCampaigns != null) ? pastCampaigns.size() : 0;
-    int s = 0;
+    int evaluatedCount = 0; // n: Mẫu số Bayesian CHỈ đếm các campaign có outcome xác định (SUCCESS hoặc FAILURE)
+    int successCount = 0;   // s: Tử số chỉ đếm các campaign SUCCESS
     double kpiSum = 0.0;
     int kpiCount = 0;
     double revSum = 0.0;
@@ -35,67 +150,66 @@ public class BayesianHistoryScorer {
       for (HistoricalCampaign hist : pastCampaigns) {
         if (hist == null) continue;
 
-        boolean verifiedSuccess = false;
+        OutcomeClassification classification = classifyOutcome(hist);
+        if (classification == OutcomeClassification.SUCCESS) {
+          evaluatedCount++;
+          successCount++;
+        } else if (classification == OutcomeClassification.FAILURE) {
+          evaluatedCount++;
+        }
+        // Trường hợp UNKNOWN (thiếu dữ liệu kết quả): KHÔNG tăng evaluatedCount (tránh biến missing thành failure)
 
-        // 1. Kiểm tra ROI hoặc KPI từ CampaignOutcome (Hợp đồng đo lường hiệu năng)
+        // 1. Trích xuất KPI score nếu có
         if (hist.getOutcome() != null) {
-          BigDecimal roi = hist.getOutcome().getRoi();
+          CampaignOutcome outcome = hist.getOutcome();
+          BigDecimal roi = outcome.getRoi();
           if (roi != null) {
-            double roiVal = roi.doubleValue();
-            if (roiVal >= 1.0) {
-              verifiedSuccess = true;
-            }
-            double normRoi = Math.max(0.0, Math.min(1.0, roiVal / 2.0));
+            double normRoi = Math.max(0.0, Math.min(1.0, roi.doubleValue() / 2.0));
             kpiSum += normRoi;
             kpiCount++;
-          } else if (hist.getOutcome().getKpiTarget() != null
-              && hist.getOutcome().getKpiActual() != null
-              && hist.getOutcome().getKpiTarget().doubleValue() > 0) {
-            double actual = hist.getOutcome().getKpiActual().doubleValue();
-            double target = hist.getOutcome().getKpiTarget().doubleValue();
-            if (actual >= target) {
-              verifiedSuccess = true;
-            }
-            double normKpi = Math.max(0.0, Math.min(1.0, actual / target));
+          } else if (outcome.getKpiTarget() != null
+              && outcome.getKpiActual() != null
+              && outcome.getKpiTarget().doubleValue() > 0) {
+            double actual = outcome.getKpiActual().doubleValue();
+            double target = outcome.getKpiTarget().doubleValue();
+            String kpiType = outcome.getKpiType() != null ? outcome.getKpiType().trim().toUpperCase() : "";
+            boolean isLowerBetter = kpiType.contains("COST")
+                || kpiType.contains("CPA")
+                || kpiType.contains("CPC")
+                || kpiType.contains("CAC")
+                || kpiType.contains("DELAY");
+            double normKpi = isLowerBetter
+                ? (actual <= 0 ? 1.0 : Math.max(0.0, Math.min(1.0, target / actual)))
+                : Math.max(0.0, Math.min(1.0, actual / target));
             kpiSum += normKpi;
             kpiCount++;
           }
         }
 
-        // 2. Trích xuất Brand Review Ratings thực tế từ evidenceValue (do CollaborationCompletedEventListener lưu)
+        // 2. Trích xuất Brand Review an toàn từ JSON
         if (hist.getEvidenceValue() != null && !hist.getEvidenceValue().isNull()) {
           var evNode = hist.getEvidenceValue();
-          if (evNode.has("reliabilityScore")) {
+          if (evNode.has("reliabilityScore") && !evNode.get("reliabilityScore").isNull()) {
             double r = evNode.get("reliabilityScore").asDouble();
-            revSum += Math.max(0.0, Math.min(1.0, r));
-            revCount++;
-            if (r >= 0.70) {
-              verifiedSuccess = true; // Review tốt (>= 7/10) xác nhận thành công
+            if (Double.isFinite(r)) {
+              revSum += Math.max(0.0, Math.min(1.0, r));
+              revCount++;
             }
-          } else if (evNode.has("overallRating")) {
+          } else if (evNode.has("overallRating") && !evNode.get("overallRating").isNull()) {
             double rating = evNode.get("overallRating").asDouble();
-            revSum += Math.max(0.0, Math.min(1.0, rating / 5.0));
-            revCount++;
-            if (rating >= 4.0) {
-              verifiedSuccess = true;
+            if (Double.isFinite(rating)) {
+              revSum += Math.max(0.0, Math.min(1.0, rating / 5.0));
+              revCount++;
             }
           }
-
-          if (evNode.has("wouldCollaborateAgain") && evNode.get("wouldCollaborateAgain").asBoolean()) {
-            verifiedSuccess = true;
-          }
-        }
-
-        if (verifiedSuccess) {
-          s++;
         }
       }
     }
 
-    boolean isColdStart = (n == 0);
+    boolean isColdStart = (evaluatedCount == 0);
     double pHat = isColdStart
         ? DEFAULT_PRIOR_MEAN
-        : (s + DEFAULT_PRIOR_STRENGTH * DEFAULT_PRIOR_MEAN) / (n + DEFAULT_PRIOR_STRENGTH);
+        : (successCount + DEFAULT_PRIOR_STRENGTH * DEFAULT_PRIOR_MEAN) / (evaluatedCount + DEFAULT_PRIOR_STRENGTH);
 
     double kpiScore = (kpiCount > 0) ? (kpiSum / kpiCount) : DEFAULT_PRIOR_MEAN;
     double revScore = (revCount > 0) ? (revSum / revCount) : DEFAULT_PRIOR_MEAN;
@@ -131,6 +245,6 @@ public class BayesianHistoryScorer {
     double sm1Norm = (wBayes * pHat) + (wKpi * kpiScore) + (wRev * revScore);
     double score100 = sm1Norm * 100.0;
 
-    return new Result(sm1Norm, score100, pHat, n, s, isColdStart);
+    return new Result(sm1Norm, score100, pHat, evaluatedCount, successCount, isColdStart);
   }
 }

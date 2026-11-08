@@ -540,21 +540,17 @@ class Phase0EngineTest {
   @Test
   @DisplayName("Phase 4: TOPSIS từ chối trọng số không hợp lệ - ném ngoại lệ khi tổng trọng số != 1.0 hoặc trọng số âm")
   void testTopsisEngine_rejectsInvalidWeights_notSumToOneOrNegative() {
-    var topsisEngine = new com.influencermatch.backend.recommendation.engine.topsis.TopsisRankingEngine();
-
     // Tổng trọng số 0.3 * 4 = 1.2 (!= 1.0)
-    var weightsOver1 = new com.influencermatch.backend.recommendation.engine.critic.model.EngineWeights(
-        0.30, 0.30, 0.30, 0.30, "TEST", 0.0);
-    org.assertj.core.api.Assertions.assertThatThrownBy(() -> topsisEngine.compute(0.5, 0.5, 0.8, 0.6, weightsOver1))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Criteria weights sum must equal 1.0");
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> new com.influencermatch.backend.recommendation.engine.critic.model.EngineWeights(
+        0.30, 0.30, 0.30, 0.30, "TEST", 0.0))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INVALID_WEIGHT_SUM");
 
     // Trọng số âm
-    var negativeWeight = new com.influencermatch.backend.recommendation.engine.critic.model.EngineWeights(
-        -0.10, 0.40, 0.40, 0.30, "TEST", 0.0);
-    org.assertj.core.api.Assertions.assertThatThrownBy(() -> topsisEngine.compute(0.5, 0.5, 0.8, 0.6, negativeWeight))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Criteria weights must be non-negative");
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> new com.influencermatch.backend.recommendation.engine.critic.model.EngineWeights(
+        -0.10, 0.40, 0.40, 0.30, "TEST", 0.0))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("must be a finite number in [0.0, 1.0]");
   }
 
   @Test

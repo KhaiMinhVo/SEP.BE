@@ -19,9 +19,14 @@ public class DynamicWeightBlender {
   }
 
   public EngineWeights blend(String objective, Optional<double[]> criticWeightsOpt, double lambda) {
+    if (!Double.isFinite(lambda) || lambda < 0.0 || lambda > 1.0) {
+      throw new IllegalStateException(
+          "INVALID_BLEND_LAMBDA: lambda must be a finite number in [0.0, 1.0], but got: " + lambda);
+    }
+
     double[] b = resolveBusinessWeights(objective);
 
-    if (criticWeightsOpt.isEmpty() || lambda <= 0.0) {
+    if (criticWeightsOpt.isEmpty() || lambda == 0.0) {
       return new EngineWeights(
           b[0], b[1], b[2], b[3],
           "BUSINESS_FALLBACK",
@@ -32,7 +37,7 @@ public class DynamicWeightBlender {
     }
 
     double[] q = criticWeightsOpt.get();
-    double effectiveLambda = Math.max(0.0, Math.min(1.0, lambda));
+    double effectiveLambda = lambda;
 
     double[] w = new double[4];
     double sum = 0.0;
@@ -44,6 +49,9 @@ public class DynamicWeightBlender {
     // Ensure unit sum
     for (int j = 0; j < 4; j++) {
       w[j] /= sum;
+      if (!Double.isFinite(w[j]) || w[j] < 0.0) {
+        throw new IllegalStateException("INVALID_ENGINE_WEIGHT: Computed weight at index " + j + " is invalid: " + w[j]);
+      }
     }
 
     return new EngineWeights(

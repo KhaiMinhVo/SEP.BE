@@ -16,6 +16,23 @@ public record EngineWeights(
     double[] criticWeights, // Raw q_j statistical weights
     double[] businessWeights // Raw b_g,j business weights
 ) {
+  public EngineWeights {
+    validateWeight(w1, "w1");
+    validateWeight(w2, "w2");
+    validateWeight(w3, "w3");
+    validateWeight(w4, "w4");
+    double sum = w1 + w2 + w3 + w4;
+    if (Math.abs(sum - 1.0) > 1e-4) {
+      throw new IllegalStateException("INVALID_WEIGHT_SUM: Weights must sum to 1.0, but got: " + sum);
+    }
+  }
+
+  private static void validateWeight(double w, String name) {
+    if (!Double.isFinite(w) || w < 0.0 || w > 1.0) {
+      throw new IllegalStateException(name + " must be a finite number in [0.0, 1.0], but got: " + w);
+    }
+  }
+
   public EngineWeights(double w1, double w2, double w3, double w4, String mode, double lambdaUsed) {
     this(w1, w2, w3, w4, mode, lambdaUsed, new double[] {w1, w2, w3, w4}, new double[] {w1, w2, w3, w4});
   }

@@ -631,6 +631,159 @@ class FourMemoryEnginePhases1To6Test {
     assertThat(weights.w1() + weights.w2() + weights.w3() + weights.w4()).isCloseTo(1.0, offset(1e-6));
   }
 
+  @Test
+  @DisplayName("P0 Test: SM1, SM4 hằng số; SM2, SM3 tương quan dương hoàn hảo -> Không tạo xung đột giả, kích hoạt Fallback")
+  void testP0_constantColumns_doNotCreateFakeConflict_triggersFallback() {
+    CriticWeightCalculator critic = new CriticWeightCalculator();
+
+    // 15 hàng:
+    // SM1 = 0.5 (hằng số)
+    // SM4 = 1.0 (hằng số)
+    // SM2 = SM3 tăng dần từ 0.2 đến 0.9 (tương quan dương tuyệt đối r_23 = 1.0)
+    List<double[]> matrix = new ArrayList<>();
+    for (int i = 0; i < 15; i++) {
+      double v = 0.2 + (i * 0.05);
+      matrix.add(new double[] {0.5, v, v, 1.0});
+    }
+
+    // Với logic đúng, hai cột hằng số bị loại khỏi phép cộng xung đột.
+    // Xung đột giữa SM2 và SM3 là (1 - 1.0) = 0.
+    // Tổng C_j = 0 -> không sinh trọng số giả từ cột hằng số -> Trả về empty (kích hoạt Fallback)
+    Optional<double[]> qOpt = critic.calculate(matrix);
+    assertThat(qOpt).isEmpty();
+  }
+
+  @Test
+  @DisplayName("P0 Test: Chỉ duy nhất 1 trong 4 chiều có phương sai khác 0 -> Không đủ thông tin đa chiều, kích hoạt Fallback")
+  void testP0_onlyOneColumnWithVariance_triggersFallback() {
+    CriticWeightCalculator critic = new CriticWeightCalculator();
+
+    // Chỉ có SM2 biến thiên, 3 cột còn lại hằng số
+    List<double[]> matrix = new ArrayList<>();
+    for (int i = 0; i < 15; i++) {
+      matrix.add(new double[] {0.5, 0.1 + i * 0.05, 0.7, 0.3});
+    }
+
+    // activeCount = 1 < 2 -> Không thể đo tương quan liên tiêu chí -> Trả về empty
+    Optional<double[]> qOpt = critic.calculate(matrix);
+    assertThat(qOpt).isEmpty();
+  }
+
+  @Test
+  @DisplayName("P0 Test: Lambda không hợp lệ (âm hoặc > 1.0 hoặc NaN) -> Ném IllegalStateException, không trả trọng số giả")
+  void testP0_invalidLambda_throwsIllegalStateException() {
+    DynamicWeightBlender blender = new DynamicWeightBlender();
+    Optional<double[]> mockQ = Optional.of(new double[] {0.25, 0.25, 0.25, 0.25});
+
+    // Lambda < 0
+    assertThatThrownBy(() -> blender.blend("CONVERSION", mockQ, -0.2))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INVALID_BLEND_LAMBDA");
+
+    // Lambda > 1.0
+    assertThatThrownBy(() -> blender.blend("CONVERSION", mockQ, 1.5))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INVALID_BLEND_LAMBDA");
+
+    // Lambda = NaN
+    assertThatThrownBy(() -> blender.blend("CONVERSION", mockQ, Double.NaN))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INVALID_BLEND_LAMBDA");
+  }
+
+  @Test
+  @DisplayName("P0 Test: Có 10 ứng viên ban đầu nhưng 1 ứng viên bị cách ly -> CRITIC nhận 9 ứng viên, kích hoạt Fallback")
+  void testP0_tenCandidatesWithOneIsolated_nineReachCritic_triggersFallback() {
+    FourMemoryTopsisEngine engine = new FourMemoryTopsisEngine();
+    Campaign campaign = Campaign.builder().id(UUID.randomUUID()).objective(com.influencermatch.backend.campaign.enums.CampaignObjective.CONVERSION).build();
+
+    List<RecommendationCandidateProjection> candidates = new ArrayList<>();
+    Map<UUID, NormalizedCandidateContext> phase0Map = new HashMap<>();
+
+    // 9 ứng viên hợp lệ
+    for (int i = 0; i < 9; i++) {
+      UUID id = UUID.randomUUID();
+      RecommendationCandidateProjection c = Mockito.mock(RecommendationCandidateProjection.class);
+      Mockito.when(c.getCreatorId()).thenReturn(id);
+      Mockito.when(c.getPlatform()).thenReturn("TIKTOK");
+      Mockito.when(c.getAccountStatus()).thenReturn("ACTIVE");
+      candidates.add(c);
+
+      phase0Map.put(id, new NormalizedCandidateContext(
+          id, null, "TIKTOK", Phase0Status.ELIGIBLE, Collections.emptyList(),
+          0.5 + i * 0.04, 0.4 + i * 0.05, 0.6 + i * 0.03,
+          0.05, 0.50, 0.70, ErMethod.BY_VIEWS, 3, false, 0.65, "V1"
+      ));
+    }
+
+    // 1 ứng viên thứ 10 bị lỗi dữ liệu (sẽ bị cách ly tại Phase 1)
+    UUID badId = UUID.randomUUID();
+    RecommendationCandidateProjection badCand = Mockito.mock(RecommendationCandidateProjection.class);
+    Mockito.when(badCand.getCreatorId()).thenReturn(badId);
+    Mockito.when(badCand.getEngagementRate()).thenReturn(BigDecimal.valueOf(-2.0)); // Ném lỗi
+    candidates.add(badCand);
+
+    List<FourMemoryTopsisEngine.EvaluatedCandidate> evaluated = engine.evaluateAndRank(
+        candidates,
+        phase0Map,
+        campaign,
+        c -> Collections.emptyList(),
+        Collections.emptyList()
+    );
+
+    // Đúng 9 ứng viên hợp lệ được xếp hạng
+    assertThat(evaluated).hasSize(9);
+    // Vì CRITIC chỉ nhận được 9 ứng viên (< MIN_POOL_SIZE = 10), chế độ trọng số bắt buộc là BUSINESS_FALLBACK
+    EngineWeights usedWeights = evaluated.get(0).weights();
+    assertThat(usedWeights.mode()).isEqualTo("BUSINESS_FALLBACK");
+    assertThat(usedWeights.lambdaUsed()).isEqualTo(0.0);
+  }
+
+  @Test
+  @DisplayName("P1 Test: Ngưỡng kích hoạt chính xác m=9 (Fallback) và m=10 (CRITIC_BLENDED)")
+  void testP1_exactNineAndTenThreshold_activatesCorrectly() {
+    CriticWeightCalculator critic = new CriticWeightCalculator();
+    Random rnd = new Random(42);
+
+    // 9 ứng viên đa dạng
+    List<double[]> matrix9 = new ArrayList<>();
+    for (int i = 0; i < 9; i++) {
+      matrix9.add(new double[] {
+          0.2 + rnd.nextDouble() * 0.6,
+          0.3 + rnd.nextDouble() * 0.5,
+          0.1 + rnd.nextDouble() * 0.7,
+          0.4 + rnd.nextDouble() * 0.4
+      });
+    }
+    assertThat(critic.calculate(matrix9)).isEmpty(); // 9 < 10 -> empty
+
+    // 10 ứng viên đa dạng
+    List<double[]> matrix10 = new ArrayList<>(matrix9);
+    matrix10.add(new double[] {0.8, 0.2, 0.9, 0.3});
+    Optional<double[]> qOpt10 = critic.calculate(matrix10);
+    assertThat(qOpt10).isPresent();
+    assertThat(qOpt10.get()[0] + qOpt10.get()[1] + qOpt10.get()[2] + qOpt10.get()[3]).isCloseTo(1.0, offset(1e-6));
+  }
+
+  @Test
+  @DisplayName("P1 Test: EngineWeights constructor phòng vệ tuyệt đối chống NaN, trọng số âm và tổng sai 1.0")
+  void testP1_engineWeightsValidation_rejectsInvalidWeights() {
+    // Trọng số âm
+    assertThatThrownBy(() -> new EngineWeights(-0.1, 0.4, 0.4, 0.3, "TEST", 0.0))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("w1 must be a finite number in [0.0, 1.0]");
+
+    // Trọng số NaN
+    assertThatThrownBy(() -> new EngineWeights(0.25, Double.NaN, 0.25, 0.25, "TEST", 0.0))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("w2 must be a finite number in [0.0, 1.0]");
+
+    // Tổng không bằng 1.0
+    assertThatThrownBy(() -> new EngineWeights(0.3, 0.3, 0.3, 0.3, "TEST", 0.0)) // Tổng 1.2
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INVALID_WEIGHT_SUM");
+  }
+
   // =========================================================================
   // Phase 4: Fixed-Ideal TOPSIS Ranking Engine
   // =========================================================================

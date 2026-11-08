@@ -50,13 +50,20 @@ public class CriticWeightCalculator {
       }
     }
     double totalSigma = 0.0;
+    boolean[] isActive = new boolean[m];
+    int activeCount = 0;
     for (int j = 0; j < m; j++) {
       sigma[j] = Math.sqrt(sigma[j] / (n - 1));
       totalSigma += sigma[j];
+      if (sigma[j] > EPSILON) {
+        isActive[j] = true;
+        activeCount++;
+      }
     }
 
-    // If total standard deviation across criteria is negligible, pool has no contrast
-    if (totalSigma < EPSILON) {
+    // Nếu tổng độ lệch chuẩn không đáng kể hoặc số tiêu chí có biến thiên < 2:
+    // Không thể đo lường tương quan đa tiêu chí -> Trả về empty để kích hoạt Business Fallback
+    if (totalSigma < EPSILON || activeCount < 2) {
       return Optional.empty();
     }
 
@@ -75,23 +82,32 @@ public class CriticWeightCalculator {
       for (int k = 0; k < m; k++) {
         if (j == k) {
           rho[j][k] = 1.0;
-        } else if (sigma[j] > EPSILON && sigma[k] > EPSILON) {
+        } else if (isActive[j] && isActive[k]) {
           rho[j][k] = cov[j][k] / ((n - 1) * sigma[j] * sigma[k]);
           // Clamp to [-1, 1] against numerical imprecision
           rho[j][k] = Math.max(-1.0, Math.min(1.0, rho[j][k]));
         } else {
-          rho[j][k] = 0.0;
+          // Pearson với biến hằng số là bất định toán học (undefined), không gán bằng 0.0
+          rho[j][k] = Double.NaN;
         }
       }
     }
 
-    // 4. Calculate information content C_j = sigma_j * sum(1 - rho_jk)
+    // 4. Calculate information content C_j = sigma_j * sum_{k in Active} (1 - rho_jk)
     double[] c = new double[m];
     double totalC = 0.0;
     for (int j = 0; j < m; j++) {
+      if (!isActive[j]) {
+        c[j] = 0.0; // Tiêu chí phẳng không có lượng thông tin phân loại ứng viên
+        continue;
+      }
       double conflictSum = 0.0;
+      // Chỉ tính tổng xung đột trên các tiêu chí ACTIVE khác; loại bỏ hoàn toàn các cột hằng số
+      // khỏi phép cộng để tránh tạo xung đột giả (fake conflict) từ tương quan bất định
       for (int k = 0; k < m; k++) {
-        conflictSum += (1.0 - rho[j][k]);
+        if (isActive[k]) {
+          conflictSum += (1.0 - rho[j][k]);
+        }
       }
       c[j] = sigma[j] * conflictSum;
       totalC += c[j];

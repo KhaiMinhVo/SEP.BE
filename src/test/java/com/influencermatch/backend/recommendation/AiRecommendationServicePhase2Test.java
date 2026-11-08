@@ -583,6 +583,61 @@ class AiRecommendationServicePhase2Test {
     }
   }
 
+  @Test
+  @DisplayName("Integration Test: Khi AI microservice sinh Explanation thành công -> Toàn bộ Evidence Warnings vẫn được bảo toàn nguyên vẹn trong DTO")
+  void testAiServiceExplanation_preservesAllEvidenceWarningsInFinalDto() {
+    UUID creatorId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(
+        creatorId, null, "TIKTOK", "AI Explanatory KOC", 25_000L,
+        BigDecimal.valueOf(8_000), BigDecimal.valueOf(400), BigDecimal.valueOf(0.05),
+        "Beauty", "Skincare", 0.85
+    );
+
+    // Mock 3 bài đăng hợp lệ (đủ tính STAB -> SCORE_READY)
+    com.influencermatch.backend.creator.repository.PostRepository mockPostRepo =
+        mock(com.influencermatch.backend.creator.repository.PostRepository.class);
+    when(mockPostRepo.findByCreatorIdIn(any())).thenReturn(List.of(
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(creatorId).build()).views(7_500L).likes(380L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(creatorId).build()).views(8_000L).likes(400L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(creatorId).build()).views(8_500L).likes(420L).build()
+    ));
+    service.setPostRepository(mockPostRepo);
+
+    // Candidate chưa có lịch sử campaign (0 campaign -> sinh cảnh báo Cold-start)
+    when(historicalCampaignRepository.findByCreatorId(creatorId)).thenReturn(Collections.emptyList());
+
+    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
+        anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+        .thenReturn(List.of(cand));
+
+    // AI microservice trả về explanation thành công
+    when(aiServiceClient.getExplanation(any())).thenReturn(
+        ExplainResponseDto.builder()
+            .status("success")
+            .summary("KOC có phong cách review tự nhiên, phù hợp với chiến dịch.")
+            .reasons(List.of("ER 5.0% cao hơn trung bình ngành", "Phong cách chân thực"))
+            .explanationAvailable(true)
+            .build()
+    );
+
+    RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
+    assertThat(response.getRecommendations()).hasSize(1);
+
+    var recItem = response.getRecommendations().get(0);
+    assertThat(recItem.getReasoning()).isNotNull();
+    assertThat(recItem.getReasoning().isExplanationAvailable()).isTrue();
+
+    // 1. Kiểm chứng cấu trúc evidenceWarnings bảo toàn nguyên vẹn
+    assertThat(recItem.getReasoning().getEvidenceWarnings()).isNotEmpty();
+    assertThat(recItem.getReasoning().getEvidenceWarnings())
+        .anyMatch(w -> w.contains("Chưa có kết quả chiến dịch quá khứ được xác minh"));
+
+    // 2. Kiểm chứng danh sách reasons hiển thị kết hợp cả AI reasons lẫn Evidence Warnings
+    assertThat(recItem.getReasoning().getReasons()).contains("ER 5.0% cao hơn trung bình ngành");
+    assertThat(recItem.getReasoning().getReasons())
+        .anyMatch(r -> r.startsWith("Lưu ý: ") && r.contains("Chưa có kết quả chiến dịch quá khứ được xác minh"));
+  }
+
   private RecommendationCandidateProjection mockCandidate(
       UUID creatorId, UUID masterId, String platform, String displayName, Long followers,
       BigDecimal avgViews, BigDecimal avgLikes, BigDecimal er, String niche, String cat, Double semantic) {

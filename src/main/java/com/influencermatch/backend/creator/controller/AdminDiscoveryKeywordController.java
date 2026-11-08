@@ -15,9 +15,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/admin/crawler/keywords")
+@RequestMapping({"/data/crawler/keywords", "/admin/crawler/keywords"})
 @RequiredArgsConstructor
-@Tag(name = "Admin Keyword Discovery Management", description = "Quản lý từ khóa săn KOC mục tiêu (Target) và từ khóa rác (Blacklist)")
+@Tag(name = "Data Manager Keyword Discovery Management", description = "Quản lý từ khóa săn KOC mục tiêu (Target) và từ khóa rác (Blacklist)")
 public class AdminDiscoveryKeywordController {
 
   private final DiscoveryKeywordService keywordService;

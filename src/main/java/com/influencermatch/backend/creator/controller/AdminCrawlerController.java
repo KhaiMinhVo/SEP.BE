@@ -11,9 +11,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/admin/crawler")
+@RequestMapping({"/data/crawler", "/admin/crawler"})
 @RequiredArgsConstructor
-@Tag(name = "Admin Crawler Management & Live Demo", description = "Luồng DM-05: Giám sát hiệu suất & Cào thử nghiệm / Hàng loạt KOC")
+@Tag(name = "Data Manager Crawler Management & Live Demo", description = "Luồng DM-05: Giám sát hiệu suất & Cào thử nghiệm / Hàng loạt KOC cho Data Manager")
 public class AdminCrawlerController {
 
   private final CrawlerServiceClient crawlerServiceClient;
@@ -74,6 +74,30 @@ public class AdminCrawlerController {
       @RequestParam(value = "limit", defaultValue = "20") int limit) {
     Map<String, Object> overview = crawlerServiceClient.getOverview(limit);
     return ApiResponse.ok(overview);
+  }
+
+  @GetMapping("/creator/{username}")
+  @Operation(summary = "Xem chi tiết 1 Creator và kết quả thẩm định Staging")
+  public ResponseEntity<Map<String, Object>> getCreatorDetail(
+      @PathVariable("username") String username,
+      @RequestParam(value = "platform", defaultValue = "TIKTOK") String platform) {
+    var detail = crawlerServiceClient.getCreatorDetail(username, platform);
+    return detail.map(ResponseEntity::ok)
+        .orElseGet(() -> ResponseEntity.notFound().build());
+  }
+
+  @PostMapping("/retry")
+  @Operation(summary = "Thử lại (Retry) cào KOC bị lỗi hoặc đưa vào lại hàng đợi")
+  public ResponseEntity<Map<String, Object>> retryCrawl(
+      @RequestBody Map<String, String> request) {
+    String username = request.get("username");
+    String platform = request.getOrDefault("platform", "TIKTOK");
+    var result = crawlerServiceClient.retryCrawl(username, platform);
+    return result.map(ResponseEntity::ok)
+        .orElseGet(() -> ResponseEntity.badRequest().body(Map.of(
+            "status", "error",
+            "message", "Không thể thử lại cào cho: " + username
+        )));
   }
 }
 

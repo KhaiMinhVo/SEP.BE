@@ -115,6 +115,8 @@ public class SecurityConfig {
                     .hasAuthority("REVIEW_CREATOR_CLASSIFICATION")
                     .requestMatchers(org.springframework.http.HttpMethod.PUT, "/admin/data-quality/{id}/approve")
                     .hasAuthority("REVIEW_CREATOR_CLASSIFICATION")
+                    .requestMatchers("/data/crawler/**", "/admin/crawler/**")
+                    .hasAnyRole("DATA_MANAGER", "ADMIN")
                     .requestMatchers("/admin/**")
                     .hasRole("ADMIN")
                     .requestMatchers("/auth/me", "/auth/logout")

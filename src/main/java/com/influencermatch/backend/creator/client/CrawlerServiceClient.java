@@ -225,4 +225,55 @@ public class CrawlerServiceClient {
       return Map.of("error", e.getMessage());
     }
   }
+
+  /**
+   * Xem chi tiết 1 Creator cụ thể và trạng thái thẩm định staging.
+   */
+  public Optional<Map<String, Object>> getCreatorDetail(String username, String platform) {
+    if (username == null || username.isBlank()) {
+      return Optional.empty();
+    }
+    String cleanUser = username.replace("@", "").trim();
+    String plat = (platform != null && !platform.isBlank()) ? platform.trim().toUpperCase() : "TIKTOK";
+    try {
+      @SuppressWarnings("unchecked")
+      Map<String, Object> detail = monitorRestClient.get()
+          .uri(uriBuilder -> uriBuilder.path("/creator/" + cleanUser).queryParam("platform", plat).build())
+          .retrieve()
+          .body(Map.class);
+      return Optional.ofNullable(detail);
+    } catch (Exception e) {
+      log.warn("Failed to fetch creator detail for @{} ({}): {}", cleanUser, plat, e.getMessage());
+      return Optional.empty();
+    }
+  }
+
+  /**
+   * Thử lại (Retry) cào KOC bị lỗi hoặc đưa vào lại hàng đợi cào sâu.
+   */
+  public Optional<Map<String, Object>> retryCrawl(String username, String platform) {
+    if (username == null || username.isBlank()) {
+      return Optional.empty();
+    }
+    String cleanUser = username.replace("@", "").trim();
+    String plat = (platform != null && !platform.isBlank()) ? platform.trim().toUpperCase() : "TIKTOK";
+    try {
+      Map<String, Object> body = Map.of(
+          "username", cleanUser,
+          "platform", plat,
+          "force_deep_crawl", true
+      );
+      @SuppressWarnings("unchecked")
+      Map<String, Object> result = restClient.post()
+          .uri("/enqueue")
+          .contentType(MediaType.APPLICATION_JSON)
+          .body(body)
+          .retrieve()
+          .body(Map.class);
+      return Optional.ofNullable(result);
+    } catch (Exception e) {
+      log.warn("Failed to retry crawl for @{} ({}): {}", cleanUser, plat, e.getMessage());
+      return Optional.empty();
+    }
+  }
 }

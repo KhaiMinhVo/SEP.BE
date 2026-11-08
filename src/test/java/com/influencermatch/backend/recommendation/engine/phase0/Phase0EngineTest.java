@@ -83,7 +83,8 @@ class Phase0EngineTest {
   @Test
   @DisplayName("Luồng 2: Fallback ER cho Facebook - Bài không views tính tương tác trung bình chia follower")
   void testEvidence_facebookFollowerErFallback() {
-    // KOC Facebook 10.000 followers, có 2 bài không có views (ảnh/text), mỗi bài 200 tương tác
+    // KOC Facebook 10.000 followers, có 2 bài không có views (ảnh/text), mỗi bài
+    // 200 tương tác
     RecommendationCandidateProjection fbCand = mockCandidate(UUID.randomUUID(), "FACEBOOK", 10_000L);
     Post p1 = Post.builder().views(0L).likes(150L).comments(30L).shares(20L).build(); // 200 int
     Post p2 = Post.builder().views(0L).likes(160L).comments(25L).shares(15L).build(); // 200 int
@@ -143,15 +144,13 @@ class Phase0EngineTest {
 
     Map<UUID, List<Post>> postsMap = Map.of(
         creatorA, List.of(pA1, pA2),
-        creatorF, List.of(pF1)
-    );
+        creatorF, List.of(pF1));
 
     List<NormalizedCandidateContext> results = orchestrator.execute(
         List.of(candA, candD, candF),
         campaign,
         Collections.emptySet(),
-        postsMap
-    );
+        postsMap);
 
     assertThat(results).hasSize(3);
 
@@ -179,7 +178,8 @@ class Phase0EngineTest {
     Campaign campaign = Campaign.builder().platforms(List.of("TIKTOK")).build();
     UUID creatorId = UUID.randomUUID();
 
-    // Trường hợp 1: Platform = NULL (thiếu) VÀ creator nằm trong danh sách loại trừ (feedback)
+    // Trường hợp 1: Platform = NULL (thiếu) VÀ creator nằm trong danh sách loại trừ
+    // (feedback)
     // -> Cả 2 điều kiện xảy ra: Precedence quy định phải ra INELIGIBLE
     RecommendationCandidateProjection candBoth = mockCandidate(creatorId, null, 50_000L);
     var resBoth = eligibilityChecker.check(candBoth, campaign, Set.of(creatorId));
@@ -226,8 +226,7 @@ class Phase0EngineTest {
         List.of(validCand, invalidCand),
         campaign,
         Collections.emptySet(),
-        Collections.emptyMap()
-    );
+        Collections.emptyMap());
 
     assertThat(results).hasSize(2);
 
@@ -246,8 +245,7 @@ class Phase0EngineTest {
   @Test
   @DisplayName("Phase 1 - SM2: Chốt Missing-Feature Policy - Mẫu số luôn luôn là 3.0 với sàn bảo thủ STAB=0.0")
   void testPublicPerformanceScorer_missingFeaturePolicy_consistentDefinition() {
-    com.influencermatch.backend.recommendation.engine.memory.PublicPerformanceScorer scorer =
-        new com.influencermatch.backend.recommendation.engine.memory.PublicPerformanceScorer();
+    com.influencermatch.backend.recommendation.engine.memory.PublicPerformanceScorer scorer = new com.influencermatch.backend.recommendation.engine.memory.PublicPerformanceScorer();
 
     NormalizedCandidateContext p0MissingStab = new NormalizedCandidateContext(
         UUID.randomUUID(),
@@ -265,11 +263,11 @@ class Phase0EngineTest {
         1,
         true,
         0.20,
-        "MVP_CALIBRATION_2026Q1"
-    );
+        "MVP_CALIBRATION_2026Q1");
 
     var res = scorer.score(p0MissingStab, null);
-    // (0.60 + 0.80 + 0.0) / 3.0 = 1.40 / 3.0 ≈ 0.4667 (không chia 2, không gán 0.50)
+    // (0.60 + 0.80 + 0.0) / 3.0 = 1.40 / 3.0 ≈ 0.4667 (không chia 2, không gán
+    // 0.50)
     assertThat(res.sm2Norm()).isCloseTo(1.40 / 3.0, org.assertj.core.data.Offset.offset(1e-4));
     assertThat(res.score100()).isCloseTo((1.40 / 3.0) * 100.0, org.assertj.core.data.Offset.offset(1e-2));
     assertThat(res.isStabImputed()).isTrue();
@@ -320,7 +318,8 @@ class Phase0EngineTest {
 
     var metrics = evidenceValidator.evaluate(cand, List.of(p1, p2, p3));
     assertThat(metrics.canComputeStability()).isFalse();
-    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.PROVISIONAL);
+    assertThat(metrics.scoringReadiness())
+        .isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.PROVISIONAL);
     assertThat(metrics.dataQualityReasons().get(0)).contains("ZERO_VIEWS_FOR_STABILITY");
   }
 
@@ -351,13 +350,15 @@ class Phase0EngineTest {
     assertThat(resNull.isPendingData()).isTrue();
     assertThat(resNull.reasons()).contains("UNKNOWN_ACCOUNT_STATUS: Creator account status is unknown");
 
-    // 4. NULL status VÀ bị Brand Feedback loại trừ -> INELIGIBLE (Precedence INELIGIBLE > PENDING)
+    // 4. NULL status VÀ bị Brand Feedback loại trừ -> INELIGIBLE (Precedence
+    // INELIGIBLE > PENDING)
     UUID rejectedId = UUID.randomUUID();
     RecommendationCandidateProjection rejectedNullCand = mockCandidate(rejectedId, "TIKTOK", 50_000L);
     when(rejectedNullCand.getAccountStatus()).thenReturn(null);
     var resRejectedNull = eligibilityChecker.check(rejectedNullCand, campaign, Set.of(rejectedId));
     assertThat(resRejectedNull.isExcluded()).isTrue();
-    assertThat(resRejectedNull.reasons()).contains("EXCLUDED_BY_FEEDBACK", "UNKNOWN_ACCOUNT_STATUS: Creator account status is unknown");
+    assertThat(resRejectedNull.reasons()).contains("EXCLUDED_BY_FEEDBACK",
+        "UNKNOWN_ACCOUNT_STATUS: Creator account status is unknown");
   }
 
   @Test
@@ -399,6 +400,79 @@ class Phase0EngineTest {
     assertThat(metrics.rawStab()).isCloseTo(2.0 / 3.0, org.assertj.core.data.Offset.offset(1e-4));
     // Độ tin cậy r_i2 vẫn phản ánh lịch sử có 20 bài (>= 10 bài -> 1.00)
     assertThat(metrics.evidenceReliabilityM2()).isEqualTo(1.00);
+  }
+
+  @Test
+  @DisplayName("Luồng 2: Ưu tiên ngày đăng thực tế (postedAt) hơn ngày crawler lưu (createdAt)")
+  void testEvidenceValidator_postedAtPrioritizedOverCreatedAt_whenCrawlDatesDiffer() {
+    UUID creatorId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(creatorId, "TIKTOK", 50_000L);
+
+    List<com.influencermatch.backend.creator.model.Post> posts = new ArrayList<>();
+    // Giả sử crawler lưu tất cả các bài vào cùng 1 ngày (hôm nay)
+    java.time.LocalDateTime crawlDate = java.time.LocalDateTime.now();
+
+    // Bài cũ P1: đăng ngày 01/11, views = 1,000
+    posts.add(com.influencermatch.backend.creator.model.Post.builder()
+        .views(1_000L).likes(50L).comments(10L).shares(5L)
+        .postedAt("2026-11-01T10:00:00Z")
+        .createdAt(crawlDate)
+        .build());
+
+    // 3 bài đăng mới thật sự:
+    // P2: đăng ngày 05/11, views = 10,000
+    posts.add(com.influencermatch.backend.creator.model.Post.builder()
+        .views(10_000L).likes(500L).comments(100L).shares(50L)
+        .postedAt("2026-11-05T10:00:00Z")
+        .createdAt(crawlDate)
+        .build());
+    // P3: đăng ngày 06/11, views = 20,000
+    posts.add(com.influencermatch.backend.creator.model.Post.builder()
+        .views(20_000L).likes(1_000L).comments(200L).shares(100L)
+        .postedAt("2026-11-06T10:00:00Z")
+        .createdAt(crawlDate)
+        .build());
+    // P4: đăng ngày 07/11, views = 30,000
+    posts.add(com.influencermatch.backend.creator.model.Post.builder()
+        .views(30_000L).likes(1_500L).comments(300L).shares(150L)
+        .postedAt("2026-11-07T10:00:00Z")
+        .createdAt(crawlDate)
+        .build());
+
+    var metrics = evidenceValidator.evaluate(cand, posts);
+
+    // Hệ thống chọn đúng 3 bài đăng ngày 05, 06, 07/11 (bỏ bài ngày 01/11 dù cùng createdAt)
+    assertThat(metrics.canComputeStability()).isTrue();
+    assertThat(metrics.rawStab()).isCloseTo(2.0 / 3.0, org.assertj.core.data.Offset.offset(1e-4));
+  }
+
+  @Test
+  @DisplayName("Luồng 1: Soft Preference - Creator có 120k Followers trong Campaign [10k, 100k] vẫn ELIGIBLE, chỉ gắn cờ outsideFollowers")
+  void testEligibilityChecker_softConstraintFollowers_outsideRangeIsStillEligible() {
+    Campaign campaign = mock(Campaign.class);
+    when(campaign.getPlatforms()).thenReturn(List.of("TIKTOK"));
+    when(campaign.getFollowerMin()).thenReturn(10_000L);
+    when(campaign.getFollowerMax()).thenReturn(100_000L);
+
+    RecommendationCandidateProjection cand120k = mockCandidate(UUID.randomUUID(), "TIKTOK", 120_000L);
+
+    var res = eligibilityChecker.check(cand120k, campaign, Collections.emptySet());
+
+    assertThat(res.eligible()).isTrue();
+    assertThat(res.isExcluded()).isFalse();
+    assertThat(res.outsideFollowers()).isTrue();
+  }
+
+  @Test
+  @DisplayName("Phase 4: TOPSIS từ chối input NaN - Không bao giờ biến lỗi tính toán thành điểm 0.0 hợp lệ")
+  void testTopsisEngine_rejectsNanInput_doesNotMaskAsZeroScore() {
+    var topsisEngine = new com.influencermatch.backend.recommendation.engine.topsis.TopsisRankingEngine();
+    var weights = new com.influencermatch.backend.recommendation.engine.critic.model.EngineWeights(
+        0.25, 0.25, 0.25, 0.25, "TEST", 0.0);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> topsisEngine.compute(0.5, Double.NaN, 0.8, 0.6, weights))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("TOPSIS_INVALID_INPUT");
   }
 
   private RecommendationCandidateProjection mockCandidate(UUID id, String platform, Long followers) {

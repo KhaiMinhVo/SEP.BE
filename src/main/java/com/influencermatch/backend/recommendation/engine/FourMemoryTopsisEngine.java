@@ -187,7 +187,7 @@ public class FourMemoryTopsisEngine {
 
   private double roundTwoDecimals(double value) {
     if (Double.isNaN(value) || Double.isInfinite(value)) {
-      return 0.0;
+      throw new IllegalStateException("TOPSIS_SCORE_CORRUPTED: Value cannot be NaN or Infinite: " + value);
     }
     return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).doubleValue();
   }

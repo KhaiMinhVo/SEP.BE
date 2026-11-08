@@ -8,6 +8,7 @@ import com.influencermatch.backend.recommendation.engine.phase0.model.ScoringPol
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 public class EvidenceValidator {
 
@@ -53,6 +54,29 @@ public class EvidenceValidator {
           canComputeStability ? List.of() : List.of("SHORT_WINDOW_INSUFFICIENT_POSTS")
       );
     }
+  }
+
+  /**
+   * Xác định thời điểm đăng bài thực tế: ưu tiên postedAt (ISO-8601 từ social platform),
+   * nếu không có thì fallback sang createdAt (thời điểm crawler lưu vào CSDL).
+   */
+  public static java.time.Instant resolvePostTime(Post p) {
+    if (p == null) return java.time.Instant.EPOCH;
+    if (p.getPostedAt() != null && !p.getPostedAt().isBlank()) {
+      try {
+        return java.time.Instant.parse(p.getPostedAt());
+      } catch (Exception ignored) {
+        try {
+          return java.time.LocalDateTime.parse(p.getPostedAt())
+              .atZone(java.time.ZoneId.systemDefault())
+              .toInstant();
+        } catch (Exception ignored2) {}
+      }
+    }
+    if (p.getCreatedAt() != null) {
+      return p.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant();
+    }
+    return java.time.Instant.EPOCH;
   }
 
   public EvidenceMetrics evaluate(
@@ -152,7 +176,9 @@ public class EvidenceValidator {
     double avgViews = (postCount > 0) ? (totalViews / postCount) : (cand.getAvgViews() != null ? cand.getAvgViews().doubleValue() : 0.0);
     double rawVr = (followers > 0 && avgViews > 0) ? (avgViews / followers) : 0.0;
 
-    // 4. Tính View Stability (STAB = 1 / (1 + CV)) trên CỬA SỔ 3 BÀI GẦN NHẤT HỢP LỆ
+    // 4. Tính View Stability (STAB = 1 / (1 + CV)) trên CỬA SỔ 3 BÀI GẦN NHẤT
+    // Sắp xếp theo ngày đăng thực tế (postedAt ưu tiên hơn createdAt).
+    // Không nhảy cóc qua bài thiếu views sang bài cũ trong lịch sử để che giấu dữ liệu thiếu.
     double rawStab;
     boolean canComputeStability = false;
     boolean stabilityEvidenceUnavailable = false;
@@ -160,42 +186,42 @@ public class EvidenceValidator {
     ScoringReadiness scoringReadiness;
     List<String> dataQualityReasons;
 
-    List<Post> stabilityWindowPosts = Collections.emptyList();
+    List<Post> recentThreePosts = Collections.emptyList();
     if (posts != null && !posts.isEmpty()) {
-      stabilityWindowPosts = posts.stream()
-          .filter(p -> p != null && p.getViews() != null && p.getViews() >= 0)
-          .sorted((a, b) -> {
-            if (a.getCreatedAt() != null && b.getCreatedAt() != null) {
-              return b.getCreatedAt().compareTo(a.getCreatedAt());
-            }
-            return 0;
-          })
+      recentThreePosts = posts.stream()
+          .filter(Objects::nonNull)
+          .sorted((a, b) -> resolvePostTime(b).compareTo(resolvePostTime(a)))
           .limit(3)
           .toList();
     }
 
+    // Lọc các bài có lượt xem hợp lệ trong chính cửa sổ 3 bài gần nhất
+    List<Post> validWindowPosts = recentThreePosts.stream()
+        .filter(p -> p.getViews() != null && p.getViews() >= 0)
+        .toList();
+
     double stabAvgViews = 0.0;
-    if (!stabilityWindowPosts.isEmpty()) {
-      stabAvgViews = stabilityWindowPosts.stream()
-          .mapToDouble(p -> p.getViews() != null ? p.getViews().doubleValue() : 0.0)
+    if (!validWindowPosts.isEmpty()) {
+      stabAvgViews = validWindowPosts.stream()
+          .mapToDouble(p -> p.getViews().doubleValue())
           .average()
           .orElse(0.0);
     }
 
-    if (stabilityWindowPosts.size() >= 2 && stabAvgViews > 0) {
+    if (validWindowPosts.size() >= 2 && stabAvgViews > 0) {
       double varianceSum = 0.0;
-      for (Post p : stabilityWindowPosts) {
-        double v = p.getViews() != null ? p.getViews().doubleValue() : 0.0;
+      for (Post p : validWindowPosts) {
+        double v = p.getViews().doubleValue();
         varianceSum += Math.pow(v - stabAvgViews, 2);
       }
-      double sV = Math.sqrt(varianceSum / (stabilityWindowPosts.size() - 1));
+      double sV = Math.sqrt(varianceSum / (validWindowPosts.size() - 1));
       double cv = sV / stabAvgViews;
       rawStab = 1.0 / (1.0 + cv);
       canComputeStability = true;
       stabilityEvidenceUnavailable = false;
       evidenceReliabilityM2 = (postCount >= 10) ? 1.00 : ((postCount >= 3) ? 0.65 : 0.45);
     } else {
-      // Thiếu bài đăng HOẶC stabAvgViews == 0 (không tính được độ lệch chuẩn mẫu s_V)
+      // Trong cửa sổ 3 bài gần nhất có ít hơn 2 bài có views hợp lệ HOẶC views = 0
       rawStab = Double.NaN;
       canComputeStability = false;
       stabilityEvidenceUnavailable = true;

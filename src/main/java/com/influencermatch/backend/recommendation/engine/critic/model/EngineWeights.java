@@ -16,6 +16,10 @@ public record EngineWeights(
     double[] criticWeights, // Raw q_j statistical weights
     double[] businessWeights // Raw b_g,j business weights
 ) {
+  public EngineWeights(double w1, double w2, double w3, double w4, String mode, double lambdaUsed) {
+    this(w1, w2, w3, w4, mode, lambdaUsed, new double[] {w1, w2, w3, w4}, new double[] {w1, w2, w3, w4});
+  }
+
   public double[] asArray() {
     return new double[] {w1, w2, w3, w4};
   }

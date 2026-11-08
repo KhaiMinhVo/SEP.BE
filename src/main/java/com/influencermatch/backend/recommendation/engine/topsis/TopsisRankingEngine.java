@@ -29,6 +29,14 @@ public class TopsisRankingEngine {
   public TopsisResult compute(
       double sm1, double sm2, double sm3, double sm4, EngineWeights weights) {
 
+    // Kiểm tra tính hợp lệ dữ liệu toán học: các điểm thành phần phải là số thực hữu hạn
+    if (Double.isNaN(sm1) || Double.isNaN(sm2) || Double.isNaN(sm3) || Double.isNaN(sm4) ||
+        Double.isInfinite(sm1) || Double.isInfinite(sm2) || Double.isInfinite(sm3) || Double.isInfinite(sm4)) {
+      throw new IllegalArgumentException(
+          String.format("TOPSIS_INVALID_INPUT: Memory scores must be finite non-negative numbers in [0, 1]. Received: [%f, %f, %f, %f]",
+              sm1, sm2, sm3, sm4));
+    }
+
     double w1 = weights.w1();
     double w2 = weights.w2();
     double w3 = weights.w3();

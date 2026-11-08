@@ -132,6 +132,8 @@ public class AiRecommendationService {
         Collection<String> safePlatforms = hasPlatforms ? campaign.getPlatforms() : List.of("TIKTOK");
 
         int retrievalLimit = Math.max(limit * 3, 50);
+        // Theo kiến trúc InfluencerMatch: Follower Range là Soft Preference mặc định (không được lọc cứng ở SQL làm mất ứng viên tốt).
+        // Chỉ Platform và Negative Constraints (Brand Exclusion) là Hard Constraints được lọc trước ở SQL.
         rawCandidates =
             publicCreatorMetricRepository.findTopCandidatesByEmbedding(
                 briefVectorStr,
@@ -139,8 +141,8 @@ public class AiRecommendationService {
                 safeExcluded,
                 hasPlatforms,
                 safePlatforms,
-                campaign.getFollowerMin(),
-                campaign.getFollowerMax(),
+                null, // followerMin = null (Soft Preference)
+                null, // followerMax = null (Soft Preference)
                 retrievalLimit
             );
         log.info("Shortlist was empty. Retrieved {} raw candidates via pgvector search for campaign {}", rawCandidates.size(), campaignId);
@@ -159,18 +161,13 @@ public class AiRecommendationService {
         if (posts != null && !posts.isEmpty()) {
           postsByCreator = posts.stream()
               .filter(p -> p != null && p.getCreator() != null && p.getCreator().getId() != null)
-              .filter(p -> p.getViews() != null && p.getViews() >= 0)
               .collect(Collectors.groupingBy(
                   p -> p.getCreator().getId(),
                   Collectors.collectingAndThen(
                       Collectors.toList(),
                       list -> list.stream()
-                          .sorted((a, b) -> {
-                            if (a.getCreatedAt() != null && b.getCreatedAt() != null) {
-                              return b.getCreatedAt().compareTo(a.getCreatedAt());
-                            }
-                            return 0;
-                          })
+                          .sorted((a, b) -> com.influencermatch.backend.recommendation.engine.phase0.EvidenceValidator.resolvePostTime(b)
+                              .compareTo(com.influencermatch.backend.recommendation.engine.phase0.EvidenceValidator.resolvePostTime(a)))
                           .limit(3)
                           .toList()
                   )

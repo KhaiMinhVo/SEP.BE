@@ -29,8 +29,10 @@ import com.influencermatch.backend.creator.client.AiServiceClient;
 import com.influencermatch.backend.creator.dto.RecommendationCandidateProjection;
 import com.influencermatch.backend.creator.model.Creator;
 import com.influencermatch.backend.creator.model.CreatorMaster;
+import com.influencermatch.backend.creator.model.Post;
 import com.influencermatch.backend.creator.model.PublicCreatorMetric;
 import com.influencermatch.backend.creator.repository.CreatorRepository;
+import com.influencermatch.backend.creator.repository.PostRepository;
 import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ConflictException;
@@ -81,6 +83,7 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   private RecommendationRunRepository recommendationRunRepository;
   private AiServiceClient aiServiceClient;
   private ObjectMapper objectMapper;
+  private PostRepository postRepository;
 
   private AiRecommendationService aiRecommendationService;
 
@@ -124,6 +127,21 @@ class Flow3ComprehensiveAcceptancePhase6Test {
         aiServiceClient,
         objectMapper
     );
+
+    postRepository = mock(PostRepository.class);
+    when(postRepository.findByCreatorIdIn(any())).thenAnswer(inv -> {
+      Collection<UUID> ids = inv.getArgument(0);
+      if (ids == null) return Collections.emptyList();
+      List<Post> list = new ArrayList<>();
+      for (UUID id : ids) {
+        Creator c = Creator.builder().id(id).build();
+        list.add(Post.builder().id(UUID.randomUUID()).creator(c).views(10_000L).likes(500L).comments(50L).shares(10L).postedAt("2026-03-01T10:00:00Z").build());
+        list.add(Post.builder().id(UUID.randomUUID()).creator(c).views(12_000L).likes(600L).comments(60L).shares(12L).postedAt("2026-03-02T10:00:00Z").build());
+        list.add(Post.builder().id(UUID.randomUUID()).creator(c).views(15_000L).likes(700L).comments(70L).shares(15L).postedAt("2026-03-03T10:00:00Z").build());
+      }
+      return list;
+    });
+    aiRecommendationService.setPostRepository(postRepository);
 
     creatorRepository = mock(CreatorRepository.class);
     userRepository = mock(UserRepository.class);

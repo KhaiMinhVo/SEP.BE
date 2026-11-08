@@ -83,6 +83,23 @@ class AiRecommendationServicePhase2Test {
         new com.fasterxml.jackson.databind.ObjectMapper()
     );
 
+    com.influencermatch.backend.creator.repository.PostRepository defaultPostRepo =
+        mock(com.influencermatch.backend.creator.repository.PostRepository.class);
+    when(defaultPostRepo.findByCreatorIdIn(any())).thenAnswer(inv -> {
+      Collection<UUID> ids = inv.getArgument(0);
+      if (ids == null) return Collections.emptyList();
+      List<com.influencermatch.backend.creator.model.Post> list = new ArrayList<>();
+      for (UUID id : ids) {
+        com.influencermatch.backend.creator.model.Creator c =
+            com.influencermatch.backend.creator.model.Creator.builder().id(id).build();
+        list.add(com.influencermatch.backend.creator.model.Post.builder().id(UUID.randomUUID()).creator(c).views(10_000L).likes(500L).comments(50L).shares(10L).postedAt("2026-03-01T10:00:00Z").build());
+        list.add(com.influencermatch.backend.creator.model.Post.builder().id(UUID.randomUUID()).creator(c).views(12_000L).likes(600L).comments(60L).shares(12L).postedAt("2026-03-02T10:00:00Z").build());
+        list.add(com.influencermatch.backend.creator.model.Post.builder().id(UUID.randomUUID()).creator(c).views(15_000L).likes(700L).comments(70L).shares(15L).postedAt("2026-03-03T10:00:00Z").build());
+      }
+      return list;
+    });
+    service.setPostRepository(defaultPostRepo);
+
     brandUser = TestActors.user(Role.BRAND);
     TestActors.authenticate(brandUser);
 
@@ -295,28 +312,27 @@ class AiRecommendationServicePhase2Test {
 
     RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
 
-    assertThat(response.getRecommendations()).hasSize(2);
-
-    var readyItem = response.getRecommendations().stream()
-        .filter(r -> r.getCreatorId().equals(readyId)).findFirst().orElseThrow();
+    // Hợp đồng DTO: recommendations CHỈ chứa ứng viên SCORE_READY (bảng chính TOPSIS)
+    assertThat(response.getRecommendations()).hasSize(1);
+    var readyItem = response.getRecommendations().get(0);
+    assertThat(readyItem.getCreatorId()).isEqualTo(readyId);
     assertThat(readyItem.getIsScoreReady()).isTrue();
     assertThat(readyItem.getIsProvisional()).isFalse();
 
-    var provItem = response.getRecommendations().stream()
-        .filter(r -> r.getCreatorId().equals(provId)).findFirst().orElseThrow();
+    // Bể provisionalRecommendations phân tách riêng biệt, CHỈ chứa ứng viên PROVISIONAL
+    assertThat(response.getProvisionalRecommendations()).hasSize(1);
+    var provItem = response.getProvisionalRecommendations().get(0);
+    assertThat(provItem.getCreatorId()).isEqualTo(provId);
     assertThat(provItem.getIsScoreReady()).isFalse();
     assertThat(provItem.getIsProvisional()).isTrue();
 
-    // Ready KOC được xếp đầu trong bảng xếp hạng chính vì đã SCORE_READY
-    assertThat(response.getRecommendations().get(0).getCreatorId()).isEqualTo(readyId);
-
-    // Bể provisionalRecommendations được phân tách riêng biệt cho FE hiển thị Additional Creators to Consider
-    assertThat(response.getProvisionalRecommendations()).hasSize(1);
-    assertThat(response.getProvisionalRecommendations().get(0).getCreatorId()).isEqualTo(provId);
+    // Hai danh sách hoàn toàn không giao nhau
+    assertThat(response.getRecommendations()).noneMatch(r -> r.getCreatorId().equals(provId));
+    assertThat(response.getProvisionalRecommendations()).noneMatch(r -> r.getCreatorId().equals(readyId));
   }
 
   @Test
-  @DisplayName("Service Integration: Run có đủ 4 trạng thái Readiness - NOT_SCORABLE và INVALID_DATA bị loại hoàn toàn khỏi Recommendations và Provisional")
+  @DisplayName("Service Integration: Run có đủ 4 trạng thái Readiness - NOT_SCORABLE và INVALID_DATA bị loại hoàn toàn, Main và Provisional hoàn toàn không giao nhau")
   void testService_fourReadinessStates_notScorableAndInvalidDataExcludedFromBothRecommendationsAndProvisional() {
     UUID readyId = UUID.randomUUID();
     UUID provId = UUID.randomUUID();
@@ -388,20 +404,64 @@ class AiRecommendationServicePhase2Test {
     // 1. Run hoàn thành an toàn (không bị crash bởi NaN hay exception)
     assertThat(response).isNotNull();
 
-    // 2. Bảng xếp hạng chính (Recommendations): Chỉ chứa Ready và Provisional (bổ sung khi thiếu quota)
-    // Tuyệt đối KHÔNG chứa NOT_SCORABLE hay INVALID_DATA
-    assertThat(response.getRecommendations()).hasSize(2);
-    assertThat(response.getRecommendations()).anyMatch(r -> r.getCreatorId().equals(readyId));
-    assertThat(response.getRecommendations()).anyMatch(r -> r.getCreatorId().equals(provId));
+    // 2. Bảng xếp hạng chính (Recommendations): CHỈ chứa ứng viên SCORE_READY (readyCand)
+    // Tuyệt đối KHÔNG chứa provCand, notScorableCand hay invalidDataCand
+    assertThat(response.getRecommendations()).hasSize(1);
+    assertThat(response.getRecommendations().get(0).getCreatorId()).isEqualTo(readyId);
+    assertThat(response.getRecommendations()).noneMatch(r -> r.getCreatorId().equals(provId));
     assertThat(response.getRecommendations()).noneMatch(r -> r.getCreatorId().equals(notScorableId));
     assertThat(response.getRecommendations()).noneMatch(r -> r.getCreatorId().equals(invalidDataId));
 
-    // 3. Bể Provisional Recommendations: Chỉ chứa ProvId
-    // Tuyệt đối KHÔNG chứa NOT_SCORABLE hay INVALID_DATA
+    // 3. Bể Provisional Recommendations: CHỈ chứa provCand
+    // Tuyệt đối KHÔNG chứa readyCand, notScorableCand hay invalidDataCand
     assertThat(response.getProvisionalRecommendations()).hasSize(1);
     assertThat(response.getProvisionalRecommendations().get(0).getCreatorId()).isEqualTo(provId);
+    assertThat(response.getProvisionalRecommendations()).noneMatch(r -> r.getCreatorId().equals(readyId));
     assertThat(response.getProvisionalRecommendations()).noneMatch(r -> r.getCreatorId().equals(notScorableId));
     assertThat(response.getProvisionalRecommendations()).noneMatch(r -> r.getCreatorId().equals(invalidDataId));
+
+    // 4. Hai danh sách có tập Creator ID hoàn toàn không giao nhau (Strictly Disjoint)
+    java.util.Set<UUID> mainIds = response.getRecommendations().stream()
+        .map(com.influencermatch.backend.recommendation.dto.CreatorRecommendationItemDto::getCreatorId)
+        .collect(java.util.stream.Collectors.toSet());
+    java.util.Set<UUID> provIds = response.getProvisionalRecommendations().stream()
+        .map(com.influencermatch.backend.recommendation.dto.CreatorRecommendationItemDto::getCreatorId)
+        .collect(java.util.stream.Collectors.toSet());
+    assertThat(mainIds).doesNotContainAnyElementsOf(provIds);
+  }
+
+  @Test
+  @DisplayName("Service Integration: Khi không có ứng viên SCORE_READY, chỉ có PROVISIONAL - recommendations rỗng, provisionalRecommendations có dữ liệu")
+  void testService_zeroScoreReadyCandidates_returnsEmptyMainAndPopulatedProvisional() {
+    UUID provId = UUID.randomUUID();
+    RecommendationCandidateProjection provCand = mockCandidate(
+        provId, null, "TIKTOK", "Sole Provisional KOC", 50_000L,
+        BigDecimal.valueOf(15_000), BigDecimal.valueOf(750), BigDecimal.valueOf(0.05),
+        "Beauty", "Skincare", 0.70
+    );
+
+    com.influencermatch.backend.creator.repository.PostRepository mockPostRepo =
+        mock(com.influencermatch.backend.creator.repository.PostRepository.class);
+    com.influencermatch.backend.creator.model.Creator provEntity =
+        com.influencermatch.backend.creator.model.Creator.builder().id(provId).build();
+    com.influencermatch.backend.creator.model.Post p1 =
+        com.influencermatch.backend.creator.model.Post.builder().creator(provEntity).views(15_000L).likes(750L).build();
+    when(mockPostRepo.findByCreatorIdIn(any())).thenReturn(List.of(p1));
+    service.setPostRepository(mockPostRepo);
+
+    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
+        anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+        .thenReturn(List.of(provCand));
+
+    RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
+
+    // Không có SCORE_READY -> recommendations rỗng (size 0)
+    assertThat(response.getRecommendations()).isEmpty();
+
+    // provisionalRecommendations có dữ liệu (size 1)
+    assertThat(response.getProvisionalRecommendations()).hasSize(1);
+    assertThat(response.getProvisionalRecommendations().get(0).getCreatorId()).isEqualTo(provId);
+    assertThat(response.getProvisionalRecommendations().get(0).getIsProvisional()).isTrue();
   }
 
   private RecommendationCandidateProjection mockCandidate(

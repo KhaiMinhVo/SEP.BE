@@ -167,8 +167,9 @@ public class AiRecommendationService {
         }
       }
 
+      java.time.ZoneId sourceZone = resolveSourceZone(campaign);
       List<NormalizedCandidateContext> phase0Results =
-          phase0Orchestrator.execute(rawCandidates, campaign, excludedIds, postsByCreator);
+          phase0Orchestrator.execute(rawCandidates, campaign, excludedIds, postsByCreator, sourceZone);
 
       Map<UUID, NormalizedCandidateContext> phase0Map = phase0Results.stream()
           .collect(Collectors.toMap(NormalizedCandidateContext::creatorId, r -> r, (a, b) -> a));
@@ -255,7 +256,7 @@ public class AiRecommendationService {
         }
       }
 
-      // 8. Sắp xếp điểm FinalScore giảm dần (deterministic) trên bảng chính
+      // 8. Sắp xếp điểm FinalScore giảm dần (deterministic) trên bảng chính (CHỈ GỒM SCORE_READY)
       int effectiveLimit = limit > 0 ? Math.min(limit, 50) : 30;
       List<FourMemoryTopsisEngine.EvaluatedCandidate> sortedCandidates =
           displaySorter.sort(new ArrayList<>(uniqueKocs.values()), DisplayMode.BEST_MATCH);
@@ -263,23 +264,8 @@ public class AiRecommendationService {
           .limit(effectiveLimit)
           .toList());
 
-      // Nếu bảng chính chưa đủ limit, bổ sung ứng viên Provisional (đánh giá sơ bộ) ở cuối danh sách
-      if (topList.size() < effectiveLimit && !evaluatedProvisionalList.isEmpty()) {
-        List<FourMemoryTopsisEngine.EvaluatedCandidate> sortedProvisional =
-            displaySorter.sort(evaluatedProvisionalList, DisplayMode.BEST_MATCH);
-        for (FourMemoryTopsisEngine.EvaluatedCandidate item : sortedProvisional) {
-          if (topList.size() >= effectiveLimit) break;
-          String masterKey = item.candidate().getMasterId() != null
-              ? item.candidate().getMasterId().toString()
-              : item.candidate().getCreatorId().toString();
-          if (!uniqueKocs.containsKey(masterKey)) {
-            uniqueKocs.put(masterKey, item);
-            topList.add(item);
-          }
-        }
-      }
-
-      // 9. Tích hợp XAI Engine (POST /api/v1/ai/explain kèm Circuit Breaker & Fallback)
+      // 9. Tích hợp XAI Engine (POST /api/v1/ai/explain kèm Circuit Breaker & Fallback) cho Bảng chính
+      // Hợp đồng DTO: recommendations CHỈ chứa ứng viên SCORE_READY (hoàn tất Four-Memory)
       List<CreatorRecommendationItemDto> recommendationItems = new ArrayList<>();
       for (FourMemoryTopsisEngine.EvaluatedCandidate item : topList) {
         ScoreBreakdownDto breakdown = fourMemoryTopsisEngine.toScoreBreakdownDto(item);
@@ -289,10 +275,6 @@ public class AiRecommendationService {
             shortlistItemRepository.findByCampaignIdAndCreatorId(campaignId, item.candidate().getCreatorId());
         boolean inShortlist = shortlistItemOpt.isPresent() && shortlistItemOpt.get().getStatus() != ShortlistStatus.REMOVED;
         ShortlistStatus itemStatus = shortlistItemOpt.map(ShortlistItem::getStatus).orElse(null);
-
-        NormalizedCandidateContext p0 = phase0Map.get(item.candidate().getCreatorId());
-        boolean isScoreReady = p0 != null && p0.isScoreReady();
-        boolean isProvisional = p0 != null && p0.isProvisional();
 
         recommendationItems.add(
             CreatorRecommendationItemDto.builder()
@@ -315,15 +297,19 @@ public class AiRecommendationService {
                 .finalScore(breakdown.getFinalScore())
                 .scoreBreakdown(breakdown)
                 .reasoning(reasoning)
-                .isScoreReady(isScoreReady)
-                .isProvisional(isProvisional)
+                .isScoreReady(true)
+                .isProvisional(false)
                 .build()
         );
       }
 
-      // Xây dựng danh sách bổ sung Provisional (Additional Creators to Consider) tách bạch
+      // 10. Xây dựng danh sách Provisional tách bạch hoàn toàn (Additional Creators to Consider)
+      // Hợp đồng DTO: provisionalRecommendations CHỈ chứa ứng viên PROVISIONAL (đánh giá sơ bộ thiếu STAB)
+      // Bảo đảm tính không giao nhau: recommendations ∩ provisionalRecommendations = ∅
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> sortedProvisional =
+          displaySorter.sort(evaluatedProvisionalList, DisplayMode.BEST_MATCH);
       List<CreatorRecommendationItemDto> provisionalItems = new ArrayList<>();
-      for (FourMemoryTopsisEngine.EvaluatedCandidate item : evaluatedProvisionalList) {
+      for (FourMemoryTopsisEngine.EvaluatedCandidate item : sortedProvisional) {
         ScoreBreakdownDto breakdown = fourMemoryTopsisEngine.toScoreBreakdownDto(item);
         ReasoningCardDto reasoning = fetchReasoningCard(item.candidate(), campaign, breakdown, item.confidence());
 
@@ -650,6 +636,22 @@ public class AiRecommendationService {
 
   private double roundToTwoDecimals(double val) {
     return Math.round(val * 100.0) / 100.0;
+  }
+
+  /**
+   * Xác định múi giờ nguồn (Source Timezone) theo hợp đồng chiến dịch:
+   * Nếu chiến dịch định vị địa lý tại Việt Nam (locations chứa VIETNAM/VN) thì áp dụng VN_SOURCE_ZONE.
+   * Ngược lại, áp dụng chuẩn quốc tế DEFAULT_SOURCE_ZONE (UTC).
+   */
+  private java.time.ZoneId resolveSourceZone(Campaign campaign) {
+    if (campaign != null && campaign.getLocations() != null) {
+      boolean isVietnamTarget = campaign.getLocations().stream()
+          .anyMatch(loc -> loc != null && (loc.equalsIgnoreCase("VIETNAM") || loc.equalsIgnoreCase("VN")));
+      if (isVietnamTarget) {
+        return com.influencermatch.backend.recommendation.engine.phase0.EvidenceValidator.VN_SOURCE_ZONE;
+      }
+    }
+    return com.influencermatch.backend.recommendation.engine.phase0.EvidenceValidator.DEFAULT_SOURCE_ZONE;
   }
 
   private record ScoredCandidate(RecommendationCandidateProjection candidate, ScoreBreakdownDto breakdown) {}

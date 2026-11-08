@@ -34,6 +34,7 @@ import com.influencermatch.backend.recommendation.engine.presentation.DisplaySor
 import com.influencermatch.backend.recommendation.engine.presentation.MmrReranker;
 import com.influencermatch.backend.recommendation.engine.presentation.enums.DisplayMode;
 import com.influencermatch.backend.recommendation.engine.presentation.enums.PriceStatus;
+import com.influencermatch.backend.recommendation.engine.presentation.pricing.PriceStatusResolver;
 import com.influencermatch.backend.recommendation.engine.topsis.TopsisRankingEngine;
 import com.influencermatch.backend.recommendation.engine.topsis.model.TopsisResult;
 import java.math.BigDecimal;
@@ -1842,6 +1843,100 @@ class FourMemoryEnginePhases1To6Test {
       assertThat(Double.isNaN(item.matchScore())).isFalse();
       assertThat(Double.isInfinite(item.matchScore())).isFalse();
     }
+  }
+
+  @Test
+  @DisplayName("P0 Test: PROVISIONAL candidate uses STAB floor = 0.00 and conservative Confidence reliabilityM2 = 0.20")
+  void testP0_provisionalCandidate_usesZeroStabFloor_andConservativeConfidence() {
+    PublicPerformanceScorer scorer = new PublicPerformanceScorer();
+    ConfidenceCalculator confCalculator = new ConfidenceCalculator();
+
+    // Context mô phỏng ứng viên PROVISIONAL (không đủ bài viết trong cửa sổ 3 bài)
+    // stabNormalized = Double.NaN, stabilityEvidenceUnavailable = true
+    NormalizedCandidateContext provisionalContext = new NormalizedCandidateContext(
+        UUID.randomUUID(),
+        null,
+        "TIKTOK",
+        Phase0Status.PENDING_DATA,
+        List.of("SHORT_WINDOW_INSUFFICIENT_POSTS: Valid posts in 3-post window 1 < 2"),
+        0.60, 0.40, Double.NaN, // ER = 0.60, VR = 0.40, STAB = NaN
+        0.05, 0.20, Double.NaN,
+        ErMethod.BY_VIEWS, 1, true, 0.20, "V1"
+    );
+
+    PublicPerformanceScorer.Result res = scorer.score(provisionalContext, null);
+
+    // 1. STAB imputation tuyệt đối tuân thủ chính sách sàn 0.00 (STAB_MISSING_POLICY_FLOOR), không phải 0.50
+    // SM2 = (0.60 + 0.40 + 0.00) / 3.0 = 0.333333
+    assertThat(res.isStabImputed()).isTrue();
+    assertThat(res.stabNorm()).isNaN();
+    assertThat(res.sm2Norm()).isCloseTo((0.60 + 0.40 + 0.00) / 3.0, offset(1e-6));
+    assertThat(res.score100()).isCloseTo(33.33, offset(0.01));
+
+    // 2. Confidence M2 reliability khi STAB unavailable bị giảm xuống mức sàn reliabilityM2 = 0.20
+    CandidateMemoryScores scores = new CandidateMemoryScores(
+        0.50, res.sm2Norm(), 0.50, 0.50,
+        50.0, res.score100(), 50.0, 50.0,
+        0.50, 0.50, 0.50,
+        0, 0, false,
+        1, true, false, true, 1, 1
+    );
+    EngineWeights weights = new DynamicWeightBlender().blend("AWARENESS", Optional.empty());
+    ConfidenceAssessment conf = confCalculator.calculate(scores, weights);
+
+    assertThat(conf.reliabilityM2()).isEqualTo(0.20);
+    assertThat(conf.evidenceWarnings()).anyMatch(w -> w.contains("chỉ số ổn định"));
+  }
+
+  @Test
+  @DisplayName("P0 Test: End-to-end Integration - Campaign Budget + Pricing Data -> PriceStatus -> Master Representative -> Display Sort")
+  void testP0_endToEndIntegration_campaignBudgetPlusPricing_to_priceStatus_to_masterDedup_to_displaySort() {
+    BigDecimal budgetMax = BigDecimal.valueOf(10_000_000); // 10 triệu VND
+
+    // 1. Phân loại PriceStatus từ dữ liệu giá thực tế
+    PriceStatus p1ConfirmedWithin = PriceStatusResolver.resolve(BigDecimal.valueOf(8_000_000), true, budgetMax);
+    PriceStatus p2DeclaredEstimate = PriceStatusResolver.resolve(BigDecimal.valueOf(7_000_000), false, budgetMax);
+    PriceStatus p3Unknown = PriceStatusResolver.resolve(null, false, budgetMax);
+    PriceStatus p4ConfirmedOver = PriceStatusResolver.resolve(BigDecimal.valueOf(30_000_000), true, budgetMax);
+
+    assertThat(p1ConfirmedWithin).isEqualTo(PriceStatus.CONFIRMED_WITHIN_BUDGET);
+    assertThat(p2DeclaredEstimate).isEqualTo(PriceStatus.DECLARED_ESTIMATE);
+    assertThat(p3Unknown).isEqualTo(PriceStatus.PRICE_UNKNOWN);
+    assertThat(p4ConfirmedOver).isEqualTo(PriceStatus.CONFIRMED_OVER_BUDGET);
+
+    // 2. Master có 2 kênh: TikTok (30M - over budget, score 95) và Instagram (8M - within budget, score 85)
+    UUID tikTokId = UUID.randomUUID();
+    UUID instaId = UUID.randomUUID();
+
+    TestBucketedMmrItem chTikTok = new TestBucketedMmrItem(
+        tikTokId, 95.0, 0.90, 0.85, p4ConfirmedOver, "Vlog", "Lifestyle", null);
+    TestBucketedMmrItem chInsta = new TestBucketedMmrItem(
+        instaId, 85.0, 0.80, 0.75, p1ConfirmedWithin, "Vlog", "Lifestyle", null);
+
+    // Ở BUDGET_READY_FIRST: Master Dedup chọn kênh trong ngân sách (Instagram 8M)
+    Comparator<DisplaySorter.DisplayableItem> budgetComp = DisplaySorter.resolveComparator(DisplayMode.BUDGET_READY_FIRST);
+    TestBucketedMmrItem winnerBudget = budgetComp.compare(chInsta, chTikTok) < 0 ? chInsta : chTikTok;
+    assertThat(winnerBudget.creatorId()).isEqualTo(instaId);
+    assertThat(winnerBudget.priceStatus()).isEqualTo(PriceStatus.CONFIRMED_WITHIN_BUDGET);
+
+    // Ở BEST_MATCH: Master Dedup chọn kênh MatchScore cao nhất (TikTok 95.0)
+    Comparator<DisplaySorter.DisplayableItem> matchComp = DisplaySorter.resolveComparator(DisplayMode.BEST_MATCH);
+    TestBucketedMmrItem winnerMatch = matchComp.compare(chTikTok, chInsta) < 0 ? chTikTok : chInsta;
+    assertThat(winnerMatch.creatorId()).isEqualTo(tikTokId);
+    assertThat(winnerMatch.matchScore()).isEqualTo(95.0);
+
+    // 3. Display Sorting thứ tự 4 mức Priority
+    TestBucketedMmrItem item1 = new TestBucketedMmrItem(instaId, 85.0, 0.8, 0.7, p1ConfirmedWithin, "Vlog", "Lifestyle", null);
+    TestBucketedMmrItem item2 = new TestBucketedMmrItem(UUID.randomUUID(), 88.0, 0.8, 0.7, p2DeclaredEstimate, "Vlog", "Lifestyle", null);
+    TestBucketedMmrItem item3 = new TestBucketedMmrItem(UUID.randomUUID(), 90.0, 0.8, 0.7, p3Unknown, "Vlog", "Lifestyle", null);
+    TestBucketedMmrItem item4 = new TestBucketedMmrItem(tikTokId, 95.0, 0.9, 0.8, p4ConfirmedOver, "Vlog", "Lifestyle", null);
+
+    List<TestBucketedMmrItem> sorted = new DisplaySorter().sort(List.of(item4, item3, item2, item1), DisplayMode.BUDGET_READY_FIRST);
+
+    assertThat(sorted.get(0).priceStatus()).isEqualTo(PriceStatus.CONFIRMED_WITHIN_BUDGET);
+    assertThat(sorted.get(1).priceStatus()).isEqualTo(PriceStatus.DECLARED_ESTIMATE);
+    assertThat(sorted.get(2).priceStatus()).isEqualTo(PriceStatus.PRICE_UNKNOWN);
+    assertThat(sorted.get(3).priceStatus()).isEqualTo(PriceStatus.CONFIRMED_OVER_BUDGET);
   }
 
   // --- Test Helper Records ---

@@ -116,12 +116,17 @@ public class MmrReranker {
       double dot = 0.0;
       double norm1 = 0.0;
       double norm2 = 0.0;
+      boolean elementsFinite = true;
       for (int i = 0; i < v1.length; i++) {
+        if (!Float.isFinite(v1[i]) || !Float.isFinite(v2[i])) {
+          elementsFinite = false;
+          break;
+        }
         dot += v1[i] * v2[i];
         norm1 += v1[i] * v1[i];
         norm2 += v2[i] * v2[i];
       }
-      if (norm1 > 1e-9 && norm2 > 1e-9) {
+      if (elementsFinite && norm1 > 1e-9 && norm2 > 1e-9) {
         double cos = dot / (Math.sqrt(norm1) * Math.sqrt(norm2));
         if (Double.isFinite(cos)) {
           return (Math.max(-1.0, Math.min(1.0, cos)) + 1.0) / 2.0;

@@ -28,21 +28,66 @@ public class BayesianHistoryScorer {
     int s = 0;
     double kpiSum = 0.0;
     int kpiCount = 0;
+    double revSum = 0.0;
+    int revCount = 0;
 
     if (pastCampaigns != null && !pastCampaigns.isEmpty()) {
       for (HistoricalCampaign hist : pastCampaigns) {
+        if (hist == null) continue;
+
+        boolean verifiedSuccess = false;
+
+        // 1. Kiểm tra ROI hoặc KPI từ CampaignOutcome (Hợp đồng đo lường hiệu năng)
         if (hist.getOutcome() != null) {
           BigDecimal roi = hist.getOutcome().getRoi();
-          if (roi != null && roi.doubleValue() >= 1.0) {
-            s++;
-          }
           if (roi != null) {
-            double normRoi = Math.max(0.0, Math.min(1.0, roi.doubleValue() / 2.0));
+            double roiVal = roi.doubleValue();
+            if (roiVal >= 1.0) {
+              verifiedSuccess = true;
+            }
+            double normRoi = Math.max(0.0, Math.min(1.0, roiVal / 2.0));
             kpiSum += normRoi;
             kpiCount++;
+          } else if (hist.getOutcome().getKpiTarget() != null
+              && hist.getOutcome().getKpiActual() != null
+              && hist.getOutcome().getKpiTarget().doubleValue() > 0) {
+            double actual = hist.getOutcome().getKpiActual().doubleValue();
+            double target = hist.getOutcome().getKpiTarget().doubleValue();
+            if (actual >= target) {
+              verifiedSuccess = true;
+            }
+            double normKpi = Math.max(0.0, Math.min(1.0, actual / target));
+            kpiSum += normKpi;
+            kpiCount++;
           }
-        } else {
-          s++; // Default completed collaboration without negative outcome
+        }
+
+        // 2. Trích xuất Brand Review Ratings thực tế từ evidenceValue (do CollaborationCompletedEventListener lưu)
+        if (hist.getEvidenceValue() != null && !hist.getEvidenceValue().isNull()) {
+          var evNode = hist.getEvidenceValue();
+          if (evNode.has("reliabilityScore")) {
+            double r = evNode.get("reliabilityScore").asDouble();
+            revSum += Math.max(0.0, Math.min(1.0, r));
+            revCount++;
+            if (r >= 0.70) {
+              verifiedSuccess = true; // Review tốt (>= 7/10) xác nhận thành công
+            }
+          } else if (evNode.has("overallRating")) {
+            double rating = evNode.get("overallRating").asDouble();
+            revSum += Math.max(0.0, Math.min(1.0, rating / 5.0));
+            revCount++;
+            if (rating >= 4.0) {
+              verifiedSuccess = true;
+            }
+          }
+
+          if (evNode.has("wouldCollaborateAgain") && evNode.get("wouldCollaborateAgain").asBoolean()) {
+            verifiedSuccess = true;
+          }
+        }
+
+        if (verifiedSuccess) {
+          s++;
         }
       }
     }
@@ -53,7 +98,7 @@ public class BayesianHistoryScorer {
         : (s + DEFAULT_PRIOR_STRENGTH * DEFAULT_PRIOR_MEAN) / (n + DEFAULT_PRIOR_STRENGTH);
 
     double kpiScore = (kpiCount > 0) ? (kpiSum / kpiCount) : DEFAULT_PRIOR_MEAN;
-    double revScore = DEFAULT_PRIOR_MEAN; // Fallback prior for brand reviews
+    double revScore = (revCount > 0) ? (revSum / revCount) : DEFAULT_PRIOR_MEAN;
 
     // Internal weights tailored to campaign objective
     double wBayes = 0.30;

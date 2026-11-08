@@ -26,6 +26,20 @@ public record CandidateMemoryScores(
     int m4MatchedTags,
     int m4TotalTags
 ) {
+  public CandidateMemoryScores {
+    validateScore(sm1, "sm1");
+    validateScore(sm2, "sm2");
+    validateScore(sm3, "sm3");
+    validateScore(sm4, "sm4");
+  }
+
+  private static void validateScore(double score, String name) {
+    if (!Double.isFinite(score) || score < 0.0 || score > 1.0) {
+      throw new IllegalArgumentException(
+          name + " must be a finite number in [0.0, 1.0], but got: " + score);
+    }
+  }
+
   public double[] asVector() {
     return new double[] {sm1, sm2, sm3, sm4};
   }

@@ -1,12 +1,15 @@
 package com.influencermatch.backend.recommendation.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.data.Offset.offset;
 
 import com.influencermatch.backend.brand.model.BrandPattern;
-import com.influencermatch.backend.collaboration.model.CampaignOutcome;
+import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.campaign.model.HistoricalCampaign;
+import com.influencermatch.backend.collaboration.model.CampaignOutcome;
 import com.influencermatch.backend.creator.dto.RecommendationCandidateProjection;
+import com.influencermatch.backend.creator.model.Post;
 import com.influencermatch.backend.recommendation.engine.confidence.ConfidenceCalculator;
 import com.influencermatch.backend.recommendation.engine.confidence.enums.ConfidenceTier;
 import com.influencermatch.backend.recommendation.engine.confidence.model.ConfidenceAssessment;
@@ -15,9 +18,12 @@ import com.influencermatch.backend.recommendation.engine.critic.DynamicWeightBle
 import com.influencermatch.backend.recommendation.engine.critic.model.EngineWeights;
 import com.influencermatch.backend.recommendation.engine.memory.BayesianHistoryScorer;
 import com.influencermatch.backend.recommendation.engine.memory.BrandAffinityScorer;
+import com.influencermatch.backend.recommendation.engine.memory.FourMemoryScorer;
 import com.influencermatch.backend.recommendation.engine.memory.PublicPerformanceScorer;
 import com.influencermatch.backend.recommendation.engine.memory.SemanticRelevanceScorer;
 import com.influencermatch.backend.recommendation.engine.memory.model.CandidateMemoryScores;
+import com.influencermatch.backend.recommendation.engine.phase0.EvidenceValidator;
+import com.influencermatch.backend.recommendation.engine.phase0.Phase0Orchestrator;
 import com.influencermatch.backend.recommendation.engine.phase0.enums.ErMethod;
 import com.influencermatch.backend.recommendation.engine.phase0.enums.Phase0Status;
 import com.influencermatch.backend.recommendation.engine.phase0.model.NormalizedCandidateContext;
@@ -174,6 +180,194 @@ class FourMemoryEnginePhases1To6Test {
     );
     assertThat(coldStart.sm4Norm()).isEqualTo(0.50);
     assertThat(coldStart.isConfigured()).isFalse();
+  }
+
+  // =========================================================================
+  // Phase 1: TRUTHMODE Section 8 Verification Test Suite (P0 & P1)
+  // =========================================================================
+
+  @Test
+  @DisplayName("P0 Test: Phase 0 tính STAB từ Views [0, 100, 100] -> SM2 nhận đúng STAB ≈ 0.536, không tính lại thành 0.134")
+  void testP0_stabViewsZeroHundredHundred_passesCorrectStabWithoutRecalculation() {
+    EvidenceValidator validator = new EvidenceValidator();
+    UUID cId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = Mockito.mock(RecommendationCandidateProjection.class);
+    Mockito.when(cand.getCreatorId()).thenReturn(cId);
+    Mockito.when(cand.getFollowers()).thenReturn(10_000L);
+    Mockito.when(cand.getPlatform()).thenReturn("TIKTOK");
+    Mockito.when(cand.getAccountStatus()).thenReturn("ACTIVE");
+
+    Post p1 = Post.builder().id(UUID.randomUUID()).platformPostId("p1").views(0L).likes(10L).postedAt("2026-11-08T10:00:00Z").build();
+    Post p2 = Post.builder().id(UUID.randomUUID()).platformPostId("p2").views(100L).likes(10L).postedAt("2026-11-08T11:00:00Z").build();
+    Post p3 = Post.builder().id(UUID.randomUUID()).platformPostId("p3").views(100L).likes(10L).postedAt("2026-11-08T12:00:00Z").build();
+
+    // 1. EvidenceValidator tính rawStab: CV ≈ 0.8660 -> rawStab = 1 / (1 + 0.8660) ≈ 0.5359
+    var evMetrics = validator.evaluate(cand, List.of(p1, p2, p3));
+    assertThat(evMetrics.rawStab()).isCloseTo(0.5359, offset(1e-3));
+    assertThat(evMetrics.canComputeStability()).isTrue();
+
+    // 2. Chuyển qua Phase0Orchestrator tạo NormalizedCandidateContext
+    Phase0Orchestrator p0Orchestrator = new Phase0Orchestrator();
+    Campaign campaign = Campaign.builder().id(UUID.randomUUID()).platforms(List.of("TIKTOK")).build();
+    var p0List = p0Orchestrator.execute(List.of(cand), campaign, Collections.emptySet(), Map.of(cId, List.of(p1, p2, p3)));
+    assertThat(p0List).hasSize(1);
+    NormalizedCandidateContext p0 = p0List.get(0);
+    assertThat(p0.stabNormalized()).isCloseTo(0.5359, offset(1e-3));
+
+    // 3. PublicPerformanceScorer trong Phase 1 nhận p0.stabNormalized() trực tiếp
+    PublicPerformanceScorer scorer = new PublicPerformanceScorer();
+    PublicPerformanceScorer.Result res = scorer.score(p0, cand);
+    assertThat(res.stabNorm()).isCloseTo(0.5359, offset(1e-3));
+    // Khẳng định không bị tính lại bằng công thức cũ 1 - min(1, CV) = 1 - 0.866 = 0.134
+    assertThat(res.stabNorm()).isNotCloseTo(0.134, offset(0.05));
+    // Điểm SM2 tính theo mẫu số 3.0: (erNorm + vrNorm + stabNorm) / 3.0
+    double expectedSm2 = (p0.erNormalized() + p0.vrNormalized() + p0.stabNormalized()) / 3.0;
+    assertThat(res.sm2Norm()).isCloseTo(expectedSm2, offset(1e-6));
+  }
+
+  @Test
+  @DisplayName("P0 Test: Một scorer nhận Double.NaN -> Không tạo CandidateMemoryScores chứa NaN (ném IllegalArgumentException tại boundary)")
+  void testP0_nanDefensiveValidation_candidateMemoryScoresRejectsNan() {
+    assertThatThrownBy(() -> new CandidateMemoryScores(
+        Double.NaN, 0.70, 0.80, 0.50,
+        50.0, 70.0, 80.0, 50.0,
+        0.5, 0.5, 0.5,
+        1, 1, false,
+        3, false, true, true, 1, 1
+    )).isInstanceOf(IllegalArgumentException.class)
+      .hasMessageContaining("sm1 must be a finite number in [0.0, 1.0]");
+
+    assertThatThrownBy(() -> new CandidateMemoryScores(
+        0.50, Double.NaN, 0.80, 0.50,
+        50.0, 70.0, 80.0, 50.0,
+        0.5, 0.5, 0.5,
+        1, 1, false,
+        3, false, true, true, 1, 1
+    )).isInstanceOf(IllegalArgumentException.class)
+      .hasMessageContaining("sm2 must be a finite number in [0.0, 1.0]");
+
+    assertThatThrownBy(() -> new CandidateMemoryScores(
+        0.50, 0.70, -0.1, 0.50,
+        50.0, 70.0, 80.0, 50.0,
+        0.5, 0.5, 0.5,
+        1, 1, false,
+        3, false, true, true, 1, 1
+    )).isInstanceOf(IllegalArgumentException.class)
+      .hasMessageContaining("sm3 must be a finite number in [0.0, 1.0]");
+  }
+
+  @Test
+  @DisplayName("P0 Test: Campaign lịch sử thiếu ROI -> Không tự chuyển Missing thành ROI = 0 hoặc Success")
+  void testP0_historicalCampaign_missingRoiDoesNotInventFakeSuccessOrZero() {
+    BayesianHistoryScorer scorer = new BayesianHistoryScorer();
+
+    // 1 campaign có bản ghi nhưng thiếu outcome (hoặc outcome thiếu ROI và KPI)
+    HistoricalCampaign missingHist = HistoricalCampaign.builder()
+        .outcome(null)
+        .evidenceValue(null)
+        .build();
+
+    BayesianHistoryScorer.Result res = scorer.score(List.of(missingHist), "CONVERSION");
+
+    // n = 1, nhưng s = 0 (Không tự động biến thành 1 thành công giả tạo)
+    assertThat(res.sampleSize()).isEqualTo(1);
+    assertThat(res.successCount()).isEqualTo(0);
+    // Posterior pHat = (0 + 3 * 0.5) / (1 + 3) = 1.5 / 4 = 0.375
+    assertThat(res.pHat()).isEqualTo(0.375);
+    // kpiScore giữ nguyên prior 0.50 (không bị ép về 0.0)
+    assertThat(res.isColdStart()).isFalse();
+  }
+
+  @Test
+  @DisplayName("P1 Test: Creator chưa có lịch sử Campaign -> SM1 dùng prior, gắn đúng Cold-Start")
+  void testP1_creatorWithoutPastCampaigns_usesPriorAndMarksColdStart() {
+    BayesianHistoryScorer scorer = new BayesianHistoryScorer();
+    BayesianHistoryScorer.Result res = scorer.score(Collections.emptyList(), "AWARENESS");
+
+    assertThat(res.isColdStart()).isTrue();
+    assertThat(res.sampleSize()).isEqualTo(0);
+    assertThat(res.successCount()).isEqualTo(0);
+    assertThat(res.pHat()).isEqualTo(0.50);
+    assertThat(res.sm1Norm()).isEqualTo(0.50);
+    assertThat(res.score100()).isEqualTo(50.0);
+  }
+
+  @Test
+  @DisplayName("P1 Test: Creator thiếu embedding -> SM3 = 0.50 theo policy, cờ hasEmbedding = false được bảo toàn")
+  void testP1_creatorMissingEmbedding_assignedPolicyNeutralScore() {
+    SemanticRelevanceScorer scorer = new SemanticRelevanceScorer();
+    SemanticRelevanceScorer.Result res = scorer.score(null);
+
+    assertThat(res.hasEmbedding()).isFalse();
+    assertThat(res.sm3Norm()).isEqualTo(0.50);
+    assertThat(res.score100()).isEqualTo(50.0);
+  }
+
+  @Test
+  @DisplayName("P1 Test: Hai Creator cùng Niche và Platform nhưng phong cách khác nhau -> Xác nhận SM4 thực tế chỉ có Rule-based Affinity")
+  void testP1_brandAffinity_isRuleBasedTagCoverageNotDeepTaste() {
+    BrandAffinityScorer scorer = new BrandAffinityScorer();
+    List<String> niches = List.of("Beauty");
+
+    // Creator A: Skincare chuyên sâu, TikTok
+    BrandAffinityScorer.Result resA = scorer.score(niches, "Beauty", "Skincare", "TIKTOK", Collections.emptyList());
+    // Creator B: Comedy giải trí thử thách, TikTok
+    BrandAffinityScorer.Result resB = scorer.score(niches, "Beauty", "Comedy", "TIKTOK", Collections.emptyList());
+
+    // Cùng khớp tag "Beauty" nên SM4 bằng nhau = 1.0 (Xác nhận tính chất Rule-based của MVP)
+    assertThat(resA.sm4Norm()).isEqualTo(resB.sm4Norm());
+    assertThat(resA.sm4Norm()).isEqualTo(1.0);
+  }
+
+  @Test
+  @DisplayName("P1 Test: SCORE_READY và PROVISIONAL cùng đi qua FourMemoryScorer -> Provisional dùng STAB Floor và isStabImputed = true")
+  void testP1_provisionalCandidateUsesStabFloorInPhase1() {
+    FourMemoryScorer scorer = new FourMemoryScorer();
+    Campaign campaign = Campaign.builder().id(UUID.randomUUID()).niches(List.of("Fashion")).build();
+
+    // 1. Candidate SCORE_READY (đầy đủ ER, VR, STAB)
+    RecommendationCandidateProjection candReady = Mockito.mock(RecommendationCandidateProjection.class);
+    Mockito.when(candReady.getCreatorId()).thenReturn(UUID.randomUUID());
+    Mockito.when(candReady.getSemanticScore()).thenReturn(0.80);
+    Mockito.when(candReady.getNiche()).thenReturn("Fashion");
+    Mockito.when(candReady.getPlatform()).thenReturn("TIKTOK");
+
+    NormalizedCandidateContext p0Ready = new NormalizedCandidateContext(
+        candReady.getCreatorId(), null, "TIKTOK",
+        Phase0Status.ELIGIBLE, Collections.emptyList(),
+        0.60, 0.70, 0.80,
+        0.05, 0.50, 0.75,
+        ErMethod.BY_VIEWS, 3, false, 0.65,
+        "MVP_CALIBRATION_2026Q1"
+    );
+
+    CandidateMemoryScores scoresReady = scorer.evaluate(candReady, p0Ready, campaign, Collections.emptyList(), Collections.emptyList());
+    assertThat(scoresReady.m2StabImputed()).isFalse();
+    assertThat(scoresReady.stabNorm()).isEqualTo(0.80);
+    assertThat(scoresReady.sm2()).isCloseTo((0.60 + 0.70 + 0.80) / 3.0, offset(1e-6));
+
+    // 2. Candidate PROVISIONAL (thiếu STAB -> stabNormalized là NaN)
+    RecommendationCandidateProjection candProv = Mockito.mock(RecommendationCandidateProjection.class);
+    Mockito.when(candProv.getCreatorId()).thenReturn(UUID.randomUUID());
+    Mockito.when(candProv.getSemanticScore()).thenReturn(0.80);
+    Mockito.when(candProv.getNiche()).thenReturn("Fashion");
+    Mockito.when(candProv.getPlatform()).thenReturn("TIKTOK");
+
+    NormalizedCandidateContext p0Prov = new NormalizedCandidateContext(
+        candProv.getCreatorId(), null, "TIKTOK",
+        Phase0Status.ELIGIBLE, Collections.emptyList(),
+        0.60, 0.70, Double.NaN,
+        0.05, 0.50, Double.NaN,
+        ErMethod.BY_VIEWS, 1, true, 0.20,
+        "MVP_CALIBRATION_2026Q1"
+    );
+
+    CandidateMemoryScores scoresProv = scorer.evaluate(candProv, p0Prov, campaign, Collections.emptyList(), Collections.emptyList());
+    assertThat(scoresProv.m2StabImputed()).isTrue();
+    // STAB được gán sàn bảo thủ 0.0: (0.60 + 0.70 + 0.0) / 3.0 = 1.30 / 3.0 ≈ 0.4333
+    assertThat(scoresProv.sm2()).isCloseTo((0.60 + 0.70 + 0.0) / 3.0, offset(1e-6));
+    // Điểm của Ready (0.70) cao hơn Provisional (0.4333) dù cùng ER và VR
+    assertThat(scoresReady.sm2()).isGreaterThan(scoresProv.sm2());
   }
 
   // =========================================================================

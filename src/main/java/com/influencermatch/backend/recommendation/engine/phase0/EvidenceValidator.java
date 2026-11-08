@@ -121,6 +121,13 @@ public class EvidenceValidator {
   public EvidenceMetrics evaluate(
       RecommendationCandidateProjection cand,
       List<Post> posts) {
+    return evaluate(cand, posts, DEFAULT_SOURCE_ZONE);
+  }
+
+  public EvidenceMetrics evaluate(
+      RecommendationCandidateProjection cand,
+      List<Post> posts,
+      java.time.ZoneId fallbackSourceZone) {
 
     // 1. Kiểm tra tính hợp lệ dữ liệu cơ bản (Strict Data Contract Validation)
     long followers = cand.getFollowers() != null ? cand.getFollowers() : 0L;
@@ -256,13 +263,15 @@ public class EvidenceValidator {
 
     // 3. Tính View-to-Follower Ratio (VR)
     double rawVr;
+    boolean unverifiedViewProvenance = false;
     if (posts != null && !posts.isEmpty()) {
       if (!postsWithViews.isEmpty() && !isFacebook) {
         double avgViews = viewsSum / postsWithViews.size();
         rawVr = (followers > 0) ? (avgViews / followers) : 0.0;
       } else if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && !isFacebook) {
-        // Metric Provenance: Có chỉ số average views hợp lệ từ profile/kênh trong DB
+        // Fallback tạm thời: Dùng avgViews cấp kênh trong CSDL (lưu ý: chưa có metadata metricSource/metricWindow để xác minh cùng cửa sổ)
         rawVr = (followers > 0) ? (cand.getAvgViews().doubleValue() / followers) : 0.0;
+        unverifiedViewProvenance = true;
       } else {
         // Không có bài nào hỗ trợ views (ví dụ bài ảnh hoặc Facebook không có video views)
         rawVr = Double.NaN;
@@ -274,7 +283,7 @@ public class EvidenceValidator {
     }
 
     // 4. Tính View Stability (STAB = 1 / (1 + CV)) trên CỬA SỔ 3 BÀI GẦN NHẤT
-    // Sử dụng chung hàm selectRecentWindow() với tie-breaker tất định theo Post ID.
+    // Sử dụng chung hàm selectRecentWindow() với tie-breaker tất định theo Post ID và timezone nguồn được chỉ định.
     double rawStab;
     boolean canComputeStability = false;
     boolean stabilityEvidenceUnavailable = false;
@@ -282,7 +291,7 @@ public class EvidenceValidator {
     ScoringReadiness scoringReadiness;
     List<String> dataQualityReasons;
 
-    List<Post> recentThreePosts = selectRecentWindow(posts, 3);
+    List<Post> recentThreePosts = selectRecentWindow(posts, 3, fallbackSourceZone);
 
     // Lọc các bài có lượt xem hợp lệ trong chính cửa sổ 3 bài gần nhất
     List<Post> validWindowPosts = recentThreePosts.stream()
@@ -317,6 +326,10 @@ public class EvidenceValidator {
       evidenceReliabilityM2 = 0.20; // Bằng chứng rất yếu
     }
 
+    if (unverifiedViewProvenance) {
+      evidenceReliabilityM2 = 0.20; // Bằng chứng yếu do dùng fallback cấp kênh khác cửa sổ đo lường
+    }
+
     // 5. Xác định Scoring Readiness: Phân biệt rõ rệt giữa SCORE_READY, PROVISIONAL, NOT_SCORABLE và INVALID_DATA
     boolean erValid = !Double.isNaN(rawEr) && !Double.isInfinite(rawEr) && rawEr >= 0.0;
     boolean vrValid = !Double.isNaN(rawVr) && !Double.isInfinite(rawVr) && rawVr >= 0.0;
@@ -333,6 +346,9 @@ public class EvidenceValidator {
         reasons.add("ZERO_VIEWS_FOR_STABILITY: Average views is 0 across posts, stability cannot be evaluated");
       } else {
         reasons.add(String.format("SHORT_WINDOW_INSUFFICIENT_POSTS: Valid posts in 3-post window %d < 2 for stability evaluation", validWindowPosts.size()));
+      }
+      if (unverifiedViewProvenance) {
+        reasons.add("UNVERIFIED_AGGREGATE_VIEW_PROVENANCE: Channel avgViews used as fallback for photo content; measurement window unverified");
       }
       dataQualityReasons = Collections.unmodifiableList(reasons);
     } else if (Double.isNaN(rawEr) || Double.isNaN(rawVr)) {

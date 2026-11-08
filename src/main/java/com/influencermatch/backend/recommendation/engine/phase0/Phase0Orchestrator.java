@@ -24,6 +24,15 @@ public class Phase0Orchestrator {
       Campaign campaign,
       Set<UUID> excludedIds,
       Map<UUID, List<Post>> postsByCreator) {
+    return execute(candidates, campaign, excludedIds, postsByCreator, EvidenceValidator.DEFAULT_SOURCE_ZONE);
+  }
+
+  public List<NormalizedCandidateContext> execute(
+      List<RecommendationCandidateProjection> candidates,
+      Campaign campaign,
+      Set<UUID> excludedIds,
+      Map<UUID, List<Post>> postsByCreator,
+      java.time.ZoneId fallbackSourceZone) {
 
     List<NormalizedCandidateContext> results = new ArrayList<>();
 
@@ -61,18 +70,45 @@ public class Phase0Orchestrator {
 
       // LUỒNG 2 & 3: Evidence Validation & Policy-Based Saturation Normalization với Error Isolation
       try {
-        // LUỒNG 2: Evidence Validation
+        // LUỒNG 2: Evidence Validation (truyền timezone nguồn đã xác nhận)
         List<Post> posts = postsByCreator != null ? postsByCreator.get(creatorId) : null;
-        var ev = evidenceValidator.evaluate(cand, posts);
+        var ev = evidenceValidator.evaluate(cand, posts, fallbackSourceZone);
 
-        // LUỒNG 3: Policy-Based Saturation Normalization (x / (x + K))
+        // Phân luồng xử lý trước bước chuẩn hóa:
+        // 1. NOT_SCORABLE: Giữ nguyên trạng thái và mã lý do, không thực hiện chuẩn hóa, không gọi resolveKEr
+        if (ev.scoringReadiness() == ScoringReadiness.NOT_SCORABLE) {
+          results.add(new NormalizedCandidateContext(
+              creatorId, cand.getMasterId(), platform,
+              CampaignEligibility.ELIGIBLE, ScoringReadiness.NOT_SCORABLE,
+              List.of(), ev.dataQualityReasons(),
+              Double.NaN, Double.NaN, Double.NaN,
+              ev.rawEr(), ev.rawVr(), ev.rawStab(),
+              ev.erMethod(), ev.postCount(), ev.isStabImputed(), ev.evidenceReliabilityM2(),
+              ScoringPolicyConfig.CALIBRATION_VERSION
+          ));
+          continue;
+        }
+
+        // 2. INVALID_DATA: Cách ly lỗi dữ liệu
+        if (ev.scoringReadiness() == ScoringReadiness.INVALID_DATA) {
+          results.add(new NormalizedCandidateContext(
+              creatorId, cand.getMasterId(), platform,
+              CampaignEligibility.ELIGIBLE, ScoringReadiness.INVALID_DATA,
+              List.of(), ev.dataQualityReasons(),
+              0.0, 0.0, Double.NaN,
+              ev.rawEr(), ev.rawVr(), ev.rawStab(),
+              ev.erMethod(), ev.postCount(), ev.isStabImputed(), ev.evidenceReliabilityM2(),
+              ScoringPolicyConfig.CALIBRATION_VERSION
+          ));
+          continue;
+        }
+
+        // LUỒNG 3: Policy-Based Saturation Normalization (x / (x + K)) - Chỉ chạy cho SCORE_READY hoặc PROVISIONAL
         double kEr = policyNormalizer.resolveKEr(platform, ev.erMethod());
         double kVr = policyNormalizer.resolveKVr(platform);
 
-        // Bảo toàn trạng thái: Nếu feature là NaN (ví dụ NOT_SCORABLE hoặc thiếu STAB), không gọi normalize để tránh ném ngoại lệ
-        // Chỉ gọi normalize khi feature là số thực (nếu số âm thì normalize sẽ ném IllegalArgumentException chuẩn xác)
-        double erNorm = Double.isNaN(ev.rawEr()) ? Double.NaN : policyNormalizer.normalize(ev.rawEr(), kEr);
-        double vrNorm = Double.isNaN(ev.rawVr()) ? Double.NaN : policyNormalizer.normalize(ev.rawVr(), kVr);
+        double erNorm = policyNormalizer.normalize(ev.rawEr(), kEr);
+        double vrNorm = policyNormalizer.normalize(ev.rawVr(), kVr);
         double stabNorm = Double.isNaN(ev.rawStab()) ? Double.NaN : Math.max(0.0, Math.min(1.0, ev.rawStab()));
 
         results.add(new NormalizedCandidateContext(

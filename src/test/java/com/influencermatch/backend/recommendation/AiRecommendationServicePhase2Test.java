@@ -315,6 +315,95 @@ class AiRecommendationServicePhase2Test {
     assertThat(response.getProvisionalRecommendations().get(0).getCreatorId()).isEqualTo(provId);
   }
 
+  @Test
+  @DisplayName("Service Integration: Run có đủ 4 trạng thái Readiness - NOT_SCORABLE và INVALID_DATA bị loại hoàn toàn khỏi Recommendations và Provisional")
+  void testService_fourReadinessStates_notScorableAndInvalidDataExcludedFromBothRecommendationsAndProvisional() {
+    UUID readyId = UUID.randomUUID();
+    UUID provId = UUID.randomUUID();
+    UUID notScorableId = UUID.randomUUID();
+    UUID invalidDataId = UUID.randomUUID();
+
+    // 1. SCORE_READY
+    RecommendationCandidateProjection readyCand = mockCandidate(
+        readyId, null, "TIKTOK", "Ready KOC", 50_000L,
+        BigDecimal.valueOf(20_000), BigDecimal.valueOf(1_000), BigDecimal.valueOf(0.05),
+        "Beauty", "Skincare", 0.75
+    );
+
+    // 2. PROVISIONAL (chỉ 1 bài -> thiếu STAB)
+    RecommendationCandidateProjection provCand = mockCandidate(
+        provId, null, "TIKTOK", "Provisional KOC", 50_000L,
+        BigDecimal.valueOf(15_000), BigDecimal.valueOf(750), BigDecimal.valueOf(0.05),
+        "Beauty", "Skincare", 0.70
+    );
+
+    // 3. NOT_SCORABLE (3 bài video nhưng toàn bộ Views = 0 -> 0/0 NaN)
+    RecommendationCandidateProjection notScorableCand = mockCandidate(
+        notScorableId, null, "TIKTOK", "Zero Views Not Scorable KOC", 50_000L,
+        BigDecimal.valueOf(0), BigDecimal.valueOf(0), BigDecimal.valueOf(0.0),
+        "Beauty", "Skincare", 0.65
+    );
+
+    // 4. INVALID_DATA (likes âm vi phạm hợp đồng)
+    RecommendationCandidateProjection invalidDataCand = mockCandidate(
+        invalidDataId, null, "TIKTOK", "Corrupted Metric KOC", 50_000L,
+        BigDecimal.valueOf(10_000), BigDecimal.valueOf(-500), BigDecimal.valueOf(0.05),
+        "Beauty", "Skincare", 0.60
+    );
+
+    // Mock Posts
+    com.influencermatch.backend.creator.repository.PostRepository mockPostRepo =
+        mock(com.influencermatch.backend.creator.repository.PostRepository.class);
+
+    com.influencermatch.backend.creator.model.Creator readyEntity =
+        com.influencermatch.backend.creator.model.Creator.builder().id(readyId).build();
+    com.influencermatch.backend.creator.model.Creator provEntity =
+        com.influencermatch.backend.creator.model.Creator.builder().id(provId).build();
+    com.influencermatch.backend.creator.model.Creator notScorableEntity =
+        com.influencermatch.backend.creator.model.Creator.builder().id(notScorableId).build();
+
+    List<com.influencermatch.backend.creator.model.Post> allPosts = List.of(
+        // ready: 3 bài views > 0
+        com.influencermatch.backend.creator.model.Post.builder().creator(readyEntity).views(18_000L).likes(900L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(readyEntity).views(20_000L).likes(1_000L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(readyEntity).views(22_000L).likes(1_100L).build(),
+        // prov: 1 bài duy nhất
+        com.influencermatch.backend.creator.model.Post.builder().creator(provEntity).views(15_000L).likes(750L).build(),
+        // notScorable: 3 bài nhưng toàn bộ views = 0
+        com.influencermatch.backend.creator.model.Post.builder().creator(notScorableEntity).views(0L).likes(0L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(notScorableEntity).views(0L).likes(0L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(notScorableEntity).views(0L).likes(0L).build()
+    );
+
+    when(mockPostRepo.findByCreatorIdIn(any())).thenReturn(allPosts);
+    service.setPostRepository(mockPostRepo);
+
+    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
+        anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+        .thenReturn(List.of(readyCand, provCand, notScorableCand, invalidDataCand));
+
+    // Thực thi Recommendation Run
+    RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
+
+    // 1. Run hoàn thành an toàn (không bị crash bởi NaN hay exception)
+    assertThat(response).isNotNull();
+
+    // 2. Bảng xếp hạng chính (Recommendations): Chỉ chứa Ready và Provisional (bổ sung khi thiếu quota)
+    // Tuyệt đối KHÔNG chứa NOT_SCORABLE hay INVALID_DATA
+    assertThat(response.getRecommendations()).hasSize(2);
+    assertThat(response.getRecommendations()).anyMatch(r -> r.getCreatorId().equals(readyId));
+    assertThat(response.getRecommendations()).anyMatch(r -> r.getCreatorId().equals(provId));
+    assertThat(response.getRecommendations()).noneMatch(r -> r.getCreatorId().equals(notScorableId));
+    assertThat(response.getRecommendations()).noneMatch(r -> r.getCreatorId().equals(invalidDataId));
+
+    // 3. Bể Provisional Recommendations: Chỉ chứa ProvId
+    // Tuyệt đối KHÔNG chứa NOT_SCORABLE hay INVALID_DATA
+    assertThat(response.getProvisionalRecommendations()).hasSize(1);
+    assertThat(response.getProvisionalRecommendations().get(0).getCreatorId()).isEqualTo(provId);
+    assertThat(response.getProvisionalRecommendations()).noneMatch(r -> r.getCreatorId().equals(notScorableId));
+    assertThat(response.getProvisionalRecommendations()).noneMatch(r -> r.getCreatorId().equals(invalidDataId));
+  }
+
   private RecommendationCandidateProjection mockCandidate(
       UUID creatorId, UUID masterId, String platform, String displayName, Long followers,
       BigDecimal avgViews, BigDecimal avgLikes, BigDecimal er, String niche, String cat, Double semantic) {

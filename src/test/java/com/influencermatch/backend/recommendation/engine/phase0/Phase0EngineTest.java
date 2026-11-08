@@ -756,6 +756,53 @@ class Phase0EngineTest {
     // CẢ ER và VR đều hợp lệ, chỉ thiếu STAB -> Đủ điều kiện xếp vào PROVISIONAL (không bị loại oan)
     assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.PROVISIONAL);
     assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("SHORT_WINDOW_INSUFFICIENT_POSTS"));
+    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("UNVERIFIED_AGGREGATE_VIEW_PROVENANCE"));
+    assertThat(metrics.evidenceReliabilityM2()).isEqualTo(0.20);
+  }
+
+  @Test
+  @DisplayName("Reviewer Check 5: NOT_SCORABLE có erMethod = null và rawEr = NaN - Orchestrator không gọi resolveKEr hay normalize")
+  void testPhase0Orchestrator_notScorableWithNullErMethod_bypassesResolveKErAndNormalizer() {
+    Campaign campaign = Campaign.builder().platforms(List.of("TIKTOK")).build();
+    UUID creatorId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(creatorId, "TIKTOK", 50_000L);
+    when(cand.getEngagementRate()).thenReturn(null);
+    when(cand.getAvgLikes()).thenReturn(null);
+    when(cand.getAvgViews()).thenReturn(null);
+
+    // Creator không có bài nào và không có DB metric -> NOT_SCORABLE
+    List<NormalizedCandidateContext> results = orchestrator.execute(
+        List.of(cand), campaign, Collections.emptySet(), Collections.emptyMap()
+    );
+
+    assertThat(results).hasSize(1);
+    var res = results.get(0);
+    assertThat(res.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.NOT_SCORABLE);
+    assertThat(Double.isNaN(res.erNormalized())).isTrue();
+    assertThat(Double.isNaN(res.vrNormalized())).isTrue();
+    assertThat(Double.isNaN(res.stabNormalized())).isTrue();
+  }
+
+  @Test
+  @DisplayName("Reviewer Check 6: Timezone nguồn xác nhận được truyền vào selectRecentWindow quyết định chính xác thứ tự bài")
+  void testEvidenceValidator_selectRecentWindow_withSourceZoneContract_ordersPostsDeterministically() {
+    // Post A: "2026-11-05T12:00:00" (chuỗi không offset)
+    // Post B: "2026-11-05T06:00:00Z" (chuỗi UTC rõ ràng = 06:00 UTC)
+    UUID idA = UUID.randomUUID();
+    UUID idB = UUID.randomUUID();
+    Post postA = Post.builder().id(idA).postedAt("2026-11-05T12:00:00").build();
+    Post postB = Post.builder().id(idB).postedAt("2026-11-05T06:00:00Z").build();
+    List<Post> posts = List.of(postA, postB);
+
+    // Kịch bản 1: Nguồn Post A xác nhận theo hợp đồng là giờ Việt Nam (Asia/Ho_Chi_Minh):
+    // 12:00 GMT+7 tương đương 05:00 UTC. Do đó Post B (06:00 UTC) mới hơn Post A (05:00 UTC).
+    List<Post> windowVn = EvidenceValidator.selectRecentWindow(posts, 1, EvidenceValidator.VN_SOURCE_ZONE);
+    assertThat(windowVn.get(0).getId()).isEqualTo(idB);
+
+    // Kịch bản 2: Nguồn Post A theo chuẩn quốc tế UTC:
+    // 12:00 UTC mới hơn Post B (06:00 UTC). Do đó Post A mới hơn.
+    List<Post> windowUtc = EvidenceValidator.selectRecentWindow(posts, 1, java.time.ZoneOffset.UTC);
+    assertThat(windowUtc.get(0).getId()).isEqualTo(idA);
   }
 
   private RecommendationCandidateProjection mockCandidate(UUID id, String platform, Long followers) {

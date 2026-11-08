@@ -179,24 +179,27 @@ public class AiRecommendationService {
 
       for (RecommendationCandidateProjection cand : rawCandidates) {
         NormalizedCandidateContext p0 = phase0Map.get(cand.getCreatorId());
-        if (p0 != null) {
-          if (!p0.isCampaignEligible()) {
-            log.info("Candidate {} excluded: Ineligible for campaign: {}", cand.getCreatorId(), p0.eligibilityReasons());
-            continue;
-          }
-          if (p0.isDataError()) {
-            log.warn("Candidate {} excluded: Data quality error (not a campaign violation): {}", cand.getCreatorId(), p0.dataQualityReasons());
-            continue;
-          }
-          if (p0.isNotScorable()) {
-            log.info("Candidate {} excluded: Unsupported metrics for SM2 scoring: {}", cand.getCreatorId(), p0.dataQualityReasons());
-            continue;
-          }
-          if (p0.isScoreReady()) {
+        if (p0 == null) continue;
+
+        if (!p0.isCampaignEligible()) {
+          log.info("Candidate {} excluded: Ineligible for campaign: {}", cand.getCreatorId(), p0.eligibilityReasons());
+          continue;
+        }
+
+        // Phân luồng tường minh theo ScoringReadiness - tuyệt đối không dùng else mặc định để tránh NOT_SCORABLE lọt vào Provisional Pool
+        switch (p0.scoringReadiness()) {
+          case SCORE_READY -> {
             scoreReadyCandidates.add(cand);
-          } else {
+          }
+          case PROVISIONAL -> {
             log.info("Candidate {} routed to provisional pool (lacks full stability evidence): {}", cand.getCreatorId(), p0.dataQualityReasons());
             provisionalCandidates.add(cand);
+          }
+          case NOT_SCORABLE -> {
+            log.info("Candidate {} excluded: Not scorable under current SM2 policy: {}", cand.getCreatorId(), p0.dataQualityReasons());
+          }
+          case INVALID_DATA -> {
+            log.warn("Candidate {} excluded: Data quality error (not a campaign violation): {}", cand.getCreatorId(), p0.dataQualityReasons());
           }
         }
       }

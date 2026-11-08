@@ -69,8 +69,10 @@ public class Phase0Orchestrator {
         double kEr = policyNormalizer.resolveKEr(platform, ev.erMethod());
         double kVr = policyNormalizer.resolveKVr(platform);
 
-        double erNorm = policyNormalizer.normalize(ev.rawEr(), kEr);
-        double vrNorm = policyNormalizer.normalize(ev.rawVr(), kVr);
+        // Bảo toàn trạng thái: Nếu feature là NaN (ví dụ NOT_SCORABLE hoặc thiếu STAB), không gọi normalize để tránh ném ngoại lệ
+        // Chỉ gọi normalize khi feature là số thực (nếu số âm thì normalize sẽ ném IllegalArgumentException chuẩn xác)
+        double erNorm = Double.isNaN(ev.rawEr()) ? Double.NaN : policyNormalizer.normalize(ev.rawEr(), kEr);
+        double vrNorm = Double.isNaN(ev.rawVr()) ? Double.NaN : policyNormalizer.normalize(ev.rawVr(), kVr);
         double stabNorm = Double.isNaN(ev.rawStab()) ? Double.NaN : Math.max(0.0, Math.min(1.0, ev.rawStab()));
 
         results.add(new NormalizedCandidateContext(

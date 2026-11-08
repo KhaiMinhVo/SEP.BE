@@ -597,6 +597,7 @@ class Phase0EngineTest {
   @DisplayName("Luồng 2: Bài ảnh không có trường Views - ER tính theo Followers, VR thiếu do đặc thù loại nội dung -> Xếp loại NOT_SCORABLE (không gọi là dữ liệu hỏng)")
   void testEvidenceValidator_photoPostsWithoutViews_usesByFollowersMethodAndClassifiedNotScorable() {
     RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "INSTAGRAM", 10_000L);
+    when(cand.getAvgViews()).thenReturn(null);
     List<Post> posts = List.of(
         Post.builder().id(UUID.randomUUID()).views(null).likes(100L).comments(20L).shares(5L).postedAt("2026-11-02T10:00:00Z").build(),
         Post.builder().id(UUID.randomUUID()).views(null).likes(100L).comments(20L).shares(5L).postedAt("2026-11-01T10:00:00Z").build()
@@ -653,17 +654,108 @@ class Phase0EngineTest {
 
     assertThat(Double.isNaN(metrics.rawEr())).isTrue();
     assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.NOT_SCORABLE);
-    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("UNSUPPORTED_OR_MISSING_ER"));
+    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("UNSUPPORTED_OR_MISSING_ER") || r.contains("NO_POST_EVIDENCE"));
   }
 
   @Test
-  @DisplayName("Luồng 2: Timezone ISO-8601 không offset được chuẩn hóa sang Asia/Ho_Chi_Minh mặc định của thị trường")
+  @DisplayName("Luồng 2: Timezone ISO-8601 không offset được chuẩn hóa sang Asia/Ho_Chi_Minh khi nguồn xác nhận")
   void testEvidenceValidator_resolvePostTime_handlesLocalDateTimeWithoutTimezoneAsTargetZone() {
     Post post = Post.builder().postedAt("2026-11-05T12:00:00").build();
-    java.time.Instant resolved = EvidenceValidator.resolvePostTime(post);
+    java.time.Instant resolved = EvidenceValidator.resolvePostTime(post, EvidenceValidator.VN_SOURCE_ZONE);
 
     // 12:00 tại GMT+7 tương ứng với 05:00:00Z UTC
     assertThat(resolved).isEqualTo(java.time.Instant.parse("2026-11-05T05:00:00Z"));
+  }
+
+  @Test
+  @DisplayName("Reviewer Check 1: Video Views = 0, Interactions = 0 - Orchestrator giữ ELIGIBLE và NOT_SCORABLE, không biến thành INVALID_DATA")
+  void testReviewerCheck1_zeroViewsVideos_orchestratorPreservesNotScorableNotInvalidData() {
+    Campaign campaign = Campaign.builder().platforms(List.of("TIKTOK")).build();
+    UUID creatorId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(creatorId, "TIKTOK", 50_000L);
+    List<Post> posts = List.of(
+        Post.builder().id(UUID.randomUUID()).views(0L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-03T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(0L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-02T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(0L).likes(0L).comments(0L).shares(0L).postedAt("2026-11-01T10:00:00Z").build()
+    );
+
+    List<NormalizedCandidateContext> results = orchestrator.execute(
+        List.of(cand), campaign, Collections.emptySet(), Map.of(creatorId, posts)
+    );
+
+    assertThat(results).hasSize(1);
+    var res = results.get(0);
+    assertThat(res.isCampaignEligible()).isTrue();
+    assertThat(res.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.NOT_SCORABLE);
+    assertThat(res.isNotScorable()).isTrue();
+    assertThat(res.isDataError()).isFalse();
+    assertThat(res.dataQualityReasons()).anyMatch(r -> r.contains("ER_UNAVAILABLE_ZERO_VIEWS_DENOMINATOR"));
+  }
+
+  @Test
+  @DisplayName("Reviewer Check 2: Video có Views null do crawler lỗi - Xếp NOT_SCORABLE với lý do Missing, không phải Unsupported")
+  void testReviewerCheck2_videoPlatformNullViewsDueToCrawler_classifiedMissingViewMetrics() {
+    RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "TIKTOK", 50_000L);
+    when(cand.getAvgViews()).thenReturn(null);
+    List<Post> posts = List.of(
+        Post.builder().id(UUID.randomUUID()).views(null).likes(100L).comments(20L).shares(5L).postedAt("2026-11-02T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(null).likes(120L).comments(15L).shares(8L).postedAt("2026-11-01T10:00:00Z").build()
+    );
+
+    var metrics = evidenceValidator.evaluate(cand, posts);
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.NOT_SCORABLE);
+    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("MISSING_VIEW_METRICS"));
+    assertThat(metrics.dataQualityReasons()).noneMatch(r -> r.contains("UNSUPPORTED_METRIC_VIEWS"));
+  }
+
+  @Test
+  @DisplayName("Reviewer Check 3: postedAt không offset nhưng nguồn xác nhận UTC - Không bị chuyển lệch bảy giờ")
+  void testReviewerCheck3_unoffsettedTimestampWithUtcSourceConvention_noSevenHourShift() {
+    Post post = Post.builder().postedAt("2026-11-08T10:00:00").build();
+
+    // 1. Mặc định / nguồn xác nhận UTC: đúng 10:00:00Z UTC, không bị lệch 7 giờ sang 03:00:00Z
+    java.time.Instant utcInstant = EvidenceValidator.resolvePostTime(post, java.time.ZoneOffset.UTC);
+    assertThat(utcInstant).isEqualTo(java.time.Instant.parse("2026-11-08T10:00:00Z"));
+
+    // Default overload không truyền zone cũng tuân thủ chuẩn UTC:
+    java.time.Instant defaultInstant = EvidenceValidator.resolvePostTime(post);
+    assertThat(defaultInstant).isEqualTo(java.time.Instant.parse("2026-11-08T10:00:00Z"));
+
+    // 2. Khi hợp đồng nguồn xác nhận là giờ Việt Nam (Asia/Ho_Chi_Minh): 10:00 GMT+7 tương đương 03:00 UTC
+    java.time.Instant vnInstant = EvidenceValidator.resolvePostTime(post, EvidenceValidator.VN_SOURCE_ZONE);
+    assertThat(vnInstant).isEqualTo(java.time.Instant.parse("2026-11-08T03:00:00Z"));
+
+    // 3. Chuỗi có offset rõ ràng (+07:00 hoặc Z): luôn parse theo đúng offset
+    Post postWithOffset = Post.builder().postedAt("2026-11-08T10:00:00+07:00").build();
+    assertThat(EvidenceValidator.resolvePostTime(postWithOffset)).isEqualTo(java.time.Instant.parse("2026-11-08T03:00:00Z"));
+  }
+
+  @Test
+  @DisplayName("Reviewer Check 4: Bài ảnh không Views nhưng DB có Average Views hợp lệ - Quyết định dựa trên Metric Provenance, xếp vào PROVISIONAL")
+  void testReviewerCheck4_photoPostsWithDbAverageViewsProvenance_classifiedProvisional() {
+    RecommendationCandidateProjection cand = mockCandidate(UUID.randomUUID(), "INSTAGRAM", 10_000L);
+    // Profile DB có averageViews = 4_000 từ nguồn channel-level analytics đã xác minh
+    when(cand.getAvgViews()).thenReturn(BigDecimal.valueOf(4_000));
+
+    // Bài đăng là bài ảnh (views = null)
+    List<Post> photoPosts = List.of(
+        Post.builder().id(UUID.randomUUID()).views(null).likes(200L).comments(30L).shares(10L).postedAt("2026-11-02T10:00:00Z").build(),
+        Post.builder().id(UUID.randomUUID()).views(null).likes(180L).comments(20L).shares(10L).postedAt("2026-11-01T10:00:00Z").build()
+    );
+
+    var metrics = evidenceValidator.evaluate(cand, photoPosts);
+
+    // ER tính theo followers: (240 + 210) / 2 = 225; 225 / 10,000 = 0.0225 (hợp lệ)
+    assertThat(metrics.rawEr()).isCloseTo(0.0225, org.assertj.core.data.Offset.offset(1e-4));
+    // VR lấy từ DB average views qua Metric Provenance: 4,000 / 10,000 = 0.40 (hợp lệ)
+    assertThat(metrics.rawVr()).isCloseTo(0.40, org.assertj.core.data.Offset.offset(1e-4));
+    // STAB không thể tính từ bài ảnh đơn lẻ (cửa sổ không có video views) -> NaN
+    assertThat(metrics.canComputeStability()).isFalse();
+    assertThat(Double.isNaN(metrics.rawStab())).isTrue();
+
+    // CẢ ER và VR đều hợp lệ, chỉ thiếu STAB -> Đủ điều kiện xếp vào PROVISIONAL (không bị loại oan)
+    assertThat(metrics.scoringReadiness()).isEqualTo(com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness.PROVISIONAL);
+    assertThat(metrics.dataQualityReasons()).anyMatch(r -> r.contains("SHORT_WINDOW_INSUFFICIENT_POSTS"));
   }
 
   private RecommendationCandidateProjection mockCandidate(UUID id, String platform, Long followers) {

@@ -56,28 +56,40 @@ public class EvidenceValidator {
     }
   }
 
-  public static final java.time.ZoneId DEFAULT_SOURCE_ZONE = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
+  public static final java.time.ZoneId VN_SOURCE_ZONE = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
+  public static final java.time.ZoneId DEFAULT_SOURCE_ZONE = java.time.ZoneOffset.UTC;
 
   /**
    * Xác định thời điểm đăng bài thực tế: ưu tiên postedAt (ISO-8601 từ social platform),
    * nếu không có thì fallback sang createdAt (thời điểm crawler lưu vào CSDL).
-   * Chuẩn hóa timezone sang múi giờ nguồn mặc định Asia/Ho_Chi_Minh (GMT+7) khi chuỗi thiếu offset.
+   *
+   * Quy tắc chuẩn hóa múi giờ:
+   * 1. Nếu chuỗi có 'Z' hoặc offset rõ ràng (+07:00, -05:00,...): parse theo chính offset đó.
+   * 2. Nếu chuỗi không có offset: sử dụng fallbackSourceZone được truyền vào theo hợp đồng dữ liệu của nguồn.
+   *    Mặc định khi nguồn chưa xác nhận quy ước là UTC (không tự tiện giả định giờ Việt Nam).
    */
   public static java.time.Instant resolvePostTime(Post p) {
+    return resolvePostTime(p, DEFAULT_SOURCE_ZONE);
+  }
+
+  public static java.time.Instant resolvePostTime(Post p, java.time.ZoneId fallbackSourceZone) {
     if (p == null) return java.time.Instant.EPOCH;
+    java.time.ZoneId zone = fallbackSourceZone != null ? fallbackSourceZone : DEFAULT_SOURCE_ZONE;
+
     if (p.getPostedAt() != null && !p.getPostedAt().isBlank()) {
+      String raw = p.getPostedAt().trim();
       try {
-        return java.time.Instant.parse(p.getPostedAt());
+        return java.time.OffsetDateTime.parse(raw).toInstant();
       } catch (Exception ignored) {
         try {
-          return java.time.LocalDateTime.parse(p.getPostedAt())
-              .atZone(DEFAULT_SOURCE_ZONE)
+          return java.time.LocalDateTime.parse(raw)
+              .atZone(zone)
               .toInstant();
         } catch (Exception ignored2) {}
       }
     }
     if (p.getCreatedAt() != null) {
-      return p.getCreatedAt().atZone(DEFAULT_SOURCE_ZONE).toInstant();
+      return p.getCreatedAt().atZone(zone).toInstant();
     }
     return java.time.Instant.EPOCH;
   }
@@ -87,11 +99,15 @@ public class EvidenceValidator {
    * Dùng chung một hàm duy nhất giữa Service và Validator, có tie-breaker theo Post ID để bảo đảm tính tất định.
    */
   public static List<Post> selectRecentWindow(List<Post> posts, int limit) {
-    if (posts == null || posts.isEmpty()) return Collections.emptyList();
+    return selectRecentWindow(posts, limit, DEFAULT_SOURCE_ZONE);
+  }
+
+  public static List<Post> selectRecentWindow(List<Post> posts, int limit, java.time.ZoneId fallbackSourceZone) {
+    if (posts == null || posts.isEmpty() || limit <= 0) return Collections.emptyList();
     return posts.stream()
         .filter(Objects::nonNull)
         .sorted((a, b) -> {
-          int cmp = resolvePostTime(b).compareTo(resolvePostTime(a));
+          int cmp = resolvePostTime(b, fallbackSourceZone).compareTo(resolvePostTime(a, fallbackSourceZone));
           if (cmp != 0) return cmp;
           if (a.getId() != null && b.getId() != null) {
             return b.getId().compareTo(a.getId());
@@ -244,11 +260,14 @@ public class EvidenceValidator {
       if (!postsWithViews.isEmpty() && !isFacebook) {
         double avgViews = viewsSum / postsWithViews.size();
         rawVr = (followers > 0) ? (avgViews / followers) : 0.0;
+      } else if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && !isFacebook) {
+        // Metric Provenance: Có chỉ số average views hợp lệ từ profile/kênh trong DB
+        rawVr = (followers > 0) ? (cand.getAvgViews().doubleValue() / followers) : 0.0;
       } else {
         // Không có bài nào hỗ trợ views (ví dụ bài ảnh hoặc Facebook không có video views)
         rawVr = Double.NaN;
       }
-    } else if (cand.getAvgViews() != null && !isFacebook) {
+    } else if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && !isFacebook) {
       rawVr = (followers > 0) ? (cand.getAvgViews().doubleValue() / followers) : 0.0;
     } else {
       rawVr = Double.NaN;
@@ -317,18 +336,33 @@ public class EvidenceValidator {
       }
       dataQualityReasons = Collections.unmodifiableList(reasons);
     } else if (Double.isNaN(rawEr) || Double.isNaN(rawVr)) {
-      // Metric không khả dụng do đặc thù loại nội dung (ví dụ bài ảnh không có Views để tính VR/STAB) hoặc thiếu mẫu số (0/0)
+      // Metric không khả dụng do đặc thù loại nội dung (ví dụ bài ảnh không có Views để tính VR/STAB),
+      // thiếu mẫu số (0/0), hoặc lỗi crawler chưa thu thập views cho video
       scoringReadiness = ScoringReadiness.NOT_SCORABLE;
       List<String> reasons = new ArrayList<>();
       if (Double.isNaN(rawEr)) {
         if (!postsWithViews.isEmpty() && viewsSum == 0.0) {
           reasons.add("ER_UNAVAILABLE_ZERO_VIEWS_DENOMINATOR: Video views sum is 0, 0/0 is mathematically indeterminate");
+        } else if (postCount == 0 && cand.getEngagementRate() == null && cand.getAvgLikes() == null) {
+          reasons.add("NO_POST_EVIDENCE: Creator has no posts in database to compute Engagement Rate");
+        } else if (followers <= 0) {
+          reasons.add("UNSUPPORTED_OR_MISSING_ER: Creator lacks follower count required as denominator for ER by followers");
         } else {
           reasons.add("UNSUPPORTED_OR_MISSING_ER: Engagement Rate cannot be calculated (lacks followers or interactions)");
         }
       }
       if (Double.isNaN(rawVr)) {
-        reasons.add("UNSUPPORTED_METRIC_VIEWS: Platform or content type does not provide Views required for VR and STAB in SM2");
+        if (postCount == 0 && (cand.getAvgViews() == null || cand.getAvgViews().doubleValue() <= 0)) {
+          reasons.add("NO_POST_EVIDENCE: Creator has no posts in database and lacks aggregate view metrics");
+        } else {
+          String platformUpper = cand.getPlatform() != null ? cand.getPlatform().trim().toUpperCase() : "";
+          boolean isVideoPlatform = "TIKTOK".equals(platformUpper) || "YOUTUBE".equals(platformUpper);
+          if (isVideoPlatform) {
+            reasons.add("MISSING_VIEW_METRICS: Crawler failed to collect view metrics for video content");
+          } else {
+            reasons.add("UNSUPPORTED_METRIC_VIEWS: Platform or content type does not provide Views required for VR and STAB in SM2");
+          }
+        }
       }
       dataQualityReasons = Collections.unmodifiableList(reasons);
     } else {

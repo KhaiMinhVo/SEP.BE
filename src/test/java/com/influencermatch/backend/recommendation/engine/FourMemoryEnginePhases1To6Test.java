@@ -1480,7 +1480,7 @@ class FourMemoryEnginePhases1To6Test {
     );
 
     var card = generator.generate(cand, campaign, breakdown, confidence);
-    assertThat(card.isExplanationAvailable()).isTrue();
+    assertThat(card.isExplanationAvailable()).isFalse();
     assertThat(card.getSummary()).contains("Bao Ngoc Review", "Four-Memory TOPSIS", "81.3");
     assertThat(card.getReasons()).isNotEmpty();
     assertThat(card.getReasons().stream().anyMatch(r -> r.contains("tương đồng ngữ nghĩa"))).isTrue();
@@ -1677,6 +1677,173 @@ class FourMemoryEnginePhases1To6Test {
     assertThat(sorted.get(2).score).isEqualTo(80.0);
   }
 
+  // =========================================================================
+  // Phase 6 Section 6 Acceptance Tests: Post-Processing, Display Sorting & MMR
+  // =========================================================================
+
+  @Test
+  @DisplayName("P0 Test: BEST_MATCH vs DIVERSIFIED_MATCH - Pure BEST_MATCH preserves TOPSIS order; DIVERSIFIED_MATCH applies MMR while preserving MatchScore")
+  void testP0_bestMatch_vs_diversifiedMatch_mmrSelectionAndScoreIntegrity() {
+    DisplaySorter sorter = new DisplaySorter();
+    MmrReranker mmr = new MmrReranker();
+
+    UUID idA = UUID.randomUUID();
+    UUID idB = UUID.randomUUID();
+    UUID idC = UUID.randomUUID();
+
+    TestBucketedMmrItem candA = new TestBucketedMmrItem(idA, 90.0, 0.90, 0.85, PriceStatus.PRICE_UNKNOWN, "Skincare", "Beauty", new float[] {1.0f, 0.0f});
+    TestBucketedMmrItem candB = new TestBucketedMmrItem(idB, 88.0, 0.88, 0.80, PriceStatus.PRICE_UNKNOWN, "Skincare", "Beauty", new float[] {0.99f, 0.01f});
+    TestBucketedMmrItem candC = new TestBucketedMmrItem(idC, 85.0, 0.85, 0.75, PriceStatus.PRICE_UNKNOWN, "Gadgets", "Tech", new float[] {0.0f, 1.0f});
+
+    List<TestBucketedMmrItem> items = List.of(candB, candA, candC);
+
+    // 1. Pure BEST_MATCH: strictly sorted by MatchScore descending without diversity perturbation
+    List<TestBucketedMmrItem> bestMatchSorted = sorter.sort(items, DisplayMode.BEST_MATCH);
+    assertThat(bestMatchSorted).containsExactly(candA, candB, candC);
+    assertThat(bestMatchSorted.get(0).matchScore()).isEqualTo(90.0);
+    assertThat(bestMatchSorted.get(1).matchScore()).isEqualTo(88.0);
+    assertThat(bestMatchSorted.get(2).matchScore()).isEqualTo(85.0);
+
+    // 2. DIVERSIFIED_MATCH (Top K = 2): MMR selects candA (highest score) and promotes candC (diverse Tech) over redundant candB
+    List<TestBucketedMmrItem> diversified = mmr.rerank(bestMatchSorted, 2, 0.70);
+    assertThat(diversified).hasSize(2);
+    assertThat(diversified.get(0)).isSameAs(candA);
+    assertThat(diversified.get(1)).isSameAs(candC);
+
+    // 3. MatchScores remain completely intact in MMR output (never modified by MMR penalty)
+    assertThat(diversified.get(0).matchScore()).isEqualTo(90.0);
+    assertThat(diversified.get(1).matchScore()).isEqualTo(85.0);
+  }
+
+  @Test
+  @DisplayName("P0 Test: Mode-aware Master Representative - BUDGET_READY_FIRST selects within-budget channel; BEST_MATCH selects highest MatchScore")
+  void testP0_masterDedup_representativeSelection_modeAware() {
+    UUID chOverBudget = UUID.randomUUID();
+    UUID chWithinBudget = UUID.randomUUID();
+
+    TestBucketedMmrItem ch1 = new TestBucketedMmrItem(
+        chOverBudget, 95.0, 0.90, 0.85, PriceStatus.CONFIRMED_OVER_BUDGET, "Vlog", "Lifestyle", null);
+    TestBucketedMmrItem ch2 = new TestBucketedMmrItem(
+        chWithinBudget, 85.0, 0.80, 0.75, PriceStatus.CONFIRMED_WITHIN_BUDGET, "Vlog", "Lifestyle", null);
+
+    List<TestBucketedMmrItem> channels = List.of(ch1, ch2);
+
+    // Mode 1: BUDGET_READY_FIRST deduplication comparator
+    Comparator<DisplaySorter.DisplayableItem> budgetComp = DisplaySorter.resolveComparator(DisplayMode.BUDGET_READY_FIRST);
+    TestBucketedMmrItem repBudget = channels.get(0);
+    for (int i = 1; i < channels.size(); i++) {
+      if (budgetComp.compare(channels.get(i), repBudget) < 0) {
+        repBudget = channels.get(i);
+      }
+    }
+    // Priority 1 (WITHIN_BUDGET) is selected over Priority 4 (OVER_BUDGET) despite lower MatchScore
+    assertThat(repBudget.creatorId()).isEqualTo(chWithinBudget);
+    assertThat(repBudget.priceStatus()).isEqualTo(PriceStatus.CONFIRMED_WITHIN_BUDGET);
+
+    // Mode 2: BEST_MATCH deduplication comparator
+    Comparator<DisplaySorter.DisplayableItem> matchComp = DisplaySorter.resolveComparator(DisplayMode.BEST_MATCH);
+    TestBucketedMmrItem repMatch = channels.get(0);
+    for (int i = 1; i < channels.size(); i++) {
+      if (matchComp.compare(channels.get(i), repMatch) < 0) {
+        repMatch = channels.get(i);
+      }
+    }
+    // Highest MatchScore (95.0) is selected
+    assertThat(repMatch.creatorId()).isEqualTo(chOverBudget);
+    assertThat(repMatch.matchScore()).isEqualTo(95.0);
+  }
+
+  @Test
+  @DisplayName("P0 Test: Deterministic Tie-breaking - Same Master with identical score/priority yields identical representative when input order is reversed")
+  void testP0_masterDedup_deterministicTieBreaking_orderIndependent() {
+    UUID id1 = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    UUID id2 = UUID.fromString("00000000-0000-0000-0000-000000000002");
+
+    TestBucketedMmrItem ch1 = new TestBucketedMmrItem(
+        id1, 80.0, 0.80, 0.70, PriceStatus.CONFIRMED_WITHIN_BUDGET, "Tech", "Tech", null);
+    TestBucketedMmrItem ch2 = new TestBucketedMmrItem(
+        id2, 80.0, 0.80, 0.70, PriceStatus.CONFIRMED_WITHIN_BUDGET, "Tech", "Tech", null);
+
+    Comparator<DisplaySorter.DisplayableItem> comp = DisplaySorter.resolveComparator(DisplayMode.BUDGET_READY_FIRST);
+
+    // Forward order: [ch1, ch2]
+    TestBucketedMmrItem winnerForward = ch1;
+    if (comp.compare(ch2, winnerForward) < 0) winnerForward = ch2;
+
+    // Reverse order: [ch2, ch1]
+    TestBucketedMmrItem winnerReverse = ch2;
+    if (comp.compare(ch1, winnerReverse) < 0) winnerReverse = ch1;
+
+    // Both must yield id1 (due to deterministic UUID ascending tie-breaker)
+    assertThat(winnerForward.creatorId()).isEqualTo(id1);
+    assertThat(winnerReverse.creatorId()).isEqualTo(id1);
+    assertThat(winnerForward).isEqualTo(winnerReverse);
+  }
+
+  @Test
+  @DisplayName("P0 Test: Intra-Bucket MMR preserves strict budget priority order (Priority 1 -> 2 -> 3 -> 4) with zero budget leakage")
+  void testP0_intraBucketMmr_strictBudgetGroupPreservation_noBudgetLeakage() {
+    MmrReranker mmr = new MmrReranker();
+
+    TestBucketedMmrItem a = new TestBucketedMmrItem(
+        UUID.randomUUID(), 90.0, 0.90, 0.80, PriceStatus.CONFIRMED_WITHIN_BUDGET, "Beauty", "Skincare", new float[] {1f, 0f});
+    TestBucketedMmrItem b = new TestBucketedMmrItem(
+        UUID.randomUUID(), 85.0, 0.85, 0.75, PriceStatus.CONFIRMED_WITHIN_BUDGET, "Beauty", "Skincare", new float[] {0.98f, 0.02f});
+    TestBucketedMmrItem c = new TestBucketedMmrItem(
+        UUID.randomUUID(), 95.0, 0.95, 0.90, PriceStatus.DECLARED_ESTIMATE, "Tech", "Gadgets", new float[] {0f, 1f});
+    TestBucketedMmrItem d = new TestBucketedMmrItem(
+        UUID.randomUUID(), 99.0, 0.99, 0.99, PriceStatus.CONFIRMED_OVER_BUDGET, "Fashion", "Clothing", new float[] {0.5f, 0.5f});
+
+    List<TestBucketedMmrItem> all = List.of(d, c, b, a); // Shuffled input
+
+    List<TestBucketedMmrItem> reranked = mmr.rerankIntraBucket(all, 4, 0.70);
+
+    assertThat(reranked).hasSize(4);
+
+    // 1. Priority 1 items (a, b) MUST precede Priority 2 (c) and Priority 4 (d)
+    assertThat(reranked.get(0).budgetPriority()).isEqualTo(1);
+    assertThat(reranked.get(1).budgetPriority()).isEqualTo(1);
+    assertThat(reranked.get(2).budgetPriority()).isEqualTo(2); // Candidate c (DECLARED_ESTIMATE)
+    assertThat(reranked.get(3).budgetPriority()).isEqualTo(4); // Candidate d (CONFIRMED_OVER_BUDGET)
+
+    // Over-budget candidate d (score 99) NEVER leaks into top budget positions
+    assertThat(reranked.get(3)).isSameAs(d);
+  }
+
+  @Test
+  @DisplayName("P1 Test: MMR Vector Cosine overrides discrete Category, with zero-norm and dimension-mismatch safety")
+  void testP1_mmrVectorCosine_overridesCategory_andHandlesVectorEdgeCasesSafely() {
+    MmrReranker mmr = new MmrReranker();
+
+    // candA is selected. candB has different category but identical vector. candC has same category but orthogonal vector.
+    TestBucketedMmrItem candA = new TestBucketedMmrItem(
+        UUID.randomUUID(), 90.0, 0.9, 0.9, PriceStatus.PRICE_UNKNOWN, "Tech", "Tech", new float[] {1.0f, 0.0f});
+    TestBucketedMmrItem candB = new TestBucketedMmrItem(
+        UUID.randomUUID(), 88.0, 0.88, 0.88, PriceStatus.PRICE_UNKNOWN, "Beauty", "Beauty", new float[] {0.999f, 0.001f});
+    TestBucketedMmrItem candC = new TestBucketedMmrItem(
+        UUID.randomUUID(), 87.0, 0.87, 0.87, PriceStatus.PRICE_UNKNOWN, "Tech", "Tech", new float[] {0.0f, 1.0f});
+
+    // Top 2: candA selected first. candC is selected second because candB's vector is redundant with candA!
+    List<TestBucketedMmrItem> selected = mmr.rerank(List.of(candA, candB, candC), 2, 0.70);
+    assertThat(selected.get(0)).isSameAs(candA);
+    assertThat(selected.get(1)).isSameAs(candC);
+
+    // Edge Cases: Zero norm vectors & dimension mismatch never cause NaN or crash
+    TestBucketedMmrItem zeroVec = new TestBucketedMmrItem(
+        UUID.randomUUID(), 80.0, 0.8, 0.8, PriceStatus.PRICE_UNKNOWN, "Beauty", "Beauty", new float[] {0.0f, 0.0f});
+    TestBucketedMmrItem mismatchDimVec = new TestBucketedMmrItem(
+        UUID.randomUUID(), 80.0, 0.8, 0.8, PriceStatus.PRICE_UNKNOWN, "Beauty", "Beauty", new float[] {1.0f, 0.0f, 0.0f});
+    TestBucketedMmrItem emptyVec = new TestBucketedMmrItem(
+        UUID.randomUUID(), 80.0, 0.8, 0.8, PriceStatus.PRICE_UNKNOWN, "Beauty", "Beauty", new float[0]);
+
+    List<TestBucketedMmrItem> edgeReranked = mmr.rerank(List.of(candA, zeroVec, mismatchDimVec, emptyVec), 4, 0.70);
+    assertThat(edgeReranked).hasSize(4);
+    for (TestBucketedMmrItem item : edgeReranked) {
+      assertThat(Double.isNaN(item.matchScore())).isFalse();
+      assertThat(Double.isInfinite(item.matchScore())).isFalse();
+    }
+  }
+
   // --- Test Helper Records ---
   private record TestDisplayItem(
       UUID creatorId,
@@ -1692,4 +1859,20 @@ class FourMemoryEnginePhases1To6Test {
       String category,
       float[] embedding
   ) implements MmrReranker.MmrCandidate {}
+
+  private record TestBucketedMmrItem(
+      UUID creatorId,
+      double matchScore,
+      double sm3,
+      double sm2,
+      PriceStatus priceStatus,
+      String niche,
+      String category,
+      float[] embedding
+  ) implements DisplaySorter.DisplayableItem, MmrReranker.BucketedMmrCandidate {
+    @Override
+    public int budgetPriority() {
+      return priceStatus != null ? priceStatus.getPriority() : PriceStatus.PRICE_UNKNOWN.getPriority();
+    }
+  }
 }

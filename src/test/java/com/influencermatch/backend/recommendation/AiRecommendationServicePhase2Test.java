@@ -638,6 +638,90 @@ class AiRecommendationServicePhase2Test {
         .anyMatch(r -> r.startsWith("Lưu ý: ") && r.contains("Chưa có kết quả chiến dịch quá khứ được xác minh"));
   }
 
+  @Test
+  @DisplayName("P1 Test: AI Explanation trả về rỗng hoặc explanationAvailable=false -> Chuyển sang Deterministic Fallback và bảo toàn đầy đủ Evidence Warnings")
+  void testAiServiceExplanation_blankOrUnavailable_triggersDeterministicFallback() {
+    UUID creatorId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(
+        creatorId, null, "TIKTOK", "Fallback KOC", 30_000L,
+        BigDecimal.valueOf(10_000), BigDecimal.valueOf(500), BigDecimal.valueOf(0.05),
+        "Beauty", "Skincare", 0.85
+    );
+
+    com.influencermatch.backend.creator.repository.PostRepository mockPostRepo =
+        mock(com.influencermatch.backend.creator.repository.PostRepository.class);
+    when(mockPostRepo.findByCreatorIdIn(any())).thenReturn(List.of(
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(creatorId).build()).views(9_000L).likes(450L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(creatorId).build()).views(10_000L).likes(500L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(creatorId).build()).views(11_000L).likes(550L).build()
+    ));
+    service.setPostRepository(mockPostRepo);
+
+    when(historicalCampaignRepository.findByCreatorId(creatorId)).thenReturn(Collections.emptyList());
+
+    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
+        anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+        .thenReturn(List.of(cand));
+
+    // AI response có explanationAvailable = false và summary rỗng
+    when(aiServiceClient.getExplanation(any())).thenReturn(
+        ExplainResponseDto.builder()
+            .status("failure")
+            .summary("")
+            .explanationAvailable(false)
+            .build()
+    );
+
+    RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
+    assertThat(response.getRecommendations()).hasSize(1);
+
+    var recItem = response.getRecommendations().get(0);
+    assertThat(recItem.getReasoning()).isNotNull();
+    assertThat(recItem.getReasoning().isExplanationAvailable()).isFalse();
+
+    // Phải sinh summary từ deterministic template
+    assertThat(recItem.getReasoning().getSummary()).contains("Four-Memory TOPSIS");
+    assertThat(recItem.getReasoning().getEvidenceWarnings()).isNotEmpty();
+    assertThat(recItem.getReasoning().getEvidenceWarnings())
+        .anyMatch(w -> w.contains("Chưa có kết quả chiến dịch quá khứ được xác minh"));
+    assertThat(recItem.getReasoning().getReasons())
+        .anyMatch(r -> r.startsWith("Lưu ý: ") && r.contains("Chưa có kết quả chiến dịch quá khứ được xác minh"));
+  }
+
+  @Test
+  @DisplayName("P0 Integration: recommendKocs hỗ trợ DisplayMode (BEST_MATCH, DIVERSIFIED_MATCH, BUDGET_READY_FIRST)")
+  void testRecommendKocs_supportsAllDisplayModes() {
+    UUID creatorId = UUID.randomUUID();
+    RecommendationCandidateProjection cand = mockCandidate(
+        creatorId, null, "TIKTOK", "Mode Test KOC", 30_000L,
+        BigDecimal.valueOf(10_000), BigDecimal.valueOf(500), BigDecimal.valueOf(0.05),
+        "Beauty", "Skincare", 0.85
+    );
+
+    com.influencermatch.backend.creator.repository.PostRepository mockPostRepo =
+        mock(com.influencermatch.backend.creator.repository.PostRepository.class);
+    when(mockPostRepo.findByCreatorIdIn(any())).thenReturn(List.of(
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(creatorId).build()).views(9_000L).likes(450L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(creatorId).build()).views(10_000L).likes(500L).build(),
+        com.influencermatch.backend.creator.model.Post.builder().creator(com.influencermatch.backend.creator.model.Creator.builder().id(creatorId).build()).views(11_000L).likes(550L).build()
+    ));
+    service.setPostRepository(mockPostRepo);
+
+    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
+        anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+        .thenReturn(List.of(cand));
+
+    // Kiểm tra chạy thành công cả 3 DisplayMode
+    RecommendationResponseDto r1 = service.recommendKocs(campaignId, 10, com.influencermatch.backend.recommendation.engine.presentation.enums.DisplayMode.BEST_MATCH);
+    assertThat(r1.getRecommendations()).hasSize(1);
+
+    RecommendationResponseDto r2 = service.recommendKocs(campaignId, 10, com.influencermatch.backend.recommendation.engine.presentation.enums.DisplayMode.DIVERSIFIED_MATCH);
+    assertThat(r2.getRecommendations()).hasSize(1);
+
+    RecommendationResponseDto r3 = service.recommendKocs(campaignId, 10, com.influencermatch.backend.recommendation.engine.presentation.enums.DisplayMode.BUDGET_READY_FIRST);
+    assertThat(r3.getRecommendations()).hasSize(1);
+  }
+
   private RecommendationCandidateProjection mockCandidate(
       UUID creatorId, UUID masterId, String platform, String displayName, Long followers,
       BigDecimal avgViews, BigDecimal avgLikes, BigDecimal er, String niche, String cat, Double semantic) {

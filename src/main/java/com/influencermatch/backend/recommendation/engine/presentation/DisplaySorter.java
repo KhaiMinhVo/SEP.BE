@@ -29,10 +29,13 @@ public class DisplaySorter {
     }
 
     List<T> sorted = new ArrayList<>(items);
-    Comparator<T> comparator;
+    sorted.sort(resolveComparator(mode));
+    return sorted;
+  }
 
+  public static <T extends DisplayableItem> Comparator<T> resolveComparator(DisplayMode mode) {
     if (mode == DisplayMode.BUDGET_READY_FIRST) {
-      comparator = (a, b) -> {
+      return (a, b) -> {
         int pA = (a.priceStatus() != null) ? a.priceStatus().getPriority() : PriceStatus.PRICE_UNKNOWN.getPriority();
         int pB = (b.priceStatus() != null) ? b.priceStatus().getPriority() : PriceStatus.PRICE_UNKNOWN.getPriority();
         int cmpP = Integer.compare(pA, pB);
@@ -50,8 +53,8 @@ public class DisplaySorter {
         return a.creatorId().compareTo(b.creatorId());
       };
     } else {
-      // BEST_MATCH
-      comparator = (a, b) -> {
+      // BEST_MATCH & DIVERSIFIED_MATCH (Initial relevance ordering)
+      return (a, b) -> {
         int cmpScore = Double.compare(b.matchScore(), a.matchScore());
         if (cmpScore != 0) return cmpScore;
 
@@ -64,8 +67,5 @@ public class DisplaySorter {
         return a.creatorId().compareTo(b.creatorId());
       };
     }
-
-    sorted.sort(comparator);
-    return sorted;
   }
 }

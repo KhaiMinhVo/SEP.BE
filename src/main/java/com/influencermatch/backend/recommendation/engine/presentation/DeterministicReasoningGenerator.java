@@ -75,7 +75,7 @@ public class DeterministicReasoningGenerator {
     return ReasoningCardDto.builder()
         .summary(summary)
         .reasons(reasons)
-        .explanationAvailable(true)
+        .explanationAvailable(false)
         .evidenceWarnings(warnings)
         .build();
   }

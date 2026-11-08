@@ -4,6 +4,7 @@ import com.influencermatch.backend.campaign.model.RecommendationRun;
 import com.influencermatch.backend.campaign.repository.RecommendationRunRepository;
 import com.influencermatch.backend.common.dto.ApiResponse;
 import com.influencermatch.backend.recommendation.dto.*;
+import com.influencermatch.backend.recommendation.engine.presentation.enums.DisplayMode;
 import com.influencermatch.backend.recommendation.service.AiRecommendationService;
 import com.influencermatch.backend.relationship.service.CampaignOwnershipService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -34,8 +35,9 @@ public class AiRecommendationController {
       security = @SecurityRequirement(name = "BearerAuth"))
   public ResponseEntity<ApiResponse<RecommendationResponseDto>> recommendKocs(
       @PathVariable UUID campaignId,
-      @RequestParam(defaultValue = "30") int limit) {
-    RecommendationResponseDto result = recommendationService.recommendKocs(campaignId, limit);
+      @RequestParam(defaultValue = "30") int limit,
+      @RequestParam(required = false, defaultValue = "BEST_MATCH") DisplayMode displayMode) {
+    RecommendationResponseDto result = recommendationService.recommendKocs(campaignId, limit, displayMode);
     return ResponseEntity.ok(ApiResponse.ok("KOC recommendations generated successfully", result));
   }
 

@@ -14,6 +14,7 @@ import com.influencermatch.backend.recommendation.engine.memory.FourMemoryScorer
 import com.influencermatch.backend.recommendation.engine.memory.model.CandidateMemoryScores;
 import com.influencermatch.backend.recommendation.engine.phase0.model.NormalizedCandidateContext;
 import com.influencermatch.backend.recommendation.engine.presentation.DisplaySorter;
+import com.influencermatch.backend.recommendation.engine.presentation.MmrReranker;
 import com.influencermatch.backend.recommendation.engine.presentation.enums.PriceStatus;
 import com.influencermatch.backend.recommendation.engine.topsis.TopsisRankingEngine;
 import com.influencermatch.backend.recommendation.engine.topsis.model.TopsisResult;
@@ -45,8 +46,31 @@ public class FourMemoryTopsisEngine {
       CandidateMemoryScores memoryScores,
       TopsisResult topsisResult,
       ConfidenceAssessment confidence,
-      EngineWeights weights
-  ) implements DisplaySorter.DisplayableItem, TopsisRankingEngine.RankableCandidate {
+      EngineWeights weights,
+      PriceStatus priceStatus,
+      float[] embedding
+  ) implements DisplaySorter.DisplayableItem, TopsisRankingEngine.RankableCandidate, MmrReranker.BucketedMmrCandidate {
+
+    public EvaluatedCandidate(
+        RecommendationCandidateProjection candidate,
+        CandidateMemoryScores memoryScores,
+        TopsisResult topsisResult,
+        ConfidenceAssessment confidence,
+        EngineWeights weights
+    ) {
+      this(candidate, memoryScores, topsisResult, confidence, weights, PriceStatus.PRICE_UNKNOWN, null);
+    }
+
+    public EvaluatedCandidate(
+        RecommendationCandidateProjection candidate,
+        CandidateMemoryScores memoryScores,
+        TopsisResult topsisResult,
+        ConfidenceAssessment confidence,
+        EngineWeights weights,
+        PriceStatus priceStatus
+    ) {
+      this(candidate, memoryScores, topsisResult, confidence, weights, priceStatus, null);
+    }
 
     @Override
     public UUID creatorId() {
@@ -70,7 +94,27 @@ public class FourMemoryTopsisEngine {
 
     @Override
     public PriceStatus priceStatus() {
-      return PriceStatus.PRICE_UNKNOWN;
+      return priceStatus != null ? priceStatus : PriceStatus.PRICE_UNKNOWN;
+    }
+
+    @Override
+    public String niche() {
+      return candidate != null ? candidate.getNiche() : null;
+    }
+
+    @Override
+    public String category() {
+      return candidate != null ? candidate.getCategory() : null;
+    }
+
+    @Override
+    public float[] embedding() {
+      return embedding;
+    }
+
+    @Override
+    public int budgetPriority() {
+      return priceStatus().getPriority();
     }
   }
 

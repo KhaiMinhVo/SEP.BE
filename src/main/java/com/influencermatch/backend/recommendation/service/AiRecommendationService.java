@@ -26,6 +26,7 @@ import com.influencermatch.backend.recommendation.engine.phase0.Phase0Orchestrat
 import com.influencermatch.backend.recommendation.engine.phase0.model.NormalizedCandidateContext;
 import com.influencermatch.backend.recommendation.engine.presentation.DeterministicReasoningGenerator;
 import com.influencermatch.backend.recommendation.engine.presentation.DisplaySorter;
+import com.influencermatch.backend.recommendation.engine.presentation.MmrReranker;
 import com.influencermatch.backend.recommendation.engine.presentation.enums.DisplayMode;
 import com.influencermatch.backend.relationship.enums.ShortlistStatus;
 import com.influencermatch.backend.relationship.model.ShortlistItem;
@@ -69,17 +70,27 @@ public class AiRecommendationService {
   private final Phase0Orchestrator phase0Orchestrator = new Phase0Orchestrator();
   private final FourMemoryTopsisEngine fourMemoryTopsisEngine = new FourMemoryTopsisEngine();
   private final DisplaySorter displaySorter = new DisplaySorter();
+  private final MmrReranker mmrReranker = new MmrReranker();
   private final DeterministicReasoningGenerator deterministicReasoningGenerator = new DeterministicReasoningGenerator();
 
   private static final UUID DUMMY_UUID = UUID.fromString("00000000-0000-0000-0000-000000000000");
 
   /**
-   * Flow 3 Core: Thực thi AI Recommendation theo Four-Memory Framework.
-   * Gồm: Two-Phase Quota Reservation -> Nạp 4 tầng bộ nhớ -> pgvector Search ->
-   * Four-Memory Feature Scorer -> Master-aware Grouping -> XAI Reasoning Card.
+   * Flow 3 Core: Thực thi AI Recommendation theo Four-Memory Framework (default DisplayMode.BEST_MATCH).
    */
   @Transactional
   public RecommendationResponseDto recommendKocs(UUID campaignId, int limit) {
+    return recommendKocs(campaignId, limit, DisplayMode.BEST_MATCH);
+  }
+
+  /**
+   * Flow 3 Core: Thực thi AI Recommendation theo Four-Memory Framework với DisplayMode chỉ định.
+   * Gồm: Two-Phase Quota Reservation -> Nạp 4 tầng bộ nhớ -> pgvector Search ->
+   * Four-Memory Feature Scorer -> Master-aware Grouping -> Post-Processing & Presentation -> XAI Reasoning Card.
+   */
+  @Transactional
+  public RecommendationResponseDto recommendKocs(UUID campaignId, int limit, DisplayMode displayMode) {
+    DisplayMode mode = (displayMode != null) ? displayMode : DisplayMode.BEST_MATCH;
     Permissions.require(Permission.RUN_RECOMMENDATION);
     Campaign campaign = ownership.requireOwned(campaignId);
     UUID brandProfileId = campaign.getBrandProfile().getId();
@@ -239,6 +250,8 @@ public class AiRecommendationService {
       }
 
       // 7. Master-aware Grouping trên Main Ranking Pool (SCORE_READY)
+      // Master Dedup diễn ra trước limit, dùng chung Comparator với Display Sorting
+      Comparator<DisplaySorter.DisplayableItem> dedupComparator = DisplaySorter.resolveComparator(mode);
       Map<String, FourMemoryTopsisEngine.EvaluatedCandidate> uniqueKocs = new LinkedHashMap<>();
       for (FourMemoryTopsisEngine.EvaluatedCandidate item : evaluatedReadyList) {
         String masterKey = item.candidate().getMasterId() != null
@@ -249,19 +262,43 @@ public class AiRecommendationService {
           uniqueKocs.put(masterKey, item);
         } else {
           FourMemoryTopsisEngine.EvaluatedCandidate existing = uniqueKocs.get(masterKey);
-          if (item.matchScore() > existing.matchScore()) {
+          if (dedupComparator.compare(item, existing) < 0) {
             uniqueKocs.put(masterKey, item);
           }
         }
       }
 
-      // 8. Sắp xếp điểm FinalScore giảm dần (deterministic) trên bảng chính (CHỈ GỒM SCORE_READY)
+      // 8. Sắp xếp hiển thị và đa dạng hóa (Post-Processing & Presentation)
       int effectiveLimit = limit > 0 ? Math.min(limit, 50) : 30;
-      List<FourMemoryTopsisEngine.EvaluatedCandidate> sortedCandidates =
-          displaySorter.sort(new ArrayList<>(uniqueKocs.values()), DisplayMode.BEST_MATCH);
-      List<FourMemoryTopsisEngine.EvaluatedCandidate> topList = new ArrayList<>(sortedCandidates.stream()
-          .limit(effectiveLimit)
-          .toList());
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> pool = new ArrayList<>(uniqueKocs.values());
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> topList;
+
+      switch (mode) {
+        case DIVERSIFIED_MATCH -> {
+          // 1. Initial relevance ordering strictly by TOPSIS MatchScore
+          List<FourMemoryTopsisEngine.EvaluatedCandidate> relevanceSorted =
+              displaySorter.sort(pool, DisplayMode.BEST_MATCH);
+          // 2. MMR diversity reranking with lambda = 0.70
+          topList = mmrReranker.rerank(relevanceSorted, effectiveLimit, MmrReranker.DEFAULT_LAMBDA);
+        }
+        case BUDGET_READY_FIRST -> {
+          // Bucketed by PriceStatus priority, then MatchScore descending
+          List<FourMemoryTopsisEngine.EvaluatedCandidate> budgetSorted =
+              displaySorter.sort(pool, DisplayMode.BUDGET_READY_FIRST);
+          topList = budgetSorted.stream().limit(effectiveLimit).toList();
+        }
+        case BEST_MATCH -> {
+          // Pure relevance: strictly ordered by TOPSIS MatchScore descending without diversity perturbation
+          List<FourMemoryTopsisEngine.EvaluatedCandidate> matchSorted =
+              displaySorter.sort(pool, DisplayMode.BEST_MATCH);
+          topList = matchSorted.stream().limit(effectiveLimit).toList();
+        }
+        default -> {
+          List<FourMemoryTopsisEngine.EvaluatedCandidate> matchSorted =
+              displaySorter.sort(pool, DisplayMode.BEST_MATCH);
+          topList = matchSorted.stream().limit(effectiveLimit).toList();
+        }
+      }
 
       // 9. Tích hợp XAI Engine (POST /api/v1/ai/explain kèm Circuit Breaker & Fallback) cho Bảng chính
       // Hợp đồng DTO: recommendations CHỈ chứa ứng viên SCORE_READY (hoàn tất Four-Memory)
@@ -327,14 +364,14 @@ public class AiRecommendationService {
           uniqueProvisionalKocs.put(masterKey, item);
         } else {
           FourMemoryTopsisEngine.EvaluatedCandidate existing = uniqueProvisionalKocs.get(masterKey);
-          if (item.matchScore() > existing.matchScore()) {
+          if (dedupComparator.compare(item, existing) < 0) {
             uniqueProvisionalKocs.put(masterKey, item);
           }
         }
       }
 
       List<FourMemoryTopsisEngine.EvaluatedCandidate> sortedProvisional =
-          displaySorter.sort(new ArrayList<>(uniqueProvisionalKocs.values()), DisplayMode.BEST_MATCH);
+          displaySorter.sort(new ArrayList<>(uniqueProvisionalKocs.values()), mode);
       List<FourMemoryTopsisEngine.EvaluatedCandidate> topProvisional = sortedProvisional.stream()
           .limit(effectiveLimit)
           .toList();
@@ -473,7 +510,8 @@ public class AiRecommendationService {
 
     try {
       ExplainResponseDto response = aiServiceClient.getExplanation(explainReq);
-      if (response != null) {
+      if (response != null && response.isExplanationAvailable()
+          && response.getSummary() != null && !response.getSummary().isBlank()) {
         List<String> combinedReasons = new ArrayList<>();
         if (response.getReasons() != null) {
           combinedReasons.addAll(response.getReasons());
@@ -487,7 +525,7 @@ public class AiRecommendationService {
         return ReasoningCardDto.builder()
             .summary(response.getSummary())
             .reasons(combinedReasons)
-            .explanationAvailable(response.isExplanationAvailable())
+            .explanationAvailable(true)
             .evidenceWarnings(warnings)
             .build();
       }

@@ -55,10 +55,21 @@ public class GeminiCampaignAutofillService {
     LocalDate defaultEnd = today.plusDays(37);
 
     return """
-        You are a marketing campaign assistant for an influencer marketing platform.
-        A brand user has described their campaign in natural language. Your task is to
-        extract and infer all relevant campaign parameters and return them as a strict
-        JSON object – no markdown, no code fences, just raw JSON.
+        You are an expert marketing campaign assistant for an influencer marketing platform.
+        A brand user has provided a prompt describing their campaign.
+
+        === CORE DIRECTIVES (STRICT COMPLIANCE REQUIRED) ===
+        1. STRICT FAITHFUL EXTRACTION (HIGHEST PRIORITY):
+           If the brand description contains specific details for ANY field (such as exact product/service, campaign name, objective, platforms, budget amount, target audience, timeline/dates, follower count, or content format), you MUST STRICTLY FOLLOW AND USE the user's exact values. DO NOT override, alter, adjust, or hallucinate different values.
+           Add the names of all fields that were explicitly extracted from the user's prompt into the "extractedFields" array.
+
+        2. INTELLIGENT INFERENCE (ONLY FOR FIELDS OMITTED / MISSING IN USER PROMPT):
+           If the user prompt lacks or does not specify certain parameters, you MUST INFER professional, realistic, and contextually appropriate recommendations for this campaign based on the product/industry.
+           Add the names of all fields that were inferred/suggested by AI into the "inferredFields" array.
+
+        3. PROVENANCE INTEGRITY:
+           - "extractedFields" and "inferredFields" MUST be mutually exclusive and together categorize all populated parameters.
+           - Recognized field names: ["name", "productService", "objective", "targetAudiences", "contentType", "startDate", "endDate", "platforms", "niches", "locations", "followerMin", "followerMax", "budgetMin", "budgetMax"].
 
         === PLATFORM ENUM VALUES (use exactly these strings) ===
         INSTAGRAM, TIKTOK, YOUTUBE, FACEBOOK, TWITTER, THREADS
@@ -71,36 +82,42 @@ public class GeminiCampaignAutofillService {
           "name": "string – concise campaign name (max 200 chars)",
           "productService": "string – what product/service is being promoted (max 500 chars)",
           "objective": "AWARENESS | ENGAGEMENT | TRAFFIC | CONVERSION",
-          "targetAudiences": ["array of audience segments, e.g. 'Women 18-35', 'Skincare enthusiasts'"],
+          "targetAudiences": ["array of audience segments, e.g. 'Gen Z 18-24', 'Skincare enthusiasts'"],
           "contentType": "string – e.g. 'Short video review', 'Unboxing', 'Tutorial post'",
-          "startDate": "YYYY-MM-DD (default to %s if not mentioned)",
-          "endDate": "YYYY-MM-DD (default to %s if not mentioned)",
-          "platforms": ["array of platform enum values"],
+          "startDate": "YYYY-MM-DD (use user-specified date if given; otherwise default to %s)",
+          "endDate": "YYYY-MM-DD (use user-specified date if given; otherwise default to %s)",
+          "platforms": ["array of platform enum values, e.g. ['TIKTOK', 'INSTAGRAM']"],
           "niches": ["relevant niches, e.g. 'beauty', 'skincare', 'lifestyle'"],
-          "locations": ["target locations, e.g. 'Vietnam', 'Ho Chi Minh City' – infer from context or use ['Vietnam'] as default"],
+          "locations": ["target locations, e.g. 'Vietnam', 'Ho Chi Minh City'"],
           "followerMin": number | null (minimum follower count, e.g. 10000),
           "followerMax": number | null (maximum follower count, e.g. 500000),
           "budgetMin": number | null (minimum budget in VND, e.g. 5000000),
           "budgetMax": number | null (maximum budget in VND, e.g. 20000000),
-          "aiExplanation": "string – 2-3 sentences explaining why you made these choices"
+          "extractedFields": ["array of field names provided directly by the user"],
+          "inferredFields": ["array of field names inferred by AI because user omitted them"],
+          "aiExplanation": "string in Vietnamese – concise explanation clearly stating which parameters were extracted directly from the user and why missing parameters were inferred as suggested"
         }
 
-        === BUDGET INTERPRETATION GUIDELINES ===
-        - "budget tầm tầm" or "budget trung bình" → budgetMin: 10000000, budgetMax: 30000000
-        - "budget thấp" or "budget ít" → budgetMin: 2000000, budgetMax: 10000000
-        - "budget cao" or "budget lớn" → budgetMin: 50000000, budgetMax: 200000000
-        - Specific amount mentioned → use that; if only one end given, set the other proportionally
+        === INFERENCE GUIDELINES (Use ONLY when user does NOT explicitly specify) ===
+        - Budget:
+          * If user mentions specific budget (e.g. 'ngân sách 20 triệu'), use that exact amount and classify under extractedFields.
+          * 'budget tầm tầm' / 'trung bình' -> budgetMin: 10000000, budgetMax: 30000000 (inferred)
+          * 'budget thấp' / 'tiết kiệm' -> budgetMin: 2000000, budgetMax: 10000000 (inferred)
+          * 'budget lớn' / 'cao' -> budgetMin: 50000000, budgetMax: 200000000 (inferred)
+          * If completely omitted -> infer realistic budget based on product and set inferredFields.
+        - Follower count:
+          * If user specifies creator tiers or numbers, follow user exactly (extractedFields).
+          * 'micro influencer' / 'nano' -> followerMin: 10000, followerMax: 100000 (inferred)
+          * 'macro influencer' / 'KOL lớn' -> followerMin: 100000, followerMax: 1000000 (inferred)
+          * If omitted -> align with budget and product tier (inferredFields).
+        - Platforms:
+          * If user names platforms, use ONLY user platforms (extractedFields).
+          * If omitted -> infer most suitable platforms for the product (e.g. beauty/fashion -> TIKTOK, INSTAGRAM) (inferredFields).
 
-        === FOLLOWER INTERPRETATION GUIDELINES ===
-        - "micro influencer" → followerMin: 10000, followerMax: 100000
-        - "macro influencer" → followerMin: 100000, followerMax: 1000000
-        - "mega influencer" or "KOL lớn" → followerMin: 500000, followerMax: null
-        - If not mentioned, infer from budget: low budget → micro; high budget → macro
-
-        === BRAND DESCRIPTION ===
+        === BRAND USER PROMPT ===
         %s
 
-        Remember: Return ONLY the JSON object, no other text.
+        Remember: Return ONLY the JSON object, no markdown code block fences if possible, strictly valid JSON.
         """.formatted(defaultStart, defaultEnd, userInput);
   }
 
@@ -207,7 +224,7 @@ public class GeminiCampaignAutofillService {
   //  Response Parsing
   // ───────────────────────────────────────────────────────────────────────────
 
-  private CampaignAutofillResponse parseResponse(String rawJson) {
+  CampaignAutofillResponse parseResponse(String rawJson) {
     // Strip markdown code fences if Gemini ignored the responseMimeType hint
     String cleaned = rawJson.trim();
     if (cleaned.startsWith("```")) {
@@ -222,6 +239,15 @@ public class GeminiCampaignAutofillService {
       throw new com.influencermatch.backend.exception.BusinessException(
           com.influencermatch.backend.exception.ErrorCode.AI_PARSE_ERROR,
           "AI returned an invalid JSON response. Please try again.");
+    }
+
+    List<String> extracted = strings(node, "extractedFields");
+    List<String> inferred = strings(node, "inferredFields");
+
+    // Dynamic fallback if AI omitted provenance lists
+    if (extracted.isEmpty() && inferred.isEmpty()) {
+      inferred = List.of("targetAudiences", "niches", "locations", "followerMin", "followerMax", "budgetMin", "budgetMax", "contentType", "startDate", "endDate");
+      extracted = List.of("productService");
     }
 
     return new CampaignAutofillResponse(
@@ -239,6 +265,8 @@ public class GeminiCampaignAutofillService {
         longVal(node, "followerMax"),
         decimal(node, "budgetMin"),
         decimal(node, "budgetMax"),
+        extracted,
+        inferred,
         text(node, "aiExplanation"));
   }
 

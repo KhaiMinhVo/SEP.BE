@@ -56,5 +56,11 @@ public record CampaignAutofillResponse(
     @Schema(description = "Suggested maximum budget in VND", example = "30000000")
     BigDecimal budgetMax,
 
+    @ArraySchema(schema = @Schema(description = "Fields explicitly extracted from the user's prompt", example = "[\"productService\", \"platforms\", \"budgetMin\"]"))
+    List<String> extractedFields,
+
+    @ArraySchema(schema = @Schema(description = "Fields inferred/suggested by AI due to missing information in the prompt", example = "[\"followerMin\", \"followerMax\", \"targetAudiences\"]"))
+    List<String> inferredFields,
+
     @Schema(description = "AI explanation of why these parameters were chosen", example = "Chiến dịch tập trung vào phân khúc Gen Z yêu thích làm đẹp tự nhiên, phù hợp với các KOC trên TikTok và Instagram.")
     String aiExplanation) {}

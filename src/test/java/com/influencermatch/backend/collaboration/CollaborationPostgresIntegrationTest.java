@@ -357,7 +357,7 @@ VALUES ('10000000-0000-0000-0000-000000000007','10000000-0000-0000-0000-00000000
                       service.create(
                           f.campaign().getId(),
                           new CreateCollaborationRequest(
-                              f.relationship().getId(), BigDecimal.ZERO, "VND", null));
+                              f.relationship().getId(), BigDecimal.ZERO, "VND", "Thỏa thuận kiểm thử rollback"));
                       throw new IllegalStateException("force rollback");
                     }))
         .isInstanceOf(IllegalStateException.class);

@@ -132,10 +132,11 @@ public class CollaborationService {
         throw new ValidationException("currency must be a valid ISO currency code");
       }
     }
-    String note =
-        (request.note() != null && !request.note().isBlank())
-            ? request.note().trim()
-            : "Thỏa thuận hợp tác được Brand ghi nhận";
+    if (request.note() == null || request.note().isBlank()) {
+      throw new ValidationException(
+          "Collaboration note is required to record agreement details, deliverables, or compensation terms");
+    }
+    String note = request.note().trim();
     com.influencermatch.backend.creator.model.CreatorMaster master = relationship.getMaster();
     if (master == null && relationship.getCreator() != null) {
       master = relationship.getCreator().getMaster();

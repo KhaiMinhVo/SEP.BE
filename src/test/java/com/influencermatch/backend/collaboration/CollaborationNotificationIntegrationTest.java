@@ -1,6 +1,7 @@
 package com.influencermatch.backend.collaboration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -23,6 +24,7 @@ import com.influencermatch.backend.collaboration.service.CollaborationService;
 import com.influencermatch.backend.creator.model.Creator;
 import com.influencermatch.backend.creator.model.CreatorMaster;
 import com.influencermatch.backend.creator.repository.CreatorMasterRepository;
+import com.influencermatch.backend.exception.ValidationException;
 import com.influencermatch.backend.notification.enums.NotificationType;
 import com.influencermatch.backend.notification.service.NotificationService;
 import com.influencermatch.backend.relationship.enums.RelationshipStage;
@@ -366,6 +368,105 @@ class CollaborationNotificationIntegrationTest {
     // CRITICAL: Asset must NOT be re-saved, and duplicate notification must NOT be dispatched
     verify(evidenceAssets, never()).save(any(EvidenceAsset.class));
     verify(notificationService, never()).createAndDispatch(any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void whenNoteIsBlankOrNull_rejectsCollaborationCreation() {
+    User brandUser = user(Role.BRAND);
+    authenticate(brandUser);
+
+    UUID campaignId = UUID.randomUUID();
+    UUID relationshipId = UUID.randomUUID();
+
+    BrandProfile brandProfile = BrandProfile.builder().user(brandUser).businessName("Aura Cosmetics").build();
+    Campaign campaign = Campaign.builder().id(campaignId).brandProfile(brandProfile).status(CampaignStatus.ACTIVE).name("Summer Launch 2026").build();
+    Creator creator = Creator.builder().id(UUID.randomUUID()).build();
+    BrandCreatorRelationship relationship =
+        BrandCreatorRelationship.builder()
+            .id(relationshipId)
+            .user(brandUser)
+            .campaign(campaign)
+            .creator(creator)
+            .stage(RelationshipStage.CONTACTED)
+            .build();
+
+    when(campaigns.findLockedForCollaborationById(campaignId)).thenReturn(Optional.of(campaign));
+    when(campaigns.findById(campaignId)).thenReturn(Optional.of(campaign));
+    when(relationships.findLockedById(relationshipId)).thenReturn(Optional.of(relationship));
+
+    // Case 1: Note is null -> Must reject
+    CreateCollaborationRequest nullNoteReq =
+        new CreateCollaborationRequest(relationshipId, BigDecimal.valueOf(5000000), "VND", null);
+
+    assertThatThrownBy(() -> service.create(campaignId, nullNoteReq))
+        .isInstanceOf(ValidationException.class)
+        .hasMessageContaining("Collaboration note is required");
+
+    // Case 2: Note is blank -> Must reject
+    CreateCollaborationRequest blankNoteReq =
+        new CreateCollaborationRequest(relationshipId, BigDecimal.valueOf(5000000), "VND", "   ");
+
+    assertThatThrownBy(() -> service.create(campaignId, blankNoteReq))
+        .isInstanceOf(ValidationException.class)
+        .hasMessageContaining("Collaboration note is required");
+  }
+
+  @Test
+  void whenAgreedFeeIsZeroWithValidNote_allowsBarterCollaboration() {
+    User creatorUser = user(Role.CREATOR);
+    User brandUser = user(Role.BRAND);
+    authenticate(brandUser);
+
+    UUID campaignId = UUID.randomUUID();
+    UUID relationshipId = UUID.randomUUID();
+
+    BrandProfile brandProfile = BrandProfile.builder().user(brandUser).businessName("Aura Cosmetics").build();
+    Campaign campaign = Campaign.builder().id(campaignId).brandProfile(brandProfile).status(CampaignStatus.ACTIVE).name("Summer Launch 2026").build();
+
+    CreatorMaster master = CreatorMaster.builder().user(creatorUser).build();
+    Creator creator = Creator.builder().id(UUID.randomUUID()).master(master).build();
+    BrandCreatorRelationship relationship =
+        BrandCreatorRelationship.builder()
+            .id(relationshipId)
+            .user(brandUser)
+            .campaign(campaign)
+            .creator(creator)
+            .master(master)
+            .stage(RelationshipStage.CONTACTED)
+            .build();
+
+    when(campaigns.findLockedForCollaborationById(campaignId)).thenReturn(Optional.of(campaign));
+    when(campaigns.findById(campaignId)).thenReturn(Optional.of(campaign));
+    when(relationships.findLockedById(relationshipId)).thenReturn(Optional.of(relationship));
+    when(collaborations.existsByRelationshipId(relationshipId)).thenReturn(false);
+    when(collaborations.save(any(Collaboration.class))).thenAnswer(inv -> {
+      Collaboration c = inv.getArgument(0);
+      c.setId(UUID.randomUUID());
+      return c;
+    });
+
+    CreateCollaborationRequest barterReq =
+        new CreateCollaborationRequest(
+            relationshipId,
+            BigDecimal.ZERO,
+            "VND",
+            "Hợp tác hình thức Barter: Tặng bộ mỹ phẩm trị giá 2.000.000 VND đổi 1 Video Review");
+
+    CollaborationResponse response = service.create(campaignId, barterReq);
+
+    assertThat(response).isNotNull();
+    assertThat(response.agreedFee()).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(response.confirmationSource()).isEqualTo("BRAND_RECORDED_EXTERNAL");
+    assertThat(response.status()).isEqualTo(com.influencermatch.backend.collaboration.enums.CollaborationStatus.IN_PROGRESS);
+
+    // Verify Notification dispatches with fee 0 VND barter notice
+    verify(notificationService).createAndDispatch(
+        eq(creatorUser.getId()),
+        eq(NotificationType.COLLABORATION_RECORDED),
+        eq("Hợp tác chiến dịch đã được ghi nhận"),
+        contains("0 VND"),
+        eq("COLLABORATION"),
+        any(UUID.class));
   }
 }
 

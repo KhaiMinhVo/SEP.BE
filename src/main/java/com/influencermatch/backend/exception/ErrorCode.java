@@ -3,6 +3,12 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  DEAL_REVISION_CONFLICT(HttpStatus.CONFLICT, "Deal revision changed"),
+  DEAL_STATE_CONFLICT(HttpStatus.CONFLICT, "Deal workflow conflict"),
+  DEAL_BUDGET_EXCEEDED(HttpStatus.CONFLICT, "Campaign budget exceeded"),
+  DEAL_BUDGET_UNAVAILABLE(HttpStatus.CONFLICT, "Campaign commitment cannot be assessed"),
+  DEAL_SINGLE_LIMIT(HttpStatus.CONFLICT, "Single Creator limit reached"),
+  IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "Idempotency key already used for different content"),
   POLICY_VERSION_CHANGED(HttpStatus.CONFLICT, "Policy version changed"),
   GOOGLE_LOGIN_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Google Login unavailable"),
   GOOGLE_ACCOUNT_LINK_REQUIRED(HttpStatus.CONFLICT, "Existing account requires explicit linking"),

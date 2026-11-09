@@ -26,11 +26,6 @@ import com.influencermatch.backend.exception.CreatorOwnershipConflictException;
 import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.exception.ForbiddenException;
 import com.influencermatch.backend.relationship.dto.*;
-import com.influencermatch.backend.relationship.enums.RelationshipStage;
-import com.influencermatch.backend.relationship.enums.ShortlistPriority;
-import com.influencermatch.backend.relationship.enums.ShortlistStatus;
-import com.influencermatch.backend.relationship.model.BrandCreatorRelationship;
-import com.influencermatch.backend.relationship.model.ShortlistItem;
 import com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository;
 import com.influencermatch.backend.relationship.repository.ShortlistItemRepository;
 import com.influencermatch.backend.relationship.service.CampaignOwnershipService;
@@ -781,156 +776,12 @@ class Flow4ComprehensiveAcceptanceTest {
   // =========================================================================
   // TEST-F4-09: Shortlist Outreach Bridging (Batch Outreach & Claim Email)
   // =========================================================================
-  @Test
-  @DisplayName(
-      "TEST-F4-09 [Shortlist Outreach]: Brand chọn KOC từ Shortlist bấm gửi Lời mời -> Tự động tạo"
-          + " quan hệ CRM CONTACTED và đưa email vào outbox")
-  void testF4_09_shortlistOutreach_publicCreator_createsCrmContactedAndEnqueuesClaimEmail() {
-    TestActors.authenticate(brandUser);
-
-    UUID creatorId = UUID.randomUUID();
-    Creator publicCreator =
-        Creator.builder()
-            .id(creatorId)
-            .platform("TIKTOK")
-            .userName("review_vietnam")
-            .displayName("Review Vietnam Official")
-            .sourceType(CreatorSourceType.PUBLIC)
-            .build();
-
-    UUID itemId = UUID.randomUUID();
-    ShortlistItem item =
-        ShortlistItem.builder()
-            .user(brandUser)
-            .id(itemId)
-            .campaign(campaign)
-            .creator(publicCreator)
-            .status(ShortlistStatus.SAVED)
-            .priority(ShortlistPriority.HIGH)
-            .build();
-
-    when(shortlistItemRepository.findByCampaignIdAndIdIn(eq(campaignId), any()))
-        .thenReturn(List.of(item));
-    when(shortlistItemRepository.save(any(ShortlistItem.class))).thenAnswer(i -> i.getArgument(0));
-
-    PublicCreatorMetric metric =
-        PublicCreatorMetric.builder()
-            .creator(publicCreator)
-            .contact("booking@reviewvietnam.vn")
-            .contentSummary("Review công nghệ và phong cách sống")
-            .build();
-    when(publicCreatorMetricRepository.findByCreatorId(creatorId)).thenReturn(Optional.of(metric));
-
-    when(relationshipRepository.findByCampaignIdAndCreatorId(campaignId, creatorId))
-        .thenReturn(Optional.empty());
-    when(relationshipRepository.save(any(BrandCreatorRelationship.class)))
-        .thenAnswer(
-            inv -> {
-              BrandCreatorRelationship r = inv.getArgument(0);
-              if (r.getId() == null) r.setId(UUID.randomUUID());
-              return r;
-            });
-
-    when(creatorInvitationRepository
-            .findFirstByTargetCreatorIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
-                eq(creatorId), eq("PENDING"), any()))
-        .thenReturn(Optional.empty());
-
-    UUID invitationId = UUID.randomUUID();
-    when(creatorInvitationService.sendInvitation(
-            eq(creatorId),
-            eq("booking@reviewvietnam.vn"),
-            eq(brandProfile.getId()),
-            eq(campaignId)))
-        .thenReturn(
-            InvitationResponse.builder()
-                .id(invitationId)
-                .creatorId(creatorId)
-                .email("booking@reviewvietnam.vn")
-                .status("PENDING")
-                .emailStatus("QUEUED")
-                .build());
-
-    ShortlistOutreachRequest request =
-        ShortlistOutreachRequest.builder()
-            .shortlistItemIds(List.of(itemId))
-            .outreachMessage("Mời bạn hợp tác chiến dịch đồng hồ thông minh 2026")
-            .proposedFee(BigDecimal.valueOf(20_000_000))
-            .currency("VND")
-            .contactMethod("EMAIL_INVITATION")
-            .build();
-
-    ShortlistOutreachResponse response = shortlistService.outreachShortlist(campaignId, request);
-
-    assertThat(response.getContactedCount()).isEqualTo(1);
-    assertThat(response.getDispatchedInvitationIds()).containsExactly(invitationId);
-    assertThat(item.getStatus()).isEqualTo(ShortlistStatus.CONTACTED);
-
-    ArgumentCaptor<BrandCreatorRelationship> relCaptor =
-        ArgumentCaptor.forClass(BrandCreatorRelationship.class);
-    verify(relationshipRepository).save(relCaptor.capture());
-    assertThat(relCaptor.getValue().getStage()).isEqualTo(RelationshipStage.CONTACTED);
-    assertThat(relCaptor.getValue().getQuotedFee())
-        .isEqualByComparingTo(BigDecimal.valueOf(20_000_000));
-    assertThat(relCaptor.getValue().getNotes())
-        .isEqualTo("Mời bạn hợp tác chiến dịch đồng hồ thông minh 2026");
-
-    verify(creatorInvitationService)
-        .sendInvitation(
-            eq(creatorId),
-            eq("booking@reviewvietnam.vn"),
-            eq(brandProfile.getId()),
-            eq(campaignId));
-  }
+  // Outreach/CRM contract is covered by ShortlistOutreachPhase4Test on PostgreSQL.
 
   // =========================================================================
   // TEST-F4-10: CRM State Machine Progression with Agreed Fee
   // =========================================================================
-  @Test
-  @DisplayName(
-      "TEST-F4-10 [CRM State Machine]: Đàm phán thành công -> Cập nhật agreedFee -> Chuyển sang"
-          + " COLLABORATING")
-  void testF4_10_crmStateMachine_negotiationToCollaborating_updatesAgreedFeeAndNextAction() {
-    TestActors.authenticate(brandUser);
-
-    UUID relId = UUID.randomUUID();
-    UUID creatorId = UUID.randomUUID();
-    Creator creator =
-        Creator.builder().id(creatorId).displayName("KOC Đỉnh Cao").platform("TIKTOK").build();
-
-    BrandCreatorRelationship relationship =
-        BrandCreatorRelationship.builder()
-            .id(relId)
-            .campaign(campaign)
-            .creator(creator)
-            .user(brandUser)
-            .stage(RelationshipStage.CONTACTED)
-            .quotedFee(BigDecimal.valueOf(15_000_000))
-            .currency("VND")
-            .createdAt(LocalDateTime.now(fixedClock).minusDays(3))
-            .updatedAt(LocalDateTime.now(fixedClock).minusDays(3))
-            .build();
-
-    when(relationshipRepository.findByIdAndCampaignIdAndUserId(
-            relId, campaignId, brandUser.getId()))
-        .thenReturn(Optional.of(relationship));
-    when(relationshipRepository.save(any(BrandCreatorRelationship.class)))
-        .thenAnswer(inv -> inv.getArgument(0));
-
-    UpdateRelationshipStageRequest stageRequest =
-        UpdateRelationshipStageRequest.builder()
-            .stage(RelationshipStage.COLLABORATING)
-            .agreedFee(BigDecimal.valueOf(18_500_000))
-            .nextAction("Ký hợp đồng dịch vụ và chuyển cọc trước 15:00 ngày 28/10")
-            .build();
-
-    RelationshipDto dto = relationshipService.updateStage(campaignId, relId, stageRequest);
-
-    assertThat(dto.getStage()).isEqualTo(RelationshipStage.COLLABORATING);
-    assertThat(dto.getAgreedFee()).isEqualByComparingTo(BigDecimal.valueOf(18_500_000));
-    assertThat(dto.getNextAction())
-        .isEqualTo("Ký hợp đồng dịch vụ và chuyển cọc trước 15:00 ngày 28/10");
-  }
+  // Outreach/CRM contract is covered by ShortlistOutreachPhase4Test on PostgreSQL.
 
   // =========================================================================
   // TEST-F4-11: Data Safety Contract (Crawler Ingestion Gatekeeper)

@@ -461,17 +461,17 @@ class ShortlistBatchPostgresIntegrationTest extends PostgresApiTestSupport {
     assertThat(readiness.toString())
         .contains("new@example.test")
         .doesNotContain("old@example.test");
-    when(invitations.sendInvitation(eq(c.getId()), eq("new@example.test"), any(), eq(campaign)))
-        .thenReturn(
-            com.influencermatch.backend.creator.dto.InvitationResponse.builder()
-                .id(UUID.randomUUID())
-                .build());
-    call(
-        owner,
-        post("/campaigns/" + campaign + "/shortlist/outreach"),
-        Map.of("shortlistItemIds", List.of(item)),
-        200);
-    verify(invitations).sendInvitation(eq(c.getId()), eq("new@example.test"), any(), eq(campaign));
+    var result =
+        call(
+                owner,
+                post("/campaigns/" + campaign + "/shortlist/outreach"),
+                Map.of("shortlistItemIds", List.of(item)),
+                200)
+            .path("data")
+            .path("items")
+            .get(0);
+    assertThat(result.path("contactStatus").asText()).isEqualTo("NEEDS_PROPOSAL");
+    verifyNoInteractions(invitations);
   }
 
   @Test

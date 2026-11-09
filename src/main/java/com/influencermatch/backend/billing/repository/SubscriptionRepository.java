@@ -16,6 +16,15 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
 
   List<Subscription> findByBrandProfileIdAndStatus(UUID brandProfileId, SubscriptionStatus status);
 
+  @org.springframework.data.jpa.repository.Modifying
+  @org.springframework.data.jpa.repository.Query(
+      "UPDATE Subscription s SET s.usedCampaignQuota = s.usedCampaignQuota + 1 "
+          + "WHERE s.id = :id AND s.status = com.influencermatch.backend.billing.enums.SubscriptionStatus.ACTIVE "
+          + "AND s.expirationDate >= :today AND s.usedCampaignQuota < s.plan.campaignQuota")
+  int reserveCampaignQuotaAtomically(
+      @org.springframework.data.repository.query.Param("id") UUID id,
+      @org.springframework.data.repository.query.Param("today") java.time.LocalDate today);
+
   boolean existsByBrandProfileIdAndStatusAndExpirationDateGreaterThanEqual(
       UUID brandProfileId, SubscriptionStatus status, java.time.LocalDate today);
 

@@ -845,3 +845,119 @@ Validation completed 2026-11-08 for Shortlist/Compare:
 
 - Final targeted verification after the timestamp adjustment: **59 tests, 59 passed, 0 failures, 0 errors, 0 skipped**, BUILD SUCCESS (2026-11-08 14:44 +07). Includes all 19 new cases and existing Shortlist/Flow3/Flow4 regressions. Local ignored log: `.local-worktrees/backups/shortlist-final-check.log`.
 - Final `git diff --check -- src README.md docs/backend-test-cases.md` passed. No new Shortlist migration was added.
+
+
+## Cooperation CRM and grouped deals (V28)
+
+Automated HTTP/provider/email calls use mocks; transaction, locking and migration checks use disposable PostgreSQL/pgvector Testcontainers. No test sends real SMTP or touches the shared database.
+
+- COOP-01: grouped verified channels create one PLANNED Collaboration, two channel links and one budget commitment; public single-channel confirmation creates no User/Master/ownership.
+- COOP-02: reject different Masters, invalid/null/duplicate IDs, wrong currency/fee/deliverables and invalid evidence; no partial confirmation writes.
+- COOP-03: create/proposal/confirm idempotency preserves original result; changed key content and stale revision return 409.
+- COOP-04: Portal acceptance is bound to the current Brand OFFER; new proposals invalidate it, and counteroffers cannot self-accept. History preserves prior fees; database rejects proposal mutation.
+- COOP-05: another Brand/Creator, disabled permission and transferred ownership cannot read or act on private resources; old Collaboration access is revoked across all channels.
+- COOP-06: audit insertion failure rolls back confirmation/Collaboration/commitment. Concurrent confirmations of one Deal yield one success; different Deals cannot jointly exceed Campaign budget.
+- COOP-07: SINGLE rejects another recipient; MULTI above target warns. PLANNED cancellation releases commitment, start requires ACTIVE, IN_PROGRESS cancellation fails, and rebooking preserves the cancelled history.
+- COOP-08: legacy VND budget initialization requires If-Match, is one-time and does not alter stored M3 Context. Missing/non-VND legacy fees make commitment unavailable and block new confirmations.
+- COOP-09: manual link is encrypted at rest; public preview contains no fee, email, private terms or identity. Creator notifications persist unread and only the recipient marks them read.
+- COOP-10: email queue insertion/SMTP configuration failures roll back invitation and notification. Rollback publishes no after-commit dispatch; committed jobs reach the listener, and SMTP executes outside a database transaction.
+- COOP-11: expired/replaced invitations do not send and erase payload; SMTP failure keeps invitation, uses exact 15/30/60/120 backoff, FAILED can retry without changing token/expiry, and worker lease fencing prevents stale completion.
+- COOP-12: queue rejection leaves persisted jobs recoverable; safe worker errors never expose provider details. Unit tests cover dispatch/worker boundaries, not database concurrency.
+- COOP-13: batch Relationship commits valid/invalid/valid independently. Outreach uses newest public booking email, creates actual Portal notification, groups by Master, returns manual link when needed, and never calls the Claim invitation sender.
+- COOP-14: legacy Collaboration endpoint cannot bypass Deal/consent/budget; CRM stage/details cannot directly write agreedFee or CONFIRMED. Outcome/Review regression explicitly confirms and starts through real APIs.
+- COOP-15: upgrade/fresh schema retains legacy Collaboration IDs, fees/status and one-channel membership; LEGACY consent remains absent. Historical V12-V27 migration tests retain explicit historical targets.
+
+Coverage: CooperationPostgresIntegrationTest (HTTP + PostgreSQL), CooperationWorkerTest (Mockito boundary tests), ShortlistOutreachPhase4Test (now real PostgreSQL, despite its historical class name), CollaborationPostgresIntegrationTest and existing Collaboration/Flow5 unit suites. The obsolete Flow4 Mockito assertions for sending Claim via Outreach and direct COLLABORATING/agreedFee updates were moved to PostgreSQL Outreach/CRM scenarios with the new contract; Claim/ownership assertions remain active. No production bypass was introduced for tests.
+
+Validation results are recorded after the final runs below.
+
+
+Validation completed 2026-11-08 for Cooperation CRM/V28:
+
+- **Final full backend regression: 1,090 tests; 1,087 passed; 3 failures; 0 errors; 0 skipped.** Local ignored log: `.local-worktrees/backups/cooperation-regression-final.log`.
+- All **35 new Cooperation cases passed**: CooperationPostgresIntegrationTest (32 actual PostgreSQL/HTTP cases), CooperationWorkerTest (3 Mockito boundary cases). ShortlistOutreachPhase4Test now runs 7 PostgreSQL scenarios, including the two Outreach/CRM scenarios migrated from Flow4; these are not counted again as 35 new cases.
+- The only remaining failures are the unchanged Payment baseline: PaymentSettlementServiceTest#activeSubscriptionPreventsActivationWithoutMutatingPendingPayment (true instead of false); ComparePaymentPostgresIntegrationTest#parallelPaymentsForSameBrandCannotActivateTwoSubscriptions ([200,200] instead of [200,409]); RbacPostgresIntegrationTest#paidSubscriptionRequiresCheckoutAndGatewayVerification (302 instead of 400). The full Maven build is therefore not green. Payment production code and Payment assertions were not changed; the ComparePayment suite only updates CRM test stage input to NEGOTIATING.
+- Before the final run, a focused compatibility run recorded **102 tests, 101 passed, 1 known Payment failure, 0 errors/skipped**, log `.local-worktrees/backups/cooperation-final-focused.log`. The final regression additionally covers the last legacy-request idempotency case and consistent UUID lock ordering.
+- An earlier full run recorded 1,087 tests/8 failures/0 errors/0 skipped. Five non-Payment failures were corrected: legacy-budget If-Match fixture, positive-fee validation fixture, preserved foreign-Campaign 404 behavior, the renamed CRM stage input and the expanded 48-permission matrix. Their assertions remain active and pass in the final run; no production bypass was introduced.
+- Schema creation and upgrade were tested only in disposable PostgreSQL Testcontainers. V1-V27 have no edits. V28 preserves historical Collaboration rows/fees/status, creates one-channel LEGACY membership without consent and retains active-only uniqueness for later rebooking.
+- Cached test-context schedulers may log refused connections after their disposable database is stopped; Surefire may use its fork shutdown timeout. These diagnostics are distinct from the 0 test errors/skips above and do not indicate a shared database was accessed.
+- Final source/docs whitespace check passed. Real `.env`, Bruno, diagrams/SDD and the shared database were not edited; no serving BE restart, commit or push was performed.
+
+
+## Collaboration execution / Content Review / Outcome — V29
+
+Automated tests use HTTP MockMvc plus real disposable PostgreSQL, fake network boundaries and latch-based concurrency (no sleep). No public provider, SMTP or shared database is used.
+
+- `ExecutionPostgresIntegrationTest`: explicit acceptance/final review lifecycle; immutable source proposal; review rounds/checklist; publication exceptions; outcome revision/reopen; Creator finance rejection and revoked ownership; idempotency/body conflict; concurrent submissions; audit rollback; legacy plan quantity expansion; duplicate measurements and missing prerequisites.
+- `ExecutionContractPostgresIntegrationTest`: migrated original Collaboration HTTP acceptance scenarios, now exercising explicit acceptance instead of auto-completion. Covers source/null metrics, finance projections, Campaign/payment preservation, ownership/RBAC/related IDs, strict metric/rating/URL boundary cases, invalid lifecycles, transaction rollback, concurrent final reviews, database uniqueness/history immutability, Swagger and explicit Campaign closing; includes legacy completed reviews without fabricated acceptance.
+- `CollaborationPostgresIntegrationTest`: retains historical V7 upgrade/fresh database assertions through V29, preserving legacy KPI/null metrics, account data, channel membership and missing historical consent; no execution/acceptance history is synthesized.
+- `CooperationPostgresIntegrationTest`: existing Deal/budget/Portal/Outbox coverage retained; valid proposal fixtures now state negotiated deadline/checklist/rounds. Multi-channel confirmation also asserts execution units on the same single Collaboration.
+- `OutcomeFinanceTest` (unit): independent ROI/ROAS/CPM/CPE, nullable inputs, zero denominators, inconsistent periods, numeric validation and post URL deduplication. No database/HTTP is involved.
+- `CollaborationServiceTest`, `Flow5CollaborationAcceptanceTest` (Mockito): historical service compatibility, evidence/read authorization, preserving payment/CRM, outcome no-auto-completion and persisted-review event semantics. These are not PostgreSQL concurrency tests.
+- `CollaborationCompletedEventListenerTest` (Mockito): persisted low rating wins over forged event values; replay does not duplicate evidence/increment legacy patterns; synchronization failure propagates for rollback.
+
+Boundary expectations changed intentionally: saving Outcome stays IN_PROGRESS; acceptance moves to AWAITING_REVIEW; final Review alone completes. SELF_REPORTED stays SELF_REPORTED; missing data stays null; M1 returns unavailable instead of a fabricated constant. Original validation/security/rollback/concurrency acceptance coverage is migrated to the new public contract, not disabled.
+
+Verified results (2026-11-08):
+
+- Related contract/migration/RBAC check: 132 passed, 0 failures/errors/skipped.
+- Full backend regression: **1,120 run; 1,117 passed; 3 failures; 0 errors; 0 skipped** (`execution-regression-final.log`, 11:24). The three failures are the same baseline Payment cases below; no Payment behavior/assertions were changed for this feature.
+- After the full run, normalized equivalent UTC/UTC+7 financial periods and added explicit missing-metric/legacy-fee boundary cases. Final rerun of the affected suites: **69 passed; 0 failures/errors/skipped** (`execution-boundaries-final.log`, 03:06): ExecutionContractPostgresIntegrationTest 43, ExecutionPostgresIntegrationTest 15, OutcomeFinanceTest 11. This final affected-suite run includes 58 PostgreSQL cases and 11 pure unit cases. It is reported separately rather than presented as another whole-backend run.
+- Existing migration tests verify preservation and fresh schema V29. No migration was run on a shared database. MockMvc/Spring test contexts are not restarts of the serving backend.
+- Full-suite shutdown emitted the existing scheduler/closed-container warnings and Surefire fork shutdown timeout after tests completed; Surefire reported zero test errors. These warnings do not represent access to the shared database.
+
+Unchanged Payment failures:
+
+1. PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment — activation returns true instead of false.
+2. ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions — statuses [200,200] instead of [200,409].
+3. RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification — 302 instead of 400.
+
+Build output/logs remain local under ignored directories. Nothing was committed/pushed; serving backend, real environment variables, Bruno and shared database were untouched.
+
+
+## Luồng 10 — Campaign History / Duplicate Brief (V30)
+
+Scope: owner-only Brand history, repeatable read snapshots, conservative completed-only report, reviewed Duplicate Brief and shared atomic campaign quota. No crawler/model/email provider is called by these tests; no shared database is used. Execution fixtures run the actual consent/confirmation/submission/acceptance/final-review APIs, rather than treating a raw legacy outcome as accepted evidence.
+
+New pure unit suite `CampaignHistoryCalculatorTest`:
+
+- Separate explicit actualCost and commitment; single-scope ROAS/ROI/CPM/CPE from totals.
+- Repeated public post key counted once; conflicting measurements invalidate only affected metrics.
+- Incompatible periods, absent metric inputs, invalid denominator and foreign currency remain unavailable.
+- Multiple completed Collaborations cannot sum GMV/revenue without attribution; individual outcomes are retained.
+- Legacy/unaccepted evidence is excluded; unfinished/cancelled work is not counted as success.
+- Brief whitelist removes execution data, recipient IDs, feedback, embeddings and legacy budget; missing fields remain null.
+
+`CampaignHistoryPostgresIntegrationTest` uses a disposable PostgreSQL database and HTTP/MockMvc:
+
+- Only the Brand owner with both History/Campaign read permissions can read; other Brand 404, Creator/Admin 403; revoked read permission 403. Child membership checked independently.
+- Read-only detail/contexts/collaborations/preview do not change Context, embedding jobs, learning evidence, recommendation runs, receipts or audit counts.
+- Current names remain labelled CURRENT_PROFILE. Later profile/Context updates cannot rewrite confirmed terms or accepted Outcome revisions.
+- Completed main report requires final Review referencing active accepted Outcome; accepted-but-unreviewed/reopened/legacy records are excluded.
+- Pagination bounds, inclusive createdAt filters, platform/status/name search and explicit context ownership are validated.
+- Selected historical Context does not fill its absent budget from the current Campaign; legacy budget is not interpreted as new money fields.
+- Duplicate starts DRAFT with dates absent, without copied Context, M3, CRM, Deal or Collaboration. Stored source reference is available on the new Campaign.
+- Source revision/kind changes return 409. Missing/fractional revision rejected; revision 0 and values above the boxed-integer cache range work.
+- Same key/body sequential or concurrent returns the same persisted response, including numeric representation; no duplicate target/receipt/quota. Changed body returns 409.
+- Audit failure rolls back Campaign, receipt and campaign quota.
+- Preview uses only read permissions; CREATE_CAMPAIGN is required for confirmation.
+- Latches interrupt a History request between reads while another connection commits a Campaign/Context change; the original request retains one repeatable-read snapshot.
+
+`HistoryQuotaPostgresIntegrationTest` owns a **separate PostgreSQL container/database** so its plan/quota fixtures cannot contaminate other modules:
+
+- Normal create competes with Duplicate for the last campaign quota: one 201, one 409; exactly one target and one increment.
+- Concurrent same-key duplicates reserve once; replay succeeds even after quota becomes full.
+- Preview does not reserve quota; audit and receipt-insert failures roll back both quota and target.
+- V29→V30 preserves raw Campaign/Context/Deal/Relationship/Collaboration/Outcome revision data; V30 receipts start empty and have four source/actor/target foreign keys. Fresh test databases migrate through V30.
+
+Existing migration assertions for latest schema now expect V30 (29 migrations after baseline), retaining historical target-version suites unchanged. SubscriptionService unit assertions validate the atomic update and exhausted-quota branch; Payment activation/settlement assertions remain unchanged.
+
+Verified results (2026-11-09):
+
+- Related run: **105 passed, 0 failures/errors/skipped** (`history-focused-final.log`).
+- Whole-backend run: **1,155 run; 1,152 passed; 3 failures; 0 errors; 0 skipped** (`history-regression.log`, 12:16). The only failures are PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment, ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions, and RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification. Payment behavior/assertions were not changed.
+- Following that full run, shared negotiation-event reads were extracted for History and existing Deal APIs. Final companion suites passed: CampaignHistoryCalculatorTest 8, HistoryQuotaPostgresIntegrationTest 5, CooperationPostgresIntegrationTest 32, ExecutionContractPostgresIntegrationTest 43, ExecutionPostgresIntegrationTest 15 (103 cases). The additional two-channel History fixture needed its authorization metadata and complete publication request aligned with the existing contract; no assertion or production ownership constraint was relaxed.
+- Final corrected History invocation: **16 passed, 0 failures/errors/skipped** (`history-publish-last.log`, 01:45). This includes the new end-to-end multi-channel agreement: two execution units, one accepted Collaboration, commitment 10,000 VND and actualCost 1,000 VND counted once, with 2,000 total views. It also includes the latch-based consistent-read and preview-without-create-permission cases. The companion and final History checks are separate invocations, not another whole-backend run.
+- A rerun while Docker Engine was stopped could not initialize Testcontainers. After Docker was restored, the final PostgreSQL run above passed; it was not marked skipped or represented as a success.
+
+These tests do not independently verify SELF_REPORTED metrics or establish production rollout readiness. Build/log artifacts stay ignored. History implementation itself did not restart the serving BE, touch the real environment/Bruno or apply migrations to a shared database.

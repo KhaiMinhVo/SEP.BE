@@ -58,7 +58,8 @@ public class GlobalExceptionHandler {
   @ExceptionHandler({
     MethodArgumentTypeMismatchException.class,
     ConstraintViolationException.class,
-    MissingServletRequestParameterException.class
+    MissingServletRequestParameterException.class,
+    MissingRequestHeaderException.class
   })
   ResponseEntity<ProblemDetail> invalid(Exception ex, HttpServletRequest req) {
     return response(ErrorCode.VALIDATION_ERROR, "Request parameter is invalid", req, Map.of());

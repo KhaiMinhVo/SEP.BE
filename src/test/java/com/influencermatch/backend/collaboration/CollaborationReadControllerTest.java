@@ -25,24 +25,28 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-@WebMvcTest({CollaborationController.class, CreatorPortalCollaborationController.class})
+@WebMvcTest({
+  CollaborationController.class,
+  CreatorPortalCollaborationController.class,
+  com.influencermatch.backend.cooperation.CollaborationExecutionController.class
+})
 @AutoConfigureMockMvc(addFilters = false)
 class CollaborationReadControllerTest {
 
   @MockBean
-  private com.influencermatch.backend.security.permission.service.EffectivePermissionService effectivePermissions;
+  private com.influencermatch.backend.security.permission.service.EffectivePermissionService
+      effectivePermissions;
 
-  @MockBean
-  private com.influencermatch.backend.security.jwt.JwtTokenProvider jwtTokenProvider;
+  @MockBean private com.influencermatch.backend.security.jwt.JwtTokenProvider jwtTokenProvider;
 
   @MockBean
   private org.springframework.security.core.userdetails.UserDetailsService userDetailsService;
 
-  @Autowired
-  private MockMvc mockMvc;
+  @Autowired private MockMvc mockMvc;
 
-  @MockBean
-  private CollaborationService collaborationService;
+  @MockBean private CollaborationService collaborationService;
+
+  @MockBean private com.influencermatch.backend.cooperation.CollaborationExecution execution;
 
   @Test
   @DisplayName("GET /campaigns/{id}/collaborations returns paginated collaboration summaries")
@@ -69,8 +73,7 @@ class CollaborationReadControllerTest {
             false,
             false);
 
-    PageResponse<CollaborationSummaryDto> page =
-        new PageResponse<>(List.of(dto), 0, 20, 1, 1);
+    PageResponse<CollaborationSummaryDto> page = new PageResponse<>(List.of(dto), 0, 20, 1, 1);
 
     when(collaborationService.getCampaignCollaborations(eq(campaignId), any(), any()))
         .thenReturn(page);
@@ -152,7 +155,8 @@ class CollaborationReadControllerTest {
   }
 
   @Test
-  @DisplayName("GET /creators/portal/collaborations returns assigned collaborations list for creator")
+  @DisplayName(
+      "GET /creators/portal/collaborations returns assigned collaborations list for creator")
   void getCreatorPortalCollaborationsReturnsList() throws Exception {
     UUID collabId = UUID.randomUUID();
     CreatorCollaborationDto dto =
@@ -175,8 +179,7 @@ class CollaborationReadControllerTest {
             false,
             false);
 
-    when(collaborationService.getCreatorPortalCollaborations(any()))
-        .thenReturn(List.of(dto));
+    when(collaborationService.getCreatorPortalCollaborations(any())).thenReturn(List.of(dto));
 
     mockMvc
         .perform(get("/creators/portal/collaborations"))
@@ -247,40 +250,34 @@ class CollaborationReadControllerTest {
 
   @Test
   @DisplayName("POST /collaborations/{id}/outcome records metrics with likes, comments, shares")
-  void recordOutcomeReturnsCreated() throws Exception {
+  void recordOutcomeReturnsRevisionWithoutCompleting() throws Exception {
     UUID collabId = UUID.randomUUID();
-    OutcomeResponse response =
-        new OutcomeResponse(
-            UUID.randomUUID(),
-            collabId,
-            10000L,
-            300L,
-            1200L,
-            80L,
-            25L,
-            "https://tiktok.com/@koc/123",
-            "Great engagement",
-            "SELF_REPORTED",
-            LocalDateTime.now(),
-            LocalDateTime.now());
-
-    when(collaborationService.recordOutcome(eq(collabId), any())).thenReturn(response);
-
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    var response =
+        mapper.readTree(
+            "{\"status\":\"IN_PROGRESS\",\"outcomeRevisions\":[{\"source\":\"SELF_REPORTED\",\"payload\":{\"posts\":[{\"views\":10000,\"likes\":1200,\"comments\":80,\"shares\":25,\"evidenceUrl\":\"https://tiktok.com/@koc/123\"}]}}]}");
+    when(execution.outcome(eq(collabId), any(), eq("outcome-test"))).thenReturn(response);
     String body =
-        "{\"views\":10000,\"clicks\":300,\"likes\":1200,\"comments\":80,\"shares\":25,\"publishedContentUrl\":\"https://tiktok.com/@koc/123\",\"resultNote\":\"Great engagement\"}";
+        "{\"expectedRevision\":1,\"reason\":\"Measured\",\"posts\":[{\"deliverableId\":\""
+            + UUID.randomUUID()
+            + "\",\"submissionRevision\":1,\"views\":10000,\"likes\":1200,\"comments\":80,\"shares\":25}]}";
 
     mockMvc
         .perform(
             org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
                     "/collaborations/" + collabId + "/outcome")
+                .header("Idempotency-Key", "outcome-test")
                 .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                 .content(body))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.views").value(10000))
-        .andExpect(jsonPath("$.data.likes").value(1200))
-        .andExpect(jsonPath("$.data.comments").value(80))
-        .andExpect(jsonPath("$.data.shares").value(25))
-        .andExpect(jsonPath("$.data.publishedContentUrl").value("https://tiktok.com/@koc/123"))
-        .andExpect(jsonPath("$.data.source").value("SELF_REPORTED"));
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"))
+        .andExpect(jsonPath("$.data.outcomeRevisions[0].payload.posts[0].views").value(10000))
+        .andExpect(jsonPath("$.data.outcomeRevisions[0].payload.posts[0].likes").value(1200))
+        .andExpect(jsonPath("$.data.outcomeRevisions[0].payload.posts[0].comments").value(80))
+        .andExpect(jsonPath("$.data.outcomeRevisions[0].payload.posts[0].shares").value(25))
+        .andExpect(
+            jsonPath("$.data.outcomeRevisions[0].payload.posts[0].evidenceUrl")
+                .value("https://tiktok.com/@koc/123"))
+        .andExpect(jsonPath("$.data.outcomeRevisions[0].source").value("SELF_REPORTED"));
   }
 }

@@ -426,8 +426,14 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"COMPLETED\"}"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("COMPLETED"));
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("INVALID_COLLABORATION_STATE"));
+    assertThat(
+            jdbc.queryForObject(
+                "select status from campaign where id=?",
+                String.class,
+                java.util.UUID.fromString(campaignId)))
+        .isEqualTo("ACTIVE");
   }
 
   private String registerAndLogin(String email, String fullName) throws Exception {

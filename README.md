@@ -783,3 +783,156 @@ Ingestion emits CRAWL_COMPLETED only after its transaction commits, using the sa
 No migration, outbox or new environment secret is required for this change. Existing V1-V27, real .env, Bruno and diagrams/SDD remain untouched.
 
 Shortlist refreshRequestStatus describes the current Add response only; it is not persisted job state. GET/list does not report the last dispatch result. New addedAt values keep the existing local timestamp convention while using Clock for deterministic creation; restore preserves the original value.
+
+
+## Cooperation CRM, grouped deals and budget-safe confirmation (V28)
+
+Relationship remains a Campaign/channel CRM card. Deal groups one or more cards into **one agreement and one Collaboration**. Multiple channels require the same currently verified CreatorMaster. Unclaimed channels may be confirmed from external evidence only as a single-channel agreement; no User/Master/ownership is created. A second non-cancelled Deal for the same recipient in a Campaign is rejected. Historical agreements are not automatically merged.
+
+### Brand API contract (prefix `/api/v1`)
+
+- Existing Relationship create/detail/list remain; create is idempotent by Campaign/channel and never overwrites existing metadata. New writes use `offeredFee` (positive VND), not ambiguous legacy `quotedFee`; `counterofferFee` and `agreedFee` cannot be written through Relationship details.
+- `POST /campaigns/{campaignId}/relationships/batch`: `{ "creatorIds": ["<uuid>"], "notes": "..." }`, 1-100 distinct non-null IDs, ordered SAVED/INVALID/FAILED results. Each item commits separately; resubmitting does not create duplicate CRM cards.
+- `POST /campaigns/{campaignId}/deals`: `{ "relationshipIds": ["<uuid>", "<uuid>"] }`.
+- `GET /campaigns/{campaignId}/deals`, `GET /campaigns/{campaignId}/deals/{dealId}`, and `GET .../{dealId}/history` read owned Deals; history returns immutable proposals and workflow events. List reads currently return up to 100 newest records.
+- `POST .../{dealId}/proposals`: body below creates a new immutable revision. Omitted/invalid channels, non-positive fee, non-VND currency or missing deliverables for any member are rejected.
+- `POST .../{dealId}/invitations`: `{ "expectedRevision": 2 }`, creates a cooperation invitation and returns delivery status separately from CRM state.
+- `POST .../{dealId}/confirm`: confirm the current proposal using PORTAL acceptance or EXTERNAL evidence. Requires both Relationship and Collaboration permissions. Create/propose/send/confirm require `Idempotency-Key` (1-100 letters, digits, dot, underscore, colon or hyphen). Retrying the same key/content returns the original result; changed content returns 409. Use the returned `revision` for the next edit, not a hardcoded increment.
+- `POST .../{dealId}/start`: `{ "expectedRevision": 3 }`, requires Campaign ACTIVE and Collaboration PLANNED.
+- `POST .../{dealId}/cancel`: `{ "expectedRevision": 3, "reason": "..." }`; unconfirmed deals or confirmed PLANNED collaborations may be cancelled, never IN_PROGRESS/COMPLETED. Cancellation keeps history and releases commitment. Rebooking uses a new Deal; cancelled Collaborations remain stored.
+
+Example proposal (fee is **for the entire Deal**, not per channel):
+
+```json
+{
+  "expectedRevision": 1,
+  "fee": 500000,
+  "currency": "VND",
+  "terms": "One review per channel with the agreed delivery schedule",
+  "deliverables": [
+    {"creatorId": "<channel-uuid>", "contentType": "Review", "quantity": 1}
+  ]
+}
+```
+
+Example external confirmation:
+
+```json
+{
+  "expectedRevision": 2,
+  "agreementSource": "EXTERNAL",
+  "agreedAt": "2026-11-08T08:00:00Z",
+  "evidenceSource": "EMAIL",
+  "evidenceUrl": "https://your-authorized-storage.example/approval",
+  "evidenceDescription": "Approval recorded by the Brand from the recipient"
+}
+```
+
+External evidence requires a non-future agreement time, source, HTTPS URL without userinfo and description. The backend stores the Brand's attestation; it does not fetch the URL or certify its contents. PORTAL confirmation uses `{ "expectedRevision": 2, "agreementSource": "PORTAL" }`; the current Brand OFFER must have been accepted by the current active verified owner. A new proposal invalidates the previous acceptance and invitation; a Creator cannot self-accept their own counteroffer.
+
+CRM progression is CONTACTED -> NEGOTIATING -> CONFIRMED, with DECLINED/CANCELLED branches. Do not PATCH stage to CONFIRMED, COLLABORATING or COMPLETED. Grouped cards are controlled by their Deal. CONFIRMED is distinct from Collaboration PLANNED/IN_PROGRESS/COMPLETED. Recording an Outcome keeps CRM CONFIRMED. Cash VND only in this version; barter, exclusivity, capacity and schedule checks are not implemented, and assessment fields return NOT_EVALUATED.
+
+### Creator Portal and minimal invitation preview
+
+- `GET /creators/portal/cooperation-deals`, `GET .../{id}`, `GET .../{id}/history`.
+- `POST .../{id}/accept` or `/decline`: `{ "expectedRevision": 2 }`.
+- `POST .../{id}/counteroffers`: proposal shape plus Idempotency-Key.
+- Effective permission `RESPOND_OWN_COOPERATION` defaults to CREATOR; access also requires ACTIVE, verified email and current ownership of **all** member channels. Old owners and unrelated accounts cannot read private terms after a transfer. Collaboration detail/list responses include `channels`; primary creator/relationship fields remain for compatibility.
+- `GET /creators/portal/notifications` reads the recipient's persisted cooperation notifications. `POST /creators/portal/notifications/{id}/read` marks only their own notification as read; invitation creation never marks it read.
+- Frontend route is `${CREATOR_INVITATION_FRONTEND_BASE_URL}/cooperation-invitations?token=...`. `GET /cooperation-invitations/preview?token=...` is public and returns only Brand/Campaign names, invitation message and expiry. It does not return fee, email, private terms or ownership and cannot accept a Deal or log in a user.
+- Tokens use 32 random bytes, only SHA-256 hashes persist outside encrypted delivery payload. TTL is 7 days. Manual-link retrieval requires the sending Brand at `GET /cooperation-invitations/{invitationId}/manual-link`; only valid MANUAL_REQUIRED invitations expose the link there. Never log or publish these URLs.
+
+### Outreach and delivery
+
+Existing Shortlist Outreach now requires both Shortlist and Relationship permissions and prepares cooperation Deals instead of Claim invitations. Multiple selected channels of one Master are grouped. Request may include `proposedFee`, VND `currency`, `outreachMessage` and `deliverables` using the proposal channel shape. Without complete proposal input it records CRM/Deal and returns NEEDS_PROPOSAL; it does not claim email was sent. Existing Deals return ALREADY_EXISTS without overwriting negotiated terms. Invalid/failed groups return safe per-item results and other groups may commit.
+
+For owned channels, sending creates a real Portal notification and queues email to the owner account. Unclaimed channels use booking email from the newest stored public contact snapshot (collectedAt/id ordering), never display name or username. Without booking email, MANUAL_REQUIRED provides a manual cooperation link. These links do not replace Admin registration invitations or channel Claim; all those APIs remain separate.
+
+Cooperation email uses a separate V28 job table and existing SMTP, TLS/timeouts and `EMAIL_OUTBOX_ENCRYPTION_KEY` cipher/executor. No new secret is needed. Email-bearing invitations require valid SMTP and encryption before enqueue; manual links require encryption. Invitation/notification/job commit together; enqueue errors roll back. SMTP runs outside transactions after commit and retries do not roll back the stored Deal/invitation.
+
+- States: QUEUED/PROCESSING/SENT/FAILED, MANUAL_REQUIRED, CANCELLED/EXPIRED.
+- Bounded shared mail executor: 2 threads, queue 100; recovery scan every 10 seconds.
+- Lease 2 minutes with processing token; old/expired workers cannot overwrite a newer result.
+- Five attempts per cycle, 15/30/60/120 second backoff. Replaced/expired/cancelled invitations do not dispatch; payload is erased at terminal state. FAILED retains ciphertext until retry or expiry.
+- `GET /cooperation-invitations/{id}/email-delivery` returns safe state/attempts/timing/canRetry. `POST .../{id}/retry-email` retries a valid FAILED job, minimum 60 seconds since last attempt, max five successful manual retry requests/hour/invitation. Same token and expiry remain.
+- Delivery is at-least-once: SMTP may accept a message before a response is lost. Do not promise exactly-once or equate QUEUED with SENT.
+
+### Budget, compatibility and deployment
+
+`GET /campaigns/{campaignId}/cooperation-budget` returns total/committed/remaining budget, confirmed Creator count and negotiating proposal total separately. Commitments count each non-cancelled PLANNED/IN_PROGRESS/COMPLETED Collaboration once, including historical ones; they are not actual cost or payments. SINGLE limits distinct recipients; MULTI target count is advisory and excess returns TARGET_CREATOR_COUNT_EXCEEDED. Concurrent confirmations serialize on Campaign and cannot overspend.
+
+A legacy Campaign with missing totalBudget can use `POST /campaigns/{campaignId}/cooperation-budget` with `{ "totalBudget": 2000000, "currency": "VND" }` and current Campaign If-Match. Requires UPDATE_CAMPAIGN; only first initialization on READY_FOR_DISCOVERY/ACTIVE is allowed. It increments Campaign revision and records audit but does not rewrite historical M3 Context. Missing/non-VND legacy commitment amounts make budget UNAVAILABLE (null fields may be omitted by JSON settings) and block new confirmations; no conversion or zero fallback is applied.
+
+The legacy `POST /campaigns/{id}/collaborations` no longer creates from CONTACTED directly. Supply `relationshipId`, `dealId`, `expectedRevision`, agreement source/evidence and Idempotency-Key; optional `agreedFee/currency` must match the proposal. It delegates to the same confirmation transaction and returns PLANNED, never implicitly starts execution. Outcome/Review remain one set per Collaboration; existing primary-channel metadata is retained for learned scoring rather than multiplying evidence per member channel.
+
+V28 backfills historical Collaborations as one-channel LEGACY Deals without fabricating consent/proposals/invitations or changing fees/status/IDs. It preserves existing CRM history, maps legacy INTERESTED to NEGOTIATING and NOT_INTERESTED to DECLINED, and uses confirmed agreements as evidence for CONFIRMED. The old one-Collaboration-per-Relationship constraint becomes an active-only unique index so cancellation can retain history and allow a later agreement. V1-V27 remain unchanged. Apply V28 through normal controlled deployment; this implementation did not migrate a shared database or restart BE. Frontend must adopt Deal revision/idempotency and explicit start before rollout.
+
+
+Integration details: Relationship responses include current `masterId` and `dealId/dealStatus/collaborationId` for grouping. Use Deal-level offer/counteroffer/agreed fee for grouped cards; do not sum the same Deal fee across its channel cards. The existing `CLAIM_EMAIL_DISPATCH_ENABLED` switch controls both Claim and cooperation email dispatch; keep it enabled for delivery in deployment. It does not change synchronous registration/OTP delivery.
+
+
+### Collaboration execution and Outcome (V29)
+
+A confirmed Deal still creates one PLANNED Collaboration and one fee, including multi-channel Deals. New proposal deliverables now require `dueAt` (UTC instant), `acceptanceChecklist` (1-50 nonblank strings), and integer `maxRevisionRounds` (0-10). Quantity (1-100) expands into individual execution units, with a maximum of 1,000 units per agreement. Confirmation snapshots these terms; old proposals missing these terms must be replaced explicitly before confirmation. No historical terms are invented.
+
+Execution lifecycle: `PLANNED -> IN_PROGRESS -> AWAITING_REVIEW -> COMPLETED`. Start remains restricted to ACTIVE Campaigns. Recording Outcome no longer completes work. CRM stays CONFIRMED; payment, commitment and agreedFee are independent. Campaign completion remains a separate Brand action and requires at least one completed Collaboration, no unfinished Collaborations and no open negotiating/contacted Deals.
+
+API prefix `/api/v1`. Authenticated endpoints under `/collaborations/{id}`:
+
+- `GET /deliverables`: current executionRevision, per-unit revision/submissionRevision, immutable submission/review/publication history, outcomeRevisions, acceptances and final review. Responses use camelCase and preserve explicit nulls for absent data. This is the authoritative execution view; the existing collaboration detail retains its legacy outcome projection, populated on final review.
+- `POST /deliverables/{deliverableId}/submissions`: expectedRevision is the **unit** revision; HTTPS url and source CREATOR_PORTAL or BRAND_EXTERNAL. Brand external submissions require sourceDescription. Pending submissions must be reviewed before replacement. New submissions after approval require approval again.
+- `POST /deliverables/{deliverableId}/review`: unit expectedRevision, submissionRevision, decision APPROVE/REQUEST_CHANGES, completedChecklist, reason. Approval requires the full negotiated checklist. Changes consume one negotiated round; exceeding the limit returns 409.
+- `POST /deliverables/{deliverableId}/publication`: unit expectedRevision, submissionRevision, HTTPS url, optional postId, acknowledgeException and exceptionReason. Early publication is retained as an exception; only Brand can acknowledge it. Approval and acknowledgement are required before acceptance. This does not publish to social media or verify that published media equals the approved draft. URLs are not fetched by the server.
+- `POST /outcome`: collaboration expectedRevision, reason and posts. Each post contains deliverableId, submissionRevision, periodStart/periodEnd and nullable nonnegative integer views/clicks/likes/comments/shares, optional evidenceUrl. One measurement per current publication/unit; duplicate posts are rejected, not double-counted. New measurements append immutable revisions. Each Outcome POST is a complete measurement snapshot: Brand-omitted finance remains unknown rather than copying agreedFee; Creator metrics retain the last explicitly recorded Brand finance until Brand accepts the new revision. Creator may report metrics but may not provide finance fields.
+- Brand finance fields: costs[{description,amount}], currency=VND, optional gmv/revenue, periodStart/periodEnd, optional financialEvidence HTTPS URL, financialConfirmed boolean. actualCost is the sum of explicit costs, never an agreedFee default. Financial data and evidence are self-reported; URLs are references, not proof that the server checked their contents.
+- `POST /outcome/accept`: collaboration expectedRevision and current outcomeRevision. Requires all units approved, current publications measured, early-publication exceptions acknowledged, and positive confirmed VND actualCost. Transitions only to AWAITING_REVIEW.
+- `POST /outcome/reopen`: collaboration expectedRevision and reason; only AWAITING_REVIEW can reopen to IN_PROGRESS. The previous acceptance remains in history and is marked reopened. COMPLETED cannot reopen.
+- `POST /review`: collaboration expectedRevision, accepted outcomeRevision, integer overallRating/brandFitRating (1-5), wouldCollaborateAgain boolean, note and reviewTags. Final review completes execution atomically with historical evidence and audit. Final reviews are immutable.
+
+All POST execution operations require `Idempotency-Key` (1-100 safe characters). Same actor/key/scope/body returns the stored response; changed body or stale revision returns 409. Unit mutations also increment the collaboration executionRevision. Keys are scoped to operations, not shared with authentication tokens. Brand writes use existing Collaboration/Outcome/Review permissions; Creator execution uses effective RESPOND_OWN_COOPERATION and current ownership of **every** Deal channel. Losing ownership removes access. No new public/magic-link access to execution data is introduced.
+
+Financial policy `outcome-finance-v1`: ROAS=GMV/actualCost, ROI=(revenue-actualCost)/actualCost, CPM=actualCost/views*1000, CPE=actualCost/(likes+comments+shares). ROI is not full accounting profit. Calculations use BigDecimal; missing inputs/zero denominator/inconsistent measurement periods return null with an unavailable reason. No absent metric is filled with zero. Raw revision calculations remain authoritative; a ratio outside the legacy numeric ROI column range is not truncated into that column.
+
+Post identity is derived from recognized platform URL IDs when possible, otherwise normalized HTTPS URL (tracking parameters removed; content-identifying query retained). Optional postId must agree with the recognized URL identity. No network redirect expansion is performed: different shortlinks cannot be proven identical in this version. Claims of provider verification are never inferred from a user-supplied URL or ID.
+
+V29 preserves old Collaboration/Outcome/Review rows and labels their provenance LEGACY_UNVERIFIED. It creates no past approvals, deadlines, consent or acceptance. An unfinished legacy Collaboration needs `POST /execution-plan` with collaboration expectedRevision, sourceDescription and fully specified deliverables before using the new workflow. This is explicit Brand recording of prior terms, not a new claim of Creator acceptance. A historical COMPLETED Collaboration with missing review uses `POST /review/legacy` (expectedRevision, ratings, wouldCollaborateAgain, note, reviewTags); this creates no content acceptance. The old generic outcome/review JSON contract is replaced for new HTTP writes; frontend must use the revision-aware endpoints above.
+
+M1 evidence records source review/revision once, actual persisted ratings (including negative reviews), acceptance provenance and SELF_REPORTED metrics. A Brand review never upgrades metrics to VERIFIED_CRAWL. One multi-channel agreement contributes one review, not one per channel. The legacy pattern counter is no longer incremented; learned M4 is rebuilt from authoritative reviews. M1 scoring is deliberately unavailable with `M1_POLICY_NOT_IMPLEMENTED` until a Bayesian/KPI policy is specified. New Recommendation runs identify this change with scoring policy `four-memory-v2-m1-unavailable`; historical run policies/results are preserved. Available components retain normalized weights, and historical RecommendationRun results are untouched.
+
+No crawler-post adapter, social publishing, barter, frontend or shared-environment rollout is included. V29 has only been exercised on disposable PostgreSQL containers; deployment requires the API/FE contract changes together. Do not apply this migration to a shared database without the normal deployment review.
+
+V29 verification: full regression 1,117/1,120 passed (only the three pre-existing Payment failures, zero errors/skipped); final affected-suite verification 69/69 passed, including UTC/UTC+7 period normalization. Detailed cases and run boundaries are recorded in `docs/backend-test-cases.md`. Real environment files, Bruno, shared DB, the serving BE and commit/push remain unchanged.
+
+
+## Campaign History and Duplicate Brief (Luồng 10, V30)
+
+History endpoints require an ACTIVE, email-verified BRAND owning the Campaign and **both** `VIEW_OWN_CAMPAIGN` and `VIEW_OWN_HISTORY_AND_INSIGHTS`. Admin/Creator cannot use these new routes. Missing/foreign Campaigns and foreign child resources return 404. Existing routes retain their own authorization. Private agreement terms, financial references and internal reviews are intentionally covered by the History permission; read access does not require write permissions.
+
+API prefix `/api/v1`:
+
+- `GET /campaign-history`: `status`, `platform`, inclusive `createdFrom`/`createdTo` dates against stored `createdAt`, literal case-insensitive name `q` (max 200 characters); page=0, size=20, size 1–100. Order: createdAt DESC, id DESC. Invalid/reversed bounds return 400.
+- `GET /campaigns/{id}/history`: separate currentCampaign, latest stored Context, deal counts, completed-only report and optional duplicate origin.
+- `GET /campaigns/{id}/history/contexts`: paginated immutable brief versions and Brand Context references. Absent snapshot attributes remain null with missingFields.
+- `GET /campaigns/{id}/history/collaborations`: paginated, optional collaboration `status`.
+- `GET /campaigns/{id}/history/collaborations/{collaborationId}`: exact confirmed proposal from confirmation history, member channels, execution submissions/decisions/publications, Outcome revisions, acceptances and final Review. Current channel names/profile are labelled CURRENT_PROFILE; they are not historical identity snapshots.
+
+GETs use read-only repeatable-read transactions. They never prepare M3, crawl, dispatch embedding jobs, produce learning evidence or recalculate stored RecommendationRun results. Execution and negotiation queries are shared with the existing execution/CRM APIs, with independent History read authorization. No proof URLs are fetched. Legacy missing snapshots/acceptance are labelled LEGACY_UNVERIFIED, never silently upgraded to VERIFIED_CRAWL or reconstructed from current data.
+
+Report policy `campaign-history-report-v1` references `outcome-finance-v1`. Only COMPLETED Collaborations with final Review referencing the exact SELF_REPORTED Outcome revision and an active Brand acceptance enter the main report. Unfinished/cancelled/legacy missing provenance remain visible separately. Each multi-channel Collaboration contributes one commitment and one explicit actualCost, never one per channel. Commitment is shown separately; actualCost is never inferred from agreedFee or legacy actual_fee.
+
+Metrics include nullable value, availability, unavailableReasons, unit and coverage (required completed sources, eligible reviewed/accepted sources and distinct post keys). Unavailable inputs do not become zero or partial campaign totals. Only valid VND amounts are summed. Public post keys deduplicate identical measurements; conflicting values or incompatible measurement periods make affected metrics unavailable. Views are counts, not unique reach. CPM/CPE use totals, not average ratios. One qualifying Collaboration may report its own GMV/revenue/ROAS/ROI; multiple completed Collaborations return `ATTRIBUTION_NOT_ESTABLISHED` for revenue-dependent totals, preserving their individual stored outcomes. This is a conservative History report, not the full Analytics dashboard or independent verification of claims.
+
+### Duplicate integration contract
+
+Preview uses the two History read permissions; confirmation additionally requires CREATE_CAMPAIGN:
+
+1. `GET /campaigns/{id}/duplicate-brief/preview?contextId=<optional UUID>` reads the selected Context, defaulting to the latest stored version. Without a Context it explicitly uses CURRENT_DRAFT or CURRENT_RECORD_FALLBACK. It returns source revision/kind/context, a whitelisted draft, resetFields, reviewFields and warnings. Preview does not write or consume quota.
+2. Review/edit the returned draft. Dates are reset to null and may remain absent in DRAFT; Brand must supply valid dates before READY. Missing snapshot values are not filled from current records. Legacy budgetMin/budgetMax are never converted into totalBudget or per-Creator fee.
+3. `POST /campaigns/{id}/duplicate-brief` with `Idempotency-Key` (1–100 letters/digits/`.`/`_`/`:`/`-`) and body `{expectedSourceRevision,sourceKind,sourceContextId,draft}`. expectedSourceRevision is the nonnegative integer returned by preview (initial Campaign revision is 0). draft uses CampaignRequest. Return 201 `{campaign,source}`. Source changes or same key with different content return 409. Missing/invalid request fields return 400.
+
+The submitted draft is the full editable input, not a JSON merge with source. New Campaign is DRAFT and owns no Context/M3 until READY. Only generic brief/preferences/budget/deliverables are suggested. Channels, Shortlist, CRM, Deals, Collaborations, agreed fees, consent, Outcome, Review, evidence, exclusions, feedback, embedding/jobs and RecommendationRuns are never copied. READY creates new Context/M3 with the Brand Context applicable then.
+
+V30 adds only campaign_duplicate_request receipts, with source/actor/target FKs and actor-key/target uniqueness. Existing Campaigns receive no fabricated origin. Source User/Campaign locks, atomic quota reservation shared with normal create, target, receipt and audit commit together. Concurrent retry returns the stored response and does not charge quota twice, even when quota is now full. Audit/receipt failure rolls back target and quota. Payment activation and settlement policies are unchanged.
+
+
+V30 validation (2026-11-09): related suite **105/105 passed**. Whole backend regression **1,155 run; 1,152 passed; 3 failures; 0 errors; 0 skipped**, with exactly the existing Payment failures documented in the test cases. After the final shared-query refactor, calculator/quota/Deal/execution companion suites passed 103 cases; the final History PostgreSQL invocation passed **16/16**, including the real two-channel, one-fee workflow. These final affected checks are separate from the whole-backend run. PostgreSQL was disposable; provider responses were mocked where needed, and no shared database migration or serving-BE restart was performed.

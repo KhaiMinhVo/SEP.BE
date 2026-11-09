@@ -61,7 +61,7 @@ class BrandM4ScoringTest {
   }
 
   @Test
-  void verifiedHistoryKeepsExistingFormulaAndAvailableWeightsSumToOne() {
+  void historyDoesNotInventM1BeforePolicyExistsAndAvailableWeightsSumToOne() {
     var c = candidate();
     when(histories.findByCreatorId(c.getCreatorId()))
         .thenReturn(
@@ -76,9 +76,13 @@ class BrandM4ScoringTest {
     var score =
         service.calculateFourMemoryScores(
             c, Campaign.builder().build(), UUID.randomUUID(), learned(5));
-    assertThat(score.getM1Score()).isEqualTo(75);
+    assertThat(score.getM1Score()).isNull();
+    assertThat(score.getM1UnavailableReason()).isEqualTo("M1_POLICY_NOT_IMPLEMENTED");
+    assertThat(score.getScoringPolicyVersion()).isEqualTo("four-memory-v2-m1-unavailable");
     assertThat(score.getM4Score()).isEqualTo(75);
-    assertThat(score.getEffectiveWeights()).isEqualTo(score.getOriginalWeights());
+    assertThat(score.getEffectiveWeights().get("M1")).isZero();
+    assertThat(score.getEffectiveWeights().get("M2")).isCloseTo(5.0 / 7, within(0.000001));
+    assertThat(score.getEffectiveWeights().get("M4")).isCloseTo(2.0 / 7, within(0.000001));
     assertThat(score.getEffectiveWeights().values().stream().mapToDouble(Double::doubleValue).sum())
         .isCloseTo(1, within(0.00001));
   }

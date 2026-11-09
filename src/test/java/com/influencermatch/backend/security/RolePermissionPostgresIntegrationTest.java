@@ -498,7 +498,19 @@ class RolePermissionPostgresIntegrationTest {
             Permission.RECORD_OWN_CREATOR_REVIEW,
             "POST",
             "/collaborations/{id}/review",
-            Map.of("overallRating", 5, "brandFitRating", 5, "wouldCollaborateAgain", true)),
+            Map.of(
+                "expectedRevision",
+                1,
+                "outcomeRevision",
+                1,
+                "overallRating",
+                5,
+                "brandFitRating",
+                5,
+                "wouldCollaborateAgain",
+                true,
+                "reviewTags",
+                List.of())),
         Arguments.of(
             Role.CREATOR,
             Permission.CLAIM_CREATOR_PROFILE,
@@ -530,8 +542,9 @@ class RolePermissionPostgresIntegrationTest {
     call(
         access,
         request(
-            org.springframework.http.HttpMethod.valueOf(method),
-            path.replace("{id}", UUID.randomUUID().toString())),
+                org.springframework.http.HttpMethod.valueOf(method),
+                path.replace("{id}", UUID.randomUUID().toString()))
+            .header("Idempotency-Key", UUID.randomUUID().toString()),
         body,
         403);
     assertThat(auditCount()).isEqualTo(count);

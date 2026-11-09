@@ -385,7 +385,7 @@ class RetiredSchemaPostgresIntegrationTest extends PostgresApiTestSupport {
   void freshSchemaHasOnlyTheCurrentTablesAndColumns() {
     String s = schema();
     try {
-      assertThat(flyway(s, null).migrate().migrationsExecuted).isEqualTo(26);
+      assertThat(flyway(s, null).migrate().migrationsExecuted).isEqualTo(29);
       absent(s);
       for (String table :
           List.of(
@@ -403,7 +403,7 @@ class RetiredSchemaPostgresIntegrationTest extends PostgresApiTestSupport {
         assertThat(
                 jdbc.queryForObject("select to_regclass(?)::text", String.class, s + "." + table))
             .isNotNull();
-      assertThat(flyway(s, null).info().current().getVersion().toString()).isEqualTo("27");
+      assertThat(flyway(s, null).info().current().getVersion().toString()).isEqualTo("30");
       assertThat(
               jdbc.queryForObject(
                   "select to_regclass(?)::text", String.class, s + ".google_login_session"))

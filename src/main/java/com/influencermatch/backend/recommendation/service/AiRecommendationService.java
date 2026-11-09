@@ -250,8 +250,7 @@ public class AiRecommendationService {
                   .candidateSource(source.name())
                   .brandContextId(brandContext.getId())
                   .brandContextVersion(brandContext.getContextVersion())
-                  .scoringPolicyVersion(
-                      com.influencermatch.backend.brand.service.BrandLearnedPatterns.POLICY)
+                  .scoringPolicyVersion("four-memory-v2-m1-unavailable")
                   .scoringSnapshot(objectMapper.valueToTree(recommendationItems))
                   .status("COMPLETED")
                   .candidatesCount(recommendationItems.size())
@@ -387,7 +386,7 @@ public class AiRecommendationService {
             + (0.25 * nicheMatchScore);
 
     // --- 2. Score M1 (Historical Reliability) ---
-    // Missing VERIFIED history remains unavailable; no neutral success is fabricated.
+    // Evidence remains inspectable, but no M1 score exists until a scoring policy is defined.
     Double m1Score = null;
     List<HistoricalCampaign> pastCampaigns =
         historicalCampaignRepository.findByCreatorId(cand.getCreatorId());
@@ -395,20 +394,11 @@ public class AiRecommendationService {
       pastCampaigns = historicalCampaignRepository.findByMasterId(cand.getMasterId());
     }
 
-    pastCampaigns = pastCampaigns.stream().filter(h -> "VERIFIED".equals(h.getQuality())).toList();
-    if (!pastCampaigns.isEmpty()) {
-      double baseM1 = 60.0;
-      int count = 0;
-      for (HistoricalCampaign hist : pastCampaigns) {
-        if (hist.getOutcome() != null && hist.getOutcome().getRoi() != null) {
-          double roi = hist.getOutcome().getRoi().doubleValue();
-          if (roi >= 1.5) baseM1 += 15.0;
-          else if (roi >= 1.0) baseM1 += 8.0;
-          count++;
-        }
-      }
-      m1Score = Math.min(100.0, Math.max(30.0, baseM1));
-    }
+    pastCampaigns =
+        pastCampaigns.stream()
+            .filter(
+                h -> h.getSourceReviewId() != null && "BRAND_ACCEPTED".equals(h.getProvenance()))
+            .toList();
 
     var cohort = learnedSnapshot.select(cand.getPlatform(), cand.getNiche());
     var evidence =
@@ -434,7 +424,7 @@ public class AiRecommendationService {
         .m4Score(m4Score == null ? null : roundToTwoDecimals(m4Score))
         .m1Available(m1Score != null)
         .m4Available(m4Score != null)
-        .m1UnavailableReason(m1Score == null ? "NO_VERIFIED_HISTORY" : null)
+        .m1UnavailableReason(m1Score == null ? "M1_POLICY_NOT_IMPLEMENTED" : null)
         .m4UnavailableReason(m4Score == null ? "INSUFFICIENT_REVIEW_EVIDENCE" : null)
         .m1EvidenceCount(pastCampaigns.size())
         .m4EvidenceCount(evidence == null ? 0 : evidence.reviewIds().size())
@@ -442,7 +432,7 @@ public class AiRecommendationService {
         .m4ReviewIds(evidence == null ? List.of() : evidence.reviewIds())
         .originalWeights(Map.of("M2", 0.50, "M1", 0.30, "M4", 0.20))
         .effectiveWeights(effective)
-        .scoringPolicyVersion(com.influencermatch.backend.brand.service.BrandLearnedPatterns.POLICY)
+        .scoringPolicyVersion("four-memory-v2-m1-unavailable")
         .followerScore(roundToTwoDecimals(followerScore))
         .engagementScore(roundToTwoDecimals(engagementScore))
         .semanticMatchScore(roundToTwoDecimals(semanticMatchScore))

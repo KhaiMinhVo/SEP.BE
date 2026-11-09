@@ -38,6 +38,7 @@ public class SecurityConfig {
     "/integrations/meta/callback",
     "/integrations/instagram/callback",
     "/integrations/tiktok/callback",
+    "/cooperation-invitations/preview",
     "/auth/csrf",
     "/auth/policies",
     "/auth/logout",

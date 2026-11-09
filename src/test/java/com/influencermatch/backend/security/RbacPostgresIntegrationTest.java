@@ -135,8 +135,8 @@ class RbacPostgresIntegrationTest {
             .schemas("empty_rbac")
             .defaultSchema("empty_rbac")
             .load();
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(26);
-    assertThat(flyway.info().current().getVersion().toString()).isEqualTo("27");
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(29);
+    assertThat(flyway.info().current().getVersion().toString()).isEqualTo("30");
     assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
   }
 

@@ -26,8 +26,11 @@ class CampaignPostgresIntegrationTest extends PostgresApiTestSupport {
             jdbc.queryForObject(
                 "select count(*) from campaign_context where campaign_id=?", Long.class, id))
         .isZero();
-    for (String state : List.of("READY_FOR_DISCOVERY", "ACTIVE", "COMPLETED"))
+    for (String state : List.of("READY_FOR_DISCOVERY", "ACTIVE"))
       call(owner, patch("/campaigns/" + id + "/status"), Map.of("status", state), 200);
+    call(owner, patch("/campaigns/" + id + "/status"), Map.of("status", "COMPLETED"), 409);
+    assertThat(jdbc.queryForObject("select status from campaign where id=?", String.class, id))
+        .isEqualTo("ACTIVE");
     assertThat(
             jdbc.queryForObject(
                 "select count(*) from campaign_context where campaign_id=?", Long.class, id))

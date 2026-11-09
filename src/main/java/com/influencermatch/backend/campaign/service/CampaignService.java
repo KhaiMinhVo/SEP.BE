@@ -48,6 +48,9 @@ public class CampaignService {
   @org.springframework.beans.factory.annotation.Autowired
   private com.influencermatch.backend.campaign.embedding.CampaignEmbeddingStore embeddings;
 
+  @org.springframework.beans.factory.annotation.Autowired
+  private org.springframework.jdbc.core.JdbcTemplate executionDb;
+
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CREATE_CAMPAIGN')")
   public CampaignResponse create(
@@ -284,6 +287,29 @@ public class CampaignService {
     if (target == CampaignStatus.READY_FOR_DISCOVERY) {
       validateReady(campaign);
       m3.create(campaign, false);
+    }
+    if (target == CampaignStatus.COMPLETED) {
+      Long completed =
+          executionDb.queryForObject(
+              "select count(*) from collaboration where campaign_id=? and status='COMPLETED'",
+              Long.class,
+              id);
+      Long unfinished =
+          executionDb.queryForObject(
+              "select count(*) from collaboration where campaign_id=? and status not in"
+                  + " ('COMPLETED','CANCELLED')",
+              Long.class,
+              id);
+      Long openDeals =
+          executionDb.queryForObject(
+              "select count(*) from cooperation_deal where campaign_id=? and status in"
+                  + " ('CONTACTED','NEGOTIATING')",
+              Long.class,
+              id);
+      if (completed == 0 || unfinished > 0 || openDeals > 0)
+        throw new BusinessException(
+            ErrorCode.INVALID_COLLABORATION_STATE,
+            "Resolve open deals and finish collaborations before closing Campaign");
     }
     campaign.setStatus(target);
     campaign.setCampaignRevision(campaign.getCampaignRevision() + 1);

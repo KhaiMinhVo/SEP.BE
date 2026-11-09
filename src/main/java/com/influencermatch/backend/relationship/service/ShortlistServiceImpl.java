@@ -1,13 +1,8 @@
 package com.influencermatch.backend.relationship.service;
 
-import com.influencermatch.backend.brand.model.BrandProfile;
-import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.campaign.repository.RecommendationRunRepository;
 import com.influencermatch.backend.creator.client.CrawlerServiceClient;
-import com.influencermatch.backend.creator.dto.InvitationResponse;
-import com.influencermatch.backend.creator.enums.CreatorSourceType;
 import com.influencermatch.backend.creator.model.Creator;
-import com.influencermatch.backend.creator.model.CreatorInvitation;
 import com.influencermatch.backend.creator.model.PublicCreatorMetric;
 import com.influencermatch.backend.creator.repository.CreatorInvitationRepository;
 import com.influencermatch.backend.creator.repository.CreatorRepository;
@@ -16,19 +11,15 @@ import com.influencermatch.backend.creator.service.CreatorInvitationService;
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.relationship.dto.*;
-import com.influencermatch.backend.relationship.enums.RelationshipStage;
 import com.influencermatch.backend.relationship.enums.ShortlistPriority;
 import com.influencermatch.backend.relationship.enums.ShortlistStatus;
-import com.influencermatch.backend.relationship.model.BrandCreatorRelationship;
 import com.influencermatch.backend.relationship.model.ShortlistItem;
 import com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository;
 import com.influencermatch.backend.relationship.repository.ShortlistItemRepository;
 import com.influencermatch.backend.security.permission.Permission;
 import com.influencermatch.backend.security.permission.Permissions;
-import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
 import jakarta.persistence.criteria.Predicate;
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -57,6 +48,10 @@ public class ShortlistServiceImpl implements ShortlistService {
   private final CreatorInvitationService creatorInvitationService;
   private final CreatorInvitationRepository creatorInvitationRepository;
   private final CrawlerServiceClient crawlerServiceClient;
+
+  @Autowired
+  private com.influencermatch.backend.cooperation.CooperationOutreachService cooperationOutreach;
+
   private final ShortlistNotificationService notificationService;
 
   @Autowired private ShortlistItemWriter writer;
@@ -529,199 +524,9 @@ public class ShortlistServiceImpl implements ShortlistService {
   }
 
   @Override
-  @Transactional
   public ShortlistOutreachResponse outreachShortlist(
       UUID campaignId, ShortlistOutreachRequest request) {
-    Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
-    Campaign campaign = ownership.requireOwned(campaignId);
-    User actor = Permissions.actor();
-    BrandProfile brand = campaign.getBrandProfile();
-
-    if (request.getShortlistItemIds() == null || request.getShortlistItemIds().isEmpty()) {
-      throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Shortlist item IDs cannot be empty");
-    }
-
-    List<ShortlistItem> items =
-        shortlistItemRepository
-            .findByCampaignIdAndIdIn(campaignId, request.getShortlistItemIds())
-            .stream()
-            .filter(this::hasMatchingOwner)
-            .toList();
-
-    if (items.isEmpty()) {
-      throw new BusinessException(
-          ErrorCode.RESOURCE_NOT_FOUND, "No shortlist items found for campaign " + campaignId);
-    }
-
-    var snapshots = projection.latest(items);
-    List<UUID> relationshipIds = new ArrayList<>();
-    List<UUID> dispatchedInvitationIds = new ArrayList<>();
-    List<ShortlistOutreachResponse.OutreachItemResult> itemResults = new ArrayList<>();
-    int contactedCount = 0;
-    LocalDateTime now = LocalDateTime.now();
-
-    for (ShortlistItem item : items) {
-      // 1. Chuyển trạng thái ShortlistItem sang CONTACTED
-      item.setStatus(ShortlistStatus.CONTACTED);
-      shortlistItemRepository.save(item);
-
-      Creator creator = item.getCreator();
-      UUID creatorId = creator.getId();
-      String creatorName =
-          creator.getDisplayName() != null ? creator.getDisplayName() : creator.getUserName();
-
-      // 2. Tạo hoặc cập nhật BrandCreatorRelationship ở giai đoạn CONTACTED
-      Optional<BrandCreatorRelationship> existingRelOpt =
-          relationshipRepository.findByCampaignIdAndCreatorId(campaignId, creatorId);
-
-      BrandCreatorRelationship rel;
-      if (existingRelOpt.isPresent()) {
-        rel = existingRelOpt.get();
-        if (rel.getUser() == null || !actor.getId().equals(rel.getUser().getId()))
-          throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Relationship not found");
-        if (rel.getStage() == RelationshipStage.SHORTLISTED) {
-          rel.setStage(RelationshipStage.CONTACTED);
-        }
-        if (request.getOutreachMessage() != null) {
-          rel.setNotes(request.getOutreachMessage());
-        }
-        if (request.getProposedFee() != null) {
-          rel.setQuotedFee(request.getProposedFee());
-        }
-        if (request.getCurrency() != null) {
-          rel.setCurrency(request.getCurrency());
-        }
-        if (request.getContactMethod() != null) {
-          rel.setContactMethod(request.getContactMethod());
-        }
-        rel.setShortlistItem(item);
-        rel.setLastContactAt(now);
-        rel.setUpdatedAt(now);
-      } else {
-        rel =
-            BrandCreatorRelationship.builder()
-                .campaign(campaign)
-                .creator(creator)
-                .master(item.getMaster() != null ? item.getMaster() : creator.getMaster())
-                .user(actor)
-                .shortlistItem(item)
-                .stage(RelationshipStage.CONTACTED)
-                .contactMethod(
-                    request.getContactMethod() != null
-                        ? request.getContactMethod()
-                        : "EMAIL_INVITATION")
-                .quotedFee(request.getProposedFee())
-                .currency(request.getCurrency() != null ? request.getCurrency() : "VND")
-                .notes(request.getOutreachMessage())
-                .lastContactAt(now)
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
-      }
-      rel = relationshipRepository.save(rel);
-      relationshipIds.add(rel.getId());
-      contactedCount++;
-
-      // 3. Xử lý Lời mời Claim hoặc Thông báo Creator Portal
-      UUID invitationId = null;
-      String contactStatus;
-      String outcomeMessage;
-
-      boolean isClaimed =
-          creator.getSourceType() == CreatorSourceType.AUTHORIZED || creator.getMaster() != null;
-      if (isClaimed) {
-        contactStatus = "PORTAL_NOTIFIED";
-        outcomeMessage =
-            "Creator chính chủ đã kết nối tài khoản. Đề xuất hợp tác được chuyển trực tiếp vào"
-                + " Creator Portal.";
-      } else {
-        // Creator chưa Claim (PUBLIC) -> Tìm email và gửi lời mời
-        String bookingEmail = null;
-        Optional<PublicCreatorMetric> metricOpt = Optional.ofNullable(snapshots.get(creatorId));
-        if (metricOpt.isPresent()) {
-          bookingEmail = extractEmail(metricOpt.get().getContact());
-          if (bookingEmail == null) {
-            bookingEmail = extractEmail(metricOpt.get().getContentSummary());
-          }
-        }
-        if (bookingEmail == null && creator.getDisplayName() != null) {
-          bookingEmail = extractEmail(creator.getDisplayName());
-        }
-        if (bookingEmail == null && creator.getUserName() != null) {
-          bookingEmail = extractEmail(creator.getUserName());
-        }
-
-        if (bookingEmail != null) {
-          Optional<CreatorInvitation> pendingOpt =
-              creatorInvitationRepository != null
-                  ? creatorInvitationRepository
-                      .findFirstByTargetCreatorIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
-                          creatorId, "PENDING", now)
-                  : Optional.empty();
-
-          if (pendingOpt.isPresent()) {
-            invitationId = pendingOpt.get().getId();
-            dispatchedInvitationIds.add(invitationId);
-            contactStatus = "PENDING_INVITATION_EXISTS";
-            outcomeMessage =
-                "Đã có lời mời Claim đang chờ xử lý tới "
-                    + bookingEmail
-                    + ". Tiếp tục ghi nhận quan hệ CRM.";
-          } else if (creatorInvitationService != null && brand != null) {
-            try {
-              InvitationResponse invResponse =
-                  creatorInvitationService.sendInvitation(
-                      creatorId, bookingEmail, brand.getId(), campaignId);
-              invitationId = invResponse.getId();
-              dispatchedInvitationIds.add(invitationId);
-              contactStatus = "INVITATION_QUEUED";
-              outcomeMessage = "Đã gửi email mời Claim và hợp tác tới: " + bookingEmail;
-            } catch (Exception ex) {
-              log.warn(
-                  "Could not dispatch claim invitation email for creator {}: {}",
-                  creatorId,
-                  ex.getMessage());
-              contactStatus = "INVITATION_FAILED";
-              outcomeMessage = "Không thể gửi email tự động: " + ex.getMessage();
-            }
-          } else {
-            contactStatus = "INVITATION_SKIPPED";
-            outcomeMessage =
-                "Tìm thấy email " + bookingEmail + " nhưng dịch vụ gửi email chưa sẵn sàng.";
-          }
-        } else if (creator.getProfileUrl() != null && !creator.getProfileUrl().isBlank()) {
-          contactStatus = "MANUAL_SOCIAL_LINK";
-          outcomeMessage =
-              "Chưa có email booking, vui lòng liên hệ trực tiếp qua mạng xã hội: "
-                  + creator.getProfileUrl();
-        } else {
-          contactStatus = "NO_CONTACT_INFO";
-          outcomeMessage =
-              "Chưa có thông tin liên hệ. Đã lưu quan hệ CRM để Brand chủ động cập nhật sau.";
-        }
-      }
-
-      itemResults.add(
-          ShortlistOutreachResponse.OutreachItemResult.builder()
-              .shortlistItemId(item.getId())
-              .creatorId(creatorId)
-              .creatorName(creatorName)
-              .relationshipId(rel.getId())
-              .invitationId(invitationId)
-              .contactStatus(contactStatus)
-              .message(outcomeMessage)
-              .build());
-    }
-
-    return ShortlistOutreachResponse.builder()
-        .campaignId(campaignId)
-        .totalRequested(items.size())
-        .contactedCount(contactedCount)
-        .relationshipIds(relationshipIds)
-        .dispatchedInvitationIds(dispatchedInvitationIds)
-        .items(itemResults)
-        .message("Đã xử lý tiếp cận hợp tác cho " + contactedCount + " Creator")
-        .build();
+    return cooperationOutreach.outreach(campaignId, request);
   }
 
   private boolean hasMatchingOwner(ShortlistItem item) {

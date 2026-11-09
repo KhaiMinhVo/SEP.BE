@@ -423,7 +423,7 @@ class ComparePaymentPostgresIntegrationTest {
     call(attacker, post(base + "/relationships"), Map.of("creatorId", a.getId()), 404);
     String rel = base + "/relationships/" + relationship.path("id").asText();
     call(attacker, get(rel), null, 404);
-    call(attacker, patch(rel + "/stage"), Map.of("stage", "INTERESTED"), 404);
+    call(attacker, patch(rel + "/stage"), Map.of("stage", "NEGOTIATING"), 404);
     call(attacker, patch(rel + "/details"), Map.of("notes", "tampered"), 404);
     assertThat(call(owner, get(rel), null, 200).path("stage").asText()).isEqualTo("CONTACTED");
     assertThat(shortlist.existsById(UUID.fromString(shortItem.path("id").asText()))).isTrue();
@@ -453,7 +453,7 @@ class ComparePaymentPostgresIntegrationTest {
     call(owner, delete(wrong + "/shortlist/" + s.path("id").asText()), null, 404);
     String rel = wrong + "/relationships/" + r.path("id").asText();
     call(owner, get(rel), null, 404);
-    call(owner, patch(rel + "/stage"), Map.of("stage", "INTERESTED"), 404);
+    call(owner, patch(rel + "/stage"), Map.of("stage", "NEGOTIATING"), 404);
     call(owner, patch(rel + "/details"), Map.of("notes", "wrong campaign"), 404);
     call(
         owner,
@@ -461,7 +461,7 @@ class ComparePaymentPostgresIntegrationTest {
         Map.of("creatorId", a.getId(), "shortlistItemId", s.path("id").asText()),
         404);
     String correct = "/campaigns/" + c.getId() + "/relationships/" + r.path("id").asText();
-    call(owner, patch(correct + "/stage"), Map.of("stage", "INTERESTED"), 200);
+    call(owner, patch(correct + "/stage"), Map.of("stage", "NEGOTIATING"), 200);
     assertThat(
             call(owner, patch(correct + "/details"), Map.of("notes", "owner updated"), 200)
                 .path("notes")

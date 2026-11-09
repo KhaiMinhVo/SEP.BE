@@ -16,6 +16,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class CollaborationExecution {
+  @org.springframework.beans.factory.annotation.Autowired
+  private LearningEvidenceWriter learningEvidence;
+
   final DealStore s;
   final DealService deals;
   final ExecutionSnapshot snapshots;
@@ -105,8 +108,13 @@ public class CollaborationExecution {
         id);
   }
 
-  Map<String,Object> view(UUID id){return history.snapshot(id);}
-  List<Map<String,Object>> rows(UUID id){return history.units(id);}
+  Map<String, Object> view(UUID id) {
+    return history.snapshot(id);
+  }
+
+  List<Map<String, Object>> rows(UUID id) {
+    return history.units(id);
+  }
 
   @Transactional(
       readOnly = true,
@@ -685,7 +693,11 @@ public class CollaborationExecution {
             .put("overallRating", r.overallRating())
             .put("brandFitRating", r.brandFitRating())
             .put("wouldCollaborateAgain", r.wouldCollaborateAgain())
-            .put("m1Policy", "M1_POLICY_NOT_IMPLEMENTED");
+            .put(
+                "m1Policy",
+                c.get("learning_context") == null
+                    ? "LEGACY_NO_LEARNING_SNAPSHOT"
+                    : com.influencermatch.backend.recommendation.learning.LearningPolicy.VERSION);
     proof.set("outcome", data);
     proof.set("calculation", calc);
     s.db.update(
@@ -700,6 +712,7 @@ public class CollaborationExecution {
         proof.toString(),
         s.time(),
         review);
+    learningEvidence.review(id, review);
     changed(
         id,
         "COLLABORATION_REVIEWED",

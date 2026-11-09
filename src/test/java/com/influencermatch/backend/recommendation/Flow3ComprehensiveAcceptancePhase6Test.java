@@ -236,7 +236,7 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   @DisplayName(
       "TEST-02 [Phase 1]: Python AI Service bị timeout hoặc lỗi -> Tự động rollback giải phóng"
           + " Quota tạm giữ")
-  void test02_aiServiceFailure_rollsBackReservedQuota() {
+  void test02_runPersistenceFailure_rollsBackReservedQuota() {
     when(subscriptionService.reserveRecommendationQuota(brandProfileId)).thenReturn(subscriptionId);
     when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
         .thenReturn(Collections.emptyList());
@@ -246,8 +246,8 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
             anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
         .thenReturn(List.of(failCandidate));
-    when(historicalCampaignRepository.findByCreatorId(any()))
-        .thenThrow(new RuntimeException("Downstream history unavailable"));
+    when(recommendationRunRepository.save(any()))
+        .thenThrow(new RuntimeException("Downstream Run persistence unavailable"));
 
     assertThatThrownBy(
             () ->

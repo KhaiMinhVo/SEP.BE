@@ -17,6 +17,7 @@ class RolePermissionsTest {
             "VIEW_OWN_NOTIFICATION",
             "MANAGE_OWN_NOTIFICATION",
             "VIEW_CREATOR_PROFILE",
+            "VIEW_CREATOR_CONTACT",
             "CREATE_BRAND_PROFILE",
             "UPDATE_BRAND_PROFILE",
             "VIEW_OWN_BRAND_DATA",
@@ -40,6 +41,8 @@ class RolePermissionsTest {
             "VIEW_OWN_BILLING");
     assertThat(RolePermissions.names(Role.DATA_MANAGER))
         .containsExactlyInAnyOrder(
+            "VIEW_CREATOR_MASTER_CATALOG",
+            "VIEW_CREATOR_IDENTITY_HISTORY",
             "INVITE_CREATOR",
             "REVIEW_CREATOR_CLAIM",
             "VIEW_OWN_PROFILE",
@@ -56,6 +59,8 @@ class RolePermissionsTest {
             "VIEW_DATA_OPERATION_LOG");
     assertThat(RolePermissions.names(Role.ADMIN))
         .containsExactlyInAnyOrder(
+            "VIEW_CREATOR_MASTER_CATALOG",
+            "VIEW_CREATOR_IDENTITY_HISTORY",
             "INVITE_CREATOR",
             "REVIEW_CREATOR_CLAIM",
             "VIEW_OWN_PROFILE",
@@ -83,11 +88,11 @@ class RolePermissionsTest {
   }
 
   @Test
-  void fixedMatrixHasExactly48PermissionsAndNoWildcard() {
-    assertThat(Permission.values()).hasSize(48);
-    assertThat(RolePermissions.forRole(Role.BRAND)).hasSize(25);
-    assertThat(RolePermissions.forRole(Role.DATA_MANAGER)).hasSize(14);
-    assertThat(RolePermissions.forRole(Role.ADMIN)).hasSize(24);
+  void fixedMatrixHasExactly52PermissionsAndNoWildcard() {
+    assertThat(Permission.values()).hasSize(52);
+    assertThat(RolePermissions.forRole(Role.BRAND)).hasSize(26);
+    assertThat(RolePermissions.forRole(Role.DATA_MANAGER)).hasSize(16);
+    assertThat(RolePermissions.forRole(Role.ADMIN)).hasSize(26);
     assertThat(RolePermissions.names(Role.CREATOR))
         .containsExactlyInAnyOrder(
             "VIEW_OWN_PROFILE",
@@ -96,7 +101,8 @@ class RolePermissionsTest {
             "VIEW_CREATOR_PROFILE",
             "CLAIM_CREATOR_PROFILE",
             "VIEW_OWN_CREATOR_CLAIM",
-            "RESPOND_OWN_COOPERATION");
+            "RESPOND_OWN_COOPERATION",
+            "MANAGE_OWN_CREATOR_PROFILE");
     Set<Permission> all = EnumSet.noneOf(Permission.class);
     for (Role role : Role.values()) {
       all.addAll(RolePermissions.forRole(role));
@@ -122,7 +128,7 @@ class RolePermissionsTest {
             Permission.VIEW_CREATOR_PROFILE);
     Set<Permission> operations = EnumSet.copyOf(RolePermissions.forRole(Role.DATA_MANAGER));
     operations.removeAll(common);
-    assertThat(operations).hasSize(10).isSubsetOf(RolePermissions.forRole(Role.ADMIN));
+    assertThat(operations).hasSize(12).isSubsetOf(RolePermissions.forRole(Role.ADMIN));
     assertThat(RolePermissions.forRole(Role.ADMIN))
         .doesNotContain(
             Permission.CREATE_CAMPAIGN,

@@ -315,6 +315,7 @@ class HistoryQuotaPostgresIntegrationTest {
                   .dataSource(jdbc.getDataSource())
                   .schemas(schema)
                   .defaultSchema(schema)
+                  .target("30")
                   .load()
                   .migrate()
                   .migrationsExecuted)

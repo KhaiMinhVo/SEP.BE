@@ -42,6 +42,8 @@ public class RecommendationRun {
   private UUID brandContextId;
   private Integer brandContextVersion;
   private String scoringPolicyVersion;
+  @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+  private com.fasterxml.jackson.databind.JsonNode scoringPolicyParameters;
 
   @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
   private com.fasterxml.jackson.databind.JsonNode scoringSnapshot;

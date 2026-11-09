@@ -135,8 +135,8 @@ class RbacPostgresIntegrationTest {
             .schemas("empty_rbac")
             .defaultSchema("empty_rbac")
             .load();
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(29);
-    assertThat(flyway.info().current().getVersion().toString()).isEqualTo("30");
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(32);
+    assertThat(flyway.info().current().getVersion().toString()).isEqualTo("33");
     assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
   }
 
@@ -233,7 +233,7 @@ class RbacPostgresIntegrationTest {
     String adminToken = login(admin).get("accessToken").asText(),
         old = login(target).get("accessToken").asText();
     String url = "/admin/users/" + target.getId() + "/status";
-    call(patch(url), adminToken, "{\"status\":\"ACTIVE\"}", 200);
+    call(patch(url), adminToken, "{\"status\":\"ACTIVE\",\"reason\":\"Test status change\"}", 200);
     call(get("/auth/me"), old, null, 200);
     call(patch(url), adminToken, "{\"status\":\"LOCKED\",\"reason\":\"Test lock\"}", 200);
     call(get("/auth/me"), old, null, 401);
@@ -395,7 +395,9 @@ class RbacPostgresIntegrationTest {
       start.countDown();
       var results =
           List.of(tasks.get(0).get(20, TimeUnit.SECONDS), tasks.get(1).get(20, TimeUnit.SECONDS));
-      assertThat(results).contains(200).allMatch(s -> s == 200 || s == 409 || s == 401);
+      assertThat(results).filteredOn(s -> s == 200).hasSize(1);
+      // The actor may lose access before authentication, or while waiting for the guard.
+      assertThat(results).allMatch(s -> s == 200 || s == 409 || s == 401 || s == 403);
       assertThat(users.countByRoleAndStatus(Role.ADMIN, UserStatus.ACTIVE)).isEqualTo(1);
       var remaining =
           users.findAll().stream()

@@ -936,3 +936,125 @@ V30 adds only campaign_duplicate_request receipts, with source/actor/target FKs 
 
 
 V30 validation (2026-11-09): related suite **105/105 passed**. Whole backend regression **1,155 run; 1,152 passed; 3 failures; 0 errors; 0 skipped**, with exactly the existing Payment failures documented in the test cases. After the final shared-query refactor, calculator/quota/Deal/execution companion suites passed 103 cases; the final History PostgreSQL invocation passed **16/16**, including the real two-channel, one-fee workflow. These final affected checks are separate from the whole-backend run. PostgreSQL was disposable; provider responses were mocked where needed, and no shared database migration or serving-BE restart was performed.
+
+
+## Creator Portal profile, sharing and verification (V31)
+
+V31 adds a private `creator_portal_profile` unique per CreatorMaster and ordered `creator_portfolio_item` rows. Existing Master, ownership, contacts, consent and verification are not backfilled or rewritten. No Rate Card or bank data is introduced. Profile data is explicitly CREATOR_DECLARED and never overwrites platform location, niche, crawler snapshots, ranking inputs or Collaboration terms.
+
+API prefix `/api/v1`:
+
+- `GET /creators/portal/profile`: CREATOR ACTIVE, verified email and VIEW_OWN_PROFILE. Returns `{masterId,profileExists,profileRevision,source,profile}` plus ETag `"creator-profile:<userId>:r<revision>"`. Missing profile/Master produces an empty virtual profile at revision 0, without writes.
+- `PATCH /creators/portal/profile`: also requires MANAGE_OWN_CREATOR_PROFILE. Supply the exact If-Match from GET; missing=428, malformed=400, stale=409 CREATOR_PROFILE_REVISION_CONFLICT. Initial meaningful PATCH creates the profile/Master under User → Master → Profile locks. Empty/no-op updates do not create rows, increment revision or audit a change.
+- `GET /creators/{id}/contacts`: verified ACTIVE BRAND with VIEW_CREATOR_CONTACT. Returns only permitted values, availability, source and verified=false for self-declared/public-crawl contacts. Hidden and absent contacts both appear as NOT_SHARED/null; no account login email is exposed.
+- `GET /creators/portal/accounts/connection-options`: verified ACTIVE CREATOR with CLAIM_CREATOR_PROFILE. Reports locally configured Facebook Page, Instagram via Page, direct Instagram and TikTok Sandbox flows. No provider request is made, no secret/configuration URL is returned. YouTube remains outside MVP. available means local configuration passes validation, not that provider consent, asset access or App Review has succeeded.
+
+Profile PATCH is a strict partial object. Omitted properties survive; optional null clears and [] clears lists. Unknown fields are rejected, including bank/ownership/verification data. Example:
+
+```json
+{
+  "introduction": "Creator introduction",
+  "serviceAreas": ["Ho Chi Minh City"],
+  "acceptedNiches": ["Beauty"],
+  "portfolio": [{"title": "Example work", "url": "https://example.com/work", "description": "Self-declared portfolio"}],
+  "availability": {"status": "OPEN", "availableFrom": "2026-11-10", "note": "Contact to discuss scope"},
+  "sharing": {"introduction": true, "serviceAreas": true, "acceptedNiches": true, "portfolio": true, "availability": false},
+  "contacts": {"bookingEmail": {"value": "booking@example.com", "visibility": "BRANDS"}}
+}
+```
+
+introduction max 4,000 characters; up to 20 nonblank serviceAreas (150 characters) and acceptedNiches (100); up to 20 portfolio items (title 200, HTTPS URL 2,000, description 1,000). Lists are trimmed, deduplicated and sorted. Portfolio is a full replacement, preserves order and uses server-generated IDs; existing IDs must belong to the profile. Resend returned IDs for edits. HTTPS URLs cannot contain credentials; the backend never fetches or previews them. Availability is nullable OPEN/LIMITED/CLOSED, optional date and note up to 1,000 characters, not checked calendar/capacity and never a booking constraint.
+
+Basic sharing flags default true; availability sharing defaults false. This is visibility inside existing authenticated Creator views, not a new anonymous public API. New public fields require valid current ownership evidence; private owner GET remains available without a linked channel. Creator detail/Compare include the allowed portfolio; Discovery/Shortlist use summaries. Responses containing the new projections use private/no-store semantics. Crawler data continues to update independently and does not erase Creator declarations.
+
+bookingEmail, zalo and managerContact each have value/visibility, default PRIVATE. A null contact block clears the value and resets PRIVATE; nested omitted values survive. bookingEmail is syntax-validated, not OTP-verified or automatically used as an outbound recipient. Visibility BRANDS permits authenticated, authorized Brand readers; CONFIRMED_PARTNERS additionally requires a noncancelled CONFIRMED Deal for the same Master, with every member channel still belonging to that Master. Completed Collaboration can remain a confirmed partnership; cancelled or ownership-mismatched Deals do not qualify. Admin/Data Manager do not get private-contact access through these new routes.
+
+For owned channels, private/missing Portal contacts do not fall back to crawler contacts. Shortlist Readiness no longer returns owner login email in contactTarget: it can report IN_APP_PORTAL readiness without revealing an address. For unclaimed channels, permitted public-crawl booking contact retains PUBLIC_CRAWL provenance. Backend cooperation notification delivery continues to the owner's verified account email, independently of disclosure settings; it is not redirected to a self-declared booking address. New profile contacts are not copied into Deal/history/receipt/SSE payloads. Audit stores changed fields and visibility choices, not raw contact values.
+
+### Evidence-based badge compatibility
+
+The shared HTTP read projection enriches existing Creator detail/search, campaign Discovery, Shortlist/Compare and Portal account/Reach responses in batches. It does not change search scores, recommendation formulas, ownership or stored evidence. Typed verification metadata reports status, method, verifiedAt, evidenceSource and environment; provider tokens/granted payloads are never returned.
+
+- Verified requires current AUTHORIZED ownership, an ACTIVE verified Creator account/Master, and matching current-owner evidence: META_OAUTH, INSTAGRAM_OAUTH, TIKTOK_OAUTH_SANDBOX or an actual APPROVED manual Claim.
+- AUTHORIZED without qualifying evidence becomes LEGACY_UNVERIFIED in the read model, with verifiedByInfluencerMatch=false. Owner/Master/sourceType remain intact. Reconnect OAuth or complete an allowed manual Claim to obtain qualifying evidence; old rows are not fabricated into official verification.
+- Simulated evidence is SIMULATED, not a genuine badge. TikTok reports SANDBOX. Meta reports OFFICIAL_API, which does not assert production App Review or distinguish Meta app Development/Live mode. Manual approval reports MANUAL_REVIEW/CREATOR_CLAIM, not OAuth.
+- Revocation and wrong-owner evidence cannot support a badge. Token expiry is separate from ownership evidence; Reach tokenStatus is deprecated and reports NOT_STORED for proofs without stored tokens rather than inferring ACTIVE from AUTHORIZED.
+
+The badge means InfluencerMatch verified management authority at the recorded time. It is not the platform's official badge, a price guarantee, endorsement of profile claims or a performance score. Manual Claim/review/revoke, the three separate invitation domains and all existing OAuth ownership writes remain in place. No frontend, bank storage, Rate Card, calendar, exclusivity or new platform integration is included.
+
+## Data Manager Master Catalog and Claim review (V32)
+
+Master existence and channel verification are separate. Invitation registration may create a Master before any channel is linked; crawler ingestion never creates a Master by matching names. This release adds read-only Catalog/history APIs and strengthens the existing manual fallback. It does not add transfer, merge or dispute processing.
+
+All paths below have prefix `/api/v1`, return `ApiResponse`, and require an ACTIVE ADMIN or DATA_MANAGER and a valid login session. `VIEW_CREATOR_MASTER_CATALOG` and `VIEW_CREATOR_IDENTITY_HISTORY` are separate dynamic permissions, enabled for those two roles by default. They do not grant `VIEW_AUDIT_LOG` or access to private contacts.
+
+- `GET /data/creator-masters`: `q`, `status=ACTIVE|SUSPENDED`, `platform=FACEBOOK|INSTAGRAM|TIKTOK|YOUTUBE`, `verificationStatus=VERIFIED|UNVERIFIED|LEGACY_UNVERIFIED|SIMULATED`, `page`, `size`. Search matches canonical name literally, case-insensitively, or exact Master UUID. Platform/verification filters must match the same member channel; Masters without channels remain visible without channel filters.
+- `GET /data/creator-masters/{id}`: current identity metadata, channel count and counts by verification state. No login email, Master notes or private profile contacts.
+- `GET /data/creator-masters/{id}/accounts`: paged current member channels and verification metadata shared with Portal.
+- `GET /data/creator-accounts/unclaimed`: channels with no Master; optional `q`, `platform`, `sourceType=PUBLIC|AUTHORIZED`, `isStableId`, `page`, `size`. Search uses username/display name/external ID; `%` and `_` are literal. A channel without Master is not verified, even if a legacy source label says AUTHORIZED.
+- `GET /data/creator-identity-events`: `masterId`, `creatorId`, `claimId`, `actorId`, `eventType`, `from`, `to`, `page`, `size`. Dates use ISO local date-time against persisted values, with inclusive boundaries; no historical timezone is inferred or rewritten. Reverse ranges are rejected. Identity audit and Claim/ownership business audit remain distinct sources; source ID/source type are returned without raw audit JSON, free text, proof URLs or tokens. Missing historical Master references remain null, not filled from current ownership. A Master filter cannot match a business-audit event whose historical Master was never recorded.
+
+Pagination defaults to page 0/size 20, size 1–100. Invalid page, size, enums or search over 200 characters return 400; missing Master returns 404. Catalog ordering is createdAt DESC/id DESC; event ordering is occurredAt DESC/source DESC/sourceId DESC. Responses are private/no-store. Reads do not create profiles, audit mutations, jobs or evidence.
+
+Manual Claim endpoints keep their existing request/response shape and `REVIEW_CREATOR_CLAIM` permission. Approval rechecks actor/claimant, ownership and invitation under database locks; it cannot transfer an owned channel. A new Claim submitted under a live invitation stores its reference. Approval checks that invitation is still PENDING, addressed to the claimant and strictly unexpired; equality with now is expired. Wrong email returns 403, expired/processed invitation 409. Historical claims retain null invitation references; current live invitation restrictions still apply. Rejecting an expired Claim remains possible. Valid approval consumes the applicable invitations, updates current Shortlist/Relationship Master references and audits atomically.
+
+Revoking an APPROVED manual Claim revokes that evidence, with reason/reviewer/time retained. An independent valid OAuth proof for the current owner keeps ownership/badge. Without valid remaining proof, owner/authorization/current references are cleared, while Deal/Collaboration members, bindings and historical snapshots remain intact. Each OAuth method uses its latest verification state; an old ACTIVE row cannot resurrect a later-revoked proof of the same method. Mock, wrong-owner and unsupported legacy methods cannot preserve ownership as valid proof. Token expiry is independent of verification. Audit/synchronization failure rolls back the business change; ownership denial still records its dedicated conflict audit.
+
+V32 adds the nullable Claim invitation FK/index, Catalog/event indexes and read views for effective evidence and Catalog state. It performs no ownership/profile/evidence backfill. The old transfer URL remains unmapped (404), and the legacy Java mutation path is hard-denied. Existing conflict history remains readable. Apply migration only through the normal deployment process; this implementation does not apply it to shared databases.
+
+## System Admin Console — AD-01 / AD-05
+
+Account and permission-matrix endpoints require an ACTIVE ADMIN, a valid persisted login session and the endpoint's capability at both controller/service boundaries. Administration responses use `Cache-Control: private, no-store`. Account DTOs remain unchanged and never expose password hashes, refresh tokens, Creator private contacts or banking data.
+
+### Account management contract
+
+`GET /api/v1/admin/users` accepts optional `role=ADMIN|DATA_MANAGER|BRAND|CREATOR`, `status=ACTIVE|LOCKED|DISABLED`, `q`, `page`, `size`. Search trims q and matches literal email/full-name substrings case-insensitively, or an exact canonical UUID (either case). `%`, `_` and `!` are literal characters. q is at most 200 characters. Defaults are page 0/size 20, size 1–100; invalid enum/pagination/search length returns 400 instead of silently clamping. Ordering is `createdAt DESC, id DESC`.
+
+Keep `GET /admin/users/{id}`, `PATCH /admin/users/{id}/status` and `PATCH /admin/users/{id}/role`. Status/role writes require `reason`: trimmed, nonblank, 1–500 characters, including no-op requests. Example status body: `{"status":"LOCKED","reason":"Reviewed policy violation"}`. A missing target returns 404. These writes do not require If-Match or a new user revision: valid requests serialize against the latest state, so this contract does not reject a stale administrative screen using optimistic concurrency.
+
+Writes lock the RBAC guard and then actor/target Users in UUID order, refresh state and recheck role/status/authVersion/session before mutation. An actor who lost authorization while waiting receives 403; an expired/revoked session receives 401. Losing authorization cannot change the target. The last ACTIVE Admin cannot be locked, disabled or demoted. Self-lock/self-disable/self-demotion is allowed while another ACTIVE Admin remains; the current request can return its result, then the actor must authenticate again with an allowed account. No new password/OTP reauthentication step is added.
+
+A real status or role change increments authVersion, revokes all target auth_session/refresh_token rows and audits actor/target, old/new state and reason atomically. Explicit actor ID preserves audit attribution for self-actions. Audit or revocation failure rolls back the entire operation. No-op does not revoke sessions, increment version or invent an audit event. Unlock never restores revoked sessions; previous access/refresh credentials remain invalid. Effects apply from the next request after commit; in-flight responses/SSE are not interrupted. Business records and ownership are retained, and existing Brand-profile/Creator-ownership/pending-Claim role constraints remain enforced.
+
+### Permission matrix contract
+
+Keep `GET /api/v1/admin/role-permissions` and `PATCH /api/v1/admin/role-permissions/{role}`. ADMIN plus `ASSIGN_USER_ROLE` is required; ADMIN capabilities remain immutable. Only implemented capabilities already in the target BRAND/CREATOR/DATA_MANAGER default allowlist can be toggled. There are no arbitrary cross-role grants or custom roles.
+
+PermissionCatalog now explicitly registers the existing History, run/read Recommendation, Creator profile/contact, cooperation response, notification and Master Catalog/identity-history endpoints. This makes their matrix entries implemented/editable for eligible roles. Provider/scoring configuration, collection/monitoring and other absent functions remain unimplemented/noneditable; enum declarations or a nearby legacy read endpoint do not claim the corresponding function exists.
+
+Matrix writes lock RBAC guard → Admin User → role config and revalidate authorization/session before writing. Existing version conflicts return 409. Override changes, config version and audit commit together; a stale version, invalid capability or audit error cannot partially apply a multi-capability update. No-op preserves version/audit. Permission changes apply on the next request using the same JWT without raising every user's authVersion or revoking the role's sessions. EffectivePermissionService keeps only a per-request snapshot, never a cache between requests. Scoring activation and algorithm changes remain outside this release.
+
+Storage remains `user`, `auth_session`, `refresh_token`, `role_permission_config`, `role_permission_override`, `audit_log`. No new migration or edits to V1–V32 are needed. Frontend clients must supply status-change reasons and handle strict pagination validation; Bruno and real environment files are not updated by this implementation.
+
+
+## Bayesian historical learning — V33 / Four-Memory v3
+
+New Recommendation runs use `four-memory-v3-bayesian-history`. M2, candidate source, quota and CreatorMaster deduplication are retained. M3 supplies the Campaign context; it is not another independent score. This is a versioned MVP policy, not an empirically calibrated probability of successful collaboration.
+
+### Proposal and evidence contract
+
+The existing proposal/counteroffer body accepts optional `kpiTargets` (default `[]`, at most 20). Each target contains `key` (unique, 1–50 ASCII letters/digits/underscore/hyphen), member `creatorId`, `metric=VIEWS|CLICKS|ENGAGEMENTS`, positive integer `target`, `periodStart` and `periodEnd` as UTC instants. A channel has one target per metric and a common measurement period. Confirmation requires that period to be strictly in the future; targets and terms are immutable after confirmation. Missing KPI does not block confirmation or completion. GMV/revenue/ROI remain financial outputs, not ranking inputs.
+
+Confirmation records an immutable learning agreement: historical Master, member channels, observed platform/niche, objective, proposal revision, deadlines and KPI. Final Review reads persisted Review/accepted Outcome/submission/publication rows, then records a schema-versioned learning snapshot in the same transaction as Review, COMPLETED, audit and idempotency receipt. Any error rolls back the entire completion; resend the same key/body. There is no asynchronous Learning job to silently fail. Existing consent, ownership, payment, fees and CRM confirmation are independent.
+
+Only completed, Brand-owned, accepted-review evidence with reviewedAt within the last 24 calendar months (inclusive cutoff, UTC Clock) qualifies. Legacy without adequate snapshots/acceptance remains visible history but does not become trusted evidence. V29 rows with an actual accepted-review/Outcome reference, server-recorded reviewer/acceptance provenance and consistent historical Master can supply saved ratings to R and personal M4. Their unknown classification, timeliness and KPI remain null; the new snapshot column is not backfilled. Legacy lacking that provenance is excluded. No historical target, niche or ownership is inferred from a current profile. Master history stays with the historical Master. Evidence without a Master remains channel-only while unclaimed and is not automatically imported on Claim. CANCELLED is neither a successful collaboration nor an inferred Creator fault.
+
+### Scores and availability
+
+Normalize each rating with `x=(rating-1)/4`. Rating posterior score is `B=100*(1+sum(x))/(2+n)`, corresponding to a symmetric Dirichlet prior `(0.4,0.4,0.4,0.4,0.4)`. This assumes equally spaced rating utilities. Prior strength 2 is an explicit deployment policy, not measured performance. No actual evidence means unavailable, never a prior-only 50.
+
+M1 requires R (overallRating) from at least 3 distinct Collaborations and 2 Brands. T (recorded timeliness) and K (KPI attainment) each require the same thresholds for their own eligible subset. R uses B. T uses `100*(1+onTimeCount)/(2+eligibleCount)` (Beta(1,1)); all required final-approved submissions must have CREATOR_PORTAL timestamps, compared to agreed deadlines, not Brand approval time. BRAND_EXTERNAL timing is unknown, not late. K uses same-objective, same-channel, exact-period accepted measurements, with `min(1,actual/target)` averaged over all goals per Collaboration, then over Collaborations. All agreed targets must be measurable; missing input is not zero. Engagements require likes+comments+shares. Duplicate post keys count once; contradictory values invalidate the relevant attainment.
+
+M1 combines original R/T/K weights 0.50/0.30/0.20, normalized over available components. SELF_REPORTED K has quality factor 0.50, so its participating weight is 0.10; no client-controlled label can raise it. This release has no independent metric-verification adapter. Review, tags and intention to collaborate again do not generate arbitrary extra bonuses. M1 describes completed history and does not model cancellation/noncompletion probability.
+
+M4 uses brandFitRating and B, selecting one source: Brand+historical Master (3 reviews), then Brand+platform+niche (5 reviews from 3 Masters), then Brand+platform (same cohort thresholds). Mixed-platform reviews contribute only at Master level. Unknown/mixed niches do not create niche cohorts. One Review counts once per cohort; positive and negative ratings both count. New derived aggregates use BRAND_FIT_BAYES_V2; legacy patterns are retained but not used to score new runs.
+
+Final original M2/M1/M4 weights remain 0.50/0.30/0.20, renormalized over available components. There is no shortlist-dependent min–max normalization or badge/fee/payment bonus. Sort and deduplicate using unrounded scores with Creator UUID as deterministic tie-breaker; round output only. Evidence support is not an accuracy probability: M4 is n/(n+2); M1 is the sum of each available original signal weight × quality × n/(n+2). `evidenceCoverage` is the available top-level original weight sum; neither support nor coverage is multiplied into Match Score.
+
+### Recommendation integration and privacy
+
+ScoreBreakdown adds `m1Details` (R/T/K score, count, Brand count, availability/reason, original/effective weight, quality), scope, evidence support, selected M4 cohort/Master count, evidence cutoff/asOf and policy. Nullable component scores must be handled by clients. M4 confidence now means n/(n+2), replacing the old heuristic. The legacy `m4ReviewIds` field is empty on new responses.
+
+A run reads one batch evidence snapshot for all candidates. All scored candidates, including those removed by top-N/Master deduplication, have internal evidence references in recommendation_scoring_evidence. Run parameters and source versions are saved. Cross-Brand M1 responses and AI requests contain aggregate scores/counts only, never other Brands' IDs, review IDs, notes, costs or proof. GET `/campaigns/{id}/ai-recommendations/runs` now uses an explicit DTO with campaignId/brandProfileId rather than JPA entity graphs, and whitelists saved result fields. Responses are private/no-store. Old results remain stored unchanged; reads do not recompute them. AI receives the public score breakdown with an evidence-only explanation policy; failure returns deterministic numerical reasons without discarding a valid ranking.
+
+V33 adds proposal KPI, immutable learning snapshots, Bayesian cohort keys, scoring parameters and internal evidence references. It does not backfill historical facts or modify V1–V32. No scoring-admin UI/API, crawler verification, fee scoring, new training job or production calibration is introduced. Apply migrations only through the deployment process; implementation tests use disposable PostgreSQL databases.

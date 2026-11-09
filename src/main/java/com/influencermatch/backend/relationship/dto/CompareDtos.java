@@ -32,7 +32,9 @@ public final class CompareDtos {
       CreatorSourceType sourceType,
       boolean verifiedByInfluencerMatch,
       LocalDateTime authorizedAt,
-      @JsonInclude(JsonInclude.Include.ALWAYS) Metrics metrics) {}
+      @JsonInclude(JsonInclude.Include.ALWAYS) Metrics metrics,
+      com.influencermatch.backend.creator.portal.PortalDtos.Verification verification,
+      com.influencermatch.backend.creator.portal.PortalDtos.DeclaredProfile declaredProfile) {}
 
   public record Metrics(
       UUID metricId,

@@ -208,7 +208,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
             patch("/admin/users/" + brand.getId() + "/status")
                 .header("Authorization", "Bearer " + adminAccess)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"LOCKED\"}"))
+                .content("{\"status\":\"LOCKED\",\"reason\":\"Test status change\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("LOCKED"));
     mvc.perform(get("/auth/me").header("Authorization", "Bearer " + brandAccess))
@@ -225,7 +225,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
             patch("/admin/users/" + brand.getId() + "/status")
                 .header("Authorization", "Bearer " + adminAccess)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"ACTIVE\"}"))
+                .content("{\"status\":\"ACTIVE\",\"reason\":\"Test status change\"}"))
         .andExpect(status().isOk());
     mvc.perform(
             post("/auth/login")
@@ -238,7 +238,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
             patch("/admin/users/" + brand.getId() + "/status")
                 .header("Authorization", "Bearer " + adminAccess)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"DISABLED\"}"))
+                .content("{\"status\":\"DISABLED\",\"reason\":\"Test disable\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("DISABLED"));
     mvc.perform(
@@ -393,7 +393,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
                 .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"ACTIVE\"}"))
+                .content("{\"status\":\"ACTIVE\",\"reason\":\"Test status change\"}"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("INVALID_CAMPAIGN_TRANSITION"));
     mvc.perform(
@@ -418,7 +418,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
                 .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"ACTIVE\"}"))
+                .content("{\"status\":\"ACTIVE\",\"reason\":\"Test status change\"}"))
         .andExpect(status().isOk());
     mvc.perform(
             patch("/campaigns/" + campaignId + "/status")

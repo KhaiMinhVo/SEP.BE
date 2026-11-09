@@ -94,7 +94,7 @@ public class ShortlistCompareService {
                               m.getEngagementRate(),
                               m.getDataConfidence(),
                               m.getFreshnessStatus(),
-                              m.getCollectedAt()));
+                              m.getCollectedAt()), null, null);
                 })
             .toList());
   }

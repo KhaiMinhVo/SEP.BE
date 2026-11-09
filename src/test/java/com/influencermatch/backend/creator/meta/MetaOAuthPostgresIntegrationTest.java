@@ -493,6 +493,83 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
+  void manualReviewAndMetaConfirmationCannotAssignDifferentOwners() throws Exception {
+    var s = ready(creator);
+    var manager = account(Role.DATA_MANAGER);
+    var claimId =
+        call(
+                other,
+                post("/creators/" + channel.getId() + "/claim"),
+                Map.of(
+                    "evidenceUrls",
+                    List.of("https://proof.test/manual"),
+                    "note",
+                    "Manual fallback"),
+                201)
+            .at("/data/id")
+            .asText();
+    var creatorToken = jwt.generateToken(creator);
+    var managerToken = jwt.generateToken(manager);
+    var begin = new CountDownLatch(1);
+    var waiting = new CountDownLatch(2);
+    var pool = Executors.newFixedThreadPool(2);
+    try {
+      var oauth =
+          pool.submit(
+              () -> {
+                waiting.countDown();
+                assertThat(begin.await(10, TimeUnit.SECONDS)).isTrue();
+                return mvc.perform(
+                        post("/creators/portal/accounts/connect/meta/sessions/"
+                                + s.id()
+                                + "/confirm")
+                            .header("Authorization", "Bearer " + creatorToken)
+                            .contentType("application/json")
+                            .content(
+                                json.writeValueAsBytes(
+                                    Map.of("accountId", channel.getExternalId()))))
+                    .andReturn()
+                    .getResponse()
+                    .getStatus();
+              });
+      var manual =
+          pool.submit(
+              () -> {
+                waiting.countDown();
+                assertThat(begin.await(10, TimeUnit.SECONDS)).isTrue();
+                return mvc.perform(
+                        patch("/data/creator-claims/" + claimId + "/review")
+                            .header("Authorization", "Bearer " + managerToken)
+                            .contentType("application/json")
+                            .content("{\"decision\":\"APPROVED\",\"reason\":\"Reviewed proof\"}"))
+                    .andReturn()
+                    .getResponse()
+                    .getStatus();
+              });
+      assertThat(waiting.await(10, TimeUnit.SECONDS)).isTrue();
+      begin.countDown();
+      assertThat(List.of(oauth.get(20, TimeUnit.SECONDS), manual.get(20, TimeUnit.SECONDS)))
+          .containsExactlyInAnyOrder(200, 409);
+    } finally {
+      pool.shutdownNow();
+    }
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from creator_master where user_id in (?,?)",
+                Long.class,
+                creator.getId(),
+                other.getId()))
+        .isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from audit_log where"
+                    + " action='REJECT_CREATOR_INVITATION_OR_OWNERSHIP' and entity_id=?",
+                Long.class,
+                channel.getId()))
+        .isEqualTo(1);
+  }
+
+  @Test
   void generalConnectCannotBypassAnInvitationToAnotherEmail() throws Exception {
     var s = ready(creator);
     var invitation =

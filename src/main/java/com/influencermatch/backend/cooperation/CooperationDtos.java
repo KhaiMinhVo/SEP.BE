@@ -40,7 +40,23 @@ public final class CooperationDtos {
           BigDecimal fee,
       @NotNull @Pattern(regexp = "VND") String currency,
       @NotEmpty @Size(max = 100) List<@Valid Deliverable> deliverables,
-      @NotBlank @Size(max = 4000) String terms) {}
+      @NotBlank @Size(max = 4000) String terms,
+      @Size(max = 20)
+          List<com.influencermatch.backend.recommendation.learning.LearningKpis.Target>
+              kpiTargets) {
+    public Proposal {
+      kpiTargets = kpiTargets == null ? List.of() : kpiTargets;
+    }
+
+    public Proposal(
+        long expectedRevision,
+        BigDecimal fee,
+        String currency,
+        List<Deliverable> deliverables,
+        String terms) {
+      this(expectedRevision, fee, currency, deliverables, terms, List.of());
+    }
+  }
 
   public record Revision(@Min(1) long expectedRevision) {}
 

@@ -9,7 +9,6 @@ import com.influencermatch.backend.brand.model.BrandPattern;
 import com.influencermatch.backend.brand.repository.BrandPatternRepository;
 import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.campaign.model.CampaignContext;
-import com.influencermatch.backend.campaign.model.HistoricalCampaign;
 import com.influencermatch.backend.campaign.model.RecommendationRun;
 import com.influencermatch.backend.campaign.repository.CampaignContextRepository;
 import com.influencermatch.backend.campaign.repository.HistoricalCampaignRepository;
@@ -20,6 +19,7 @@ import com.influencermatch.backend.creator.repository.PublicCreatorMetricReposit
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.recommendation.dto.*;
+import com.influencermatch.backend.recommendation.learning.*;
 import com.influencermatch.backend.relationship.enums.ShortlistStatus;
 import com.influencermatch.backend.relationship.model.ShortlistItem;
 import com.influencermatch.backend.relationship.repository.ShortlistItemRepository;
@@ -38,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class AiRecommendationService {
+  @org.springframework.beans.factory.annotation.Autowired private LearningStore learningStore;
 
   private final SubscriptionService subscriptionService;
   private final CampaignOwnershipService ownership;
@@ -53,8 +54,14 @@ public class AiRecommendationService {
   @org.springframework.beans.factory.annotation.Autowired
   private com.influencermatch.backend.brand.repository.BrandContextRepository brandContexts;
 
-  @org.springframework.beans.factory.annotation.Autowired
-  private com.influencermatch.backend.brand.service.BrandLearnedPatterns learned;
+  @Transactional(readOnly = true)
+  public List<RecommendationRunView> runs(UUID campaignId) {
+    Permissions.require(Permission.VIEW_OWN_RECOMMENDATION);
+    ownership.requireOwned(campaignId);
+    return recommendationRunRepository.findByCampaignIdOrderByCreatedAtDesc(campaignId).stream()
+        .map(RecommendationRunView::from)
+        .toList();
+  }
 
   private static final UUID DUMMY_UUID = UUID.fromString("00000000-0000-0000-0000-000000000000");
 
@@ -96,7 +103,6 @@ public class AiRecommendationService {
             .findByBrandProfileId(brandProfileId)
             .orElseThrow(
                 () -> new BusinessException(ErrorCode.BRAND_NOT_FOUND, "Brand context missing"));
-    var learnedSnapshot = learned.snapshot(brandProfileId);
 
     UUID subscriptionId = null;
     try {
@@ -156,13 +162,25 @@ public class AiRecommendationService {
       if (rawCandidates.isEmpty())
         throw new BusinessException(
             ErrorCode.RECOMMENDATION_NO_CANDIDATES, "No eligible candidates in selected source");
+      var historySnapshot =
+          learningStore.snapshot(
+              brandProfileId,
+              rawCandidates.stream()
+                  .map(RecommendationCandidateProjection::getMasterId)
+                  .filter(Objects::nonNull)
+                  .distinct()
+                  .toList(),
+              rawCandidates.stream()
+                  .map(RecommendationCandidateProjection::getCreatorId)
+                  .distinct()
+                  .toList());
       subscriptionId = subscriptionService.reserveRecommendationQuota(brandProfileId);
       // 5. Four-Memory Feature Scorer
       List<ScoredCandidate> scoredList = new ArrayList<>();
       for (RecommendationCandidateProjection cand : rawCandidates) {
         ScoreBreakdownDto breakdown =
             calculateFourMemoryScores(
-                cand, campaign, brandProfileId, learnedSnapshot, brandContext.getProfileContext());
+                cand, campaign, brandProfileId, historySnapshot, brandContext.getProfileContext());
         scoredList.add(new ScoredCandidate(cand, breakdown));
       }
 
@@ -178,7 +196,7 @@ public class AiRecommendationService {
           uniqueKocs.put(masterKey, item);
         } else {
           ScoredCandidate existing = uniqueKocs.get(masterKey);
-          if (item.breakdown.getFinalScore() > existing.breakdown.getFinalScore()) {
+          if (compareScored(item, existing) < 0) {
             uniqueKocs.put(masterKey, item);
           }
         }
@@ -189,9 +207,7 @@ public class AiRecommendationService {
       int effectiveLimit = limit > 0 ? Math.min(limit, 50) : 30;
       List<ScoredCandidate> topList =
           uniqueKocs.values().stream()
-              .sorted(
-                  Comparator.comparingDouble((ScoredCandidate sc) -> sc.breakdown.getFinalScore())
-                      .reversed())
+              .sorted(AiRecommendationService::compareScored)
               .limit(effectiveLimit)
               .toList();
 
@@ -235,6 +251,29 @@ public class AiRecommendationService {
                 .build());
       }
 
+      // Retain all scored inputs, including candidates omitted by dedup/top-N. Public DTOs
+      // expose policy constants only; private source review links live in their own table.
+      var policyParameters = objectMapper.valueToTree(LearningPolicy.parameters());
+      var inputs = objectMapper.createArrayNode();
+      for (var scored : scoredList) {
+        var candidate = scored.candidate();
+        var input = objectMapper.createObjectNode();
+        input.set("creatorId", objectMapper.valueToTree(candidate.getCreatorId()));
+        input.set("masterId", objectMapper.valueToTree(candidate.getMasterId()));
+        input.set("metricId", objectMapper.valueToTree(candidate.getId()));
+        input.set("followers", objectMapper.valueToTree(candidate.getFollowers()));
+        input.set("avgViews", objectMapper.valueToTree(candidate.getAvgViews()));
+        input.set("avgLikes", objectMapper.valueToTree(candidate.getAvgLikes()));
+        input.set("engagementRate", objectMapper.valueToTree(candidate.getEngagementRate()));
+        input.set("platform", objectMapper.valueToTree(candidate.getPlatform()));
+        input.set("niche", objectMapper.valueToTree(candidate.getNiche()));
+        input.set("category", objectMapper.valueToTree(candidate.getCategory()));
+        input.set("semanticScore", objectMapper.valueToTree(candidate.getSemanticScore()));
+        input.put("unroundedFinalScore", scored.breakdown().getRankingScore());
+        input.set("scores", objectMapper.valueToTree(scored.breakdown()));
+        inputs.add(input);
+      }
+      ((ObjectNode) policyParameters).set("candidateInputs", inputs);
       // 9. Lưu vết RecommendationRun
       RecommendationRun run =
           recommendationRunRepository.save(
@@ -250,13 +289,30 @@ public class AiRecommendationService {
                   .candidateSource(source.name())
                   .brandContextId(brandContext.getId())
                   .brandContextVersion(brandContext.getContextVersion())
-                  .scoringPolicyVersion("four-memory-v2-m1-unavailable")
+                  .scoringPolicyVersion(LearningPolicy.VERSION)
+                  .scoringPolicyParameters(policyParameters)
                   .scoringSnapshot(objectMapper.valueToTree(recommendationItems))
                   .status("COMPLETED")
                   .candidatesCount(recommendationItems.size())
                   .queryBrief(queryBrief)
                   .build());
 
+      recommendationRunRepository.flush(); // JDBC evidence FKs must see the saved JPA Run.
+      for (var scored : scoredList) {
+        var candidate = scored.candidate();
+        learningStore.trace(
+            run.getId(),
+            candidate.getCreatorId(),
+            historySnapshot.m1(
+                candidate.getMasterId(),
+                candidate.getCreatorId(),
+                campaign.getObjective() == null ? null : campaign.getObjective().name()),
+            historySnapshot.m4(
+                brandProfileId,
+                candidate.getMasterId(),
+                candidate.getPlatform(),
+                candidate.getNiche()));
+      }
       return RecommendationResponseDto.builder()
           .recommendationRunId(run.getId())
           .campaignId(campaignId)
@@ -271,12 +327,11 @@ public class AiRecommendationService {
       log.error(
           "AI recommendation failed for campaign {}, rolled back quota: {}",
           campaignId,
-          e.getMessage());
+          e.getClass().getSimpleName());
       if (e instanceof BusinessException) {
         throw e;
       }
-      throw new BusinessException(
-          ErrorCode.INTERNAL_ERROR, "Failed to run AI recommendation: " + e.getMessage());
+      throw new BusinessException(ErrorCode.INTERNAL_ERROR, "Failed to run AI recommendation");
     }
   }
 
@@ -285,25 +340,10 @@ public class AiRecommendationService {
    * Score_M2 + 0.30 * Score_M1 + 0.20 * Score_M4
    */
   public ScoreBreakdownDto calculateFourMemoryScores(
-      RecommendationCandidateProjection cand, Campaign campaign, UUID brandProfileId) {
-    return calculateFourMemoryScores(
-        cand, campaign, brandProfileId, learned.snapshot(brandProfileId));
-  }
-
-  public ScoreBreakdownDto calculateFourMemoryScores(
       RecommendationCandidateProjection cand,
       Campaign campaign,
       UUID brandProfileId,
-      com.influencermatch.backend.brand.service.BrandLearnedPatterns.Snapshot learnedSnapshot) {
-    return calculateFourMemoryScores(
-        cand, campaign, brandProfileId, learnedSnapshot, objectMapper.createObjectNode());
-  }
-
-  public ScoreBreakdownDto calculateFourMemoryScores(
-      RecommendationCandidateProjection cand,
-      Campaign campaign,
-      UUID brandProfileId,
-      com.influencermatch.backend.brand.service.BrandLearnedPatterns.Snapshot learnedSnapshot,
+      LearningPolicy.Snapshot snapshot,
       JsonNode explicitContext) {
 
     // --- 1. Score M2 (Public Creator Fit) ---
@@ -385,34 +425,29 @@ public class AiRecommendationService {
             + (0.30 * semanticMatchScore)
             + (0.25 * nicheMatchScore);
 
-    // --- 2. Score M1 (Historical Reliability) ---
-    // Evidence remains inspectable, but no M1 score exists until a scoring policy is defined.
-    Double m1Score = null;
-    List<HistoricalCampaign> pastCampaigns =
-        historicalCampaignRepository.findByCreatorId(cand.getCreatorId());
-    if (pastCampaigns.isEmpty() && cand.getMasterId() != null) {
-      pastCampaigns = historicalCampaignRepository.findByMasterId(cand.getMasterId());
-    }
-
-    pastCampaigns =
-        pastCampaigns.stream()
-            .filter(
-                h -> h.getSourceReviewId() != null && "BRAND_ACCEPTED".equals(h.getProvenance()))
-            .toList();
-
-    var cohort = learnedSnapshot.select(cand.getPlatform(), cand.getNiche());
-    var evidence =
-        cohort == null ? learnedSnapshot.observed(cand.getPlatform(), cand.getNiche()) : cohort;
+    var m1 =
+        snapshot.m1(
+            cand.getMasterId(),
+            cand.getCreatorId(),
+            campaign.getObjective() == null ? null : campaign.getObjective().name());
+    var cohort =
+        snapshot.m4(brandProfileId, cand.getMasterId(), cand.getPlatform(), cand.getNiche());
+    var observed =
+        cohort == null
+            ? snapshot.observedM4(
+                brandProfileId, cand.getMasterId(), cand.getPlatform(), cand.getNiche())
+            : cohort;
+    Double m1Score = m1.score();
     Double m4Score = cohort == null ? null : cohort.score();
     double total = 0.50 + (m1Score == null ? 0 : 0.30) + (m4Score == null ? 0 : 0.20);
     var effective =
         Map.of(
             "M2",
-            0.50 / total,
+            .50 / total,
             "M1",
-            m1Score == null ? 0 : 0.30 / total,
+            m1Score == null ? 0 : .30 / total,
             "M4",
-            m4Score == null ? 0 : 0.20 / total);
+            m4Score == null ? 0 : .20 / total);
     double finalScore =
         effective.get("M2") * m2Score
             + (m1Score == null ? 0 : effective.get("M1") * m1Score)
@@ -424,15 +459,24 @@ public class AiRecommendationService {
         .m4Score(m4Score == null ? null : roundToTwoDecimals(m4Score))
         .m1Available(m1Score != null)
         .m4Available(m4Score != null)
-        .m1UnavailableReason(m1Score == null ? "M1_POLICY_NOT_IMPLEMENTED" : null)
+        .m1UnavailableReason(m1Score == null ? m1.review().unavailableReason() : null)
         .m4UnavailableReason(m4Score == null ? "INSUFFICIENT_REVIEW_EVIDENCE" : null)
-        .m1EvidenceCount(pastCampaigns.size())
-        .m4EvidenceCount(evidence == null ? 0 : evidence.reviewIds().size())
-        .m4Confidence(evidence == null ? null : evidence.confidence())
-        .m4ReviewIds(evidence == null ? List.of() : evidence.reviewIds())
+        .m1EvidenceCount(m1.review().count())
+        .m4EvidenceCount(observed == null ? 0 : observed.count())
+        .m4Confidence(observed == null ? null : observed.support())
+        .m4ReviewIds(List.of())
+        .rankingScore(finalScore)
+        .m1Details(
+            new ScoreBreakdownDto.M1Details(
+                m1.review(), m1.timeliness(), m1.kpi(), m1.scope(), m1.support()))
+        .m4Cohort(cohort == null ? null : cohort.scope())
+        .m4MasterCount(observed == null ? 0 : observed.masterCount())
+        .evidenceCoverage(total)
+        .evidenceAsOf(snapshot.asOf().toString())
+        .evidenceCutoff(snapshot.cutoff().toString())
         .originalWeights(Map.of("M2", 0.50, "M1", 0.30, "M4", 0.20))
         .effectiveWeights(effective)
-        .scoringPolicyVersion("four-memory-v2-m1-unavailable")
+        .scoringPolicyVersion(LearningPolicy.VERSION)
         .followerScore(roundToTwoDecimals(followerScore))
         .engagementScore(roundToTwoDecimals(engagementScore))
         .semanticMatchScore(roundToTwoDecimals(semanticMatchScore))
@@ -454,6 +498,7 @@ public class AiRecommendationService {
 
     ExplainRequestDto explainReq =
         ExplainRequestDto.builder()
+            .scoreBreakdown(objectMapper.valueToTree(breakdown))
             .creatorName(cand.getDisplayName() != null ? cand.getDisplayName() : cand.getUserName())
             .followers(cand.getFollowers() != null ? cand.getFollowers() : 0L)
             .engagementRate(candEr)
@@ -471,7 +516,29 @@ public class AiRecommendationService {
                     : campaign.getName())
             .build();
 
-    ExplainResponseDto response = aiServiceClient.getExplanation(explainReq);
+    ExplainResponseDto response;
+    try {
+      response = aiServiceClient.getExplanation(explainReq);
+    } catch (RuntimeException e) {
+      response = null;
+    }
+    if (response == null
+        || !response.isExplanationAvailable()
+        || !"success".equals(response.getStatus())) {
+      return ReasoningCardDto.builder()
+          .summary("Four-Memory ranking calculated from saved evidence")
+          .reasons(
+              List.of(
+                  "M2: " + breakdown.getM2Score(),
+                  breakdown.isM1Available()
+                      ? "M1: " + breakdown.getM1Score()
+                      : "M1 unavailable: " + breakdown.getM1UnavailableReason(),
+                  breakdown.isM4Available()
+                      ? "M4: " + breakdown.getM4Score()
+                      : "M4 unavailable: " + breakdown.getM4UnavailableReason()))
+          .explanationAvailable(false)
+          .build();
+    }
 
     return ReasoningCardDto.builder()
         .summary(response.getSummary())
@@ -687,6 +754,11 @@ public class AiRecommendationService {
 
   private double roundToTwoDecimals(double val) {
     return Math.round(val * 100.0) / 100.0;
+  }
+
+  private static int compareScored(ScoredCandidate a, ScoredCandidate b) {
+    int score = Double.compare(b.breakdown.getRankingScore(), a.breakdown.getRankingScore());
+    return score != 0 ? score : a.candidate.getCreatorId().compareTo(b.candidate.getCreatorId());
   }
 
   private record ScoredCandidate(

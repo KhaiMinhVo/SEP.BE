@@ -217,6 +217,8 @@ class ComparePaymentPostgresIntegrationTest {
                 .freshnessStatus(MetricDataStatus.FRESH)
                 .build());
     var owner = user(Role.CREATOR);
+    owner.setEmailVerified(true);
+    users.saveAndFlush(owner);
     var master =
         masters.saveAndFlush(
             com.influencermatch.backend.creator.model.CreatorMaster.builder()
@@ -234,6 +236,8 @@ class ComparePaymentPostgresIntegrationTest {
                 .creator(a)
                 .claimant(owner)
                 .status(CreatorClaimStatus.APPROVED)
+                .reviewer(user(Role.DATA_MANAGER))
+                .reviewedAt(LocalDateTime.now())
                 .evidenceUrls(List.of("https://example.com/proof"))
                 .note("Proof")
                 .build());
@@ -245,6 +249,8 @@ class ComparePaymentPostgresIntegrationTest {
     assertThat(data.path("creators").get(1).path("metrics").path("metricId").asText())
         .isEqualTo(latest.getId().toString());
     assertThat(data.path("creators").get(1).path("verifiedByInfluencerMatch").asBoolean()).isTrue();
+    assertThat(data.path("creators").get(1).path("verification").path("method").asText())
+        .isEqualTo("MANUAL_REVIEW");
     data.path("creators").forEach(item -> assertThat(item.has("rateCard")).isFalse());
     claim.setStatus(CreatorClaimStatus.REVOKED);
     claims.saveAndFlush(claim);

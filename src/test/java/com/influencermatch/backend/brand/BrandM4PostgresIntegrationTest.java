@@ -291,9 +291,10 @@ class BrandM4PostgresIntegrationTest extends PostgresApiTestSupport {
             .path("recommendations")
             .get(0)
             .path("scoreBreakdown");
-    assertThat(second.path("m4Available").asBoolean()).isTrue();
-    assertThat(second.path("m4Score").asDouble()).isEqualTo(100);
-    assertThat(second.path("m4EvidenceCount").asInt()).isEqualTo(5);
+    // These five legacy fixtures have no accepted revision/snapshot. Count alone cannot promote them.
+    assertThat(second.path("m4Available").asBoolean()).isFalse();
+    assertThat(second.path("m4Score").isNull()).isTrue();
+    assertThat(second.path("m4EvidenceCount").asInt()).isZero();
     assertThat(
             jdbc.queryForObject(
                 "select brand_context_id from recommendation_run where id=?", UUID.class, run))

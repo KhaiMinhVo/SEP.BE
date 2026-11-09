@@ -251,7 +251,8 @@ class ShortlistPhase3ContactReadinessTest {
     var itemRes = response.getItems().get(0);
     assertThat(itemRes.getReadinessStatus()).isEqualTo("READY");
     assertThat(itemRes.getContactChannel()).isEqualTo("IN_APP_PORTAL");
-    assertThat(itemRes.getContactTarget()).isEqualTo("creator.portal@gmail.com");
+    assertThat(itemRes.getContactTarget()).isNull();
+    assertThat(response.toString()).doesNotContain("creator.portal@gmail.com");
     assertThat(itemRes.isCanProceed()).isTrue();
   }
 

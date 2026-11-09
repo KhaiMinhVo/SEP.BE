@@ -3,6 +3,7 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  CREATOR_PROFILE_REVISION_CONFLICT(HttpStatus.CONFLICT, "Creator profile revision changed"),
   DEAL_REVISION_CONFLICT(HttpStatus.CONFLICT, "Deal revision changed"),
   DEAL_STATE_CONFLICT(HttpStatus.CONFLICT, "Deal workflow conflict"),
   DEAL_BUDGET_EXCEEDED(HttpStatus.CONFLICT, "Campaign budget exceeded"),

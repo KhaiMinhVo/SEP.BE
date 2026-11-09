@@ -66,6 +66,10 @@ class CreatorPortalReachPhase5Test {
     oAuthProofClient = mock(OAuthProofClient.class);
     publicCreatorMetricRepository = mock(PublicCreatorMetricRepository.class);
 
+    lenient().when(publicCreatorMetricRepository.latestForCreators(anyCollection())).thenAnswer(i->{
+      java.util.List<com.influencermatch.backend.creator.model.PublicCreatorMetric> values=new java.util.ArrayList<>();
+      for(var id:(java.util.Collection<java.util.UUID>)i.getArgument(0))publicCreatorMetricRepository.findByCreatorId(id).ifPresent(values::add);return values;
+    });
     accountLinkService =
         new CreatorAccountLinkService(
             creatorRepository,

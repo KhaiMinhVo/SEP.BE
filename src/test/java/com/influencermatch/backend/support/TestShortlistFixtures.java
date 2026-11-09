@@ -74,6 +74,9 @@ public final class TestShortlistFixtures {
             projection,
             java.time.Clock.systemUTC(),
             mock(org.springframework.context.ApplicationEventPublisher.class));
+    var contactPolicy=mock(com.influencermatch.backend.creator.portal.CreatorPortalProjection.class);
+    lenient().when(contactPolicy.canViewContacts()).thenAnswer(i->{try{com.influencermatch.backend.security.permission.Permissions.require(com.influencermatch.backend.security.permission.Permission.VIEW_CREATOR_CONTACT);return true;}catch(com.influencermatch.backend.exception.ForbiddenException e){return false;}});
+    ReflectionTestUtils.setField(service,"contactPolicy",contactPolicy);
     ReflectionTestUtils.setField(service, "projection", projection);
     ReflectionTestUtils.setField(service, "writer", writer);
     ReflectionTestUtils.setField(service, "writeLocks", locks);

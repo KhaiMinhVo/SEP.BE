@@ -10,6 +10,21 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ScoreBreakdownDto {
+  @com.fasterxml.jackson.annotation.JsonIgnore private Double rankingScore;
+
+  public record M1Details(
+      com.influencermatch.backend.recommendation.learning.LearningPolicy.Signal review,
+      com.influencermatch.backend.recommendation.learning.LearningPolicy.Signal timeliness,
+      com.influencermatch.backend.recommendation.learning.LearningPolicy.Signal kpi,
+      String scope,
+      double evidenceSupport) {}
+
+  private M1Details m1Details;
+  private String m4Cohort;
+  private int m4MasterCount;
+  private double evidenceCoverage;
+  private String evidenceAsOf;
+  private String evidenceCutoff;
   private Double m2Score;
 
   @com.fasterxml.jackson.annotation.JsonInclude(

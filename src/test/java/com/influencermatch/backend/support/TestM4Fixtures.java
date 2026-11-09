@@ -69,6 +69,11 @@ public final class TestM4Fixtures {
       ReflectionTestUtils.setField(service, "m3Embeddings", store);
       ReflectionTestUtils.setField(service, "campaignLocks", locks);
     }
+    if (org.springframework.util.ReflectionUtils.findField(service.getClass(), "learningStore") != null) {
+      var learning = mock(com.influencermatch.backend.recommendation.learning.LearningStore.class);
+      lenient().when(learning.snapshot(any(),any(),any())).thenReturn(com.influencermatch.backend.recommendation.learning.LearningPolicy.Snapshot.empty(java.time.Instant.now()));
+      ReflectionTestUtils.setField(service,"learningStore",learning);
+    }
     if (org.springframework.util.ReflectionUtils.findField(service.getClass(), "learned") != null) {
       var learned = mock(BrandLearnedPatterns.class);
       lenient()

@@ -15,7 +15,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -23,15 +22,24 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 @Tag(name = "Admin Users", description = "ADMIN-only account management")
 @SecurityRequirement(name = "BearerAuth")
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
 public class AdminUserController {
   private final AdminUserService service;
+
+  @ModelAttribute
+  public void privateResponse(jakarta.servlet.http.HttpServletResponse response) {
+    response.setHeader("Cache-Control", "private, no-store");
+  }
 
   @Operation(
       summary = "Assign a fixed role",
       description =
-          "ASSIGN_USER_ROLE; requires a reason. Revokes existing tokens. Cannot remove the last"
-              + " active admin or promote a Brand with a profile.")
-  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('ASSIGN_USER_ROLE')")
+          "ASSIGN_USER_ROLE; reason required (1-500 trimmed characters). Any real role change"
+              + " revokes sessions and refresh tokens. Cannot remove the last active Admin,"
+              + " reassign a Brand with a profile away from BRAND, or reassign a Creator with"
+              + " owned channels/pending claims away from CREATOR. No If-Match/version required.")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasRole('ADMIN') and hasAuthority('ASSIGN_USER_ROLE')")
   @PatchMapping("/{id}/role")
   public ApiResponse<AdminUserResponse> role(
       @PathVariable UUID id,
@@ -39,18 +47,28 @@ public class AdminUserController {
     return ApiResponse.ok(service.changeRole(id, request));
   }
 
-  @Operation(summary = "List users")
+  @Operation(
+      summary = "List users",
+      description =
+          "Literal case-insensitive q over email/full name or exact UUID; optional role/status;"
+              + " page>=0, size 1-100. Stable createdAt/id descending order.")
   @GetMapping
-  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('VIEW_USER')")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasRole('ADMIN') and hasAuthority('VIEW_USER')")
   public ApiResponse<PageResponse<AdminUserResponse>> list(
-      @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-    return ApiResponse.ok(
-        PageResponse.from(
-            service.list(PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)))));
+      @RequestParam(required = false) Role role,
+      @RequestParam(required = false) UserStatus status,
+      @RequestParam(required = false) String q,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "20") int size) {
+    UserAccountSearch.page(page, size);
+    UserAccountSearch.query(q);
+    return ApiResponse.ok(PageResponse.from(service.list(role, status, q, page, size)));
   }
 
   @Operation(summary = "Get a user")
-  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('VIEW_USER')")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasRole('ADMIN') and hasAuthority('VIEW_USER')")
   @GetMapping("/{id}")
   public ApiResponse<AdminUserResponse> get(@PathVariable UUID id) {
     return ApiResponse.ok(service.get(id));
@@ -58,8 +76,12 @@ public class AdminUserController {
 
   @Operation(
       summary = "Change account status",
-      description = "ACTIVE unlocks; LOCKED and DISABLED revoke all refresh tokens")
-  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CHANGE_USER_STATUS')")
+      description =
+          "Reason required (1-500 trimmed characters), including no-op requests. Any real status"
+              + " change revokes all sessions and refresh tokens; unlock does not restore old"
+              + " sessions.")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasRole('ADMIN') and hasAuthority('CHANGE_USER_STATUS')")
   @PatchMapping("/{id}/status")
   public ApiResponse<AdminUserResponse> status(
       @PathVariable UUID id, @Valid @RequestBody UpdateUserStatusRequest request) {

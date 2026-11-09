@@ -225,7 +225,7 @@ class AiRecommendationServicePhase2Test {
     when(historicalCampaignRepository.findByCreatorId(creatorId))
         .thenReturn(Collections.emptyList());
 
-    ScoreBreakdownDto score = service.calculateFourMemoryScores(cand, campaign, brandProfileId);
+    ScoreBreakdownDto score = service.calculateFourMemoryScores(cand, campaign, brandProfileId, com.influencermatch.backend.recommendation.learning.LearningPolicy.Snapshot.empty(java.time.Instant.now()), new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode());
 
     assertThat(score.getM1Score()).isNull();
     assertThat(score.isM1Available()).isFalse();
@@ -251,7 +251,7 @@ class AiRecommendationServicePhase2Test {
             "Beauty",
             0.5);
     ScoreBreakdownDto scoreInside =
-        service.calculateFourMemoryScores(insideRange, campaign, brandProfileId);
+        service.calculateFourMemoryScores(insideRange, campaign, brandProfileId, com.influencermatch.backend.recommendation.learning.LearningPolicy.Snapshot.empty(java.time.Instant.now()), new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode());
     assertThat(scoreInside.getFollowerScore()).isEqualTo(100.0);
 
     UUID hugeId = UUID.randomUUID(); // 5 triệu followers (trần là 500k)
@@ -269,7 +269,7 @@ class AiRecommendationServicePhase2Test {
             "Beauty",
             0.5);
     ScoreBreakdownDto scoreOver =
-        service.calculateFourMemoryScores(overRange, campaign, brandProfileId);
+        service.calculateFourMemoryScores(overRange, campaign, brandProfileId, com.influencermatch.backend.recommendation.learning.LearningPolicy.Snapshot.empty(java.time.Instant.now()), new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode());
     // log10(5M / 500k) = log10(10) = 1.0 -> 100 - 30 = 70.0
     assertThat(scoreOver.getFollowerScore()).isEqualTo(70.0);
 
@@ -288,7 +288,7 @@ class AiRecommendationServicePhase2Test {
             "Beauty",
             0.5);
     ScoreBreakdownDto scoreSuperHuge =
-        service.calculateFourMemoryScores(superHuge, campaign, brandProfileId);
+        service.calculateFourMemoryScores(superHuge, campaign, brandProfileId, com.influencermatch.backend.recommendation.learning.LearningPolicy.Snapshot.empty(java.time.Instant.now()), new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode());
     assertThat(scoreSuperHuge.getFollowerScore()).isEqualTo(60.0);
   }
 
@@ -345,8 +345,8 @@ class AiRecommendationServicePhase2Test {
     when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
             anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
         .thenReturn(List.of(failCandidate));
-    when(historicalCampaignRepository.findByCreatorId(any()))
-        .thenThrow(new RuntimeException("Downstream history unavailable"));
+    when(recommendationRunRepository.save(any()))
+        .thenThrow(new RuntimeException("Downstream Run persistence unavailable"));
 
     assertThatThrownBy(
             () ->

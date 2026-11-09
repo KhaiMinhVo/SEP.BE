@@ -16,6 +16,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ShortlistItemDto {
+  private boolean verifiedByInfluencerMatch;
   private UUID id;
   private UUID campaignId;
   private UUID creatorId;
@@ -43,4 +44,6 @@ public class ShortlistItemDto {
   private Boolean isInShortlist;
   private Long totalShortlistCount;
   private String message;
+  private com.influencermatch.backend.creator.portal.PortalDtos.Verification verification;
+  private com.influencermatch.backend.creator.portal.PortalDtos.DeclaredProfile declaredProfile;
 }

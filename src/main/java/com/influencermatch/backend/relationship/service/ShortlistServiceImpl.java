@@ -54,6 +54,7 @@ public class ShortlistServiceImpl implements ShortlistService {
 
   private final ShortlistNotificationService notificationService;
 
+  @Autowired private com.influencermatch.backend.creator.portal.CreatorPortalProjection contactPolicy;
   @Autowired private ShortlistItemWriter writer;
   @Autowired private ShortlistProjectionService projection;
   @Autowired private com.influencermatch.backend.campaign.service.CampaignWriteLock writeLocks;
@@ -409,7 +410,7 @@ public class ShortlistServiceImpl implements ShortlistService {
       // Case 1: Đã Claim kênh, có Creator Portal nội bộ
       if (creator.getMaster() != null && creator.getMaster().getUser() != null) {
         readyCount++;
-        String userEmail = creator.getMaster().getUser().getEmail();
+
         readinessItems.add(
             ContactReadinessResponse.ContactReadinessItem.builder()
                 .shortlistItemId(item.getId())
@@ -420,10 +421,10 @@ public class ShortlistServiceImpl implements ShortlistService {
                 .avatarUrl(creator.getAvatarUrl())
                 .readinessStatus("READY")
                 .contactChannel("IN_APP_PORTAL")
-                .contactTarget(userEmail)
+                .contactTarget(null)
                 .action("Gửi Collaboration Invitation trực tiếp qua Creator Portal")
                 .canProceed(true)
-                .reason("Kênh đã xác minh quyền sở hữu, gửi thông báo trực tiếp qua Portal")
+                .reason("Kênh có tài khoản Portal liên kết; gửi thông báo qua hệ thống")
                 .build());
         continue;
       }
@@ -438,6 +439,7 @@ public class ShortlistServiceImpl implements ShortlistService {
         }
       }
 
+      if (bookingEmail != null && !contactPolicy.canViewContacts()) bookingEmail = null;
       if (bookingEmail != null) {
         readyCount++;
         readinessItems.add(
@@ -453,7 +455,7 @@ public class ShortlistServiceImpl implements ShortlistService {
                 .contactTarget(bookingEmail)
                 .action("Gửi Email mời trao đổi chiến dịch qua Outbox hệ thống")
                 .canProceed(true)
-                .reason("Tìm thấy email booking công khai hợp lệ: " + bookingEmail)
+                .reason("Có email booking công khai được phép sử dụng")
                 .build());
         continue;
       }

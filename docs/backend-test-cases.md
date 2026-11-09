@@ -961,3 +961,96 @@ Verified results (2026-11-09):
 - A rerun while Docker Engine was stopped could not initialize Testcontainers. After Docker was restored, the final PostgreSQL run above passed; it was not marked skipped or represented as a success.
 
 These tests do not independently verify SELF_REPORTED metrics or establish production rollout readiness. Build/log artifacts stay ignored. History implementation itself did not restart the serving BE, touch the real environment/Bruno or apply migrations to a shared database.
+
+
+## Creator Portal, sharing and verification — V31
+
+New pure unit suites: PortalDataTest (PATCH validation/normalization, omitted/null/list, portfolio IDs/HTTPS, contact visibility, availability), CreatorVerificationProjectionTest (official/manual/legacy/mock/revoked/wrong-owner evidence and independent token expiry), PortalHttpProjectionTest (batch enrichment of identical cards, missing channels cannot retain old verified flags, private/other-module responses are untouched).
+
+CreatorPortalProfilePostgresIntegrationTest uses real PostgreSQL/Flyway/JWT sessions and HTTP MockMvc. Provider verification rows are explicit test fixtures; manual-claim tests go through the real submission/review/revoke API. There are no real provider, SMTP or crawler calls.
+
+Cases include:
+
+- GET and empty PATCH create no Master/profile/portfolio/audit; initial meaningful PATCH creates one shared profile without changing crawler location or metric count.
+- If-Match missing/malformed/stale and two concurrent first updates (latch, no sleep): only one succeeds; audit error rolls back Master/profile/portfolio.
+- Optional fields, sorted lists and complete portfolio resend are no-op when semantically unchanged; meaningful updates preserve omitted fields.
+- Basic sharing defaults on and availability off; owned channels without evidence are LEGACY_UNVERIFIED and their declarations are not exposed. Valid proof enables the projection; changing sharing applies on the next request.
+- Contact defaults PRIVATE. BRANDS and CONFIRMED_PARTNERS enforce role/permission, Campaign Brand, same Master, current member ownership and noncancelled agreement; COMPLETED Collaboration can still qualify.
+- Changing channel owner cannot expose the former profile or give the new owner an old confirmed partnership.
+- Contact Readiness uses a separate Campaign with no existing CRM relation so it exercises IN_APP_PORTAL, not an early ALREADY_CONTACTED branch. Neither account email, private booking address nor crawler fallback is returned.
+- Profile/contact access is denied to foreign roles and when dynamic permissions are disabled; audit contains no contact values and connection options contain no secrets.
+- Actual manual approval projects MANUAL_REVIEW and actual reviewedAt; revoke removes the badge without inventing an OAuth verification.
+- V30→V31 preserves original creator/owner rows and creates no declared profile/portfolio or inferred consent.
+
+Legacy fixture changes reflect the public contract, not weaker validation: Contact Readiness asserts a null target and absence of account email; unit repository adapters model latest-snapshot reads; permission matrix strictly includes the two new permissions; fresh-schema migration assertions expect V31 and historical V29→V30 tests stay pinned to V30. No production bypass is added.
+
+Verified results (2026-11-09):
+
+- Related suites: **49 passed, 0 failures/errors/skipped** (`portal-related-final.log`).
+- Whole-backend regression: **1,188 run; 1,184 passed; 4 failures; 0 errors; 0 skipped** (`portal-regression.log`, 11:38). Three reproduce the pre-existing Payment failures: PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment, ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions, and RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification.
+- The fourth was the old Compare fixture: an APPROVED Claim lacked reviewer/reviewedAt. The fixture now explicitly provides a verified owner and manual-review provenance. The VERIFIED assertion is retained and additionally asserts MANUAL_REVIEW; no production badge validation was weakened.
+- Final affected rerun: **33 passed, 0 failures/errors/skipped** (`portal-final-fixture.log`, 02:07), including the corrected PostgreSQL Compare case, all 16 Portal PostgreSQL cases and all 16 new unit cases. This is a separate targeted run after the full regression, not another whole-backend run. The three Payment failures remain unresolved and their assertions/behavior are unchanged.
+
+These tests distinguish application ownership evidence from independent verification of self-reported profile/financial claims. PostgreSQL runs use disposable Testcontainers; no shared database or serving backend was changed. V31 was tested only on disposable databases. No real provider calls, environment edits, commits or pushes were performed for this implementation.
+
+## Data Manager Master Catalog and Claim review — V32
+
+CreatorCatalogPostgresIntegrationTest uses real PostgreSQL/Flyway, persisted authentication sessions and HTTP endpoints. Master/channel/Claim fixtures are unique per case. Tests cover empty Masters, literal `%`/`_` search, unclaimed channels, same-member platform/verification filters, pagination/enum validation, separate dynamic read permissions, Admin/DM access and Brand/Creator denial. Catalog/event DTOs are checked for absence of login email, private contacts, raw audit JSON, proof URLs and tokens. GET is checked for no audit mutations.
+
+Claim tests submit through the actual API, bind a live invitation, change that invitation before review and verify wrong email/expiry/processed denials without business writes. Expiry fixtures use the same Clock and JPA timestamp mapping as production; ManualClaimGuardTest fixes Clock precisely at expiresAt=now and expects INVITATION_EXPIRED. This avoids interpreting a raw JDBC timestamp fixture as a successful expiry check.
+
+Additional cases cover manual revocation with independent valid OAuth, latest-method OAuth revocation suppressing older ACTIVE rows, mock proof not preserving ownership, approval/revoke audit rollback, actor authVersion changed while waiting, two concurrent reviewers, and two channels sharing a single Master. Latch-based MetaOAuthPostgresIntegrationTest.manualReviewAndMetaConfirmationCannotAssignDifferentOwners races real HTTP manual approval against Meta confirmation with the provider mocked: one owner wins and the losing ownership conflict is audited. Provider calls remain outside locked transactions as asserted by existing Meta tests.
+
+Approval/revoke synchronizes current Shortlist/Relationship Master references without creating Collaboration. Historical Deal/Collaboration members remain outside the mutation. New audit snapshots record the actual Master on approval/revoke; submission and legacy events without that reference remain unknown. Current channel ownership changes do not rewrite event snapshots. V31→V32 is tested in an isolated schema with original Creator/Claim rows preserved and no inferred invitation/Master rows.
+
+Legacy service tests now assert transfer is denied and no owner, current references or transfer audit is mutated; the HTTP transfer URL is still tested as 404. Exact RBAC matrix assertions now include 52 permissions (Admin 26, Data Manager 16, Brand 26; Creator unchanged). Latest-schema tests expect V32; the Portal V30→V31 boundary remains explicitly targeted to V31. No production bypass or weaker badge assertion was introduced.
+
+Verified results (2026-11-09):
+
+- Related final check: **85 passed, 0 failures/errors/skipped** (`catalog-final-check.log`, 03:09): 18 Catalog PostgreSQL, 16 Portal PostgreSQL, 36 Meta OAuth PostgreSQL, 8 Claim service, 6 verification projection and 1 fixed-Clock guard case.
+- Whole-backend regression: **1,209 run; 1,206 passed; 3 failures; 0 errors; 0 skipped** (`catalog-regression.log`, 12:29). All failures reproduce the existing Payment baseline: PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment, ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions, and RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification. No Payment behavior or assertion was changed.
+- Final contract rerun after the small UUID case-insensitivity and post-lock session checks: **55 passed, 0 failures/errors/skipped** (`catalog-contract-final.log`, 02:03). Includes all 18 Catalog PostgreSQL cases, Claim/guard/projection/RBAC suites and the legacy transfer-denial tests. This is a separate targeted run after full regression, not a second full regression. Legacy test names now describe denial rather than the removed transfer behavior.
+
+Mockito/Clock tests exercise policy and validation; PostgreSQL tests exercise migration, transaction rollback and concurrency. No real Meta, crawler, SMTP or shared database is used. Serving BE/environment/Bruno/diagrams were not changed; no commit or push was performed. Build/log artifacts remain ignored.
+
+## AD-01 / AD-05 — Account administration and Permission Matrix
+
+AdminAccountContractTest uses Bean Validation and pure input checks for reason normalization/requiredness, literal search bounds and strict pagination/order. AdminUserServiceTest, AdminRoleGuardTest and AdminUserControllerTest retain role/status, no-op, last-admin, Creator ownership/Claim and DTO assertions while adapting the repository call to filtered search and audit to explicit actor attribution. Positive legacy HTTP fixtures now supply the required status reason. RolePermissionServiceTest and its PostgreSQL companion retain version, no-op, audit rollback, multi-change atomicity and concurrent-update assertions; their unsupported-capability fixture now uses REQUEST_CREATOR_REFRESH because notifications have implemented endpoints.
+
+AdminConsolePostgresIntegrationTest has its own disposable PostgreSQL container. Last-admin counts cannot see or alter fixtures from another module. Its fixed Clock, real JWT/session rows, HTTP endpoints, actual role-matrix changes and latch-based requests cover:
+
+- Role/status/email/name/UUID filters, literal `%`/`_`/`!`, upper-case UUID, deterministic ordering, strict bounds and private/no-store DTOs without credential/contact fields.
+- Missing/blank/overlong reasons, including no-op; normalized reason audit; unchanged authVersion/audit/session on no-op.
+- LOCKED/DISABLED revoking two sessions and refresh credentials; unlock not restoring them; fresh login remains possible. Role changes also invalidate old sessions.
+- Self-lock, self-disable and self-demotion with another Admin; rejection when the actor is the last ACTIVE Admin. Two Admins locking each other or themselves simultaneously retain one ACTIVE Admin (latches, no sleep).
+- Actor status, role, logout or exact session expiry changed after authentication but before the write lock: account and matrix writes return 403/401 without target/config mutation.
+- Audit failure and failure after actual session revocation roll back User status/authVersion, session rows and audit. Existing Brand profile, current ownership and PENDING Claim prevent incompatible role changes without deleting their records.
+- Ten newly registered capability entries are exercised through the real matrix API: toggle off, reuse the same actor JWT and observe 403 at the actual endpoint; toggle on and regain authorized access. For absent-resource probes, expected 404 proves authorization passed; Creator profile/notifications, Campaign History and Catalog probes use successful reads. No direct role-override SQL substitutes for these toggle tests.
+- ADMIN edit and unsupported scoring/provider/collection/duplicate operations remain rejected; no out-of-role grants are introduced. Default role/permission counts are unchanged.
+
+Related final run: **96 passed, 0 failures/errors/skipped** (`admin-related-final.log`, 01:29): 42 new Admin PostgreSQL cases, 30 existing RBAC PostgreSQL cases, and 24 contract/service/controller unit cases. Initial fixture failures were the old repository verification signature and the read-Recommendation path missing `/runs`; both were corrected with assertions retained. Whole-backend regression: **1,254 run; 1,249 passed; 5 failures; 0 errors; 0 skipped** (`admin-regression.log`, 08:25). Three are the unchanged Payment baseline: PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment, ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions, and RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification. The other two were legacy Admin fixtures: a DISABLED request missing the now-required reason, and a concurrent-admin assertion missing post-lock 403. Both fixtures were corrected; the concurrency case additionally asserts exactly one successful mutation and still requires one ACTIVE Admin. These corrections do not bypass authorization or weaken last-admin protection. Final affected rerun: **105 passed, 0 failures/errors/skipped** (`admin-verification-final.log`, 01:56), comprising the 96 related cases plus all 8 BackendApplicationTests and the corrected last-admin concurrency case. This is a separate targeted run after the full regression, not a second whole-backend run. The three Payment failures remain unresolved; their assertions and behavior are unchanged.
+
+No migration is added and V1–V32 are unchanged. The server environment, Bruno, serving backend and shared databases remain untouched. The three pre-existing Payment failures are tracked separately; their behavior/assertions are outside this implementation.
+
+
+## M1 / learned M4 Bayesian learning — V33
+
+LearningPolicyTest covers the fixed 1–5 utility mapping/Dirichlet posterior, positive and negative observations, per-component minimum 3 Collaborations/2 Brands, single-Brand exclusion, objective-scoped KPI, external timing unavailable, weighted SELF_REPORTED KPI, exact 24-month UTC window, duplicate Review/Collaboration elimination, historical-owner separation and no automatic unclaimed-to-Master inheritance. Personal M4 uses 3 Reviews; cohort M4 requires 5 Reviews/3 Masters with platform/niche precedence and no mixed-platform attribution. Support is descriptive, not a probability.
+
+LearningKpisTest verifies future agreed periods, membership, duplicate keys/metrics, unsupported financial targets, strict integer JSON, known zero vs missing/negative inputs, bounded overachievement, complete engagement inputs, exact period/revision, post-key deduplication and contradictory measurements. LearningPrivacyTest preserves stored JSON while whitelisting the public Run projection and excluding unknown evidence/credential graphs.
+
+LearningPostgresIntegrationTest runs through actual proposal, confirmation, Portal submission, approval, publication, Outcome acceptance and final Review APIs. It checks immutable agreement/evidence snapshots, one evidence row on retry/concurrent completion, rollback after a real evidence write fails, external timestamps remaining unknown, owner/platform changes not rewriting historical identity, future KPI targets evaluated from accepted measurements, and Bayesian personal M4 rebuilds without counter increments. A V29 compatibility fixture suppresses only the new snapshot writer, leaving real saved Review/acceptance rows: only its proven ratings may be read; missing timeliness/KPI/classification remain null with no backfill.
+
+The cross-Brand case completes actual collaborations for three Brands, checks aggregated M1 and unavailable unrelated M4, executes Recommendation with a READY M3 and failing AI explanation, verifies deterministic fallback and internal evidence FKs, then checks API/AI payloads contain no other Brands' evidence/review IDs. Later Reviews can alter derived M4 but cannot rewrite the original Run. Private candidate inputs retain every scored candidate and unrounded final score; GET Run whitelists policy constants and does not expose those inputs. Existing role-matrix tests toggle Recommendation access through the real RBAC API.
+
+The V32→V33 test copies real execution/Review evidence into an isolated V32 schema, applies exactly V33, verifies original evidence is byte-for-byte preserved after removing the newly added null column, and asserts no learning context, KPI or scoring links were invented. Existing fresh-schema fixtures advance to V33/32 migrations; explicitly pinned historical boundary tests remain pinned.
+
+Existing rollback unit fixtures now fail Run persistence after quota reservation rather than the removed per-Creator historical lookup. Their exception/release assertions remain. A legacy M4 Recommendation fixture with no acceptance/history snapshot no longer becomes available solely on its fifth Review; new HTTP tests prove qualified Bayesian personal M4 works. Legacy pattern-reader compatibility tests retain their assertions, while new Runs use only the new versioned policy. No production bypass, fake ownership, verified-metric label or weaker authorization assertion is added.
+
+Verified results (2026-11-09):
+
+- Whole-backend regression: **1,285 run; 1,282 passed; 3 failures; 0 errors; 0 skipped** (`learning-regression.log`, 13:57). All failures reproduce the existing Payment baseline: PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment, ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions, and RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification. Payment behavior/assertions were not changed.
+- Final affected rerun: **219 passed, 0 failures/errors/skipped** (`learning-final.log`, 05:44). Includes 15 policy cases, 5 KPI cases, 1 DTO-privacy case, all 11 new PostgreSQL cases, Brand/M4, execution, Deal, schema preservation, Recommendation and actual RBAC API suites. This is a separate targeted run after the full regression, including the final V29 compatibility reader, internal all-candidate input traces and update/delete snapshot protection; it is not a second whole-backend run.
+- The first integration iterations caught real JPA/JDBC FK flush ordering and lazy DTO projection errors. Run flush and transactional read projection fix those paths; HTTP regression now exercises both. Fixture corrections preserve assertions: literal 404 for a foreign Campaign per existing ownership policy, UTC JSON date serialization, correct combined R/T expectation, seed-safe isolated schema copy, and failure injection on Run persistence after the removed historical N+1 query.
+
+Test databases are disposable; no serving backend, shared database, real provider/model or environment configuration is used. V33 was applied only to isolated test databases/schemas. No commit or push was performed.

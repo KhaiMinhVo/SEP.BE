@@ -1,6 +1,5 @@
 package com.influencermatch.backend.recommendation.controller;
 
-import com.influencermatch.backend.campaign.model.RecommendationRun;
 import com.influencermatch.backend.campaign.repository.RecommendationRunRepository;
 import com.influencermatch.backend.common.dto.ApiResponse;
 import com.influencermatch.backend.recommendation.dto.*;
@@ -39,7 +38,9 @@ public class AiRecommendationController {
           com.influencermatch.backend.campaign.enums.CandidateSource candidateSource) {
     RecommendationResponseDto result =
         recommendationService.recommendKocs(campaignId, limit, candidateSource);
-    return ResponseEntity.ok(ApiResponse.ok("KOC recommendations generated successfully", result));
+    return ResponseEntity.ok()
+        .header("Cache-Control", "private, no-store")
+        .body(ApiResponse.ok("KOC recommendations generated successfully", result));
   }
 
   @GetMapping("/runs")
@@ -47,12 +48,12 @@ public class AiRecommendationController {
   @Operation(
       summary = "Get historical AI recommendation runs for campaign",
       security = @SecurityRequirement(name = "BearerAuth"))
-  public ResponseEntity<ApiResponse<List<RecommendationRun>>> getRecommendationRuns(
-      @PathVariable UUID campaignId) {
-    ownership.requireOwned(campaignId);
-    List<RecommendationRun> runs =
-        recommendationRunRepository.findByCampaignIdOrderByCreatedAtDesc(campaignId);
-    return ResponseEntity.ok(ApiResponse.ok(runs));
+  public ResponseEntity<
+          ApiResponse<List<com.influencermatch.backend.recommendation.dto.RecommendationRunView>>>
+      getRecommendationRuns(@PathVariable UUID campaignId) {
+    return ResponseEntity.ok()
+        .header("Cache-Control", "private, no-store")
+        .body(ApiResponse.ok(recommendationService.runs(campaignId)));
   }
 
   @PostMapping("/feedback")

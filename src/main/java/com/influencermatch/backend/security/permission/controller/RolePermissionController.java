@@ -23,6 +23,11 @@ import org.springframework.web.bind.annotation.*;
 public class RolePermissionController {
   private final RolePermissionService service;
 
+  @ModelAttribute
+  public void privateResponse(jakarta.servlet.http.HttpServletResponse response) {
+    response.setHeader("Cache-Control", "private, no-store");
+  }
+
   @GetMapping
   @Operation(summary = "View default and effective permissions for all roles")
   public ApiResponse<List<RoleView>> catalog() {
@@ -30,7 +35,13 @@ public class RolePermissionController {
   }
 
   @PatchMapping("/{role}")
-  @Operation(summary = "Enable or disable existing role capabilities")
+  @Operation(
+      summary = "Enable or disable existing role capabilities",
+      description =
+          "ADMIN + ASSIGN_USER_ROLE. Only default, implemented capabilities of"
+              + " BRAND/CREATOR/DATA_MANAGER are editable; ADMIN is immutable. Requires current"
+              + " config version; stale version returns 409. Applies next request with the same"
+              + " JWT; does not revoke all sessions of the role.")
   public ApiResponse<RoleView> update(@PathVariable Role role, @Valid @RequestBody Update request) {
     return ApiResponse.ok(service.update(role, request));
   }

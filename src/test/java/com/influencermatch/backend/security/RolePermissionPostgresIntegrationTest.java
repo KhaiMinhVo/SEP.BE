@@ -186,7 +186,7 @@ class RolePermissionPostgresIntegrationTest {
         "{\"version\":0,\"changes\":[{\"permission\":\"CREATE_CAMPAIGN\"}]}",
         "{\"version\":0,\"changes\":[{\"permission\":\"UNKNOWN\",\"enabled\":false}]}",
         "{\"version\":0,\"changes\":[{\"permission\":\"ASSIGN_USER_ROLE\",\"enabled\":true}]}",
-        "{\"version\":0,\"changes\":[{\"permission\":\"VIEW_OWN_NOTIFICATION\",\"enabled\":false}]}",
+        "{\"version\":0,\"changes\":[{\"permission\":\"REQUEST_CREATOR_REFRESH\",\"enabled\":false}]}",
         "{\"version\":0,\"changes\":[{\"permission\":\"CREATE_CAMPAIGN\",\"enabled\":false},{\"permission\":\"CREATE_CAMPAIGN\",\"enabled\":true}]}"
       })
   void invalidChangesDoNotWriteOrAudit(String body) throws Exception {

@@ -22,7 +22,7 @@ public class AggregatedReachDto {
   @Schema(description = "Canonical / Display name of Master KOC")
   private String canonicalName;
 
-  @Schema(description = "Total number of verified social channels linked")
+  @Schema(description = "Total number of linked social channels; verification is reported per channel")
   private int channelCount;
 
   @Schema(description = "Total aggregated followers across all linked platforms")
@@ -76,7 +76,12 @@ public class AggregatedReachDto {
     private BigDecimal engagementRate;
 
     @Schema(description = "OAuth token status (ACTIVE, EXPIRED, DISCONNECTED)")
+    @Deprecated
     private String tokenStatus;
+    private boolean verifiedByInfluencerMatch;
+    private java.util.UUID masterId;
+    private com.influencermatch.backend.creator.portal.PortalDtos.DeclaredProfile declaredProfile;
+    private com.influencermatch.backend.creator.portal.PortalDtos.Verification verification;
 
     @Schema(description = "Verification method used during OAuth claim")
     private String verificationMethod;

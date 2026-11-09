@@ -21,6 +21,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class DealService {
+  @org.springframework.beans.factory.annotation.Autowired
+  private LearningEvidenceWriter learningEvidence;
+
   final DealStore store;
   final CampaignWriteLock locks;
   final AuditService audit;
@@ -416,7 +419,9 @@ public class DealService {
         "deliverables",
         store.decode(p.get("deliverables")),
         "createdAt",
-        p.get("created_at"));
+        p.get("created_at"),
+        "kpiTargets",
+        store.decode(p.get("kpi_targets")));
   }
 
   @Transactional(readOnly = true)
@@ -465,6 +470,8 @@ public class DealService {
       throw new ValidationException("Positive VND fee, terms and deliverables required");
     var expected =
         new HashSet<>(store.members(id).stream().map(m -> uuid(m.get("creator_id"))).toList());
+    com.influencermatch.backend.recommendation.learning.LearningKpis.validate(
+        p.kpiTargets(), expected, null);
     var actual = new HashSet<UUID>();
     for (var a : p.deliverables()) {
       if (a == null
@@ -518,7 +525,9 @@ public class DealService {
     long revision = store.revision(d) + 1;
     invalidate(id);
     store.db.update(
-        "insert into cooperation_proposal values(?,?,?,?,?,?,?,?::jsonb,?,?)",
+        "insert into"
+            + " cooperation_proposal(id,deal_id,revision,author_id,kind,fee,currency,deliverables,terms,created_at,kpi_targets)"
+            + " values(?,?,?,?,?,?,?,?::jsonb,?,?,?::jsonb)",
         UUID.randomUUID(),
         id,
         revision,
@@ -528,7 +537,8 @@ public class DealService {
         request.currency(),
         store.encode(request.deliverables()),
         request.terms().trim(),
-        store.time());
+        store.time(),
+        store.encode(request.kpiTargets()));
     store.db.update(
         "update cooperation_deal set"
             + " revision=?,status='NEGOTIATING',accepted_revision=null,accepted_by=null,accepted_at=null,updated_at=?"
@@ -760,6 +770,7 @@ public class DealService {
           m.get("relationship_id"));
     executionSnapshot.create(
         collaboration, uuid(p.get("id")), store.decode(p.get("deliverables")), "PROPOSAL");
+    learningEvidence.agreement(collaboration, uuid(p.get("id")));
     store.db.update(
         "update cooperation_deal set"
             + " status='CONFIRMED',revision=revision+1,collaboration_id=?,updated_at=? where id=?",

@@ -698,79 +698,16 @@ class Flow4ComprehensiveAcceptanceTest {
   // TEST-F4-08: Admin Identity Conflict Resolution (APPROVE_TRANSFER & REJECT)
   // =========================================================================
   @Test
-  @DisplayName(
-      "TEST-F4-08 [Admin Resolve Conflict]: Data Manager gọi POST"
-          + " /admin/creator-conflicts/{id}/resolve -> Chuyển kênh thành công hoặc từ chối đúng"
-          + " logic")
-  void testF4_08_adminResolveConflict_approveTransferAndReject_enforcesPermissionsAndAudits() {
+  @DisplayName("TEST-F4-08: Legacy transfer is disabled; unauthorized callers are rejected")
+  void testF4_08_legacyTransferDeniedAndPermissionsEnforced() {
     TestActors.authenticate(dataManagerUser);
-
-    CreatorMaster originalMaster =
-        CreatorMaster.builder().id(UUID.randomUUID()).canonicalName("Original Master").build();
-
-    CreatorMaster claimantMaster =
-        CreatorMaster.builder().id(UUID.randomUUID()).canonicalName("Claimant Master").build();
-
-    Creator contestedAccount =
-        Creator.builder()
-            .id(UUID.randomUUID())
-            .platform("TIKTOK")
-            .externalId("tt_contested_channel")
-            .userName("contested_creator")
-            .master(originalMaster)
-            .sourceType(CreatorSourceType.AUTHORIZED)
-            .build();
-
-    UUID conflictId = UUID.randomUUID();
-    CreatorIdentityConflict conflict =
-        CreatorIdentityConflict.builder()
-            .id(conflictId)
-            .conflictType("ACCOUNT_ALREADY_LINKED")
-            .sourceAccount(contestedAccount)
-            .targetMaster(claimantMaster)
-            .status("PENDING_MANAGER")
-            .createdAt(LocalDateTime.now(fixedClock).minusDays(1))
-            .build();
-
-    when(conflictRepository.findById(conflictId)).thenReturn(Optional.of(conflict));
-    when(conflictRepository.save(any(CreatorIdentityConflict.class)))
-        .thenAnswer(inv -> inv.getArgument(0));
-
-    // 1. Data Manager approves transfer
-    ResolveConflictRequest approveReq =
-        ResolveConflictRequest.builder()
-            .decision(ConflictResolutionDecision.APPROVE_TRANSFER)
-            .notes("Verified contract and notarized ID of claimant")
-            .build();
-
-    ApiResponse<ConflictDetailDto> response =
-        adminConflictController.resolveConflict(conflictId, approveReq);
-
-    assertThat(response.success()).isTrue();
-    assertThat(response.data().getStatus()).isEqualTo("RESOLVED");
-    assertThat(response.data().getResolutionNotes())
-        .isEqualTo("Verified contract and notarized ID of claimant");
-
-    // Verified ownership transferred to claimantMaster
-    assertThat(contestedAccount.getMaster()).isEqualTo(claimantMaster);
-    verify(shortlistItemRepository)
-        .updateMasterForCreator(contestedAccount.getId(), claimantMaster);
-    verify(relationshipRepository).updateMasterForCreator(contestedAccount.getId(), claimantMaster);
-
-    // Verified audit log created
-    verify(identityAuditRepository)
-        .save(
-            argThat(
-                audit ->
-                    "CONFLICT_RESOLVED_TRANSFER".equals(audit.getEventType())
-                        && audit.getMaster().equals(claimantMaster)));
-
-    // 2. Unauthorized access guard: Brand user attempting to resolve conflict is forbidden
-    User unauthorizedBrandUser = TestActors.user(Role.BRAND);
-    TestActors.authenticate(unauthorizedBrandUser);
-
-    assertThatThrownBy(() -> adminConflictController.resolveConflict(conflictId, approveReq))
-        .isInstanceOf(ForbiddenException.class);
+    var request=ResolveConflictRequest.builder().decision(ConflictResolutionDecision.APPROVE_TRANSFER).notes("Legacy transfer").build();
+    assertThatThrownBy(() -> adminConflictController.resolveConflict(UUID.randomUUID(),request)).isInstanceOf(com.influencermatch.backend.exception.ConflictException.class);
+    verify(shortlistItemRepository,never()).updateMasterForCreator(any(),any());
+    verify(relationshipRepository,never()).updateMasterForCreator(any(),any());
+    verify(identityAuditRepository,never()).save(any());
+    TestActors.authenticate(brandUser);
+    assertThatThrownBy(() -> adminConflictController.resolveConflict(UUID.randomUUID(),request)).isInstanceOf(ForbiddenException.class);
   }
 
   // =========================================================================

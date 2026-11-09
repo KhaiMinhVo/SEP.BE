@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.influencermatch.backend.brand.service.BrandLearnedPatterns;
 import com.influencermatch.backend.campaign.model.*;
 import com.influencermatch.backend.campaign.repository.*;
 import com.influencermatch.backend.creator.dto.RecommendationCandidateProjection;
@@ -37,11 +36,31 @@ class BrandM4ScoringTest {
     return c;
   }
 
-  BrandLearnedPatterns.Snapshot learned(int n) {
-    var evidence = new ArrayList<BrandLearnedPatterns.Evidence>();
+  final UUID brandId = UUID.randomUUID();
+
+  com.influencermatch.backend.recommendation.learning.LearningPolicy.Snapshot learned(int n) {
+    var rows =
+        new ArrayList<
+            com.influencermatch.backend.recommendation.learning.LearningPolicy.Evidence>();
+    var now = java.time.Instant.now();
     for (int i = 0; i < n; i++)
-      evidence.add(new BrandLearnedPatterns.Evidence(UUID.randomUUID(), "TIKTOK", "Skin", 4));
-    return BrandLearnedPatterns.aggregate(evidence);
+      rows.add(
+          new com.influencermatch.backend.recommendation.learning.LearningPolicy.Evidence(
+              UUID.randomUUID(),
+              UUID.randomUUID(),
+              UUID.randomUUID(),
+              brandId,
+              UUID.randomUUID(),
+              UUID.randomUUID(),
+              now.minusSeconds(1),
+              "AWARENESS",
+              "TIKTOK",
+              "Skin",
+              4,
+              4,
+              null,
+              null));
+    return com.influencermatch.backend.recommendation.learning.LearningPolicy.snapshot(now, rows);
   }
 
   @Test
@@ -49,7 +68,7 @@ class BrandM4ScoringTest {
     var c = candidate();
     var score =
         service.calculateFourMemoryScores(
-            c, Campaign.builder().build(), UUID.randomUUID(), learned(4));
+            c, Campaign.builder().build(), brandId, learned(4), json.createObjectNode());
     assertThat(score.getM1Score()).isNull();
     assertThat(score.getM4Score()).isNull();
     assertThat(score.getM4EvidenceCount()).isEqualTo(4);
@@ -61,25 +80,15 @@ class BrandM4ScoringTest {
   }
 
   @Test
-  void historyDoesNotInventM1BeforePolicyExistsAndAvailableWeightsSumToOne() {
+  void unsupportedLegacyHistoryDoesNotInventM1AndBayesianWeightsSumToOne() {
     var c = candidate();
-    when(histories.findByCreatorId(c.getCreatorId()))
-        .thenReturn(
-            List.of(
-                HistoricalCampaign.builder()
-                    .quality("VERIFIED")
-                    .outcome(
-                        com.influencermatch.backend.collaboration.model.CampaignOutcome.builder()
-                            .roi(java.math.BigDecimal.valueOf(2))
-                            .build())
-                    .build()));
     var score =
         service.calculateFourMemoryScores(
-            c, Campaign.builder().build(), UUID.randomUUID(), learned(5));
+            c, Campaign.builder().build(), brandId, learned(5), json.createObjectNode());
     assertThat(score.getM1Score()).isNull();
-    assertThat(score.getM1UnavailableReason()).isEqualTo("M1_POLICY_NOT_IMPLEMENTED");
-    assertThat(score.getScoringPolicyVersion()).isEqualTo("four-memory-v2-m1-unavailable");
-    assertThat(score.getM4Score()).isEqualTo(75);
+    assertThat(score.getM1UnavailableReason()).isEqualTo("INSUFFICIENT_COLLABORATIONS");
+    assertThat(score.getScoringPolicyVersion()).isEqualTo("four-memory-v3-bayesian-history");
+    assertThat(score.getM4Score()).isEqualTo(67.86);
     assertThat(score.getEffectiveWeights().get("M1")).isZero();
     assertThat(score.getEffectiveWeights().get("M2")).isCloseTo(5.0 / 7, within(0.000001));
     assertThat(score.getEffectiveWeights().get("M4")).isCloseTo(2.0 / 7, within(0.000001));
@@ -90,11 +99,9 @@ class BrandM4ScoringTest {
   @Test
   void legacyUnverifiedHistoryDoesNotBecomeNeutralSuccess() {
     var c = candidate();
-    when(histories.findByCreatorId(c.getCreatorId()))
-        .thenReturn(List.of(HistoricalCampaign.builder().quality("LEGACY").build()));
     var score =
         service.calculateFourMemoryScores(
-            c, Campaign.builder().build(), UUID.randomUUID(), learned(5));
+            c, Campaign.builder().build(), brandId, learned(5), json.createObjectNode());
     assertThat(score.isM1Available()).isFalse();
     assertThat(score.isM4Available()).isTrue();
     assertThat(score.getEffectiveWeights().get("M4")).isCloseTo(2.0 / 7, within(0.000001));

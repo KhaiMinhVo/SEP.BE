@@ -18,3 +18,4 @@ public enum OccurrencePolicy {
    */
   MULTI_EVENT_INSTANCE
 }
+

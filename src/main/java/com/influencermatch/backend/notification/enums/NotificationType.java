@@ -30,8 +30,8 @@ public enum NotificationType {
   QUOTA_LOW(false, "Cảnh báo hạn ngạch dịch vụ sắp hết", OccurrencePolicy.SINGLE_PER_ENTITY),
 
   // Security & Account Admin (Luồng 13 & AD-01)
-  ROLE_CHANGED(true, "Thông báo thay đổi vai trò tài khoản", OccurrencePolicy.SINGLE_PER_ENTITY),
-  ACCOUNT_LOCKED(true, "Cảnh báo tài khoản bị tạm khóa", OccurrencePolicy.SINGLE_PER_ENTITY);
+  ROLE_CHANGED(true, "Thông báo thay đổi vai trò tài khoản", OccurrencePolicy.MULTI_EVENT_INSTANCE),
+  ACCOUNT_LOCKED(true, "Cảnh báo tài khoản bị tạm khóa", OccurrencePolicy.MULTI_EVENT_INSTANCE);
 
   private final boolean emailDispatchEnabled;
   private final String defaultTitle;

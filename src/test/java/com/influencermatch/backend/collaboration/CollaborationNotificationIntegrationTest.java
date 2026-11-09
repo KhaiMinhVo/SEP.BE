@@ -10,6 +10,7 @@ import com.influencermatch.backend.campaign.enums.CampaignStatus;
 import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.campaign.repository.CampaignRepository;
 import com.influencermatch.backend.collaboration.dto.CreateCollaborationRequest;
+import com.influencermatch.backend.collaboration.dto.EvidenceAssetResponse;
 import com.influencermatch.backend.collaboration.dto.SubmitEvidenceRequest;
 import com.influencermatch.backend.collaboration.model.Collaboration;
 import com.influencermatch.backend.collaboration.model.EvidenceAsset;
@@ -307,6 +308,61 @@ class CollaborationNotificationIntegrationTest {
         eq(asset2Id));
 
     verify(notificationService, times(2)).createAndDispatch(any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void whenSubmitEvidenceRetriedWithSameUrl_doesNotCreateDuplicateAssetOrNotification() {
+    User creatorUser = user(Role.CREATOR);
+    authenticate(creatorUser);
+
+    User brandUser = user(Role.BRAND);
+    BrandProfile brandProfile = BrandProfile.builder().user(brandUser).businessName("Aura Cosmetics").build();
+    Campaign campaign = Campaign.builder().brandProfile(brandProfile).name("Summer Launch 2026").build();
+
+    CreatorMaster master = CreatorMaster.builder().user(creatorUser).build();
+    Creator creator = Creator.builder().master(master).build();
+
+    UUID collabId = UUID.randomUUID();
+    Collaboration collaboration =
+        Collaboration.builder()
+            .id(collabId)
+            .campaign(campaign)
+            .creator(creator)
+            .master(master)
+            .build();
+
+    when(collaborations.findById(collabId)).thenReturn(Optional.of(collaboration));
+
+    UUID existingAssetId = UUID.randomUUID();
+    EvidenceAsset existingAsset =
+        EvidenceAsset.builder()
+            .id(existingAssetId)
+            .collaboration(collaboration)
+            .assetType("POST_LINK")
+            .storageUrl("https://tiktok.com/@koc/video/duplicate-test")
+            .source("CREATOR_SUBMITTED")
+            .build();
+
+    // Mock that asset already exists (e.g. from previous attempt or network retry)
+    when(evidenceAssets.findFirstByCollaborationIdAndAssetTypeAndStorageUrl(
+            eq(collabId), eq("POST_LINK"), eq("https://tiktok.com/@koc/video/duplicate-test")))
+        .thenReturn(Optional.of(existingAsset));
+
+    SubmitEvidenceRequest retryReq =
+        new SubmitEvidenceRequest(
+            "POST_LINK",
+            "https://tiktok.com/@koc/video/duplicate-test",
+            "https://tiktok.com/@koc/video/duplicate-test",
+            "Retry submit");
+
+    EvidenceAssetResponse response = service.submitEvidence(collabId, retryReq);
+
+    assertThat(response).isNotNull();
+    assertThat(response.id()).isEqualTo(existingAssetId);
+
+    // CRITICAL: Asset must NOT be re-saved, and duplicate notification must NOT be dispatched
+    verify(evidenceAssets, never()).save(any(EvidenceAsset.class));
+    verify(notificationService, never()).createAndDispatch(any(), any(), any(), any(), any(), any());
   }
 }
 

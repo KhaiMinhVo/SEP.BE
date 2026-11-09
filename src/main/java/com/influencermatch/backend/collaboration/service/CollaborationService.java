@@ -508,17 +508,27 @@ public class CollaborationService {
     CampaignOutcome outcome = outcomes.findByCollaborationId(collaborationId).orElse(null);
 
     EvidenceAsset asset =
-        evidenceAssets.save(
-            EvidenceAsset.builder()
-                .collaboration(collaboration)
-                .outcome(outcome)
-                .assetType(request.assetType())
-                .storageUrl(request.storageUrl())
-                .source(source)
-                .uploadedAt(now)
-                .build());
+        evidenceAssets
+            .findFirstByCollaborationIdAndAssetTypeAndStorageUrl(
+                collaborationId, request.assetType(), request.storageUrl())
+            .orElse(null);
 
-    if (notificationService != null
+    boolean isNewAsset = (asset == null);
+    if (isNewAsset) {
+      asset =
+          evidenceAssets.save(
+              EvidenceAsset.builder()
+                  .collaboration(collaboration)
+                  .outcome(outcome)
+                  .assetType(request.assetType())
+                  .storageUrl(request.storageUrl())
+                  .source(source)
+                  .uploadedAt(now)
+                  .build());
+    }
+
+    if (isNewAsset
+        && notificationService != null
         && isCreatorOwner
         && collaboration.getCampaign() != null
         && collaboration.getCampaign().getBrandProfile() != null

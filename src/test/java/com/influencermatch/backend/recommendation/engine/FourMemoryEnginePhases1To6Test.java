@@ -1782,7 +1782,7 @@ class FourMemoryEnginePhases1To6Test {
   }
 
   @Test
-  @DisplayName("P0 Test: Intra-Bucket MMR preserves strict budget priority order (Priority 1 -> 2 -> 3 -> 4) with zero budget leakage")
+  @DisplayName("P0 Test: Intra-Bucket MMR preserves strict budget priority order (Priority 1 -> 2 -> 3 -> 4 -> 5) with zero budget leakage")
   void testP0_intraBucketMmr_strictBudgetGroupPreservation_noBudgetLeakage() {
     MmrReranker mmr = new MmrReranker();
 
@@ -1801,11 +1801,11 @@ class FourMemoryEnginePhases1To6Test {
 
     assertThat(reranked).hasSize(4);
 
-    // 1. Priority 1 items (a, b) MUST precede Priority 2 (c) and Priority 4 (d)
+    // 1. Priority 1 items (a, b) MUST precede Priority 2 (c) and Priority 5 (d)
     assertThat(reranked.get(0).budgetPriority()).isEqualTo(1);
     assertThat(reranked.get(1).budgetPriority()).isEqualTo(1);
     assertThat(reranked.get(2).budgetPriority()).isEqualTo(2); // Candidate c (DECLARED_ESTIMATE)
-    assertThat(reranked.get(3).budgetPriority()).isEqualTo(4); // Candidate d (CONFIRMED_OVER_BUDGET)
+    assertThat(reranked.get(3).budgetPriority()).isEqualTo(5); // Candidate d (CONFIRMED_OVER_BUDGET)
 
     // Over-budget candidate d (score 99) NEVER leaks into top budget positions
     assertThat(reranked.get(3)).isSameAs(d);
@@ -1893,23 +1893,27 @@ class FourMemoryEnginePhases1To6Test {
   void testP0_endToEndIntegration_campaignBudgetPlusPricing_to_priceStatus_to_masterDedup_to_displaySort() {
     BigDecimal budgetMax = BigDecimal.valueOf(10_000_000); // 10 triệu VND
 
-    // 1. Phân loại PriceStatus từ dữ liệu giá thực tế
+    // 1. Phân loại PriceStatus từ dữ liệu giá thực tế (Truth Table 5 trạng thái)
     PriceStatus p1ConfirmedWithin = PriceStatusResolver.resolve(BigDecimal.valueOf(8_000_000), true, budgetMax);
     PriceStatus p2DeclaredEstimate = PriceStatusResolver.resolve(BigDecimal.valueOf(7_000_000), false, budgetMax);
     PriceStatus p3Unknown = PriceStatusResolver.resolve(null, false, budgetMax);
-    PriceStatus p4ConfirmedOver = PriceStatusResolver.resolve(BigDecimal.valueOf(30_000_000), true, budgetMax);
+    PriceStatus p4EstimatedOver = PriceStatusResolver.resolve(BigDecimal.valueOf(30_000_000), false, budgetMax);
+    PriceStatus p5ConfirmedOver = PriceStatusResolver.resolve(BigDecimal.valueOf(30_000_000), true, budgetMax);
 
     assertThat(p1ConfirmedWithin).isEqualTo(PriceStatus.CONFIRMED_WITHIN_BUDGET);
     assertThat(p2DeclaredEstimate).isEqualTo(PriceStatus.DECLARED_ESTIMATE);
     assertThat(p3Unknown).isEqualTo(PriceStatus.PRICE_UNKNOWN);
-    assertThat(p4ConfirmedOver).isEqualTo(PriceStatus.CONFIRMED_OVER_BUDGET);
+    // Nghiệm thu P0: Giá chưa xác nhận vượt ngân sách PHẢI là ESTIMATED_OVER_BUDGET, KHÔNG THỂ là CONFIRMED_OVER_BUDGET
+    assertThat(p4EstimatedOver).isEqualTo(PriceStatus.ESTIMATED_OVER_BUDGET);
+    assertThat(p4EstimatedOver).isNotEqualTo(PriceStatus.CONFIRMED_OVER_BUDGET);
+    assertThat(p5ConfirmedOver).isEqualTo(PriceStatus.CONFIRMED_OVER_BUDGET);
 
     // 2. Master có 2 kênh: TikTok (30M - over budget, score 95) và Instagram (8M - within budget, score 85)
     UUID tikTokId = UUID.randomUUID();
     UUID instaId = UUID.randomUUID();
 
     TestBucketedMmrItem chTikTok = new TestBucketedMmrItem(
-        tikTokId, 95.0, 0.90, 0.85, p4ConfirmedOver, "Vlog", "Lifestyle", null);
+        tikTokId, 95.0, 0.90, 0.85, p5ConfirmedOver, "Vlog", "Lifestyle", null);
     TestBucketedMmrItem chInsta = new TestBucketedMmrItem(
         instaId, 85.0, 0.80, 0.75, p1ConfirmedWithin, "Vlog", "Lifestyle", null);
 
@@ -1925,18 +1929,60 @@ class FourMemoryEnginePhases1To6Test {
     assertThat(winnerMatch.creatorId()).isEqualTo(tikTokId);
     assertThat(winnerMatch.matchScore()).isEqualTo(95.0);
 
-    // 3. Display Sorting thứ tự 4 mức Priority
+    // 3. Display Sorting thứ tự 5 mức Priority
     TestBucketedMmrItem item1 = new TestBucketedMmrItem(instaId, 85.0, 0.8, 0.7, p1ConfirmedWithin, "Vlog", "Lifestyle", null);
     TestBucketedMmrItem item2 = new TestBucketedMmrItem(UUID.randomUUID(), 88.0, 0.8, 0.7, p2DeclaredEstimate, "Vlog", "Lifestyle", null);
     TestBucketedMmrItem item3 = new TestBucketedMmrItem(UUID.randomUUID(), 90.0, 0.8, 0.7, p3Unknown, "Vlog", "Lifestyle", null);
-    TestBucketedMmrItem item4 = new TestBucketedMmrItem(tikTokId, 95.0, 0.9, 0.8, p4ConfirmedOver, "Vlog", "Lifestyle", null);
+    TestBucketedMmrItem item4 = new TestBucketedMmrItem(UUID.randomUUID(), 92.0, 0.8, 0.7, p4EstimatedOver, "Vlog", "Lifestyle", null);
+    TestBucketedMmrItem item5 = new TestBucketedMmrItem(tikTokId, 95.0, 0.9, 0.8, p5ConfirmedOver, "Vlog", "Lifestyle", null);
 
-    List<TestBucketedMmrItem> sorted = new DisplaySorter().sort(List.of(item4, item3, item2, item1), DisplayMode.BUDGET_READY_FIRST);
+    List<TestBucketedMmrItem> sorted = new DisplaySorter().sort(List.of(item5, item4, item3, item2, item1), DisplayMode.BUDGET_READY_FIRST);
 
     assertThat(sorted.get(0).priceStatus()).isEqualTo(PriceStatus.CONFIRMED_WITHIN_BUDGET);
     assertThat(sorted.get(1).priceStatus()).isEqualTo(PriceStatus.DECLARED_ESTIMATE);
     assertThat(sorted.get(2).priceStatus()).isEqualTo(PriceStatus.PRICE_UNKNOWN);
-    assertThat(sorted.get(3).priceStatus()).isEqualTo(PriceStatus.CONFIRMED_OVER_BUDGET);
+    assertThat(sorted.get(3).priceStatus()).isEqualTo(PriceStatus.ESTIMATED_OVER_BUDGET);
+    assertThat(sorted.get(4).priceStatus()).isEqualTo(PriceStatus.CONFIRMED_OVER_BUDGET);
+  }
+
+  @Test
+  @DisplayName("P0 Test: Pricing Data Flow & Graceful Fallback - Unquoted Candidates Default to PRICE_UNKNOWN without Hallucination")
+  void testP0_pricingDataFlow_unquotedCandidatesDefaultToPriceUnknown() {
+    BigDecimal budgetMax = BigDecimal.valueOf(15_000_000);
+
+    // Candidate 1: Missing all pricing (crawled public creator, retired rate card)
+    PriceStatus missingPrice = PriceStatusResolver.resolve(null, null, budgetMax);
+    assertThat(missingPrice).isEqualTo(PriceStatus.PRICE_UNKNOWN);
+
+    // Candidate 2: Campaign budget is unspecified (budgetMax is null or <= 0)
+    PriceStatus unspecifiedBudget = PriceStatusResolver.resolve(BigDecimal.valueOf(10_000_000), false, (BigDecimal) null);
+    assertThat(unspecifiedBudget).isEqualTo(PriceStatus.PRICE_UNKNOWN);
+
+    // Candidate 3: Unconfirmed historical fee within budget
+    PriceStatus historicalWithin = PriceStatusResolver.resolve(BigDecimal.valueOf(12_000_000), false, budgetMax);
+    assertThat(historicalWithin).isEqualTo(PriceStatus.DECLARED_ESTIMATE);
+
+    // Candidate 4: Unconfirmed historical fee exceeding budget
+    PriceStatus historicalOver = PriceStatusResolver.resolve(BigDecimal.valueOf(25_000_000), false, budgetMax);
+    assertThat(historicalOver).isEqualTo(PriceStatus.ESTIMATED_OVER_BUDGET);
+
+    // Soft Preference Verification: All candidates, even PRICE_UNKNOWN or ESTIMATED_OVER_BUDGET,
+    // remain present in the result pool - none are silently discarded as hard violations.
+    List<TestBucketedMmrItem> allCandidates = List.of(
+        new TestBucketedMmrItem(UUID.randomUUID(), 90.0, 0.9, 0.8, historicalOver, "Tech", "Tech", null),
+        new TestBucketedMmrItem(UUID.randomUUID(), 85.0, 0.8, 0.7, missingPrice, "Beauty", "Beauty", null),
+        new TestBucketedMmrItem(UUID.randomUUID(), 80.0, 0.8, 0.7, historicalWithin, "Food", "Food", null)
+    );
+
+    List<TestBucketedMmrItem> bestMatchSorted = new DisplaySorter().sort(allCandidates, DisplayMode.BEST_MATCH);
+    assertThat(bestMatchSorted).hasSize(3);
+    assertThat(bestMatchSorted.get(0).matchScore()).isEqualTo(90.0); // Ranked purely by MatchScore
+
+    List<TestBucketedMmrItem> budgetSorted = new DisplaySorter().sort(allCandidates, DisplayMode.BUDGET_READY_FIRST);
+    assertThat(budgetSorted).hasSize(3);
+    assertThat(budgetSorted.get(0).priceStatus()).isEqualTo(PriceStatus.DECLARED_ESTIMATE); // 80.0 score but within budget
+    assertThat(budgetSorted.get(1).priceStatus()).isEqualTo(PriceStatus.PRICE_UNKNOWN);
+    assertThat(budgetSorted.get(2).priceStatus()).isEqualTo(PriceStatus.ESTIMATED_OVER_BUDGET);
   }
 
   // --- Test Helper Records ---

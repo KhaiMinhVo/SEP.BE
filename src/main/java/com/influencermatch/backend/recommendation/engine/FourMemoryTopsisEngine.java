@@ -127,6 +127,19 @@ public class FourMemoryTopsisEngine {
       Campaign campaign,
       Function<RecommendationCandidateProjection, List<HistoricalCampaign>> historyProvider,
       List<BrandPattern> brandPatterns) {
+    return evaluateAndRank(candidates, phase0Map, campaign, historyProvider, brandPatterns, cand -> PriceStatus.PRICE_UNKNOWN);
+  }
+
+  /**
+   * Evaluates and ranks a pool of candidates with pricing status resolution.
+   */
+  public List<EvaluatedCandidate> evaluateAndRank(
+      List<RecommendationCandidateProjection> candidates,
+      Map<UUID, NormalizedCandidateContext> phase0Map,
+      Campaign campaign,
+      Function<RecommendationCandidateProjection, List<HistoricalCampaign>> historyProvider,
+      List<BrandPattern> brandPatterns,
+      Function<RecommendationCandidateProjection, PriceStatus> priceStatusProvider) {
 
     if (candidates == null || candidates.isEmpty()) {
       return List.of();
@@ -173,13 +186,17 @@ public class FourMemoryTopsisEngine {
     for (IntermediateEvaluation inter : intermediateList) {
       TopsisResult topsis = topsisEngine.compute(inter.scores, weights);
       ConfidenceAssessment confidence = confidenceCalculator.calculate(inter.scores, weights);
+      PriceStatus priceStatus = (priceStatusProvider != null)
+          ? priceStatusProvider.apply(inter.cand)
+          : PriceStatus.PRICE_UNKNOWN;
 
       evaluatedList.add(new EvaluatedCandidate(
           inter.cand,
           inter.scores,
           topsis,
           confidence,
-          weights
+          weights,
+          priceStatus
       ));
     }
 
@@ -215,12 +232,26 @@ public class FourMemoryTopsisEngine {
       List<HistoricalCampaign> past,
       List<BrandPattern> brandPatterns,
       EngineWeights weights) {
+    return evaluateSingle(cand, p0, campaign, past, brandPatterns, weights, PriceStatus.PRICE_UNKNOWN);
+  }
+
+  /**
+   * Evaluates a single candidate using explicit weights and pricing status.
+   */
+  public EvaluatedCandidate evaluateSingle(
+      RecommendationCandidateProjection cand,
+      NormalizedCandidateContext p0,
+      Campaign campaign,
+      List<HistoricalCampaign> past,
+      List<BrandPattern> brandPatterns,
+      EngineWeights weights,
+      PriceStatus priceStatus) {
 
     CandidateMemoryScores scores = fourMemoryScorer.evaluate(cand, p0, campaign, past, brandPatterns);
     TopsisResult topsis = topsisEngine.compute(scores, weights);
     ConfidenceAssessment confidence = confidenceCalculator.calculate(scores, weights);
 
-    return new EvaluatedCandidate(cand, scores, topsis, confidence, weights);
+    return new EvaluatedCandidate(cand, scores, topsis, confidence, weights, priceStatus);
   }
 
   public EngineWeights getFallbackWeights(String objective) {

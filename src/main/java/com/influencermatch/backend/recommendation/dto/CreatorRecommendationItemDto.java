@@ -1,5 +1,6 @@
 package com.influencermatch.backend.recommendation.dto;
 
+import com.influencermatch.backend.recommendation.engine.presentation.enums.PriceStatus;
 import com.influencermatch.backend.relationship.enums.ShortlistStatus;
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -32,6 +33,8 @@ public class CreatorRecommendationItemDto {
   private Double finalScore;
   private ScoreBreakdownDto scoreBreakdown;
   private ReasoningCardDto reasoning;
+  private PriceStatus priceStatus;
   private Boolean isScoreReady;
   private Boolean isProvisional;
 }
+

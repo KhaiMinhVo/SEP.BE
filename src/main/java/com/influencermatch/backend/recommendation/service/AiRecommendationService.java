@@ -28,6 +28,8 @@ import com.influencermatch.backend.recommendation.engine.presentation.Determinis
 import com.influencermatch.backend.recommendation.engine.presentation.DisplaySorter;
 import com.influencermatch.backend.recommendation.engine.presentation.MmrReranker;
 import com.influencermatch.backend.recommendation.engine.presentation.enums.DisplayMode;
+import com.influencermatch.backend.recommendation.engine.presentation.enums.PriceStatus;
+import com.influencermatch.backend.recommendation.engine.presentation.pricing.PriceStatusResolver;
 import com.influencermatch.backend.relationship.enums.ShortlistStatus;
 import com.influencermatch.backend.relationship.model.ShortlistItem;
 import com.influencermatch.backend.relationship.repository.ShortlistItemRepository;
@@ -225,6 +227,22 @@ public class AiRecommendationService {
         return past;
       };
 
+      // Pricing Data Integration:
+      // Trích xuất benchmark giá từ lịch sử hợp tác (nếu có) để PriceStatusResolver phân loại.
+      // Do Rate Card cũ đã bị loại bỏ ở V15, ứng viên discovery không có dữ liệu giá sẽ mặc định trả về PRICE_UNKNOWN.
+      // candidatePrice vs budgetMax xác định khả năng chi trả đơn lẻ (Soft Preference), không thay thế ngân sách giỏ tuyển dụng.
+      Function<RecommendationCandidateProjection, PriceStatus> priceStatusProvider = cand -> {
+        List<HistoricalCampaign> past = historyProvider.apply(cand);
+        BigDecimal historicalFee = null;
+        for (HistoricalCampaign hc : past) {
+          if (hc.getCollaboration() != null && hc.getCollaboration().getAgreedFee() != null) {
+            historicalFee = hc.getCollaboration().getAgreedFee();
+            break;
+          }
+        }
+        return PriceStatusResolver.resolve(historicalFee, false, campaign);
+      };
+
       List<FourMemoryTopsisEngine.EvaluatedCandidate> evaluatedReadyList = Collections.emptyList();
       if (!scoreReadyCandidates.isEmpty()) {
         evaluatedReadyList = fourMemoryTopsisEngine.evaluateAndRank(
@@ -232,7 +250,8 @@ public class AiRecommendationService {
             phase0Map,
             campaign,
             historyProvider,
-            brandPatterns
+            brandPatterns,
+            priceStatusProvider
         );
       }
 
@@ -246,7 +265,8 @@ public class AiRecommendationService {
       for (RecommendationCandidateProjection cand : provisionalCandidates) {
         NormalizedCandidateContext p0 = phase0Map.get(cand.getCreatorId());
         List<HistoricalCampaign> past = historyProvider.apply(cand);
-        evaluatedProvisionalList.add(fourMemoryTopsisEngine.evaluateSingle(cand, p0, campaign, past, brandPatterns, runWeights));
+        PriceStatus pStatus = priceStatusProvider.apply(cand);
+        evaluatedProvisionalList.add(fourMemoryTopsisEngine.evaluateSingle(cand, p0, campaign, past, brandPatterns, runWeights, pStatus));
       }
 
       // 7. Master-aware Grouping trên Main Ranking Pool (SCORE_READY)
@@ -333,6 +353,7 @@ public class AiRecommendationService {
                 .finalScore(breakdown.getFinalScore())
                 .scoreBreakdown(breakdown)
                 .reasoning(reasoning)
+                .priceStatus(item.priceStatus())
                 .isScoreReady(true)
                 .isProvisional(false)
                 .build()
@@ -407,6 +428,7 @@ public class AiRecommendationService {
                 .finalScore(breakdown.getFinalScore())
                 .scoreBreakdown(breakdown)
                 .reasoning(reasoning)
+                .priceStatus(item.priceStatus())
                 .isScoreReady(false)
                 .isProvisional(true)
                 .build()

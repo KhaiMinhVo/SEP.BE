@@ -10,7 +10,11 @@ import java.math.BigDecimal;
  * - Priority 1: CONFIRMED_WITHIN_BUDGET (Verified pricing <= budgetMax)
  * - Priority 2: DECLARED_ESTIMATE (Self-declared or estimated pricing <= budgetMax)
  * - Priority 3: PRICE_UNKNOWN (Missing rate card or unspecified budget)
- * - Priority 4: CONFIRMED_OVER_BUDGET (Pricing strictly exceeds budgetMax)
+ * - Priority 4: ESTIMATED_OVER_BUDGET (Unconfirmed / estimated pricing exceeds budgetMax)
+ * - Priority 5: CONFIRMED_OVER_BUDGET (Verified pricing strictly exceeds budgetMax)
+ *
+ * NOTE: candidatePrice vs budgetMax verifies individual creator affordability (Soft Preference),
+ * not total campaign basket feasibility. Budget remains a soft preference.
  */
 public class PriceStatusResolver {
 
@@ -21,13 +25,16 @@ public class PriceStatusResolver {
     }
 
     boolean withinBudget = candidatePrice.compareTo(budgetMax) <= 0;
+    boolean confirmed = Boolean.TRUE.equals(isConfirmed);
 
     if (withinBudget) {
-      return Boolean.TRUE.equals(isConfirmed)
+      return confirmed
           ? PriceStatus.CONFIRMED_WITHIN_BUDGET
           : PriceStatus.DECLARED_ESTIMATE;
     } else {
-      return PriceStatus.CONFIRMED_OVER_BUDGET;
+      return confirmed
+          ? PriceStatus.CONFIRMED_OVER_BUDGET
+          : PriceStatus.ESTIMATED_OVER_BUDGET;
     }
   }
 
@@ -36,3 +43,5 @@ public class PriceStatusResolver {
     return resolve(candidatePrice, isConfirmed, budgetMax);
   }
 }
+
+

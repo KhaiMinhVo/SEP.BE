@@ -3,23 +3,47 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  CREATOR_PROFILE_REVISION_CONFLICT(HttpStatus.CONFLICT, "Creator profile revision changed"),
+  DEAL_REVISION_CONFLICT(HttpStatus.CONFLICT, "Deal revision changed"),
+  DEAL_STATE_CONFLICT(HttpStatus.CONFLICT, "Deal workflow conflict"),
+  DEAL_BUDGET_EXCEEDED(HttpStatus.CONFLICT, "Campaign budget exceeded"),
+  DEAL_BUDGET_UNAVAILABLE(HttpStatus.CONFLICT, "Campaign commitment cannot be assessed"),
+  DEAL_SINGLE_LIMIT(HttpStatus.CONFLICT, "Single Creator limit reached"),
+  IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "Idempotency key already used for different content"),
+  POLICY_VERSION_CHANGED(HttpStatus.CONFLICT, "Policy version changed"),
+  GOOGLE_LOGIN_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Google Login unavailable"),
+  GOOGLE_ACCOUNT_LINK_REQUIRED(HttpStatus.CONFLICT, "Existing account requires explicit linking"),
+  GOOGLE_LOGIN_REPLAY(HttpStatus.CONFLICT, "Google login session already used"),
+  META_OAUTH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Meta OAuth unavailable"),
+  INSTAGRAM_OAUTH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Instagram Login unavailable"),
+  META_OAUTH_INVALID_STATE(HttpStatus.BAD_REQUEST, "Invalid Meta OAuth state"),
+  META_OAUTH_SESSION_EXPIRED(HttpStatus.CONFLICT, "Meta OAuth session expired"),
+  META_OAUTH_ALREADY_PROCESSED(HttpStatus.CONFLICT, "Meta OAuth request already processed"),
+  META_AUTHORIZATION_REJECTED(HttpStatus.FORBIDDEN, "Meta authorization rejected"),
+  META_PROVIDER_ERROR(HttpStatus.BAD_GATEWAY, "Meta verification unavailable"),
+  META_ACCOUNT_NOT_MATCHED(HttpStatus.CONFLICT, "Meta account does not match an existing channel"),
   CLAIM_EMAIL_NOT_RETRYABLE(HttpStatus.CONFLICT, "Claim email cannot be retried"),
   CLAIM_EMAIL_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Claim email retry limit exceeded"),
   CREATOR_INVITATION_PENDING(HttpStatus.CONFLICT, "A pending invitation already exists"),
-  SOCIAL_PROOF_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Social provider verification unavailable"),
+  SOCIAL_PROOF_UNAVAILABLE(
+      HttpStatus.SERVICE_UNAVAILABLE, "Social provider verification unavailable"),
   EMAIL_NOT_VERIFIED(HttpStatus.FORBIDDEN, "Email is not verified"),
   EMAIL_ALREADY_VERIFIED(HttpStatus.CONFLICT, "Email is already verified"),
   EMAIL_OTP_INVALID_OR_EXPIRED(HttpStatus.BAD_REQUEST, "OTP is invalid or expired"),
   EMAIL_OTP_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Email verification limit exceeded"),
   EMAIL_DELIVERY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Email delivery unavailable"),
-  CREATOR_INVITATION_INVALID(HttpStatus.BAD_REQUEST, "Invitation is invalid, expired or already used"),
+  CREATOR_INVITATION_INVALID(
+      HttpStatus.BAD_REQUEST, "Invitation is invalid, expired or already used"),
   DATA_QUALITY_REVIEW_CONFLICT(HttpStatus.CONFLICT, "Snapshot is no longer pending quality review"),
   CREATOR_CLAIM_CONFLICT(HttpStatus.CONFLICT, "Creator claim conflict"),
-  CREATOR_ALREADY_LINKED(HttpStatus.CONFLICT, "Creator account has already been claimed and linked"),
-  IDENTITY_MISMATCH(HttpStatus.CONFLICT, "Authenticated identity does not match target creator account"),
+  CREATOR_ALREADY_LINKED(
+      HttpStatus.CONFLICT, "Creator account has already been claimed and linked"),
+  IDENTITY_MISMATCH(
+      HttpStatus.CONFLICT, "Authenticated identity does not match target creator account"),
   INVITATION_ALREADY_PROCESSED(HttpStatus.CONFLICT, "Invitation has already been processed"),
   INVITATION_EXPIRED(HttpStatus.CONFLICT, "Invitation has expired"),
-  CREATOR_ROLE_CHANGE_CONFLICT(HttpStatus.CONFLICT, "Creator has active ownership or pending claims"),
+  CREATOR_ROLE_CHANGE_CONFLICT(
+      HttpStatus.CONFLICT, "Creator has active ownership or pending claims"),
   COLLABORATION_ALREADY_EXISTS(HttpStatus.CONFLICT, "Collaboration already exists"),
   OUTCOME_ALREADY_EXISTS(HttpStatus.CONFLICT, "Outcome already exists"),
   CREATOR_REVIEW_ALREADY_EXISTS(HttpStatus.CONFLICT, "Creator review already exists"),
@@ -40,6 +64,21 @@ public enum ErrorCode {
   RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "Resource not found"),
   RESOURCE_ALREADY_EXISTS(HttpStatus.CONFLICT, "Resource already exists"),
   BRAND_NOT_FOUND(HttpStatus.NOT_FOUND, "Brand not found"),
+  PRECONDITION_REQUIRED(
+      org.springframework.http.HttpStatus.PRECONDITION_REQUIRED, "If-Match is required"),
+  CAMPAIGN_REVISION_CONFLICT(
+      org.springframework.http.HttpStatus.CONFLICT, "Campaign revision changed"),
+  CAMPAIGN_EMBEDDING_NOT_READY(
+      org.springframework.http.HttpStatus.CONFLICT, "Campaign embedding is not ready"),
+  CAMPAIGN_EMBEDDING_RETRY_CONFLICT(
+      org.springframework.http.HttpStatus.CONFLICT, "Campaign embedding cannot be retried"),
+  RECOMMENDATION_NO_CANDIDATES(
+      org.springframework.http.HttpStatus.CONFLICT, "No eligible recommendation candidates"),
+  BRAND_REVISION_CONFLICT(
+      org.springframework.http.HttpStatus.CONFLICT, "Brand profile revision changed"),
+  BRAND_EMBEDDING_RETRY_CONFLICT(
+      org.springframework.http.HttpStatus.CONFLICT,
+      "Embedding cannot be retried in its current state"),
   BRAND_ALREADY_EXISTS(HttpStatus.CONFLICT, "Brand already exists"),
   CAMPAIGN_NOT_FOUND(HttpStatus.NOT_FOUND, "Campaign not found"),
   CAMPAIGN_NOT_EDITABLE(HttpStatus.CONFLICT, "Campaign is not editable"),
@@ -54,6 +93,13 @@ public enum ErrorCode {
   UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported media type"),
   AI_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI service is unavailable"),
   AI_PARSE_ERROR(HttpStatus.BAD_GATEWAY, "AI returned an unprocessable response"),
+  TIKTOK_OAUTH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "TikTok Sandbox unavailable"),
+  TIKTOK_INVALID_STATE(HttpStatus.BAD_REQUEST, "Invalid TikTok state"),
+  TIKTOK_SESSION_EXPIRED(HttpStatus.BAD_REQUEST, "TikTok session expired"),
+  TIKTOK_ALREADY_PROCESSED(HttpStatus.CONFLICT, "TikTok session already processed"),
+  TIKTOK_AUTHORIZATION_REJECTED(HttpStatus.FORBIDDEN, "TikTok authorization rejected"),
+  TIKTOK_PROVIDER_ERROR(HttpStatus.BAD_GATEWAY, "TikTok provider error"),
+  TIKTOK_IDENTITY_RESOLUTION_FAILED(HttpStatus.BAD_GATEWAY, "TikTok identity resolution failed"),
   INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
   private final HttpStatus status;
   private final String title;

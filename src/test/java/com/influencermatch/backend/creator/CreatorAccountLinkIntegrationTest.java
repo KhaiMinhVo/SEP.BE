@@ -171,15 +171,15 @@ class CreatorAccountLinkIntegrationTest {
   @Test
   @DisplayName("TC-09: Connect 2nd channel never crawled before -> creates new Creator, immediately sets master_id = M1, AUTHORIZED")
   void testTC09_connectSecondChannel_brandNewAccount_createsAndSetsMaster() {
-    when(creatorRepository.findLockedByPlatformAndExternalId("INSTAGRAM", "ig_brand_new_koc"))
+    when(creatorRepository.findLockedByPlatformAndExternalId("TIKTOK", "tt_brand_new_koc"))
         .thenReturn(Optional.empty());
 
-    when(oAuthProofClient.exchangeAndVerify(eq("INSTAGRAM"), eq("auth_code_ig_new"), any(), any()))
+    when(oAuthProofClient.exchangeAndVerify(eq("TIKTOK"), eq("auth_code_tt_new"), any(), any()))
         .thenReturn(OAuthProofClient.ProofResult.builder()
-            .providerUserId("ig_brand_new_koc")
-            .providerUsername("koc_lifestyle_insta")
-            .accessToken("ig_token_abc")
-            .refreshToken("ig_ref_abc")
+            .providerUserId("tt_brand_new_koc")
+            .providerUsername("koc_lifestyle_tt")
+            .accessToken("tt_token_abc")
+            .refreshToken("tt_ref_abc")
             .tokenExpiresAt(LocalDateTime.now().plusDays(60))
             .rawProfileData(Map.of())
             .build());
@@ -191,21 +191,21 @@ class CreatorAccountLinkIntegrationTest {
     });
 
     ConnectAccountResponse response =
-        accountLinkService.linkAdditionalAccount(authenticated(kocUser.getId()), "INSTAGRAM", "auth_code_ig_new");
+        accountLinkService.linkAdditionalAccount(authenticated(kocUser.getId()), "TIKTOK", "auth_code_tt_new");
 
     assertThat(response).isNotNull();
     assertThat(response.getStatus()).isEqualTo("CREATED_AND_LINKED");
     assertThat(response.getAccountId()).isNotNull();
     assertThat(response.getMasterId()).isEqualTo(masterM1.getId());
-    assertThat(response.getPlatform()).isEqualTo("INSTAGRAM");
+    assertThat(response.getPlatform()).isEqualTo("TIKTOK");
 
     // Case 2 assertion: new Creator saved directly with master = M1, sourceType = AUTHORIZED
     verify(creatorRepository).save(argThat(c ->
         c.getMaster() != null
             && c.getMaster().getId().equals(masterM1.getId())
             && c.getSourceType() == CreatorSourceType.AUTHORIZED
-            && "INSTAGRAM".equals(c.getPlatform())
-            && "ig_brand_new_koc".equals(c.getExternalId())
+            && "TIKTOK".equals(c.getPlatform())
+            && "tt_brand_new_koc".equals(c.getExternalId())
     ));
 
     verify(auditRepository).save(argThat(audit -> "LINK_NEW_ACCOUNT".equals(audit.getEventType())));
@@ -360,61 +360,11 @@ class CreatorAccountLinkIntegrationTest {
   }
 
   @Test
-  @DisplayName("TC-16: Data Manager resolves dispute -> approves channel transfer with complete audit trail")
-  void testTC16_dataManagerResolvesConflict_approvesTransferWithAudit() {
-    UUID conflictId = UUID.randomUUID();
-    User managerUser =
-        User.builder()
-            .id(UUID.randomUUID())
-            .email("admin.manager@influencermatch.com")
-            .role(Role.ADMIN)
-            .build();
-
-    User oldOwner = User.builder().id(UUID.randomUUID()).email("old.owner@test.com").build();
-    CreatorMaster oldMaster = CreatorMaster.builder().id(UUID.randomUUID()).user(oldOwner).build();
-
-    Creator contestedCreator =
-        Creator.builder()
-            .id(UUID.randomUUID())
-            .platform("TIKTOK")
-            .externalId("tt_transfer_channel")
-            .master(oldMaster)
-            .sourceType(CreatorSourceType.AUTHORIZED)
-            .build();
-
-    CreatorIdentityConflict conflict =
-        CreatorIdentityConflict.builder()
-            .id(conflictId)
-            .conflictType("ACCOUNT_ALREADY_LINKED")
-            .sourceAccount(contestedCreator)
-            .targetMaster(masterM1) // KOC user M1 is the claimant
-            .status("PENDING_MANAGER")
-            .build();
-
-    when(conflictRepository.findById(conflictId)).thenReturn(Optional.of(conflict));
-    when(conflictRepository.save(any(CreatorIdentityConflict.class))).thenAnswer(inv -> inv.getArgument(0));
-
-    ConflictDetailDto response = conflictService.resolveConflict(
-        conflictId,
-        ConflictResolutionDecision.APPROVE_TRANSFER,
-        "Contractual transfer verified by Data Manager",
-        managerUser);
-
-    assertThat(response).isNotNull();
-    assertThat(response.getStatus()).isEqualTo("RESOLVED");
-    assertThat(response.getResolvedByUserId()).isEqualTo(managerUser.getId());
-
-    // Verified ownership transfer to target master M1
-    assertThat(contestedCreator.getMaster()).isEqualTo(masterM1);
-
-    // Verify dual references update in Shortlist and Relationship
-    verify(shortlistItemRepository).updateMasterForCreator(contestedCreator.getId(), masterM1);
-    verify(relationshipRepository).updateMasterForCreator(contestedCreator.getId(), masterM1);
-
-    // Verify audit log recorded for conflict resolution
-    verify(auditRepository).save(argThat(audit ->
-        "CONFLICT_RESOLVED_TRANSFER".equals(audit.getEventType())
-            && audit.getMaster().getId().equals(masterM1.getId())
-    ));
+  @DisplayName("TC-16: Legacy transfer is denied without identity or reference mutations")
+  void testTC16_legacyTransferIsDeniedWithoutIdentityWrites() {
+    assertThatThrownBy(() -> conflictService.resolveConflict(UUID.randomUUID(), ConflictResolutionDecision.APPROVE_TRANSFER, "Legacy request", kocUser)).isInstanceOf(com.influencermatch.backend.exception.ConflictException.class);
+    verify(shortlistItemRepository,never()).updateMasterForCreator(any(),any());
+    verify(relationshipRepository,never()).updateMasterForCreator(any(),any());
+    verify(auditRepository,never()).save(any());
   }
 }

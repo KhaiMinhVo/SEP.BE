@@ -14,6 +14,7 @@ import org.hibernate.type.SqlTypes;
 public class CreatorClaim extends BaseEntity {
   @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(nullable=false) private Creator creator;
   @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(nullable=false) private User claimant;
+  @ManyToOne(fetch=FetchType.LAZY) @JoinColumn(name="invitation_id") private CreatorInvitation invitation;
   @JdbcTypeCode(SqlTypes.JSON) @Column(nullable=false) private List<String> evidenceUrls;
   @Column(nullable=false,length=2000) private String note;
   @Enumerated(EnumType.STRING) @Column(nullable=false,length=16) private CreatorClaimStatus status;

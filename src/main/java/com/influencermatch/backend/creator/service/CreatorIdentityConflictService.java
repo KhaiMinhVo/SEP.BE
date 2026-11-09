@@ -44,68 +44,7 @@ public class CreatorIdentityConflictService {
   public ConflictDetailDto resolveConflict(
       UUID conflictId, ConflictResolutionDecision decision, String notes, User resolver) {
 
-    CreatorIdentityConflict conflict = conflictRepository.findById(conflictId)
-        .orElseThrow(() -> new ResourceNotFoundException("CreatorIdentityConflict", "id", conflictId));
-
-    if (!"PENDING_MANAGER".equalsIgnoreCase(conflict.getStatus())) {
-      throw new ConflictException(
-          ErrorCode.DATA_QUALITY_REVIEW_CONFLICT,
-          "Conflict has already been resolved with status: " + conflict.getStatus());
-    }
-
-    Creator account = conflict.getSourceAccount();
-    CreatorMaster targetMaster = conflict.getTargetMaster();
-
-    if (decision == ConflictResolutionDecision.APPROVE_TRANSFER) {
-      log.info("Manager approved channel transfer for accountId={} to masterId={}",
-          account.getId(), targetMaster.getId());
-
-      account.setMaster(targetMaster);
-      account.setAuthorizedAt(LocalDateTime.now());
-      creatorRepository.save(account);
-
-      shortlistItemRepository.updateMasterForCreator(account.getId(), targetMaster);
-      relationshipRepository.updateMasterForCreator(account.getId(), targetMaster);
-
-      conflict.setStatus("RESOLVED");
-
-      auditRepository.save(CreatorIdentityAudit.builder()
-          .eventType("CONFLICT_RESOLVED_TRANSFER")
-          .master(targetMaster)
-          .account(account)
-          .performedBy(resolver)
-          .details(Map.of(
-              "conflictId", conflict.getId().toString(),
-              "decision", "APPROVE_TRANSFER",
-              "notes", notes != null ? notes : ""
-          ))
-          .build());
-
-    } else {
-      log.info("Manager rejected channel transfer for accountId={} to masterId={}",
-          account.getId(), targetMaster.getId());
-
-      conflict.setStatus("REJECTED");
-
-      auditRepository.save(CreatorIdentityAudit.builder()
-          .eventType("CONFLICT_REJECTED")
-          .master(targetMaster)
-          .account(account)
-          .performedBy(resolver)
-          .details(Map.of(
-              "conflictId", conflict.getId().toString(),
-              "decision", "REJECT",
-              "notes", notes != null ? notes : ""
-          ))
-          .build());
-    }
-
-    conflict.setResolvedBy(resolver);
-    conflict.setResolvedAt(LocalDateTime.now());
-    conflict.setResolutionNotes(notes);
-
-    CreatorIdentityConflict saved = conflictRepository.save(conflict);
-    return toDto(saved);
+    throw new ConflictException(ErrorCode.CREATOR_ALREADY_LINKED, "Ownership transfer is outside MVP");
   }
 
   private ConflictDetailDto toDto(CreatorIdentityConflict c) {

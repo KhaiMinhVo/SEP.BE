@@ -24,7 +24,7 @@ class OAuthSandboxProviderTest {
     properties = new OAuthSandboxProperties();
     properties.getTiktok().setClientKey("test_tiktok_client_key");
     properties.getTiktok().setClientSecret("test_tiktok_client_secret");
-    properties.getTiktok().setRedirectUri("http://localhost:8080/callback/tiktok");
+    properties.getTiktok().setRedirectUri("https://example.test/api/v1/integrations/tiktok/callback");
 
     properties.getGoogle().setClientId("test_google_client_id");
     properties.getGoogle().setClientSecret("test_google_client_secret");
@@ -44,11 +44,12 @@ class OAuthSandboxProviderTest {
     assertThat(authUrl).contains("client_key=test_tiktok_client_key");
     assertThat(authUrl).contains("response_type=code");
     assertThat(authUrl).contains("state=token_12345");
-    assertThat(authUrl).contains("redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fcallback%2Ftiktok");
+    assertThat(authUrl).contains("redirect_uri=https://example.test/api/v1/integrations/tiktok/callback");
   }
 
   @Test
-  @DisplayName("Google YouTube provider builds correct Testing authorization URL with channel scope")
+  @DisplayName(
+      "Google YouTube provider builds correct Testing authorization URL with channel scope")
   void googleBuildsTestingModeUrl() {
     String authUrl = googleProvider.buildAuthorizationUrl("token_67890");
 
@@ -58,7 +59,8 @@ class OAuthSandboxProviderTest {
     assertThat(authUrl).contains("access_type=offline");
     assertThat(authUrl).contains("prompt=consent");
     assertThat(authUrl).contains("state=token_67890");
-    assertThat(authUrl).contains("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fyoutube.readonly");
+    assertThat(authUrl)
+        .contains("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fyoutube.readonly");
   }
 
   @Test
@@ -66,11 +68,17 @@ class OAuthSandboxProviderTest {
   void oAuthProofClientDelegatesToOfficialSandbox() {
     properties.setMode("OFFICIAL_SANDBOX");
     MockEnvironment env = new MockEnvironment();
-    OAuthProofClient client = new OAuthProofClient(
-        env, false, properties, tikTokProvider, googleProvider, fallbackProvider);
+    OAuthProofClient client =
+        new OAuthProofClient(
+            env, false, properties, tikTokProvider, googleProvider, fallbackProvider);
 
-    String tikTokUrl = client.buildAuthorizationUrl("TIKTOK", "state_tt");
-    assertThat(tikTokUrl).contains("https://www.tiktok.com/v2/auth/authorize/");
+    assertThatThrownBy(() -> client.buildAuthorizationUrl("TIKTOK", "state_tt"))
+        .isInstanceOf(BusinessException.class);
+    assertThatThrownBy(() -> client.exchangeAndVerify("TIKTOK", "real-code", "crawler-id", "name"))
+        .isInstanceOf(BusinessException.class);
+    env.setActiveProfiles("dev");
+    assertThatThrownBy(() -> client.exchangeAndVerify("TIKTOK", "sim:id:name", "crawler-id", "name"))
+        .isInstanceOf(BusinessException.class);
 
     String ytUrl = client.buildAuthorizationUrl("YOUTUBE", "state_yt");
     assertThat(ytUrl).contains("https://accounts.google.com/o/oauth2/v2/auth");
@@ -82,13 +90,16 @@ class OAuthSandboxProviderTest {
     properties.setMode("MOCK_FALLBACK");
     MockEnvironment env = new MockEnvironment();
     env.setActiveProfiles("dev");
-    OAuthProofClient client = new OAuthProofClient(
-        env, true, properties, tikTokProvider, googleProvider, fallbackProvider);
+    OAuthProofClient client =
+        new OAuthProofClient(
+            env, true, properties, tikTokProvider, googleProvider, fallbackProvider);
 
     String fallbackUrl = client.buildAuthorizationUrl("TIKTOK", "state_fallback");
-    assertThat(fallbackUrl).startsWith("/api/v1/creators/claim/oauth/tiktok/callback?code=sim-auth-code&state=");
+    assertThat(fallbackUrl)
+        .startsWith("/api/v1/creators/claim/oauth/tiktok/callback?code=sim-auth-code&state=");
 
-    ProofResult proof = client.exchangeAndVerify("TIKTOK", "sim:custom_user_id:custom_username", null, null);
+    ProofResult proof =
+        client.exchangeAndVerify("TIKTOK", "sim:custom_user_id:custom_username", null, null);
     assertThat(proof.getProviderUserId()).isEqualTo("custom_user_id");
     assertThat(proof.getProviderUsername()).isEqualTo("custom_username");
   }
@@ -99,10 +110,12 @@ class OAuthSandboxProviderTest {
     properties.setMode("MOCK_FALLBACK");
     MockEnvironment env = new MockEnvironment();
     env.setActiveProfiles("dev");
-    OAuthProofClient client = new OAuthProofClient(
-        env, true, properties, tikTokProvider, googleProvider, fallbackProvider);
+    OAuthProofClient client =
+        new OAuthProofClient(
+            env, true, properties, tikTokProvider, googleProvider, fallbackProvider);
 
-    ProofResult proof = client.exchangeAndVerify("TIKTOK", "sim-mismatch:code", "genuine_id", "genuine_user");
+    ProofResult proof =
+        client.exchangeAndVerify("TIKTOK", "sim-mismatch:code", "genuine_id", "genuine_user");
     assertThat(proof.getProviderUserId()).isEqualTo("mismatched_external_id");
     assertThat(proof.getProviderUsername()).isEqualTo("mismatched_user");
   }
@@ -118,5 +131,50 @@ class OAuthSandboxProviderTest {
         .isInstanceOf(BusinessException.class)
         .extracting("code")
         .isEqualTo(ErrorCode.SOCIAL_PROOF_UNAVAILABLE);
+  }
+
+  @Test
+  void officialModeCannotEnableSimulationOrUnconfiguredFallbackInProduction() {
+    properties.setMode("OFFICIAL_SANDBOX");
+    MockEnvironment env = new MockEnvironment();
+    env.setActiveProfiles("prod");
+    OAuthProofClient client =
+        new OAuthProofClient(
+            env, true, properties, tikTokProvider, googleProvider, fallbackProvider);
+    assertThatThrownBy(
+            () -> client.exchangeAndVerify("TIKTOK", "sim:forged:user", "target", "user"))
+        .isInstanceOf(BusinessException.class)
+        .extracting("code")
+        .isEqualTo(ErrorCode.SOCIAL_PROOF_UNAVAILABLE);
+    properties.getTiktok().setClientSecret("");
+    assertThatThrownBy(() -> client.buildAuthorizationUrl("TIKTOK", "state"))
+        .isInstanceOf(BusinessException.class)
+        .extracting("code")
+        .isEqualTo(ErrorCode.SOCIAL_PROOF_UNAVAILABLE);
+    assertThatThrownBy(() -> client.exchangeAndVerify("TIKTOK", "real-code", "target", "user"))
+        .isInstanceOf(BusinessException.class)
+        .extracting("code")
+        .isEqualTo(ErrorCode.SOCIAL_PROOF_UNAVAILABLE);
+  }
+
+  @Test
+  void legacyProvidersCannotBypassRealFacebookOrInstagramSessions() {
+    properties.setMode("OFFICIAL_SANDBOX");
+    MockEnvironment env = new MockEnvironment();
+    env.setActiveProfiles("dev");
+    OAuthProofClient client =
+        new OAuthProofClient(
+            env, true, properties, tikTokProvider, googleProvider, fallbackProvider);
+    for (String platform : new String[] {"FACEBOOK", "INSTAGRAM"}) {
+      assertThatThrownBy(() -> client.buildAuthorizationUrl(platform, "state"))
+          .isInstanceOf(BusinessException.class)
+          .extracting("code")
+          .isEqualTo(ErrorCode.META_OAUTH_UNAVAILABLE);
+      assertThatThrownBy(
+              () -> client.exchangeAndVerify(platform, "sim:forged:user", "target", "user"))
+          .isInstanceOf(BusinessException.class)
+          .extracting("code")
+          .isEqualTo(ErrorCode.META_OAUTH_UNAVAILABLE);
+    }
   }
 }

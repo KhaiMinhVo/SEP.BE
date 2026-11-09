@@ -54,6 +54,7 @@ public class CreatorClaimResolutionService {
       String platform, String code, String rawToken, User explicitUser) {
 
     Permissions.require(com.influencermatch.backend.security.permission.Permission.CLAIM_CREATOR_PROFILE);
+    com.influencermatch.backend.creator.meta.MetaPlatformGuard.requireLegacy(platform);
     User claimantUser = Permissions.actor();
     if (explicitUser == null || !explicitUser.getId().equals(claimantUser.getId())
         || claimantUser.getRole() != Role.CREATOR || claimantUser.getStatus() != UserStatus.ACTIVE

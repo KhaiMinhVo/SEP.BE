@@ -41,7 +41,7 @@ public class CreatorController {
     @GetMapping("/{id}")
     @PreAuthorize("hasAuthority('VIEW_CREATOR_PROFILE')")
     @Transactional(readOnly = true)
-    @Operation(summary = "Get creator profile details", description = "Get full creator profile including metrics, rate card, and recent posts.")
+    @Operation(summary = "Get creator profile details", description = "Get full creator profile including metrics, declared profile and evidence-based InfluencerMatch verification.")
     public ResponseEntity<ApiResponse<CreatorDetailResponse>> getCreatorDetail(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.ok(creatorService.getCreatorDetail(id)));
     }

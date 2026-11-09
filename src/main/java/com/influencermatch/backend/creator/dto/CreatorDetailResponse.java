@@ -40,4 +40,7 @@ public class CreatorDetailResponse {
 
     // Recent Posts
     private List<PostDto> recentPosts;
+  private com.influencermatch.backend.creator.portal.PortalDtos.Verification verification;
+  private com.influencermatch.backend.creator.portal.PortalDtos.DeclaredProfile declaredProfile;
+  private java.util.UUID masterId;
 }

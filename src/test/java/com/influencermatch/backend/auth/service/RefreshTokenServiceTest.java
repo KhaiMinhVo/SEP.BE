@@ -1,208 +1,181 @@
 package com.influencermatch.backend.auth.service;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.influencermatch.backend.auth.model.RefreshToken;
 import com.influencermatch.backend.auth.repository.RefreshTokenRepository;
-import com.influencermatch.backend.exception.BusinessException;
-import com.influencermatch.backend.exception.ErrorCode;
-import com.influencermatch.backend.user.enums.Role;
-import com.influencermatch.backend.user.enums.UserStatus;
+import com.influencermatch.backend.exception.*;
+import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
-import java.time.LocalDateTime;
-import java.util.Optional;
-import java.util.UUID;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import java.time.*;
+import java.util.*;
+import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
+import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class RefreshTokenServiceTest {
+  @Mock RefreshTokenRepository tokens;
+  @Mock UserRepository users;
+  @Mock AuthSessionStore sessions;
+  @InjectMocks RefreshTokenService service;
+  Instant now = Instant.parse("2026-11-07T00:00:00Z");
+  User user;
+  AuthSessionStore.Session session;
 
-    @Mock
-    private RefreshTokenRepository tokens;
+  @BeforeEach
+  void setup() {
+    user =
+        User.builder()
+            .id(UUID.randomUUID())
+            .email("session@test.invalid")
+            .role(Role.BRAND)
+            .status(UserStatus.ACTIVE)
+            .build();
+    session =
+        new AuthSessionStore.Session(
+            UUID.randomUUID(), user.getId(), 0, now.plusSeconds(604800), false);
+    lenient().when(users.findLockedByEmail(user.getEmail())).thenReturn(Optional.of(user));
+    lenient().when(users.findById(user.getId())).thenReturn(Optional.of(user));
+    lenient().when(sessions.now()).thenReturn(now);
+    lenient().when(sessions.open(user, "INTERNAL")).thenReturn(session);
+    lenient().when(sessions.read(session.id(), true)).thenReturn(session);
+    lenient().when(sessions.require(eq(session.id()), eq(user), anyBoolean())).thenReturn(session);
+    lenient()
+        .when(tokens.save(any()))
+        .thenAnswer(
+            a -> {
+              RefreshToken t = a.getArgument(0);
+              t.setId(UUID.randomUUID());
+              return t;
+            });
+  }
 
-    @Mock
-    private UserRepository users;
+  RefreshToken old() {
+    return RefreshToken.builder()
+        .id(UUID.randomUUID())
+        .userId(user.getId())
+        .sessionId(session.id())
+        .expiresAt(session.expiresAt())
+        .build();
+  }
 
-    @InjectMocks
-    private RefreshTokenService refreshTokenService;
+  @Test
+  void issue_Success() {
+    var issued = service.issue(user);
+    assertThat(issued.raw()).isNotBlank();
+    assertThat(issued.entity().getTokenHash()).doesNotContain(issued.raw());
+    assertThat(issued.entity().getSessionId()).isEqualTo(session.id());
+    assertThat(issued.entity().getExpiresAt()).isEqualTo(session.expiresAt());
+    verify(users).lockRoleChanges();
+  }
 
-    @BeforeEach
-    void setUp() {
-        // Set the mock expiration time (1 day in ms)
-        ReflectionTestUtils.setField(refreshTokenService, "expirationMs", 86400000L);
-    }
+  @Test
+  void issue_FailsAuthVersionMismatch() {
+    var request =
+        User.builder()
+            .id(user.getId())
+            .email(user.getEmail())
+            .authVersion(9)
+            .role(Role.BRAND)
+            .build();
+    assertThatThrownBy(() -> service.issue(request, session.id()))
+        .isInstanceOf(BusinessException.class);
+    verify(tokens, never()).save(any());
+  }
 
-    @Test
-    @DisplayName("issue - Success")
-    void issue_Success() {
-        UUID userId = UUID.randomUUID();
-        User requestUser = User.builder().id(userId).role(Role.DATA_MANAGER).authVersion(1L).status(UserStatus.ACTIVE).build();
-        User dbUser = User.builder().id(userId).role(Role.DATA_MANAGER).authVersion(1L).status(UserStatus.ACTIVE).build();
+  @Test
+  void issue_FailsWhenUserNotActive() {
+    user.setStatus(UserStatus.LOCKED);
+    assertThatThrownBy(() -> service.issue(user)).isInstanceOf(BusinessException.class);
+    verify(tokens, never()).save(any());
+  }
 
-        when(users.findById(userId)).thenReturn(Optional.of(dbUser));
-        when(tokens.save(any(RefreshToken.class))).thenAnswer(i -> {
-            RefreshToken t = i.getArgument(0);
-            t.setId(UUID.randomUUID());
-            return t;
-        });
+  @Test
+  void changedRoleCannotIssueTokenFromStalePrincipal() {
+    var stale =
+        User.builder()
+            .id(user.getId())
+            .email(user.getEmail())
+            .role(Role.CREATOR)
+            .authVersion(user.getAuthVersion())
+            .status(UserStatus.ACTIVE)
+            .build();
+    assertThatThrownBy(() -> service.issue(stale, session.id()))
+        .isInstanceOf(BusinessException.class);
+    verify(tokens, never()).save(any());
+  }
 
-        RefreshTokenService.Issued issued = refreshTokenService.issue(requestUser);
+  @Test
+  void rotate_Success() {
+    var old = old();
+    when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(old));
+    var r = service.rotate("old");
+    assertThat(r.refreshToken()).isNotBlank();
+    assertThat(old.getRevokedAt()).isNotNull();
+    assertThat(old.getReplacedByTokenId()).isNotNull();
+    assertThat(r.sessionId()).isEqualTo(session.id());
+    verify(users).lockRoleChanges();
+  }
 
-        assertThat(issued).isNotNull();
-        assertThat(issued.raw()).isNotBlank();
-        assertThat(issued.entity().getUserId()).isEqualTo(userId);
-        
-        verify(users).lockRoleChanges();
-        verify(tokens).save(any(RefreshToken.class));
-    }
+  @Test
+  void rotate_FailsWhenRevokedAndRevokesAll() {
+    var old = old();
+    old.setRevokedAt(now.minusSeconds(10));
+    when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(old));
+    assertThatThrownBy(() -> service.rotate("old")).isInstanceOf(RefreshTokenReplayException.class);
+    verify(sessions).revokeAll(user.getId());
+    assertThat(user.getAuthVersion()).isEqualTo(1);
+    verify(tokens, never()).save(any());
+  }
 
-    @Test
-    @DisplayName("issue - Fails when auth version mismatches")
-    void issue_FailsAuthVersionMismatch() {
-        UUID userId = UUID.randomUUID();
-        // The token expects version 1, but DB has version 2 (user might have changed password or role)
-        User requestUser = User.builder().id(userId).role(Role.DATA_MANAGER).authVersion(1L).status(UserStatus.ACTIVE).build();
-        User dbUser = User.builder().id(userId).role(Role.DATA_MANAGER).authVersion(2L).status(UserStatus.ACTIVE).build();
+  @Test
+  void expiredTokenCannotRotate() {
+    var old = old();
+    old.setExpiresAt(now.minusSeconds(1));
+    when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(old));
+    assertThatThrownBy(() -> service.rotate("old")).isInstanceOf(BusinessException.class);
+    assertThat(old.getRevokedAt()).isNull();
+    verify(tokens, never()).save(any());
+  }
 
-        when(users.findById(userId)).thenReturn(Optional.of(dbUser));
+  @Test
+  void unknownTokenCannotRotate() {
+    when(tokens.findByTokenHash(anyString())).thenReturn(Optional.empty());
+    assertThatThrownBy(() -> service.rotate("unknown")).isInstanceOf(BusinessException.class);
+    verify(tokens, never()).save(any());
+  }
 
-        assertThatThrownBy(() -> refreshTokenService.issue(requestUser))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("Refresh token is invalid or expired")
-                .extracting(e -> ((BusinessException) e).code()).isEqualTo(ErrorCode.UNAUTHENTICATED);
-    }
-    
-    @Test
-    @DisplayName("issue - Fails when user is not active")
-    void issue_FailsWhenUserNotActive() {
-        UUID userId = UUID.randomUUID();
-        User requestUser = User.builder().id(userId).role(Role.DATA_MANAGER).authVersion(1L).status(UserStatus.LOCKED).build();
-        User dbUser = User.builder().id(userId).role(Role.DATA_MANAGER).authVersion(1L).status(UserStatus.LOCKED).build();
+  @Test
+  void revoke_Success() {
+    var old = old();
+    when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(old));
+    service.revoke("old");
+    verify(sessions).revoke(session.id());
+  }
 
-        when(users.findById(userId)).thenReturn(Optional.of(dbUser));
+  @Test
+  void revokeUnknownIsIdempotent() {
+    when(tokens.findByTokenHash(anyString())).thenReturn(Optional.empty());
+    service.revoke("missing");
+    verify(sessions, never()).revoke(any());
+  }
 
-        assertThatThrownBy(() -> refreshTokenService.issue(requestUser))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).code()).isEqualTo(ErrorCode.UNAUTHENTICATED);
-    }
+  @Test
+  void revokeAll_Success() {
+    service.revokeAll(user.getId());
+    verify(sessions).revokeAll(user.getId());
+  }
 
-    @Test
-    @DisplayName("rotate - Success")
-    void rotate_Success() {
-        UUID userId = UUID.randomUUID();
-        String rawToken = "old-raw-token";
-        
-        RefreshToken oldToken = RefreshToken.builder()
-                .id(UUID.randomUUID())
-                .userId(userId)
-                .expiresAt(LocalDateTime.now().plusDays(1)) // Still valid
-                .build();
-                
-        User dbUser = User.builder().id(userId).role(Role.DATA_MANAGER).status(UserStatus.ACTIVE).build();
-
-        when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(oldToken));
-        when(users.findById(userId)).thenReturn(Optional.of(dbUser));
-        when(tokens.save(any(RefreshToken.class))).thenAnswer(i -> {
-            RefreshToken t = i.getArgument(0);
-            t.setId(UUID.randomUUID());
-            return t;
-        });
-
-        RefreshTokenService.Rotated rotated = refreshTokenService.rotate(rawToken);
-
-        assertThat(rotated).isNotNull();
-        assertThat(rotated.refreshToken()).isNotBlank();
-        
-        // Ensure old token is revoked and linked to the new one
-        assertThat(oldToken.getRevokedAt()).isNotNull();
-        assertThat(oldToken.getReplacedByTokenId()).isNotNull();
-        
-        verify(users).lockRoleChanges();
-    }
-
-    @Test
-    @DisplayName("rotate - Fails when token is revoked (Suspicious activity triggers revokeAll)")
-    void rotate_FailsWhenRevokedAndRevokesAll() {
-        UUID userId = UUID.randomUUID();
-        String rawToken = "old-raw-token";
-        
-        RefreshToken oldToken = RefreshToken.builder()
-                .id(UUID.randomUUID())
-                .userId(userId)
-                .revokedAt(LocalDateTime.now().minusDays(1)) // Already revoked
-                .expiresAt(LocalDateTime.now().plusDays(1))
-                .build();
-                
-        when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(oldToken));
-
-        assertThatThrownBy(() -> refreshTokenService.rotate(rawToken))
-                .isInstanceOf(com.influencermatch.backend.exception.RefreshTokenReplayException.class)
-                .extracting(e -> ((BusinessException) e).code()).isEqualTo(ErrorCode.UNAUTHENTICATED);
-
-        // Security check: attempting to use a revoked token revokes ALL tokens for that user
-        verify(tokens).revokeAll(eq(userId), any(LocalDateTime.class));
-    }
-
-    @Test
-    @DisplayName("revoke - Success")
-    void revoke_Success() {
-        String rawToken = "some-token";
-        RefreshToken token = RefreshToken.builder()
-                .id(UUID.randomUUID())
-                .build();
-                
-        when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(token));
-        
-        refreshTokenService.revoke(rawToken);
-        
-        assertThat(token.getRevokedAt()).isNotNull();
-    }
-
-    @Test
-    @DisplayName("revokeAll - Success")
-    void revokeAll_Success() {
-        UUID userId = UUID.randomUUID();
-        
-        refreshTokenService.revokeAll(userId);
-        
-        verify(tokens).revokeAll(eq(userId), any(LocalDateTime.class));
-    }
-    @Test
-    void expiredTokenDoesNotCreateOrRevokeOtherSessions() {
-        var old=RefreshToken.builder().userId(UUID.randomUUID()).expiresAt(LocalDateTime.of(2000,1,1,0,0)).build();
-        when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(old));
-        assertThatThrownBy(()->refreshTokenService.rotate("expired")).isInstanceOf(BusinessException.class);
-        verify(tokens,never()).save(any());verify(tokens,never()).revokeAll(any(),any());
-        verify(users,never()).findById(any());
-    }
-    @Test
-    void unknownTokenAndIdempotentRevokeDoNotWrite() {
-        assertThatThrownBy(()->refreshTokenService.rotate("unknown")).isInstanceOf(BusinessException.class);
-        refreshTokenService.revoke("unknown");verify(tokens,never()).save(any());verify(tokens,never()).revokeAll(any(),any());
-        var timestamp=LocalDateTime.of(2026,1,1,0,0);
-        var old=RefreshToken.builder().revokedAt(timestamp).build();
-        when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(old));
-        refreshTokenService.revoke("revoked");assertThat(old.getRevokedAt()).isEqualTo(timestamp);
-    }
-    @Test
-    void changedRoleCannotIssueTokenFromStalePrincipal() {
-        var id=UUID.randomUUID();var stale=User.builder().id(id).role(Role.BRAND).status(UserStatus.ACTIVE).build();
-        when(users.findById(id)).thenReturn(Optional.of(User.builder().id(id).role(Role.CREATOR).status(UserStatus.ACTIVE).build()));
-        assertThatThrownBy(()->refreshTokenService.issue(stale)).isInstanceOf(BusinessException.class);
-        verifyNoInteractions(tokens);
-    }
-
+  @Test
+  void inactiveUserCannotRotate() {
+    user.setStatus(UserStatus.DISABLED);
+    when(tokens.findByTokenHash(anyString())).thenReturn(Optional.of(old()));
+    assertThatThrownBy(() -> service.rotate("old")).isInstanceOf(BusinessException.class);
+    verify(tokens, never()).save(any());
+  }
 }

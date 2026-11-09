@@ -26,7 +26,7 @@ public class ShortlistOutreachResponse {
   @Schema(description = "IDs of created or updated BrandCreatorRelationship records")
   private List<UUID> relationshipIds;
 
-  @Schema(description = "IDs of claim invitations dispatched or found pending")
+  @Schema(description = "IDs of cooperation invitations queued (not Claim invitations)")
   private List<UUID> dispatchedInvitationIds;
 
   @Schema(description = "Detailed outcome per shortlist candidate")
@@ -52,8 +52,10 @@ public class ShortlistOutreachResponse {
     @Schema(description = "Created or updated BrandCreatorRelationship ID")
     private UUID relationshipId;
 
-    @Schema(description = "Dispatched or existing CreatorInvitation ID if applicable")
+    @Schema(description = "Cooperation invitation ID if applicable")
     private UUID invitationId;
+
+    private UUID dealId;
 
     @Schema(description = "Contact delivery status")
     private String contactStatus;

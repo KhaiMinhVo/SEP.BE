@@ -1,35 +1,63 @@
 package com.influencermatch.backend.creator.client.provider;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.influencermatch.backend.creator.client.OAuthProofClient.ProofResult;
-import com.influencermatch.backend.exception.BusinessException;
-import com.influencermatch.backend.exception.ErrorCode;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
+import com.influencermatch.backend.creator.tiktok.TikTokLoginProperties;
+import com.influencermatch.backend.exception.*;
 import java.time.Duration;
-import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.MediaType;
+import java.util.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.*;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
-import org.springframework.web.client.RestClient;
+import org.springframework.web.client.*;
 
-@Slf4j
 @Component
 public class TikTokSandboxProofProvider implements OAuthProofProvider {
+  public record VerifiedAccount(String openId, String username, String displayName) {
+    @Override
+    public String toString() {
+      return "TikTokAccount[redacted]";
+    }
+  }
 
-  private final OAuthSandboxProperties properties;
-  private final RestClient restClient;
+  private final TikTokLoginProperties config;
+  private final RestClient http;
+
+  @Autowired
+  public TikTokSandboxProofProvider(TikTokLoginProperties config) {
+    this(config, client());
+  }
+
+  TikTokSandboxProofProvider(TikTokLoginProperties config, RestClient http) {
+    this.config = config;
+    this.http = http;
+  }
 
   public TikTokSandboxProofProvider(OAuthSandboxProperties properties) {
-    this.properties = properties;
-    SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+    this(
+        new TikTokLoginProperties(
+            true,
+            properties.getTiktok().resolveClientId(),
+            properties.getTiktok().getClientSecret(),
+            properties.getTiktok().getRedirectUri(),
+            "user.info.basic,user.info.profile"));
+  }
+
+  private static RestClient client() {
+    var factory =
+        new SimpleClientHttpRequestFactory() {
+          @Override
+          protected void prepareConnection(java.net.HttpURLConnection connection, String method)
+              throws java.io.IOException {
+            super.prepareConnection(connection, method);
+            connection.setInstanceFollowRedirects(false);
+          }
+        };
     factory.setConnectTimeout(Duration.ofSeconds(5));
-    factory.setReadTimeout(Duration.ofSeconds(15));
-    this.restClient = RestClient.builder().requestFactory(factory).build();
+    factory.setReadTimeout(Duration.ofSeconds(5));
+    return RestClient.builder().requestFactory(factory).build();
   }
 
   @Override
@@ -39,138 +67,98 @@ public class TikTokSandboxProofProvider implements OAuthProofProvider {
 
   @Override
   public boolean isConfigured() {
-    return properties != null && properties.getTiktok().isConfigured();
+    try {
+      config.requireConfigured();
+      return true;
+    } catch (BusinessException ex) {
+      return false;
+    }
   }
 
   @Override
   public String buildAuthorizationUrl(String state) {
-    var config = properties.getTiktok();
-    String authBase = config.getAuthUrl() != null && !config.getAuthUrl().isBlank()
-        ? config.getAuthUrl()
-        : "https://www.tiktok.com/v2/auth/authorize/";
+    return config.authorizationUrl(state);
+  }
 
-    String scope = config.getScope() != null && !config.getScope().isBlank()
-        ? config.getScope()
-        : "user.info.basic,video.list";
+  private BusinessException invalid() {
+    return new BusinessException(
+        ErrorCode.TIKTOK_PROVIDER_ERROR, "TikTok returned an invalid account or token response");
+  }
 
-    String encodedRedirect = URLEncoder.encode(config.getRedirectUri(), StandardCharsets.UTF_8);
-    String encodedScope = URLEncoder.encode(scope, StandardCharsets.UTF_8);
-    String encodedState = state != null ? URLEncoder.encode(state, StandardCharsets.UTF_8) : "";
+  private String text(JsonNode node, String field, int max) {
+    var value = node.path(field);
+    if (!value.isTextual() || value.asText().isBlank() || value.asText().length() > max)
+      throw invalid();
+    return value.asText();
+  }
 
-    return String.format(
-        "%s?client_key=%s&response_type=code&scope=%s&redirect_uri=%s&state=%s",
-        authBase.endsWith("?") ? authBase.substring(0, authBase.length() - 1) : authBase,
-        config.resolveClientId(),
-        encodedScope,
-        encodedRedirect,
-        encodedState);
+  public VerifiedAccount verify(String code) {
+    config.requireConfigured();
+    if (code == null
+        || code.isBlank()
+        || code.length() > 4096
+        || (code.startsWith("sim:")
+            || code.startsWith("sim-mismatch")
+            || code.equals("sim-auth-code")))
+      throw new BusinessException(
+          ErrorCode.TIKTOK_AUTHORIZATION_REJECTED, "TikTok authorization code is required");
+    try {
+      var form = new LinkedMultiValueMap<String, String>();
+      form.add("client_key", config.clientKey());
+      form.add("client_secret", config.clientSecret());
+      form.add("code", code);
+      form.add("grant_type", "authorization_code");
+      form.add("redirect_uri", config.redirectUri());
+      var token =
+          http.post()
+              .uri("https://open.tiktokapis.com/v2/oauth/token/")
+              .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+              .body(form)
+              .retrieve()
+              .body(JsonNode.class);
+      if (token == null || !token.isObject()) throw invalid();
+      if (token.has("error"))
+        throw new BusinessException(
+            ErrorCode.TIKTOK_AUTHORIZATION_REJECTED, "TikTok did not grant authorization");
+      String accessToken = text(token, "access_token", 8192), openId = text(token, "open_id", 255);
+      if (!"Bearer".equalsIgnoreCase(text(token, "token_type", 32))
+          || !new HashSet<>(Arrays.asList(text(token, "scope", 2048).split(",")))
+              .containsAll(TikTokLoginProperties.SCOPES)
+          || !token.path("expires_in").isIntegralNumber()
+          || !token.path("expires_in").canConvertToLong()
+          || token.path("expires_in").asLong() <= 0) throw invalid();
+      var profile =
+          http.get()
+              .uri("https://open.tiktokapis.com/v2/user/info/?fields=open_id,username,display_name")
+              .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+              .retrieve()
+              .body(JsonNode.class);
+      if (profile == null || !"ok".equals(profile.path("error").path("code").asText()))
+        throw invalid();
+      var user = profile.path("data").path("user");
+      if (!openId.equals(text(user, "open_id", 255))) throw invalid();
+      return new VerifiedAccount(
+          openId, text(user, "username", 255), text(user, "display_name", 255));
+    } catch (BusinessException ex) {
+      throw ex;
+    } catch (RestClientResponseException ex) {
+      if (Set.of(400, 401, 403).contains(ex.getStatusCode().value()))
+        throw new BusinessException(
+            ErrorCode.TIKTOK_AUTHORIZATION_REJECTED, "TikTok rejected authorization");
+      throw new BusinessException(ErrorCode.TIKTOK_PROVIDER_ERROR, "TikTok request failed");
+    } catch (Exception ex) {
+      throw new BusinessException(ErrorCode.TIKTOK_PROVIDER_ERROR, "TikTok request failed");
+    }
   }
 
   @Override
-  @SuppressWarnings("unchecked")
-  public ProofResult exchangeAndVerify(String code, String expectedExternalId, String expectedUserName) {
-    var config = properties.getTiktok();
-    if (!isConfigured()) {
-      throw new BusinessException(
-          ErrorCode.SOCIAL_PROOF_UNAVAILABLE, "TikTok Developer Sandbox credentials are not configured");
-    }
-
-    try {
-      // 1. Exchange code for access_token
-      String tokenUrl = config.getTokenUrl() != null && !config.getTokenUrl().isBlank()
-          ? config.getTokenUrl()
-          : "https://open.tiktokapis.com/v2/oauth/token/";
-
-      MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
-      form.add("client_key", config.resolveClientId());
-      form.add("client_secret", config.getClientSecret());
-      form.add("code", code);
-      form.add("grant_type", "authorization_code");
-      form.add("redirect_uri", config.getRedirectUri());
-
-      Map<String, Object> tokenResponse = restClient.post()
-          .uri(tokenUrl)
-          .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-          .body(form)
-          .retrieve()
-          .body(Map.class);
-
-      if (tokenResponse == null) {
-        throw new BusinessException(ErrorCode.SOCIAL_PROOF_UNAVAILABLE, "Empty response from TikTok token endpoint");
-      }
-
-      Map<String, Object> data = tokenResponse.containsKey("data") && tokenResponse.get("data") instanceof Map
-          ? (Map<String, Object>) tokenResponse.get("data")
-          : tokenResponse;
-
-      String accessToken = (String) data.get("access_token");
-      String refreshToken = (String) data.getOrDefault("refresh_token", "");
-      String openId = (String) data.getOrDefault("open_id", "");
-      Number expiresIn = (Number) data.getOrDefault("expires_in", 86400);
-
-      if (accessToken == null || accessToken.isBlank()) {
-        Object error = tokenResponse.get("error");
-        log.error("TikTok token exchange failed: {}", error != null ? error : tokenResponse);
-        throw new BusinessException(ErrorCode.SOCIAL_PROOF_UNAVAILABLE, "TikTok OAuth authorization failed: token not granted");
-      }
-
-      // 2. Fetch User Info to get canonical username and profile details
-      String userInfoUrl = config.getUserInfoUrl() != null && !config.getUserInfoUrl().isBlank()
-          ? config.getUserInfoUrl()
-          : "https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url,display_name,username";
-
-      Map<String, Object> userResponse = restClient.get()
-          .uri(userInfoUrl)
-          .header("Authorization", "Bearer " + accessToken)
-          .retrieve()
-          .body(Map.class);
-
-      String resolvedUsername = "";
-      String displayName = "";
-      String avatarUrl = "";
-
-      if (userResponse != null && userResponse.containsKey("data") && userResponse.get("data") instanceof Map) {
-        Map<String, Object> userData = (Map<String, Object>) userResponse.get("data");
-        if (userData.containsKey("user") && userData.get("user") instanceof Map) {
-          Map<String, Object> user = (Map<String, Object>) userData.get("user");
-          resolvedUsername = (String) user.getOrDefault("username", "");
-          displayName = (String) user.getOrDefault("display_name", "");
-          avatarUrl = (String) user.getOrDefault("avatar_url", "");
-          if (user.containsKey("open_id") && (openId == null || openId.isBlank())) {
-            openId = (String) user.get("open_id");
-          }
-        }
-      }
-
-      // Normalize username: remove leading @, trim
-      if (resolvedUsername != null) {
-        resolvedUsername = resolvedUsername.replace("@", "").trim();
-      }
-
-      Map<String, Object> rawData = new HashMap<>();
-      rawData.put("platform", "TIKTOK");
-      rawData.put("verificationEnvironment", "OFFICIAL_SANDBOX");
-      rawData.put("openId", openId);
-      rawData.put("username", resolvedUsername);
-      rawData.put("displayName", displayName);
-      rawData.put("avatarUrl", avatarUrl);
-      rawData.put("tokenData", data);
-
-      return ProofResult.builder()
-          .providerUserId(openId != null && !openId.isBlank() ? openId : expectedExternalId)
-          .providerUsername(resolvedUsername != null && !resolvedUsername.isBlank() ? resolvedUsername : expectedUserName)
-          .accessToken(accessToken)
-          .refreshToken(refreshToken)
-          .tokenExpiresAt(LocalDateTime.now().plusSeconds(expiresIn.longValue()))
-          .rawProfileData(rawData)
-          .build();
-
-    } catch (BusinessException be) {
-      throw be;
-    } catch (Exception ex) {
-      log.error("Error communicating with TikTok Developer Sandbox: {}", ex.getMessage(), ex);
-      throw new BusinessException(
-          ErrorCode.SOCIAL_PROOF_UNAVAILABLE, "Error communicating with TikTok Sandbox: " + ex.getMessage());
-    }
+  public ProofResult exchangeAndVerify(
+      String code, String expectedExternalId, String expectedUserName) {
+    var account = verify(code);
+    return ProofResult.builder()
+        .providerUserId(account.openId())
+        .providerUsername(account.username())
+        .rawProfileData(Map.of("verificationEnvironment", "OFFICIAL_SANDBOX"))
+        .build();
   }
 }

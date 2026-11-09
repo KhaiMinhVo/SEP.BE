@@ -26,6 +26,12 @@ public class CrawlerResolveAuthorResponse {
   @JsonProperty("author_id")
   private String authorId;
 
+  @JsonProperty("id_type")
+  private String idType;
+
+  @JsonProperty("observed_at")
+  private java.time.Instant observedAt;
+
   @JsonProperty("sec_uid")
   private String secUid;
 

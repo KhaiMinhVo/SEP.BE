@@ -27,6 +27,6 @@ public class CreatorClaimReviewController {
   public ApiResponse<ClaimResponse> detail(@PathVariable UUID id) {return ApiResponse.ok(service.detail(id));}
   @PatchMapping("/{id}/review") @Operation(summary="Approve or reject a pending claim",description="Reason required. Approval verifies ownership and rejects competing pending claims atomically.")
   public ApiResponse<ClaimResponse> review(@PathVariable UUID id,@Valid @RequestBody ReviewRequest request) {return ApiResponse.ok(service.review(id,request));}
-  @PostMapping("/{id}/revoke") @Operation(summary="Revoke approved ownership",description="Reason required. Clears owner and authorization; hides rates while retaining history.")
+  @PostMapping("/{id}/revoke") @Operation(summary="Revoke approved manual evidence",description="Reason required. Retains ownership if independent valid proof remains; otherwise clears ownership and current references. Preserves all history.")
   public ApiResponse<ClaimResponse> revoke(@PathVariable UUID id,@Valid @RequestBody RevokeRequest request) {return ApiResponse.ok(service.revoke(id,request));}
 }

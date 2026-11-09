@@ -23,7 +23,7 @@ class RolePermissionServiceTest {
   final RolePermissionOverrideRepository overrides=mock(RolePermissionOverrideRepository.class);
   final AuditService audit=mock(AuditService.class);
   final ValidatorFactory factory=Validation.buildDefaultValidatorFactory();
-  final RolePermissionService service=new RolePermissionService(configs,overrides,audit,factory.getValidator());
+  final RolePermissionService service=new RolePermissionService(configs,overrides,audit,factory.getValidator(),mock(com.influencermatch.backend.user.service.AdminAccessGuard.class));
   @BeforeEach void admin() {
     var user=User.builder().role(Role.ADMIN).status(UserStatus.ACTIVE).build();
     SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(user,null,user.getAuthorities()));
@@ -55,7 +55,7 @@ class RolePermissionServiceTest {
   }
   @Test void invalidAndOutOfRoleChangesAreRejectedBeforeLocking() {
     for (var request : List.of(update(0,Permission.ASSIGN_USER_ROLE,true),
-        update(0,Permission.VIEW_OWN_NOTIFICATION,false),new Update(0L,List.of()),
+        update(0,Permission.REQUEST_CREATOR_REFRESH,false),new Update(0L,List.of()),
         new Update(0L,List.of(new Change(Permission.CREATE_CAMPAIGN,true),new Change(Permission.CREATE_CAMPAIGN,false)))))
       assertThatThrownBy(() -> service.update(Role.BRAND,request)).isInstanceOf(BusinessException.class);
     assertThatThrownBy(() -> service.update(Role.ADMIN,update(0,Permission.VIEW_USER,false))).isInstanceOf(BusinessException.class);

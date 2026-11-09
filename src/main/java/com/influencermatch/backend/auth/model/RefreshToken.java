@@ -5,7 +5,7 @@ import com.influencermatch.backend.auth.dto.*;
 import com.influencermatch.backend.auth.repository.*;
 import com.influencermatch.backend.auth.service.*;
 import jakarta.persistence.*;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 import lombok.*;
 
@@ -25,6 +25,8 @@ public class RefreshToken {
   @Column(nullable = false)
   private UUID userId;
 
+  private UUID sessionId;
+
   @Column(nullable = false, unique = true, length = 64)
   private String tokenHash;
 
@@ -32,16 +34,16 @@ public class RefreshToken {
   private UUID jti;
 
   @Column(nullable = false)
-  private LocalDateTime expiresAt;
+  private Instant expiresAt;
 
-  @Column private LocalDateTime revokedAt;
+  @Column private Instant revokedAt;
 
   @Column private UUID replacedByTokenId;
 
   @Column(nullable = false)
-  private LocalDateTime createdAt;
+  private Instant createdAt;
 
-  public boolean active(LocalDateTime now) {
+  public boolean active(Instant now) {
     return revokedAt == null && expiresAt.isAfter(now);
   }
 }

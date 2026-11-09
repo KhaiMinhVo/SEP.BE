@@ -9,13 +9,24 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.*;
 
-@RestController @RequiredArgsConstructor
+@RestController
+@RequiredArgsConstructor
 @Profile("dev & !prod")
-@ConditionalOnProperty(name="application.auth.creator-mock.enabled",havingValue="true")
+@ConditionalOnProperty(name = "application.auth.creator-mock.enabled", havingValue = "true")
 public class DevCreatorLoginController {
   private final DevCreatorLoginService service;
+  private final com.influencermatch.backend.auth.service.AuthCookies cookies;
+
   @PostMapping("/auth/dev/creator-login")
-  @Operation(summary="Create and log in a new mock Creator (dev only)",
-      description="No Google credentials needed. Creates a new DEV_MOCK identity every call; does not log in existing users.", security={})
-  public ApiResponse<LoginResponse> login() { return ApiResponse.ok(service.login()); }
+  @Operation(
+      summary = "Create and log in a new mock Creator (dev only)",
+      description =
+          "No Google credentials needed. Creates a new DEV_MOCK identity every call; does not log"
+              + " in existing users.",
+      security = {})
+  public ApiResponse<LoginResponse> login(jakarta.servlet.http.HttpServletResponse response) {
+    var result = service.login();
+    cookies.write(response, result);
+    return ApiResponse.ok(result);
+  }
 }

@@ -55,6 +55,10 @@ public class HistoricalCampaign {
   @Column(nullable = false, length = 32)
   private String quality;
 
+  private UUID sourceReviewId;
+  private Long sourceRevision;
+  @Builder.Default private String provenance = "LEGACY_UNVERIFIED";
+
   @Column(name = "recorded_at", nullable = false)
   private LocalDateTime recordedAt;
 }

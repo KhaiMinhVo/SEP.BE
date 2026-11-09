@@ -24,4 +24,14 @@ public record BrandResponse(
     String description,
     int m4Version,
     LocalDateTime createdAt,
-    LocalDateTime updatedAt) {}
+    LocalDateTime updatedAt,
+    String phoneNumber,
+    String onboardingStatus,
+    java.time.Instant onboardingCompletedAt,
+    long profileRevision,
+    String positioning,
+    String guidelines,
+    String embeddingStatus,
+    String embeddingModel,
+    String embeddingModelVersion,
+    java.time.Instant embeddingReadyAt) {}

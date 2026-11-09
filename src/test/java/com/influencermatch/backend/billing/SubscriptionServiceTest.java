@@ -73,9 +73,11 @@ class SubscriptionServiceTest {
     var sub = Subscription.builder().id(UUID.randomUUID()).brandProfile(brand).plan(activePlan)
         .status(SubscriptionStatus.ACTIVE).expirationDate(LocalDate.now().plusDays(10)).usedCampaignQuota(1).build();
     when(subscriptions.findByBrandProfileId(brand.getId())).thenReturn(List.of(sub));
+    when(subscriptions.reserveCampaignQuotaAtomically(eq(sub.getId()), any())).thenReturn(1, 0);
     service.checkAndDeductCampaignQuota(brand.getId());
-    assertThat(sub.getUsedCampaignQuota()).isEqualTo(2);
-    verify(subscriptions).save(sub);
+    verify(subscriptions).reserveCampaignQuotaAtomically(eq(sub.getId()), any());
+    verify(em).refresh(sub);
+    verify(subscriptions, never()).save(any());
 
     assertThatThrownBy(() -> service.checkAndDeductCampaignQuota(brand.getId()))
         .isInstanceOfSatisfying(ConflictException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.QUOTA_EXCEEDED));

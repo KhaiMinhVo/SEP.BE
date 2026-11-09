@@ -9,8 +9,14 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface HistoricalCampaignRepository extends JpaRepository<HistoricalCampaign, UUID> {
+  java.util.Optional<HistoricalCampaign> findBySourceReviewIdAndSourceRevision(
+      UUID reviewId, Long revision);
+
   List<HistoricalCampaign> findByCreatorId(UUID creatorId);
+
   List<HistoricalCampaign> findByMasterId(UUID masterId);
+
   List<HistoricalCampaign> findByCreatorIdIn(Collection<UUID> creatorIds);
+
   List<HistoricalCampaign> findByMasterIdIn(Collection<UUID> masterIds);
 }

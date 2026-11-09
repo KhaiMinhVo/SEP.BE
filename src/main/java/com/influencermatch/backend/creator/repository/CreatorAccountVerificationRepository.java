@@ -20,4 +20,3 @@ public interface CreatorAccountVerificationRepository
 
   Optional<CreatorAccountVerification> findFirstByCreatorIdOrderByVerifiedAtDesc(UUID creatorId);
 }
-

@@ -9,5 +9,9 @@ import java.util.*;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface BrandContextRepository extends JpaRepository<BrandContext, UUID> {
-  Optional<BrandContext> findByBrandProfileId(UUID brandProfileId);
+  Optional<BrandContext> findFirstByBrandProfileIdOrderByContextVersionDesc(UUID brandProfileId);
+
+  default Optional<BrandContext> findByBrandProfileId(UUID brandProfileId) {
+    return findFirstByBrandProfileIdOrderByContextVersionDesc(brandProfileId);
+  }
 }

@@ -22,4 +22,8 @@ public class LinkedAccountDto {
   private String profileUrl;
   private CreatorSourceType sourceType;
   private LocalDateTime authorizedAt;
+  private com.influencermatch.backend.creator.portal.PortalDtos.Verification verification;
+  private com.influencermatch.backend.creator.portal.PortalDtos.DeclaredProfile declaredProfile;
+  private boolean verifiedByInfluencerMatch;
+  private java.util.UUID masterId;
 }

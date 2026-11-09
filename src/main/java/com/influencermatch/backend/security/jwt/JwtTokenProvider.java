@@ -36,8 +36,19 @@ public class JwtTokenProvider {
   @Value("${application.security.jwt.expiration}")
   private long jwtExpirationMs;
 
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.auth.service.AuthSessionStore sessions;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  private java.time.Clock clock = java.time.Clock.systemUTC();
+
   public String generateToken(User user) {
-    long now = System.currentTimeMillis();
+    var session = sessions.open(user, "INTERNAL");
+    return generateToken(user, session.id(), session.expiresAt());
+  }
+
+  public String generateToken(User user, java.util.UUID sid, java.time.Instant sessionExpiry) {
+    long now = clock.instant().toEpochMilli();
     return Jwts.builder()
         .subject(user.getId().toString())
         .id(java.util.UUID.randomUUID().toString())
@@ -46,8 +57,11 @@ public class JwtTokenProvider {
         .claim(CLAIM_ROLE, user.getRole().name())
         .claim(CLAIM_TYPE, "access")
         .claim("authVersion", user.getAuthVersion())
+        .claim("sid", sid.toString())
         .issuedAt(new Date(now))
-        .expiration(new Date(now + jwtExpirationMs))
+        .expiration(
+            new Date(
+                Math.min(now + Math.min(jwtExpirationMs, 900_000L), sessionExpiry.toEpochMilli())))
         .signWith(getSigningKey(), Jwts.SIG.HS256)
         .compact();
   }
@@ -57,6 +71,13 @@ public class JwtTokenProvider {
     Claims claims = extractAllClaims(token);
     if (!(userDetails instanceof User user)) return false;
     Object rawVersion = claims.get("authVersion");
+    java.util.UUID sid;
+    try {
+      sid = java.util.UUID.fromString(claims.get("sid", String.class));
+    } catch (Exception ex) {
+      return false;
+    }
+    if (!sessions.valid(sid, user)) return false;
     long version = rawVersion == null ? 0 : ((Number) rawVersion).longValue();
     return username != null
         && username.equals(user.getEmail())
@@ -69,7 +90,11 @@ public class JwtTokenProvider {
 
   public boolean validateToken(String token) {
     try {
-      Jwts.parser().verifyWith(getSigningKey()).build().parseSignedClaims(token);
+      Jwts.parser()
+          .clock(() -> Date.from(clock.instant()))
+          .verifyWith(getSigningKey())
+          .build()
+          .parseSignedClaims(token);
       return true;
     } catch (SignatureException ex) {
       log.warn("Invalid JWT signature: {}", ex.getMessage());
@@ -103,7 +128,7 @@ public class JwtTokenProvider {
 
   /** Returns remaining token lifetime in seconds (0 if already expired). */
   public long extractExpiresInSeconds(String token) {
-    long remaining = extractExpiration(token).getTime() - System.currentTimeMillis();
+    long remaining = extractExpiration(token).getTime() - clock.instant().toEpochMilli();
     return Math.max(0L, remaining / 1000L);
   }
 
@@ -112,11 +137,16 @@ public class JwtTokenProvider {
   }
 
   private Claims extractAllClaims(String token) {
-    return Jwts.parser().verifyWith(getSigningKey()).build().parseSignedClaims(token).getPayload();
+    return Jwts.parser()
+        .clock(() -> Date.from(clock.instant()))
+        .verifyWith(getSigningKey())
+        .build()
+        .parseSignedClaims(token)
+        .getPayload();
   }
 
   private boolean isTokenExpired(String token) {
-    return extractExpiration(token).before(new Date());
+    return !extractExpiration(token).toInstant().isAfter(clock.instant());
   }
 
   private SecretKey getSigningKey() {
@@ -128,8 +158,9 @@ public class JwtTokenProvider {
     }
     if (keyBytes.length < 32) {
       try {
-        keyBytes = java.security.MessageDigest.getInstance("SHA-256")
-            .digest(secretKey.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        keyBytes =
+            java.security.MessageDigest.getInstance("SHA-256")
+                .digest(secretKey.getBytes(java.nio.charset.StandardCharsets.UTF_8));
       } catch (java.security.NoSuchAlgorithmException e) {
         throw new IllegalStateException("SHA-256 algorithm not available", e);
       }

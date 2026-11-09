@@ -27,6 +27,9 @@ public class ScoreBreakdownDto {
   private String evidenceCutoff;
   private Double m2Score;
 
+  /** Diagnostic component for the separate TOPSIS engine; v3 does not score M3 independently. */
+  private Double m3Score;
+
   @com.fasterxml.jackson.annotation.JsonInclude(
       com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
   private Double m1Score;

@@ -1054,3 +1054,15 @@ Verified results (2026-11-09):
 - The first integration iterations caught real JPA/JDBC FK flush ordering and lazy DTO projection errors. Run flush and transactional read projection fix those paths; HTTP regression now exercises both. Fixture corrections preserve assertions: literal 404 for a foreign Campaign per existing ownership policy, UTC JSON date serialization, correct combined R/T expectation, seed-safe isolated schema copy, and failure injection on Run persistence after the removed historical N+1 query.
 
 Test databases are disposable; no serving backend, shared database, real provider/model or environment configuration is used. V33 was applied only to isolated test databases/schemas. No commit or push was performed.
+
+
+## Merge develop 2c83a94 into khai — 2026-11-09
+
+The merge retains develop's Phase 0, TOPSIS/CRITIC/MMR, confidence, pricing modules and their standalone tests, plus the latest-post ingestion changes. Conflicting older HTTP/service fixtures are resolved against the approved v3 API: explicit candidateSource, READY asynchronous M3, no prior-only M1=50, nullable historical scores, immutable evidence and private Run DTOs. No default algorithm switch or implicit Discovery fallback is introduced. BEST_MATCH remains the only active display mode; unsupported modes fail rather than silently selecting another policy. RecommendationMergeContractTest verifies that boundary without changing the engine assertions.
+
+Develop's deterministic explanation used host-locale String.format, so the original engine assertion expected 81.3 but received 81,3. Production formatting now explicitly uses Locale.ROOT; no numeric assertion is relaxed. DeterministicReasoningLocaleTest covers vi-VN, fr-FR and en-US and restores default/format/display locales in finally.
+
+- Full post-merge regression: **1,393 run; 1,389 passed; 4 failures; 0 errors; 0 skipped** (`develop-merge-regression.log`, 12:12). Three are the unchanged Payment baseline (PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment, ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions, RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification); the fourth is the locale failure fixed above.
+- Final affected rerun: **166 passed, 0 failures/errors/skipped** (`develop-merge-final.log`, 02:37). Includes all 57 incoming FourMemory engine cases, 41 Phase 0 cases, 3 locale cases, ingestion, v3 Recommendation, M1/M4 policy/KPI/privacy and all 11 Learning PostgreSQL cases. This is a separate targeted rerun, not another full regression. The three Payment failures remain unresolved; Payment behavior/assertions are unchanged.
+
+No .env, Bruno, shared database, serving BE or diagram/SDD edits are included in the merge. Local diagram/SDD work is preserved outside these commits. Tests use mocks and disposable PostgreSQL containers.

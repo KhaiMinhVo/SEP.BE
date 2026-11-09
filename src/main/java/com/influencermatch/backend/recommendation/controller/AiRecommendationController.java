@@ -30,12 +30,20 @@ public class AiRecommendationController {
   @PreAuthorize("hasAuthority('RUN_RECOMMENDATION')")
   @Operation(
       summary = "Run AI KOC Recommendation using Four-Memory Framework",
+      description =
+          "Uses four-memory-v3-bayesian-history, explicit candidateSource and READY M3. Only"
+              + " BEST_MATCH is active; other displayMode values return 400.",
       security = @SecurityRequirement(name = "BearerAuth"))
   public ResponseEntity<ApiResponse<RecommendationResponseDto>> recommendKocs(
       @PathVariable UUID campaignId,
       @RequestParam(defaultValue = "30") int limit,
       @RequestParam(defaultValue = "SHORTLIST")
-          com.influencermatch.backend.campaign.enums.CandidateSource candidateSource) {
+          com.influencermatch.backend.campaign.enums.CandidateSource candidateSource,
+      @RequestParam(defaultValue = "BEST_MATCH") String displayMode) {
+    if (!"BEST_MATCH".equals(displayMode))
+      throw new com.influencermatch.backend.exception.ValidationException(
+          "The active four-memory-v3-bayesian-history policy supports BEST_MATCH only; TOPSIS"
+              + " display modes are not activated");
     RecommendationResponseDto result =
         recommendationService.recommendKocs(campaignId, limit, candidateSource);
     return ResponseEntity.ok()

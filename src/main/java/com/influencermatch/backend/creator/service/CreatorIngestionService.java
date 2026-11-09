@@ -8,6 +8,7 @@ import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.relationship.service.ShortlistNotificationService;
 import java.time.LocalDateTime;
+import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -16,6 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 @Service
 public class CreatorIngestionService {
+
+  public static final int MAX_RECENT_POSTS = 3;
 
   private final CreatorRepository creatorRepository;
   private final PublicCreatorMetricRepository metricRepository;
@@ -170,11 +173,21 @@ public class CreatorIngestionService {
 
     if (request.getRecentPosts() != null && !request.getRecentPosts().isEmpty()) {
       postRepository.deleteByCreatorId(savedCreator.getId());
+      java.util.Set<String> seenPostIds = new java.util.HashSet<>();
+      int count = 0;
       for (PostDto dto : request.getRecentPosts()) {
+        if (dto == null) continue;
+        String pid = dto.getPlatformPostId() != null ? dto.getPlatformPostId().trim() : "";
+        if (!pid.isEmpty()) {
+          if (seenPostIds.contains(pid)) {
+            continue; // Chống trùng lặp theo platformPostId trong cùng một snapshot
+          }
+          seenPostIds.add(pid);
+        }
         Post post =
             Post.builder()
                 .creator(savedCreator)
-                .platformPostId(dto.getPlatformPostId())
+                .platformPostId(!pid.isEmpty() ? pid : UUID.randomUUID().toString())
                 .postUrl(dto.getPostUrl())
                 .caption(dto.getCaption())
                 .views(dto.getViews())
@@ -184,6 +197,10 @@ public class CreatorIngestionService {
                 .postedAt(dto.getPostedAt())
                 .build();
         postRepository.save(post);
+        count++;
+        if (count >= MAX_RECENT_POSTS) {
+          break; // Tuân thủ hợp đồng snapshot tối đa 3 bài hiện hành
+        }
       }
     }
 

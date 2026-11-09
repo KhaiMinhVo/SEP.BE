@@ -11,6 +11,8 @@ import com.influencermatch.backend.common.dto.PageResponse;
 import com.influencermatch.backend.creator.model.CreatorMaster;
 import com.influencermatch.backend.creator.repository.CreatorMasterRepository;
 import com.influencermatch.backend.exception.*;
+import com.influencermatch.backend.notification.enums.NotificationType;
+import com.influencermatch.backend.notification.service.NotificationService;
 import com.influencermatch.backend.relationship.enums.RelationshipStage;
 import com.influencermatch.backend.relationship.model.BrandCreatorRelationship;
 import com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository;
@@ -45,6 +47,7 @@ public class CollaborationService {
   private final EntityManager entityManager;
   private final Validator validator;
   private final ApplicationEventPublisher eventPublisher;
+  private final NotificationService notificationService;
 
   public CollaborationService(
       CampaignRepository campaigns,
@@ -66,6 +69,32 @@ public class CollaborationService {
         evidenceAssets,
         entityManager,
         validator,
+        null,
+        null);
+  }
+
+  public CollaborationService(
+      CampaignRepository campaigns,
+      BrandCreatorRelationshipRepository relationships,
+      CollaborationRepository collaborations,
+      CampaignOutcomeRepository outcomes,
+      CreatorReviewRepository reviews,
+      CreatorMasterRepository creatorMasters,
+      EvidenceAssetRepository evidenceAssets,
+      EntityManager entityManager,
+      Validator validator,
+      ApplicationEventPublisher eventPublisher) {
+    this(
+        campaigns,
+        relationships,
+        collaborations,
+        outcomes,
+        reviews,
+        creatorMasters,
+        evidenceAssets,
+        entityManager,
+        validator,
+        eventPublisher,
         null);
   }
 
@@ -123,6 +152,23 @@ public class CollaborationService {
     relationship.setAgreedFee(agreedFee);
     relationship.setCurrency(currency);
     relationship.setUpdatedAt(now);
+
+    if (notificationService != null
+        && collaboration.getCreator() != null
+        && collaboration.getCreator().getOwner() != null) {
+      String brandName =
+          campaign.getBrandProfile() != null
+              ? campaign.getBrandProfile().getBusinessName()
+              : "Nhãn hàng";
+      notificationService.createAndDispatch(
+          collaboration.getCreator().getOwner().getId(),
+          NotificationType.COLLABORATION_PROPOSAL,
+          "Đề xuất hợp tác từ " + brandName,
+          "Bạn vừa nhận được một đề xuất hợp tác cho chiến dịch: " + campaign.getName(),
+          "COLLABORATION",
+          collaboration.getId());
+    }
+
     return new CollaborationResponse(
         collaboration.getId(),
         campaignId,
@@ -471,6 +517,22 @@ public class CollaborationService {
                 .source(source)
                 .uploadedAt(now)
                 .build());
+
+    if (notificationService != null
+        && isCreatorOwner
+        && collaboration.getCampaign() != null
+        && collaboration.getCampaign().getBrandProfile() != null
+        && collaboration.getCampaign().getBrandProfile().getUser() != null) {
+      UUID brandUserId = collaboration.getCampaign().getBrandProfile().getUser().getId();
+      notificationService.createAndDispatch(
+          brandUserId,
+          NotificationType.EVIDENCE_SUBMITTED,
+          "Creator đã nộp bài nghiệm thu",
+          "Creator đã nộp nội dung nghiệm thu cho chiến dịch: "
+              + collaboration.getCampaign().getName(),
+          "COLLABORATION",
+          collaboration.getId());
+    }
 
     return new EvidenceAssetResponse(
         asset.getId(),

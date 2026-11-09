@@ -223,6 +223,15 @@
                 </configuration>
             </plugin>
 
+            <!-- Maven Surefire Plugin with adequate heap for Spring/Mockito contexts -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>@{argLine} -Xmx1536m -XX:+EnableDynamicAgentLoading</argLine>
+                </configuration>
+            </plugin>
+
             <!-- JaCoCo Test Coverage Plugin -->
             <plugin>
                 <groupId>org.jacoco</groupId>

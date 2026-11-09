@@ -17,4 +17,5 @@ public class RecommendationResponseDto {
   private int contextVersion;
   private int totalCandidates;
   private List<CreatorRecommendationItemDto> recommendations;
+  private List<CreatorRecommendationItemDto> provisionalRecommendations;
 }

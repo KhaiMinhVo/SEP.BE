@@ -10,8 +10,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ScoreBreakdownDto {
-  private Double m2Score;
   private Double m1Score;
+  private Double m2Score;
+  private Double m3Score;
   private Double m4Score;
   private Double followerScore;
   private Double engagementScore;

@@ -228,16 +228,28 @@ public class AiRecommendationService {
       };
 
       // Pricing Data Integration:
-      // Trích xuất benchmark giá từ lịch sử hợp tác (nếu có) để PriceStatusResolver phân loại.
-      // Do Rate Card cũ đã bị loại bỏ ở V15, ứng viên discovery không có dữ liệu giá sẽ mặc định trả về PRICE_UNKNOWN.
-      // candidatePrice vs budgetMax xác định khả năng chi trả đơn lẻ (Soft Preference), không thay thế ngân sách giỏ tuyển dụng.
+      // Trích xuất benchmark giá từ lịch sử hợp tác theo quy tắc chuẩn hóa:
+      // 1. Phải thuộc đúng tài khoản Creator (Platform Account) đang xét (tránh lấy nhầm giá TikTok gán cho Instagram của cùng Master)
+      // 2. Sắp xếp theo recordedAt giảm dần để lấy giao dịch hoàn tất gần nhất
+      // 3. Nếu không có dữ liệu giá hợp lệ, tuyệt đối không bịa số liệu mà trả về PRICE_UNKNOWN (Zero Hallucination)
       Function<RecommendationCandidateProjection, PriceStatus> priceStatusProvider = cand -> {
         List<HistoricalCampaign> past = historyProvider.apply(cand);
         BigDecimal historicalFee = null;
-        for (HistoricalCampaign hc : past) {
-          if (hc.getCollaboration() != null && hc.getCollaboration().getAgreedFee() != null) {
-            historicalFee = hc.getCollaboration().getAgreedFee();
-            break;
+        if (past != null && !past.isEmpty()) {
+          List<HistoricalCampaign> platformSpecific = past.stream()
+              .filter(hc -> hc != null && hc.getCreator() != null
+                  && Objects.equals(hc.getCreator().getId(), cand.getCreatorId()))
+              .sorted(Comparator.comparing(HistoricalCampaign::getRecordedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+              .toList();
+
+          for (HistoricalCampaign hc : platformSpecific) {
+            if (hc.getCollaboration() != null && hc.getCollaboration().getAgreedFee() != null) {
+              com.influencermatch.backend.collaboration.enums.CollaborationStatus st = hc.getCollaboration().getStatus();
+              if (st == null || st == com.influencermatch.backend.collaboration.enums.CollaborationStatus.COMPLETED) {
+                historicalFee = hc.getCollaboration().getAgreedFee();
+                break;
+              }
+            }
           }
         }
         return PriceStatusResolver.resolve(historicalFee, false, campaign);

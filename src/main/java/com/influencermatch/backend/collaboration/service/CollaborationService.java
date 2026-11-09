@@ -120,6 +120,10 @@ public class CollaborationService {
           "Relationship must be COLLABORATING, INTERESTED, or CONTACTED to start collaboration");
     BigDecimal agreedFee =
         request.agreedFee() != null ? request.agreedFee() : relationship.getAgreedFee();
+    if (agreedFee == null) {
+      throw new ValidationException(
+          "agreedFee is required (use 0 for barter or non-monetary collaborations)");
+    }
     String currency = request.currency() != null ? request.currency() : relationship.getCurrency();
     if (currency != null && !currency.isBlank()) {
       try {
@@ -128,6 +132,10 @@ public class CollaborationService {
         throw new ValidationException("currency must be a valid ISO currency code");
       }
     }
+    String note =
+        (request.note() != null && !request.note().isBlank())
+            ? request.note().trim()
+            : "Thỏa thuận hợp tác được Brand ghi nhận";
     com.influencermatch.backend.creator.model.CreatorMaster master = relationship.getMaster();
     if (master == null && relationship.getCreator() != null) {
       master = relationship.getCreator().getMaster();
@@ -142,7 +150,8 @@ public class CollaborationService {
                 .master(master)
                 .agreedFee(agreedFee)
                 .currency(currency)
-                .note(request.note())
+                .note(note)
+                .confirmationSource("BRAND_RECORDED_EXTERNAL")
                 .status(CollaborationStatus.IN_PROGRESS)
                 .paymentStatus(CollaborationPaymentStatus.PENDING)
                 .startAt(now)
@@ -160,11 +169,13 @@ public class CollaborationService {
           campaign.getBrandProfile() != null
               ? campaign.getBrandProfile().getBusinessName()
               : "Nhãn hàng";
+      String feeDisplay = agreedFee + " " + (currency != null ? currency : "VND");
       notificationService.createAndDispatch(
           collaboration.getCreator().getOwner().getId(),
-          NotificationType.COLLABORATION_PROPOSAL,
-          "Đề xuất hợp tác từ " + brandName,
-          "Bạn vừa nhận được một đề xuất hợp tác cho chiến dịch: " + campaign.getName(),
+          NotificationType.COLLABORATION_RECORDED,
+          "Hợp tác chiến dịch đã được ghi nhận",
+          "Nhãn hàng " + brandName + " đã ghi nhận thỏa thuận hợp tác cho chiến dịch: "
+              + campaign.getName() + " (Mức phí: " + feeDisplay + ")",
           "COLLABORATION",
           collaboration.getId());
     }
@@ -180,6 +191,7 @@ public class CollaborationService {
         collaboration.getPaymentStatus(),
         collaboration.getPublishedContentUrl(),
         collaboration.getNote(),
+        collaboration.getConfirmationSource(),
         collaboration.getStartAt(),
         collaboration.getCompletedAt(),
         collaboration.getUpdatedAt());

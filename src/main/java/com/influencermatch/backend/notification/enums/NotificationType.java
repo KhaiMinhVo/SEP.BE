@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public enum NotificationType {
   // Collaboration Lifecycle (Luồng 8.1 & 8.2)
+  COLLABORATION_RECORDED(true, "Hợp tác chiến dịch đã được ghi nhận", OccurrencePolicy.SINGLE_PER_ENTITY),
   COLLABORATION_PROPOSAL(true, "Lời mời hợp tác chiến dịch", OccurrencePolicy.SINGLE_PER_ENTITY),
   COLLABORATION_ACCEPTED(true, "Creator đồng ý hợp tác", OccurrencePolicy.SINGLE_PER_ENTITY),
   COLLABORATION_REJECTED(true, "Creator từ chối hợp tác", OccurrencePolicy.SINGLE_PER_ENTITY),

@@ -10,6 +10,7 @@ import com.influencermatch.backend.campaign.enums.CampaignStatus;
 import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.campaign.repository.CampaignRepository;
 import com.influencermatch.backend.collaboration.dto.CreateCollaborationRequest;
+import com.influencermatch.backend.collaboration.dto.CollaborationResponse;
 import com.influencermatch.backend.collaboration.dto.EvidenceAssetResponse;
 import com.influencermatch.backend.collaboration.dto.SubmitEvidenceRequest;
 import com.influencermatch.backend.collaboration.model.Collaboration;
@@ -144,13 +145,15 @@ class CollaborationNotificationIntegrationTest {
     CreateCollaborationRequest req =
         new CreateCollaborationRequest(relationshipId, BigDecimal.valueOf(5000000), "VND", "Welcome aboard");
 
-    service.create(campaignId, req);
+    CollaborationResponse response = service.create(campaignId, req);
+
+    assertThat(response.confirmationSource()).isEqualTo("BRAND_RECORDED_EXTERNAL");
 
     // Verify Notification was dispatched with exact creator user ID as recipient
     verify(notificationService).createAndDispatch(
         eq(creatorUser.getId()),
-        eq(NotificationType.COLLABORATION_PROPOSAL),
-        eq("Đề xuất hợp tác từ Aura Cosmetics"),
+        eq(NotificationType.COLLABORATION_RECORDED),
+        eq("Hợp tác chiến dịch đã được ghi nhận"),
         contains("Summer Launch 2026"),
         eq("COLLABORATION"),
         any(UUID.class));

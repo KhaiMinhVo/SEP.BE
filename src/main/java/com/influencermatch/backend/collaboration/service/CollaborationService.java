@@ -530,8 +530,8 @@ public class CollaborationService {
           "Creator đã nộp bài nghiệm thu",
           "Creator đã nộp nội dung nghiệm thu cho chiến dịch: "
               + collaboration.getCampaign().getName(),
-          "COLLABORATION",
-          collaboration.getId());
+          "EVIDENCE_ASSET",
+          asset.getId());
     }
 
     return new EvidenceAssetResponse(

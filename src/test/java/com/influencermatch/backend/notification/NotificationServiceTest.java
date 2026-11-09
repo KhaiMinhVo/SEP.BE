@@ -44,10 +44,12 @@ class NotificationServiceTest {
   @BeforeEach
   void setUp() {
     TransactionSynchronizationManager.initSynchronization();
+    TransactionSynchronizationManager.setActualTransactionActive(true);
   }
 
   @AfterEach
   void tearDown() {
+    TransactionSynchronizationManager.setActualTransactionActive(false);
     if (TransactionSynchronizationManager.isSynchronizationActive()) {
       TransactionSynchronizationManager.clearSynchronization();
     }
@@ -55,6 +57,7 @@ class NotificationServiceTest {
 
   @Test
   void throwsExceptionWhenCalledOutsideActiveTransaction() {
+    TransactionSynchronizationManager.setActualTransactionActive(false);
     TransactionSynchronizationManager.clearSynchronization();
     UUID userId = UUID.randomUUID();
 
@@ -68,7 +71,26 @@ class NotificationServiceTest {
                     "COLLABORATION",
                     UUID.randomUUID()))
         .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("active business transaction");
+        .hasMessageContaining("active database transaction context");
+  }
+
+  @Test
+  void throwsExceptionWhenSynchronizationActiveButNoActualTransaction() {
+    TransactionSynchronizationManager.setActualTransactionActive(false);
+    // synchronization is active, but actual transaction is false
+    UUID userId = UUID.randomUUID();
+
+    assertThatThrownBy(
+            () ->
+                service.createAndDispatch(
+                    userId,
+                    NotificationType.COLLABORATION_PROPOSAL,
+                    "Title",
+                    "Message",
+                    "COLLABORATION",
+                    UUID.randomUUID()))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("active database transaction context");
   }
 
   @Test
@@ -173,6 +195,50 @@ class NotificationServiceTest {
 
     // Never save duplicate
     verify(notificationRepository, never()).save(any(Notification.class));
+  }
+
+  @Test
+  void multiEventInstanceAllowsMultipleDifferentAssetsOnSameWorkflow() {
+    UUID userId = UUID.randomUUID();
+    UUID asset1Id = UUID.randomUUID();
+    UUID asset2Id = UUID.randomUUID();
+
+    when(notificationRepository.save(any(Notification.class)))
+        .thenAnswer(
+            inv -> {
+              Notification n = inv.getArgument(0);
+              n.setId(UUID.randomUUID());
+              return n;
+            });
+
+    when(userRepository.findById(userId))
+        .thenReturn(Optional.of(User.builder().id(userId).email("brand@example.com").build()));
+
+    // First asset submission
+    NotificationDto notif1 =
+        service.createAndDispatch(
+            userId,
+            NotificationType.EVIDENCE_SUBMITTED,
+            "Creator đã nộp bài nghiệm thu #1",
+            "Nội dung 1",
+            "EVIDENCE_ASSET",
+            asset1Id);
+
+    // Second asset submission on same collaboration
+    NotificationDto notif2 =
+        service.createAndDispatch(
+            userId,
+            NotificationType.EVIDENCE_SUBMITTED,
+            "Creator đã nộp bài nghiệm thu #2",
+            "Nội dung 2",
+            "EVIDENCE_ASSET",
+            asset2Id);
+
+    assertThat(notif1).isNotNull();
+    assertThat(notif2).isNotNull();
+    assertThat(notif1.getEntityId()).isEqualTo(asset1Id);
+    assertThat(notif2.getEntityId()).isEqualTo(asset2Id);
+    verify(notificationRepository, times(2)).save(any(Notification.class));
   }
 
   @Test

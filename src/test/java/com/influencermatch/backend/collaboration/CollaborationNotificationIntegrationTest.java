@@ -192,14 +192,121 @@ class CollaborationNotificationIntegrationTest {
 
     service.submitEvidence(collabId, req);
 
-    // Verify Notification was dispatched to the brand user ID
+    // Verify Notification was dispatched to the brand user ID with EVIDENCE_ASSET identity
     verify(notificationService).createAndDispatch(
         eq(brandUser.getId()),
         eq(NotificationType.EVIDENCE_SUBMITTED),
         eq("Creator đã nộp bài nghiệm thu"),
         contains("Summer Launch 2026"),
-        eq("COLLABORATION"),
-        eq(collabId));
+        eq("EVIDENCE_ASSET"),
+        any(UUID.class));
+  }
+
+  @Test
+  void whenCreatorHasNoOwner_doesNotDispatchNotification() {
+    User brandUser = user(Role.BRAND);
+    authenticate(brandUser);
+
+    UUID campaignId = UUID.randomUUID();
+    UUID relationshipId = UUID.randomUUID();
+
+    BrandProfile brandProfile = BrandProfile.builder().user(brandUser).businessName("Aura Cosmetics").build();
+    Campaign campaign = Campaign.builder().id(campaignId).brandProfile(brandProfile).status(CampaignStatus.ACTIVE).name("Summer Launch 2026").build();
+
+    // Unclaimed creator in CRM: has no owner/user account yet
+    Creator creator = Creator.builder().id(UUID.randomUUID()).build();
+    BrandCreatorRelationship relationship =
+        BrandCreatorRelationship.builder()
+            .id(relationshipId)
+            .user(brandUser)
+            .campaign(campaign)
+            .creator(creator)
+            .stage(RelationshipStage.CONTACTED)
+            .build();
+
+    when(campaigns.findLockedForCollaborationById(campaignId)).thenReturn(Optional.of(campaign));
+    when(campaigns.findById(campaignId)).thenReturn(Optional.of(campaign));
+    when(relationships.findLockedById(relationshipId)).thenReturn(Optional.of(relationship));
+    when(collaborations.existsByRelationshipId(relationshipId)).thenReturn(false);
+    when(collaborations.save(any(Collaboration.class))).thenAnswer(inv -> {
+      Collaboration c = inv.getArgument(0);
+      c.setId(UUID.randomUUID());
+      return c;
+    });
+
+    CreateCollaborationRequest req =
+        new CreateCollaborationRequest(relationshipId, BigDecimal.valueOf(5000000), "VND", "Welcome aboard");
+
+    service.create(campaignId, req);
+
+    // CRITICAL: Unclaimed creator must NEVER trigger phantom notification or unsolicited email
+    verify(notificationService, never()).createAndDispatch(any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void repeatedEvidenceSubmissions_createSeparateNotificationsForDifferentAssets() {
+    User creatorUser = user(Role.CREATOR);
+    authenticate(creatorUser);
+
+    User brandUser = user(Role.BRAND);
+    BrandProfile brandProfile = BrandProfile.builder().user(brandUser).businessName("Aura Cosmetics").build();
+    Campaign campaign = Campaign.builder().brandProfile(brandProfile).name("Summer Launch 2026").build();
+
+    CreatorMaster master = CreatorMaster.builder().user(creatorUser).build();
+    Creator creator = Creator.builder().master(master).build();
+
+    UUID collabId = UUID.randomUUID();
+    Collaboration collaboration =
+        Collaboration.builder()
+            .id(collabId)
+            .campaign(campaign)
+            .creator(creator)
+            .master(master)
+            .build();
+
+    when(collaborations.findById(collabId)).thenReturn(Optional.of(collaboration));
+
+    UUID asset1Id = UUID.randomUUID();
+    UUID asset2Id = UUID.randomUUID();
+
+    when(evidenceAssets.save(any(EvidenceAsset.class)))
+        .thenAnswer(inv -> {
+          EvidenceAsset a = inv.getArgument(0);
+          a.setId(asset1Id);
+          return a;
+        })
+        .thenAnswer(inv -> {
+          EvidenceAsset a = inv.getArgument(0);
+          a.setId(asset2Id);
+          return a;
+        });
+
+    SubmitEvidenceRequest req1 =
+        new SubmitEvidenceRequest("POST_LINK", "https://tiktok.com/@koc/video/1", "https://tiktok.com/@koc/video/1", "Draft 1");
+    SubmitEvidenceRequest req2 =
+        new SubmitEvidenceRequest("ANALYTICS_IMAGE", "https://storage.cdn/analytics2.png", "https://tiktok.com/@koc/video/1", "Insights screenshot");
+
+    service.submitEvidence(collabId, req1);
+    service.submitEvidence(collabId, req2);
+
+    // Verify both evidence submissions on the same collaboration dispatch notifications with their distinct asset IDs
+    verify(notificationService).createAndDispatch(
+        eq(brandUser.getId()),
+        eq(NotificationType.EVIDENCE_SUBMITTED),
+        any(),
+        any(),
+        eq("EVIDENCE_ASSET"),
+        eq(asset1Id));
+
+    verify(notificationService).createAndDispatch(
+        eq(brandUser.getId()),
+        eq(NotificationType.EVIDENCE_SUBMITTED),
+        any(),
+        any(),
+        eq("EVIDENCE_ASSET"),
+        eq(asset2Id));
+
+    verify(notificationService, times(2)).createAndDispatch(any(), any(), any(), any(), any(), any());
   }
 }
 

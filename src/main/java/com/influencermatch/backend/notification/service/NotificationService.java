@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -36,7 +37,7 @@ public class NotificationService {
    * Policy-driven notification dispatch resolving channels (In-App / Email) via NotificationType.
    * Enforces transactional integrity and prevents duplicate dispatches.
    */
-  @Transactional
+  @Transactional(propagation = Propagation.MANDATORY)
   public NotificationDto createAndDispatch(
       UUID userId,
       NotificationType type,
@@ -50,7 +51,7 @@ public class NotificationService {
   /**
    * Overloaded policy-driven dispatch with optional deduplication.
    */
-  @Transactional
+  @Transactional(propagation = Propagation.MANDATORY)
   public NotificationDto createAndDispatch(
       UUID userId,
       NotificationType type,
@@ -60,10 +61,11 @@ public class NotificationService {
       UUID entityId,
       boolean deduplicate) {
 
-    // 1. Transaction Guard
-    if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+    // 1. Transaction Guard: Require both active physical DB transaction and synchronization context
+    if (!TransactionSynchronizationManager.isActualTransactionActive()
+        || !TransactionSynchronizationManager.isSynchronizationActive()) {
       throw new IllegalStateException(
-          "Notification dispatch must occur within an active business transaction");
+          "Notification dispatch must occur within an active database transaction context");
     }
 
     // 2. Idempotency / Deduplication Guard
@@ -72,9 +74,10 @@ public class NotificationService {
         && notificationRepository.existsByUserIdAndTypeAndEntityTypeAndEntityId(
             userId, type.name(), entityType, entityId)) {
       log.debug(
-          "Idempotency hit: duplicate notification skipped for user={}, type={}, entityId={}",
+          "Idempotency hit: duplicate notification skipped for user={}, type={}, entityType={}, entityId={}",
           userId,
           type,
+          entityType,
           entityId);
       return notificationRepository
           .findFirstByUserIdAndTypeAndEntityTypeAndEntityIdOrderByCreatedAtDesc(
@@ -110,7 +113,7 @@ public class NotificationService {
    * Persists the notification record within the current business transaction,
    * then schedules SSE & email delivery strictly after the transaction commits.
    */
-  @Transactional
+  @Transactional(propagation = Propagation.MANDATORY)
   public NotificationDto createAndDispatch(
       UUID userId,
       String type,
@@ -120,9 +123,10 @@ public class NotificationService {
       UUID entityId,
       boolean sendEmail) {
 
-    if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+    if (!TransactionSynchronizationManager.isActualTransactionActive()
+        || !TransactionSynchronizationManager.isSynchronizationActive()) {
       throw new IllegalStateException(
-          "Notification dispatch must occur within an active business transaction");
+          "Notification dispatch must occur within an active database transaction context");
     }
 
     Notification notification =

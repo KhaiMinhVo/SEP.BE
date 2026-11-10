@@ -25,9 +25,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PaymentService {
@@ -142,10 +144,15 @@ public class PaymentService {
   @Transactional
   public boolean processVnPayReturn(Map<String, String> params) {
     String signature = params.get("vnp_SecureHash");
-    if (signature == null
-        || signature.length() != 128
-        || vnPayConfig.getHashSecret() == null
-        || vnPayConfig.getHashSecret().isBlank()) return false;
+    String txnRef = params.get("vnp_TxnRef");
+    if (signature == null || signature.length() != 128) {
+      log.warn("VNPay callback rejected: invalid or missing vnp_SecureHash for txnRef='{}'", txnRef);
+      return false;
+    }
+    if (vnPayConfig.getHashSecret() == null || vnPayConfig.getHashSecret().isBlank()) {
+      log.error("VNPay callback rejected: vnp_HashSecret is unconfigured for txnRef='{}'", txnRef);
+      return false;
+    }
     Map<String, String> signed = new HashMap<>();
     params.forEach(
         (key, value) -> {
@@ -156,17 +163,34 @@ public class PaymentService {
     String expected = VnPayUtil.hashAllFields(signed, vnPayConfig.getHashSecret());
     if (!java.security.MessageDigest.isEqual(
         expected.getBytes(StandardCharsets.US_ASCII),
-        signature.toLowerCase(java.util.Locale.ROOT).getBytes(StandardCharsets.US_ASCII)))
+        signature.toLowerCase(java.util.Locale.ROOT).getBytes(StandardCharsets.US_ASCII))) {
+      log.warn("VNPay callback rejected: signature mismatch for txnRef='{}'", txnRef);
       return false;
-    if (!java.util.Objects.equals(vnPayConfig.getTmnCode(), params.get("vnp_TmnCode")))
+    }
+    if (!java.util.Objects.equals(vnPayConfig.getTmnCode(), params.get("vnp_TmnCode"))) {
+      log.warn(
+          "VNPay callback rejected: merchant code mismatch for txnRef='{}', received='{}'",
+          txnRef,
+          params.get("vnp_TmnCode"));
       return false;
+    }
     Payment existing =
-        paymentRepository.findByTransactionCode(params.get("vnp_TxnRef")).orElse(null);
-    if (existing == null) return false;
+        paymentRepository.findByTransactionCode(txnRef).orElse(null);
+    if (existing == null) {
+      log.warn("VNPay callback rejected: transaction not found for txnRef='{}'", txnRef);
+      return false;
+    }
     Payment payment = settlement.lock(existing);
     long expectedAmount =
         payment.getAmount().multiply(java.math.BigDecimal.valueOf(100)).longValueExact();
-    if (!Long.toString(expectedAmount).equals(params.get("vnp_Amount"))) return false;
+    if (!Long.toString(expectedAmount).equals(params.get("vnp_Amount"))) {
+      log.warn(
+          "VNPay callback rejected: amount mismatch for txnRef='{}', expected={}, received={}",
+          txnRef,
+          expectedAmount,
+          params.get("vnp_Amount"));
+      return false;
+    }
     boolean success =
         "00".equals(params.get("vnp_ResponseCode"))
             && "00".equals(params.get("vnp_TransactionStatus"));

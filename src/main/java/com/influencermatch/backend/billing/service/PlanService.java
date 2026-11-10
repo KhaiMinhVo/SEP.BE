@@ -46,7 +46,7 @@ public class PlanService {
 
     Plan savedPlan = planRepository.save(plan);
     audit.record(
-        "CREATE_PLAN", "Plan", savedPlan.getId(), null, toResponse(savedPlan), "Plan created");
+        "CREATE_PLAN", "Plan", savedPlan.getId(), null, toResponse(savedPlan), "Tạo mới gói cước dịch vụ");
     log.info("Created new plan: {}", savedPlan.getId());
     return toResponse(savedPlan);
   }
@@ -99,7 +99,7 @@ public class PlanService {
     if (request.getStatus() != null) plan.setStatus(request.getStatus());
 
     Plan updatedPlan = planRepository.save(plan);
-    audit.record("UPDATE_PLAN", "Plan", id, before, toResponse(updatedPlan), "Plan updated");
+    audit.record("UPDATE_PLAN", "Plan", id, before, toResponse(updatedPlan), "Cập nhật thông tin gói cước dịch vụ");
     log.info("Updated plan: {}", id);
     return toResponse(updatedPlan);
   }
@@ -113,7 +113,7 @@ public class PlanService {
     var before = toResponse(plan);
     plan.setStatus(PlanStatus.INACTIVE);
     planRepository.save(plan);
-    audit.record("DEACTIVATE_PLAN", "Plan", id, before, toResponse(plan), "Plan deactivated");
+    audit.record("DEACTIVATE_PLAN", "Plan", id, before, toResponse(plan), "Vô hiệu hóa gói cước dịch vụ");
     log.info("Deactivated plan: {}", id);
   }
 

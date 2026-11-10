@@ -56,7 +56,8 @@ class RolePermissionsTest {
             "RESOLVE_CREATOR_DUPLICATE",
             "RESOLVE_CREATOR_DATA_ISSUE",
             "REVIEW_CREATOR_CLASSIFICATION",
-            "VIEW_DATA_OPERATION_LOG");
+            "VIEW_DATA_OPERATION_LOG",
+            "MANAGE_RECOMMENDATION_CONFIG");
     assertThat(RolePermissions.names(Role.ADMIN))
         .containsExactlyInAnyOrder(
             "VIEW_CREATOR_MASTER_CATALOG",
@@ -91,7 +92,7 @@ class RolePermissionsTest {
   void fixedMatrixHasExactly52PermissionsAndNoWildcard() {
     assertThat(Permission.values()).hasSize(52);
     assertThat(RolePermissions.forRole(Role.BRAND)).hasSize(26);
-    assertThat(RolePermissions.forRole(Role.DATA_MANAGER)).hasSize(16);
+    assertThat(RolePermissions.forRole(Role.DATA_MANAGER)).hasSize(17);
     assertThat(RolePermissions.forRole(Role.ADMIN)).hasSize(26);
     assertThat(RolePermissions.names(Role.CREATOR))
         .containsExactlyInAnyOrder(
@@ -128,7 +129,7 @@ class RolePermissionsTest {
             Permission.VIEW_CREATOR_PROFILE);
     Set<Permission> operations = EnumSet.copyOf(RolePermissions.forRole(Role.DATA_MANAGER));
     operations.removeAll(common);
-    assertThat(operations).hasSize(12).isSubsetOf(RolePermissions.forRole(Role.ADMIN));
+    assertThat(operations).hasSize(13).isSubsetOf(RolePermissions.forRole(Role.ADMIN));
     assertThat(RolePermissions.forRole(Role.ADMIN))
         .doesNotContain(
             Permission.CREATE_CAMPAIGN,

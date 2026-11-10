@@ -98,7 +98,7 @@ public class RolePermissionService {
         config.getId(),
         before,
         after,
-        "Administrator customized capability overrides for " + role);
+        "Quản trị viên tùy chỉnh phân quyền cho vai trò " + role);
     return after;
   }
 

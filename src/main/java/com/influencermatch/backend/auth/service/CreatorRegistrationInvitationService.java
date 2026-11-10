@@ -109,7 +109,7 @@ public class CreatorRegistrationInvitationService {
         invitation.getId(),
         null,
         Map.of("email", email, "expiresAt", invitation.getExpiresAt().toString()),
-        "Creator registration invitation");
+        "Gửi thư mời đăng ký tài khoản Creator");
     String link =
         UriComponentsBuilder.fromUriString(frontend + "/auth/creator/register")
             .queryParam("token", token)

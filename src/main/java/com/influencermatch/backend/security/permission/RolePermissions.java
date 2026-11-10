@@ -66,7 +66,8 @@ public final class RolePermissions {
               Permission.RESOLVE_CREATOR_DUPLICATE,
               Permission.RESOLVE_CREATOR_DATA_ISSUE,
               Permission.REVIEW_CREATOR_CLASSIFICATION,
-              Permission.VIEW_DATA_OPERATION_LOG));
+              Permission.VIEW_DATA_OPERATION_LOG,
+              Permission.MANAGE_RECOMMENDATION_CONFIG));
     if (role == Role.ADMIN)
       permissions.addAll(
           EnumSet.of(
@@ -74,7 +75,6 @@ public final class RolePermissions {
               Permission.CHANGE_USER_STATUS,
               Permission.ASSIGN_USER_ROLE,
               Permission.MANAGE_PROVIDER_CONFIG,
-              Permission.MANAGE_RECOMMENDATION_CONFIG,
               Permission.MANAGE_PLAN,
               Permission.MANAGE_SUBSCRIPTION,
               Permission.VIEW_SYSTEM_STATUS,

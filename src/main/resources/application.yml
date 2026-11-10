@@ -5,7 +5,11 @@
 
 server:
   port: 8080
-  forward-headers-strategy: framework
+  forward-headers-strategy: native
+  tomcat:
+    remote-ip-header: X-Forwarded-For
+    protocol-header: X-Forwarded-Proto
+    internal-proxies: "10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|192\\.168\\.\\d{1,3}\\.\\d{1,3}|169\\.254\\.\\d{1,3}\\.\\d{1,3}|127\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|172\\.(?:1[6-9]|2\\d|3[0-1])\\.\\d{1,3}\\.\\d{1,3}|0:0:0:0:0:0:0:1|::1"
   servlet:
     context-path: /api/v1
   error:
@@ -150,9 +154,6 @@ application:
       token-url: ${GOOGLE_TESTING_TOKEN_URL:https://oauth2.googleapis.com/token}
       youtube-channel-url: ${GOOGLE_TESTING_YOUTUBE_URL:https://www.googleapis.com/youtube/v3/channels}
       scope: ${GOOGLE_TESTING_SCOPE:https://www.googleapis.com/auth/youtube.readonly}
-  payment:
-    mock:
-      enabled: ${PAYMENT_MOCK_ENABLED:false}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,https://api.influencermatch.site,https://influencermatch.site}
   bootstrap-admin:

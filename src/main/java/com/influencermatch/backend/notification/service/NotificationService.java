@@ -88,13 +88,15 @@ public class NotificationService {
 
     // 3. Centralized Channel Policy
     boolean sendEmail = type.isEmailDispatchEnabled();
+    String resolvedTitle = (title != null && !title.isBlank()) ? title : type.getDefaultTitle();
+    String resolvedMessage = (message != null && !message.isBlank()) ? message : type.getDefaultMessage();
 
     Notification notification =
         Notification.builder()
             .userId(userId)
             .type(type.name())
-            .title(title != null ? title : type.getDefaultTitle())
-            .message(message)
+            .title(resolvedTitle)
+            .message(resolvedMessage)
             .entityType(entityType)
             .entityId(entityId)
             .isRead(false)
@@ -104,7 +106,7 @@ public class NotificationService {
     Notification saved = notificationRepository.save(notification);
     NotificationDto dto = NotificationDto.fromEntity(saved);
 
-    dispatchPostCommit(userId, notification.getTitle(), message, dto, sendEmail);
+    dispatchPostCommit(userId, resolvedTitle, resolvedMessage, dto, sendEmail);
 
     return dto;
   }

@@ -95,7 +95,7 @@ public class SubscriptionService {
           sub.getId(),
           null,
           toResponse(sub),
-          "Administrative subscription creation");
+          "Quản trị viên khởi tạo gói đăng ký dịch vụ");
     return toResponse(sub);
   }
 
@@ -132,7 +132,7 @@ public class SubscriptionService {
           id,
           before,
           toResponse(sub),
-          "Administrative cancellation");
+          "Quản trị viên hủy gói đăng ký dịch vụ");
   }
 
   /**

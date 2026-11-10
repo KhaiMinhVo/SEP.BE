@@ -64,7 +64,7 @@ public class CreatorRegistrationInvitationService {
     invitations.save(invitation);deliveries.deleteByEmailAndSentAtBefore(email,now.minusSeconds(3600));
     deliveries.save(new CreatorRegistrationInvitationDelivery(UUID.randomUUID(),email,now));
     audit.record("INVITE_CREATOR","CreatorRegistrationInvitation",invitation.getId(),null,
-        Map.of("email",email,"expiresAt",invitation.getExpiresAt().toString()),"Creator registration invitation");
+        Map.of("email",email,"expiresAt",invitation.getExpiresAt().toString()),"Gửi thư mời đăng ký tài khoản Creator");
     String link=UriComponentsBuilder.fromUriString(frontend+"/auth/creator/register").queryParam("token",token).build().encode().toUriString();
     sender.sendCreatorInvitation(email,link);return response(invitation);
   }

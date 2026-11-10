@@ -36,7 +36,7 @@ public class MockPaymentService {
     if(!settlement.apply(payment,request.outcome()==Outcome.SUCCESS,"MOCK_FAILED"))
       throw new ConflictException(ErrorCode.SUBSCRIPTION_CONFLICT,"Payment outcome conflicts with current payment or subscription state");
     Response after=response(payment);
-    if(!before.equals(after)) audit.record("MOCK_PAYMENT_WEBHOOK","Payment",payment.getId(),before,after,"Development payment simulation");
+    if(!before.equals(after)) audit.record("MOCK_PAYMENT_WEBHOOK","Payment",payment.getId(),before,after,"Mô phỏng thanh toán thử nghiệm trong môi trường phát triển");
     return after;
   }
 

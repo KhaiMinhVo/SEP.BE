@@ -55,7 +55,7 @@ public class CreatorClaimService {
         .evidenceUrls(List.copyOf(request.evidenceUrls())).note(request.note()).status(CreatorClaimStatus.PENDING).build());
     audit.record("SUBMIT_CREATOR_CLAIM","CreatorClaim",claim.getId(),null,
         Map.of("status","PENDING","creatorId",creatorId,"claimantId",claimant.getId()),
-        "Creator submitted ownership evidence");
+        "Creator nộp bằng chứng xác minh quyền sở hữu kênh");
     return response(claim);
   }
 
@@ -109,7 +109,7 @@ public class CreatorClaimService {
         if(other.getId().equals(claim.getId()))continue;
         em.refresh(other);
         if(other.getStatus()!=CreatorClaimStatus.PENDING)continue;
-        decide(other,CreatorClaimStatus.REJECTED,reviewer,"Channel ownership was verified for another claimant");
+        decide(other,CreatorClaimStatus.REJECTED,reviewer,"Quyền sở hữu kênh đã được xác nhận cho người nhận claim khác");
         audit.record("REJECT_CREATOR_CLAIM","CreatorClaim",other.getId(),Map.of("status","PENDING"),
             Map.of("status","REJECTED"),other.getReason());
       }

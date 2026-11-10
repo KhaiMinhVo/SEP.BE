@@ -74,7 +74,7 @@ public class RolePermissionService {
     configs.flush();
     var after = view(role, config.getVersion(), rows);
     audit.record("UPDATE_ROLE_PERMISSIONS", "ROLE_PERMISSION", config.getId(), before, after,
-        "Administrator customized capability overrides for " + role);
+        "Quản trị viên tùy chỉnh phân quyền cho vai trò " + role);
     return after;
   }
 

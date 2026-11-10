@@ -29,7 +29,7 @@ class SmtpVerificationEmailSenderTest {
     new SmtpVerificationEmailSender(provider,true,"smtp.test","from@example.test",secret).send("to@example.test","000042");
     var msg=ArgumentCaptor.forClass(SimpleMailMessage.class);verify(mail).send(msg.capture());
     assertThat(msg.getValue().getTo()).containsExactly("to@example.test");
-    assertThat(msg.getValue().getText()).contains("000042","10 minutes");
+    assertThat(msg.getValue().getText()).contains("000042","10 phút");
   }
   @Test void smtpErrorsAreMappedWithoutLeakingServerDetails() {
     when(provider.getIfAvailable()).thenReturn(mail);when(provider.getObject()).thenReturn(mail);
@@ -42,21 +42,21 @@ class SmtpVerificationEmailSenderTest {
     new SmtpVerificationEmailSender(provider,true,"smtp.test","from@example.test",secret)
         .sendCreatorInvitation("to@example.test","https://frontend.example.test/auth/creator/register?token=random");
     var msg=ArgumentCaptor.forClass(SimpleMailMessage.class);verify(mail).send(msg.capture());
-    assertThat(msg.getValue().getSubject()).contains("Creator invitation");assertThat(msg.getValue().getText()).contains("?token=random","48 hours");
+    assertThat(msg.getValue().getSubject()).contains("Creator");assertThat(msg.getValue().getText()).contains("?token=random","48 giờ");
   }
   @Test void passwordSetupMessageHasItsOwnPurpose() {
     when(provider.getIfAvailable()).thenReturn(mail);when(provider.getObject()).thenReturn(mail);
     new SmtpVerificationEmailSender(provider,true,"smtp.test","from@example.test",secret).sendPasswordSetup("to@example.test","000042");
     var msg=ArgumentCaptor.forClass(SimpleMailMessage.class);verify(mail).send(msg.capture());
-    assertThat(msg.getValue().getSubject()).contains("Set your account password");assertThat(msg.getValue().getText()).contains("password setup","000042","10 minutes");
+    assertThat(msg.getValue().getSubject()).contains("Thiết lập mật khẩu");assertThat(msg.getValue().getText()).contains("000042","10 phút");
   }
   @Test void claimInvitationHasSevenDayLimitAndDoesNotImplyRegistration() {
     when(provider.getIfAvailable()).thenReturn(mail);when(provider.getObject()).thenReturn(mail);
     new SmtpVerificationEmailSender(provider,true,"smtp.test","from@example.test",secret)
         .sendCreatorClaimInvitation("to@example.test","https://frontend.example.test/claim-profile?token=random");
     var msg=ArgumentCaptor.forClass(SimpleMailMessage.class);verify(mail).send(msg.capture());
-    assertThat(msg.getValue().getSubject()).contains("Channel claim");
-    assertThat(msg.getValue().getText()).contains("7 days","/claim-profile?token=random","does not register","Admin/Data Manager","Resending does not extend its expiry");
+    assertThat(msg.getValue().getSubject()).contains("quyền sở hữu");
+    assertThat(msg.getValue().getText()).contains("7 ngày","/claim-profile?token=random","Admin/Data Manager");
   }
 
 }

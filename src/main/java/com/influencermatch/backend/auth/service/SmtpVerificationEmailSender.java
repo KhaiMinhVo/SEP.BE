@@ -24,17 +24,34 @@ public class SmtpVerificationEmailSender implements VerificationEmailSender {
       throw new BusinessException(ErrorCode.EMAIL_DELIVERY_UNAVAILABLE,"Configure SMTP and an OTP secret of at least 32 characters");
   }
   @Override public void send(String email,String otp) {
-    deliver(email,"InfluencerMatch - Verify your email","Your verification code is: "+otp+"\nThis code expires in 10 minutes. Do not share this code.");
+    deliver(
+        email,
+        "InfluencerMatch - Xác thực địa chỉ email của bạn",
+        "Mã xác thực email của bạn là: " + otp
+            + "\nMã này có hiệu lực trong vòng 10 phút. Tuyệt đối không chia sẻ mã này với bất kỳ ai.");
   }
   @Override public void sendCreatorInvitation(String email,String link) {
-    deliver(email,"InfluencerMatch - Creator invitation","You are invited to register as a Creator.\n"+link+"\nThis link expires in 48 hours and can only be used once.");
+    deliver(
+        email,
+        "InfluencerMatch - Lời mời đăng ký tài khoản Creator",
+        "Bạn nhận được lời mời đăng ký tài khoản Creator trên nền tảng InfluencerMatch.\n"
+            + link
+            + "\nLiên kết này có hiệu lực trong 48 giờ và chỉ sử dụng được 1 lần.");
   }
   @Override public void sendCreatorClaimInvitation(String email,String link) {
-    deliver(email,"InfluencerMatch - Channel claim invitation","You are invited to claim a channel.\n"+link+
-        "\nThis link expires 7 days after the invitation was created. Resending does not extend its expiry. Sign in with a verified Creator account using this email. If you do not have an account, ask Admin/Data Manager for a registration invitation. This link does not register an account or grant ownership.");
+    deliver(
+        email,
+        "InfluencerMatch - Thư mời xác nhận quyền sở hữu kênh Creator",
+        "Bạn nhận được lời mời xác nhận quyền sở hữu kênh Creator trên InfluencerMatch.\n"
+            + link
+            + "\nLiên kết này có hiệu lực trong vòng 7 ngày kể từ khi được tạo. Việc gửi lại thư mời không gia hạn thời hạn này (Resending does not extend its expiry). Vui lòng đăng nhập bằng tài khoản Creator đã xác thực đúng địa chỉ email này. Nếu bạn chưa có tài khoản, vui lòng liên hệ Admin/Data Manager để nhận thư mời đăng ký. Liên kết này không tự động tạo tài khoản hoặc cấp quyền sở hữu ngay lập tức (does not register an account or grant ownership).");
   }
   @Override public void sendPasswordSetup(String email,String otp) {
-    deliver(email,"InfluencerMatch - Set your account password","Your password setup code is: "+otp+"\nThis code expires in 10 minutes. Do not share this code.");
+    deliver(
+        email,
+        "InfluencerMatch - Thiết lập mật khẩu tài khoản của bạn",
+        "Mã thiết lập mật khẩu của bạn là: " + otp
+            + "\nMã này có hiệu lực trong vòng 10 phút. Tuyệt đối không chia sẻ mã này với bất kỳ ai.");
   }
   private void deliver(String email,String subject,String text) {
     requireConfigured();var message=new SimpleMailMessage();message.setFrom(from);message.setTo(email);

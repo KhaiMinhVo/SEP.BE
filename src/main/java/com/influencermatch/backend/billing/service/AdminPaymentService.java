@@ -159,7 +159,7 @@ public class AdminPaymentService {
         payment.getId(),
         oldStatus.name(),
         PaymentStatus.REFUNDED.name(),
-        reason);
+        (reason != null && !reason.isBlank()) ? reason : "Quản trị viên hoàn tiền giao dịch");
 
     return mapToResponse(payment);
   }

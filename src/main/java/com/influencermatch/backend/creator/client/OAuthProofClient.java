@@ -43,14 +43,19 @@ public class OAuthProofClient {
     this.properties = properties != null ? properties : new OAuthSandboxProperties();
     this.tikTokProvider = tikTokProvider;
     this.googleProvider = googleProvider;
-    this.fallbackProvider = fallbackProvider != null ? fallbackProvider : new SimulatedFallbackProofProvider();
+    this.fallbackProvider =
+        fallbackProvider != null ? fallbackProvider : new SimulatedFallbackProofProvider();
   }
 
-  /**
-   * Backwards-compatible constructor for existing tests and non-injected environments.
-   */
+  /** Backwards-compatible constructor for existing tests and non-injected environments. */
   public OAuthProofClient(Environment environment, boolean mockEnabled) {
-    this(environment, mockEnabled, new OAuthSandboxProperties(), null, null, new SimulatedFallbackProofProvider());
+    this(
+        environment,
+        mockEnabled,
+        new OAuthSandboxProperties(),
+        null,
+        null,
+        new SimulatedFallbackProofProvider());
   }
 
   public boolean isOfficialSandboxMode() {
@@ -81,53 +86,70 @@ public class OAuthProofClient {
     private Map<String, Object> rawProfileData;
   }
 
-  /**
-   * Generates authorization redirect URL for official provider sandbox or fallback mock.
-   */
+  /** Generates authorization redirect URL for official provider sandbox or fallback mock. */
   public String buildAuthorizationUrl(String platform, String state) {
+    com.influencermatch.backend.creator.meta.MetaPlatformGuard.requireLegacy(platform);
+    requireLegacyTikTok(platform);
     requireConfigured();
     String normPlatform = platform != null ? platform.toUpperCase() : "";
 
     if (isOfficialSandboxMode()) {
-      if ("TIKTOK".equals(normPlatform) && tikTokProvider != null && tikTokProvider.isConfigured()) {
-        log.info("Directing client to Official TikTok Developer Sandbox consent screen");
-        return tikTokProvider.buildAuthorizationUrl(state);
-      }
       if (("YOUTUBE".equals(normPlatform) || "GOOGLE".equals(normPlatform))
-          && googleProvider != null && googleProvider.isConfigured()) {
+          && googleProvider != null
+          && googleProvider.isConfigured()) {
         log.info("Directing client to Google OAuth Testing consent screen");
         return googleProvider.buildAuthorizationUrl(state);
       }
     }
 
+    requireDevSimulation();
     log.info("Directing client to Simulated OAuth Fallback for platform: {}", normPlatform);
     return fallbackProvider.buildAuthorizationUrl(platform, state);
   }
 
-  /**
-   * Exchanges authorization code with the provider and verifies account identity.
-   */
+  /** Exchanges authorization code with the provider and verifies account identity. */
   public ProofResult exchangeAndVerify(
       String platform, String code, String expectedExternalId, String expectedUserName) {
+    com.influencermatch.backend.creator.meta.MetaPlatformGuard.requireLegacy(platform);
+    requireLegacyTikTok(platform);
     requireConfigured();
     String normPlatform = platform != null ? platform.toUpperCase() : "";
 
     // Explicit simulation codes always route to SimulatedFallbackProofProvider
-    if (code != null && (code.startsWith("sim:") || code.startsWith("sim-mismatch") || "sim-auth-code".equals(code))) {
-      return fallbackProvider.exchangeAndVerify(platform, code, expectedExternalId, expectedUserName);
+    if (code != null
+        && (code.startsWith("sim:")
+            || code.startsWith("sim-mismatch")
+            || "sim-auth-code".equals(code))) {
+      requireDevSimulation();
+      return fallbackProvider.exchangeAndVerify(
+          platform, code, expectedExternalId, expectedUserName);
     }
 
     if (isOfficialSandboxMode()) {
-      if ("TIKTOK".equals(normPlatform) && tikTokProvider != null && tikTokProvider.isConfigured()) {
-        return tikTokProvider.exchangeAndVerify(code, expectedExternalId, expectedUserName);
-      }
       if (("YOUTUBE".equals(normPlatform) || "GOOGLE".equals(normPlatform))
-          && googleProvider != null && googleProvider.isConfigured()) {
+          && googleProvider != null
+          && googleProvider.isConfigured()) {
         return googleProvider.exchangeAndVerify(code, expectedExternalId, expectedUserName);
       }
     }
 
+    requireDevSimulation();
     return fallbackProvider.exchangeAndVerify(platform, code, expectedExternalId, expectedUserName);
   }
-}
 
+  private void requireLegacyTikTok(String platform) {
+    if ("TIKTOK".equalsIgnoreCase(platform) && isOfficialSandboxMode()) {
+      throw new BusinessException(ErrorCode.SOCIAL_PROOF_UNAVAILABLE,
+          "Use TikTok proof-only session endpoints; legacy ownership verification is disabled");
+    }
+  }
+
+  private void requireDevSimulation() {
+    if (!mockEnabled || !environment.acceptsProfiles(Profiles.of("dev & !prod"))) {
+      throw new BusinessException(
+          ErrorCode.SOCIAL_PROOF_UNAVAILABLE,
+          "Simulated provider verification is only available in explicitly enabled development"
+              + " mode");
+    }
+  }
+}

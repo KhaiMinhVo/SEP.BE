@@ -27,8 +27,8 @@ import org.springframework.test.context.*;
 import org.springframework.test.web.servlet.*;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.junit.jupiter.*;
+import org.testcontainers.utility.DockerImageName;
 
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -43,9 +43,13 @@ import org.testcontainers.junit.jupiter.*;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RbacPostgresIntegrationTest {
+  @org.springframework.boot.test.mock.mockito.MockBean
+  com.influencermatch.backend.creator.client.CrawlerServiceClient crawler;
+
   @Container
-  static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
-      DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
+  static final PostgreSQLContainer<?> postgres =
+      new PostgreSQLContainer<>(
+          DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
 
   @DynamicPropertySource
   static void database(DynamicPropertyRegistry registry) throws Exception {
@@ -124,14 +128,15 @@ class RbacPostgresIntegrationTest {
   void migrationUpgradeAndEmptyDatabasePreserveDataAndValidate() {
     User legacy = users.findByEmail("legacy@rbac.test").orElseThrow();
     assertThat(legacy.getPasswordHash()).isEqualTo("preserved");
-    assertThat(legacy.getAuthVersion()).isZero();
+    assertThat(legacy.getAuthVersion()).isEqualTo(1); // V25 invalidates pre-session JWTs.
     var flyway =
         Flyway.configure()
             .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
             .schemas("empty_rbac")
             .defaultSchema("empty_rbac")
             .load();
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(15);
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(31);
+    assertThat(flyway.info().current().getVersion().toString()).isEqualTo("32");
     assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
   }
 
@@ -163,7 +168,8 @@ class RbacPostgresIntegrationTest {
             "/campaigns/00000000-0000-0000-0000-000000000004",
             "/plans")) call(get(route), token, null, 403);
     call(get("/auth/me"), token, null, 200);
-    assertThat(users.findById(target.getId()).orElseThrow().getAuthVersion()).isEqualTo(1);
+    // Role change and reuse of a revoked refresh token each invalidate the user's sessions.
+    assertThat(users.findById(target.getId()).orElseThrow().getAuthVersion()).isEqualTo(2);
     JsonNode auditPage =
         call(
             get("/admin/audit-logs")
@@ -227,7 +233,7 @@ class RbacPostgresIntegrationTest {
     String adminToken = login(admin).get("accessToken").asText(),
         old = login(target).get("accessToken").asText();
     String url = "/admin/users/" + target.getId() + "/status";
-    call(patch(url), adminToken, "{\"status\":\"ACTIVE\"}", 200);
+    call(patch(url), adminToken, "{\"status\":\"ACTIVE\",\"reason\":\"Test status change\"}", 200);
     call(get("/auth/me"), old, null, 200);
     call(patch(url), adminToken, "{\"status\":\"LOCKED\",\"reason\":\"Test lock\"}", 200);
     call(get("/auth/me"), old, null, 401);
@@ -389,7 +395,9 @@ class RbacPostgresIntegrationTest {
       start.countDown();
       var results =
           List.of(tasks.get(0).get(20, TimeUnit.SECONDS), tasks.get(1).get(20, TimeUnit.SECONDS));
-      assertThat(results).contains(200).allMatch(s -> s == 200 || s == 409 || s == 401);
+      assertThat(results).filteredOn(s -> s == 200).hasSize(1);
+      // The actor may lose access before authentication, or while waiting for the guard.
+      assertThat(results).allMatch(s -> s == 200 || s == 409 || s == 401 || s == 403);
       assertThat(users.countByRoleAndStatus(Role.ADMIN, UserStatus.ACTIVE)).isEqualTo(1);
       var remaining =
           users.findAll().stream()
@@ -444,8 +452,14 @@ class RbacPostgresIntegrationTest {
       throws Exception {
     if (token != null) req.header("Authorization", "Bearer " + token);
     if (body != null) req.contentType(MediaType.APPLICATION_JSON).content(body);
-    var result = mvc.perform(req).andExpect(status().is(expected)).andReturn();
+    var result =
+        mvc.perform(req.with(com.influencermatch.backend.support.TestAuthHttp.request(body)))
+            .andExpect(status().is(expected))
+            .andReturn();
     String content = result.getResponse().getContentAsString();
-    return content.isEmpty() ? json.nullNode() : json.readTree(content).path("data");
+    return content.isEmpty()
+        ? json.nullNode()
+        : com.influencermatch.backend.support.TestAuthHttp.read(result.getResponse(), json)
+            .path("data");
   }
 }

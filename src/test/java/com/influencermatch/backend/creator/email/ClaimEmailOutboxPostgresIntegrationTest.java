@@ -205,7 +205,7 @@ class ClaimEmailOutboxPostgresIntegrationTest extends PostgresApiTestSupport {
       jdbc.update("insert into "+schema+".creator(id,platform,external_id,user_name,created_at,updated_at) values(?,'TIKTOK',?,'old-channel',now(),now())",account,account.toString());
       jdbc.update("insert into "+schema+".creator_invitation(id,target_creator_id,invited_by,invited_email,token_hash,expires_at) values(?,?,?,'old@example.test',?,now()+interval '7 days')",invitation,account,user,"c".repeat(64));
       var before=jdbc.queryForObject("select to_jsonb(i)::text from "+schema+".creator_invitation i where id=?",String.class,invitation);
-      org.flywaydb.core.Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema).defaultSchema(schema).load().migrate();
+      org.flywaydb.core.Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema).defaultSchema(schema).target("16").load().migrate();
       assertThat(jdbc.queryForObject("select to_jsonb(i)::text from "+schema+".creator_invitation i where id=?",String.class,invitation)).isEqualTo(before);
       assertThat(jdbc.queryForObject("select count(*) from "+schema+".claim_email_outbox",Long.class)).isZero();
       assertThat(jdbc.queryForObject("select count(*) from "+schema+".\"user\" where id=? and email_verified=true",Long.class,user)).isEqualTo(1);

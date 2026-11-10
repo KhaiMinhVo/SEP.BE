@@ -157,15 +157,10 @@ public class SubscriptionService {
       throw new ForbiddenException("No active subscription found. Please subscribe to create campaigns.");
     }
 
-    int quotaLimit = sub.getPlan().getCampaignQuota();
-    if (sub.getUsedCampaignQuota() >= quotaLimit) {
-      throw new ConflictException(
-          ErrorCode.QUOTA_EXCEEDED,
-          "Campaign quota exceeded (" + sub.getUsedCampaignQuota() + "/" + quotaLimit + "). Please upgrade your plan.");
-    }
+    if (subscriptionRepository.reserveCampaignQuotaAtomically(sub.getId(), LocalDate.now()) != 1)
+      throw new ConflictException(ErrorCode.QUOTA_EXCEEDED, "Campaign quota exhausted or subscription no longer active");
+    entityManager.refresh(sub);
 
-    sub.setUsedCampaignQuota(sub.getUsedCampaignQuota() + 1);
-    subscriptionRepository.save(sub);
   }
 
   /**

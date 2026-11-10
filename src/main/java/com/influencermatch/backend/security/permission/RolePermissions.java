@@ -19,12 +19,19 @@ public final class RolePermissions {
   public static Set<Permission> forRole(Role role) {
     Objects.requireNonNull(role, "role");
     EnumSet<Permission> permissions = EnumSet.copyOf(COMMON);
-    if (role == Role.CREATOR) permissions.addAll(EnumSet.of(Permission.CLAIM_CREATOR_PROFILE,
-        Permission.VIEW_OWN_CREATOR_CLAIM));
-    if (role == Role.ADMIN || role == Role.DATA_MANAGER) permissions.add(Permission.REVIEW_CREATOR_CLAIM);
+    if (role == Role.CREATOR)
+      permissions.addAll(
+          EnumSet.of(
+              Permission.CLAIM_CREATOR_PROFILE,
+              Permission.VIEW_OWN_CREATOR_CLAIM,
+              Permission.RESPOND_OWN_COOPERATION,
+              Permission.MANAGE_OWN_CREATOR_PROFILE));
+    if (role == Role.ADMIN || role == Role.DATA_MANAGER)
+      permissions.add(Permission.REVIEW_CREATOR_CLAIM);
     if (role == Role.BRAND)
       permissions.addAll(
           EnumSet.of(
+              Permission.VIEW_CREATOR_CONTACT,
               Permission.CREATE_BRAND_PROFILE,
               Permission.UPDATE_BRAND_PROFILE,
               Permission.VIEW_OWN_BRAND_DATA,
@@ -50,6 +57,8 @@ public final class RolePermissions {
       permissions.addAll(
           EnumSet.of(
               Permission.INVITE_CREATOR,
+              Permission.VIEW_CREATOR_MASTER_CATALOG,
+              Permission.VIEW_CREATOR_IDENTITY_HISTORY,
               Permission.VIEW_DATA_MONITORING,
               Permission.VIEW_COLLECTION_JOB,
               Permission.RETRY_COLLECTION_JOB,

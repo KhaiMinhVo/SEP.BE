@@ -38,6 +38,17 @@ public interface ShortlistItemRepository
 
   Optional<ShortlistItem> findByCampaignIdAndCreatorId(UUID campaignId, UUID creatorId);
 
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @Query(
+      "select i from ShortlistItem i where i.campaign.id=:campaignId and i.creator.id=:creatorId")
+  Optional<ShortlistItem> findLockedByCampaignIdAndCreatorId(
+      @Param("campaignId") UUID campaignId, @Param("creatorId") UUID creatorId);
+
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @Query("select i from ShortlistItem i where i.id=:id and i.campaign.id=:campaignId")
+  Optional<ShortlistItem> findLockedByIdAndCampaignId(
+      @Param("id") UUID id, @Param("campaignId") UUID campaignId);
+
   List<ShortlistItem> findByCampaignIdAndStatus(UUID campaignId, ShortlistStatus status);
 
   long countByCampaignId(UUID campaignId);

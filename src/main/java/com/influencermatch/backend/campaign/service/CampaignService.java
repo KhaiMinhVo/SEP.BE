@@ -1,6 +1,5 @@
 package com.influencermatch.backend.campaign.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.influencermatch.backend.brand.controller.*;
 import com.influencermatch.backend.brand.dto.*;
@@ -32,6 +31,10 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class CampaignService {
   private final CampaignRepository campaigns;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.brand.repository.BrandContextRepository brandContexts;
+
   private final CampaignContextRepository contexts;
   private final BrandService brandService;
   private final com.influencermatch.backend.billing.service.SubscriptionService subscriptionService;
@@ -39,12 +42,20 @@ public class CampaignService {
   private final PublicCreatorMetricRepository metricRepository;
   private final com.influencermatch.backend.creator.repository.PostRepository postRepository;
 
+  @org.springframework.beans.factory.annotation.Autowired private CampaignWriteLock writeLocks;
+  @org.springframework.beans.factory.annotation.Autowired private CampaignM3ContextService m3;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.campaign.embedding.CampaignEmbeddingStore embeddings;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  private org.springframework.jdbc.core.JdbcTemplate executionDb;
+
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CREATE_CAMPAIGN')")
   public CampaignResponse create(
       UUID brandId, CampaignRequest request, Authentication authentication) {
-    Permissions.require(
-        Permission.CREATE_CAMPAIGN);
+    Permissions.require(Permission.CREATE_CAMPAIGN);
     BrandProfile brandProfile = brandService.requireAccessible(brandId, authentication);
     validate(request);
     subscriptionService.checkAndDeductCampaignQuota(brandProfile.getId());
@@ -52,7 +63,9 @@ public class CampaignService {
         Campaign.builder()
             .brandProfile(brandProfile)
             .name(request.name().trim())
-            .productService(request.productService().trim())
+            .productService(
+                com.influencermatch.backend.brand.service.BrandContextData.text(
+                    request.productService()))
             .objective(request.objective())
             .status(CampaignStatus.DRAFT)
             .build();
@@ -65,9 +78,7 @@ public class CampaignService {
       "hasAuthority('VIEW_OWN_CAMPAIGN') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
   public PageResponse<CampaignResponse> list(
       UUID brandId, Pageable pageable, Authentication authentication) {
-    Permissions.require(
-        Permission.VIEW_OWN_CAMPAIGN,
-        Permission.VIEW_BRAND_SUPPORT_DATA);
+    Permissions.require(Permission.VIEW_OWN_CAMPAIGN, Permission.VIEW_BRAND_SUPPORT_DATA);
     brandService.requireAccessible(brandId, authentication);
     return PageResponse.from(
         campaigns.findByBrandProfileId(brandId, pageable).map(this::loadResponse));
@@ -77,9 +88,7 @@ public class CampaignService {
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('VIEW_OWN_CAMPAIGN') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
   public CampaignResponse get(UUID id, Authentication authentication) {
-    Permissions.require(
-        Permission.VIEW_OWN_CAMPAIGN,
-        Permission.VIEW_BRAND_SUPPORT_DATA);
+    Permissions.require(Permission.VIEW_OWN_CAMPAIGN, Permission.VIEW_BRAND_SUPPORT_DATA);
     Campaign campaign = requireCampaign(id);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
     return loadResponse(campaign);
@@ -89,8 +98,7 @@ public class CampaignService {
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SEARCH_CREATOR')")
   public PageResponse<CreatorDiscoveryResponse> discoverCreators(
       UUID campaignId, Pageable pageable, Authentication authentication) {
-    Permissions.require(
-        Permission.SEARCH_CREATOR);
+    Permissions.require(Permission.SEARCH_CREATOR);
     Campaign campaign = requireCampaign(campaignId);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
 
@@ -237,28 +245,31 @@ public class CampaignService {
 
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
-  public CampaignResponse update(UUID id, CampaignRequest request, Authentication authentication) {
-    Permissions.require(
-        Permission.UPDATE_CAMPAIGN);
-    Campaign campaign = requireCampaign(id);
-    brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
+  public CampaignResponse update(
+      UUID id, CampaignRequest request, Authentication authentication, String revision) {
+    Permissions.require(Permission.UPDATE_CAMPAIGN);
+    Campaign campaign = writeLocks.owned(id);
+    CampaignRevision.require(revision, id, campaign.getCampaignRevision());
     campaign.getStatus().requireEditable();
     validate(request);
+    var before = CampaignBriefData.snapshot(campaign, objectMapper);
     applyCampaign(campaign, request);
+    if (!before.equals(CampaignBriefData.snapshot(campaign, objectMapper)))
+      campaign.setCampaignRevision(campaign.getCampaignRevision() + 1);
     return response(campaign);
   }
 
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('CHANGE_CAMPAIGN_STATUS')")
-  public CampaignResponse archive(UUID id, Authentication authentication) {
-    Permissions.require(
-        Permission.CHANGE_CAMPAIGN_STATUS);
-    Campaign campaign = requireCampaign(id);
-    brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
+  public CampaignResponse archive(UUID id, Authentication authentication, String revision) {
+    Permissions.require(Permission.CHANGE_CAMPAIGN_STATUS);
+    Campaign campaign = writeLocks.owned(id);
+    CampaignRevision.require(revision, id, campaign.getCampaignRevision());
     if (campaign.getStatus() != CampaignStatus.ARCHIVED) {
       campaign.getStatus().requireTransitionTo(CampaignStatus.ARCHIVED);
       campaign.setStatus(CampaignStatus.ARCHIVED);
+      campaign.setCampaignRevision(campaign.getCampaignRevision() + 1);
     }
     return loadResponse(campaign);
   }
@@ -267,18 +278,41 @@ public class CampaignService {
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('CHANGE_CAMPAIGN_STATUS')")
   public CampaignResponse changeStatus(
-      UUID id, CampaignStatusRequest request, Authentication authentication) {
-    Permissions.require(
-        Permission.CHANGE_CAMPAIGN_STATUS);
-    Campaign campaign = requireCampaign(id);
-    brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
+      UUID id, CampaignStatusRequest request, Authentication authentication, String revision) {
+    Permissions.require(Permission.CHANGE_CAMPAIGN_STATUS);
+    Campaign campaign = writeLocks.owned(id);
+    CampaignRevision.require(revision, id, campaign.getCampaignRevision());
     CampaignStatus target = request.status();
     campaign.getStatus().requireTransitionTo(target);
     if (target == CampaignStatus.READY_FOR_DISCOVERY) {
       validateReady(campaign);
-      createInitialContext(campaign);
+      m3.create(campaign, false);
+    }
+    if (target == CampaignStatus.COMPLETED) {
+      Long completed =
+          executionDb.queryForObject(
+              "select count(*) from collaboration where campaign_id=? and status='COMPLETED'",
+              Long.class,
+              id);
+      Long unfinished =
+          executionDb.queryForObject(
+              "select count(*) from collaboration where campaign_id=? and status not in"
+                  + " ('COMPLETED','CANCELLED')",
+              Long.class,
+              id);
+      Long openDeals =
+          executionDb.queryForObject(
+              "select count(*) from cooperation_deal where campaign_id=? and status in"
+                  + " ('CONTACTED','NEGOTIATING')",
+              Long.class,
+              id);
+      if (completed == 0 || unfinished > 0 || openDeals > 0)
+        throw new BusinessException(
+            ErrorCode.INVALID_COLLABORATION_STATE,
+            "Resolve open deals and finish collaborations before closing Campaign");
     }
     campaign.setStatus(target);
+    campaign.setCampaignRevision(campaign.getCampaignRevision() + 1);
     return loadResponse(campaign);
   }
 
@@ -286,43 +320,72 @@ public class CampaignService {
     return campaigns.findById(id).orElseThrow(() -> notFound("Campaign not found: " + id));
   }
 
+  public CampaignResponse update(UUID id, CampaignRequest r, Authentication a) {
+    return update(id, r, a, null);
+  }
+
+  public CampaignResponse changeStatus(UUID id, CampaignStatusRequest r, Authentication a) {
+    return changeStatus(id, r, a, null);
+  }
+
+  public CampaignResponse archive(UUID id, Authentication a) {
+    return archive(id, a, null);
+  }
+
+  @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
+  public CampaignResponse retryEmbedding(UUID id, Authentication a) {
+    Permissions.require(Permission.UPDATE_CAMPAIGN);
+    var c = writeLocks.owned(id);
+    var ctx = m3.latest(id);
+    if (ctx == null || ctx.getEmbeddingSourceContextId() == null)
+      throw new ConflictException(
+          ErrorCode.CAMPAIGN_EMBEDDING_RETRY_CONFLICT, "No tracked current embedding job");
+    embeddings.retry(ctx.getEmbeddingSourceContextId());
+    return response(c);
+  }
+
   private void validate(CampaignRequest r) {
+    if (r.budgetMin() != null || r.budgetMax() != null)
+      throw new ValidationException(
+          "budgetMin/budgetMax are legacy read-only fields; use totalBudget and"
+              + " creatorFeeMin/creatorFeeMax");
     if (r.startDate() != null && r.endDate() != null && r.endDate().isBefore(r.startDate()))
       invalid("endDate must not be before startDate");
-    if (greater(r.followerMin(), r.followerMax()))
-      invalid("followerMax must be greater than or equal to followerMin");
-    if (greater(r.budgetMin(), r.budgetMax()))
-      invalid("budgetMax must be greater than or equal to budgetMin");
+    if (greater(r.followerMin(), r.followerMax())) invalid("Invalid follower range");
+    if (greater(r.creatorFeeMin(), r.creatorFeeMax())) invalid("Invalid Creator fee range");
+    if (r.creatorMode() == CreatorMode.SINGLE
+        && r.targetCreatorCount() != null
+        && r.targetCreatorCount() != 1) invalid("SINGLE requires one Creator");
+    if (r.creatorMode() == CreatorMode.MULTI
+        && r.targetCreatorCount() != null
+        && r.targetCreatorCount() < 2) invalid("MULTI requires at least two Creators");
+    if (r.deliverables() != null)
+      for (var d : r.deliverables())
+        if (r.platforms() == null || !r.platforms().contains(d.platform()))
+          invalid("Deliverable platform must belong to Campaign platforms");
   }
 
-  private void validateReady(Campaign campaign) {
-    if (campaign.getPlatforms() == null || campaign.getPlatforms().isEmpty()) {
-      throw new ConflictException(
-          ErrorCode.CAMPAIGN_CONTEXT_NOT_READY,
-          "At least one platform is required before discovery");
-    }
-  }
-
-  private void createInitialContext(Campaign campaign) {
-    Map<String, Object> value = new LinkedHashMap<>();
-    value.put("platforms", campaign.getPlatforms());
-    value.put("niches", campaign.getNiches());
-    value.put("locations", campaign.getLocations());
-    value.put("targetAudiences", campaign.getTargetAudiences());
-    value.put("objective", campaign.getObjective().name());
-    value.put("followerMin", campaign.getFollowerMin());
-    value.put("followerMax", campaign.getFollowerMax());
-    value.put("budgetMin", campaign.getBudgetMin());
-    value.put("budgetMax", campaign.getBudgetMax());
-    value.put("contentType", campaign.getContentType());
-    JsonNode contextData = objectMapper.valueToTree(value);
-    contexts.save(
-        CampaignContext.builder()
-            .campaign(campaign)
-            .contextVersion(1)
-            .contextData(contextData)
-            .active(true)
-            .build());
+  private void validateReady(Campaign c) {
+    var missing = new LinkedHashMap<String, List<String>>();
+    for (var e :
+        Map.of(
+                "productService",
+                Objects.toString(c.getProductService(), ""),
+                "brief",
+                Objects.toString(c.getBrief(), ""))
+            .entrySet())
+      if (e.getValue().isBlank()) missing.put(e.getKey(), List.of("Required before READY"));
+    if (c.getObjective() == null) missing.put("objective", List.of("Required"));
+    if (c.getPlatforms().isEmpty()) missing.put("platforms", List.of("At least one required"));
+    if (c.getStartDate() == null) missing.put("startDate", List.of("Required"));
+    if (c.getEndDate() == null) missing.put("endDate", List.of("Required"));
+    if (c.getTotalBudget() == null) missing.put("totalBudget", List.of("Required"));
+    if (c.getCreatorMode() == null) missing.put("creatorMode", List.of("Required"));
+    if (c.getTargetCreatorCount() == null) missing.put("targetCreatorCount", List.of("Required"));
+    if (c.getDeliverables().isEmpty())
+      missing.put("deliverables", List.of("At least one required"));
+    if (!missing.isEmpty()) throw new ProfileIncompleteException(missing);
   }
 
   private boolean greater(Long min, Long max) {
@@ -339,25 +402,44 @@ public class CampaignService {
 
   private void applyCampaign(Campaign c, CampaignRequest r) {
     c.setName(r.name().trim());
-    c.setProductService(r.productService().trim());
+    c.setProductService(BrandContextData.text(r.productService()));
     c.setObjective(r.objective());
     c.setTargetAudiences(strings(r.targetAudiences()));
-    c.setContentType(r.contentType());
+    c.setContentType(BrandContextData.text(r.contentType()));
     c.setStartDate(r.startDate());
     c.setEndDate(r.endDate());
-    c.setPlatforms(r.platforms().stream().map(Enum::name).distinct().toList());
+    c.setPlatforms(
+        r.platforms() == null
+            ? List.of()
+            : r.platforms().stream().map(Enum::name).distinct().sorted().toList());
     c.setNiches(strings(r.niches()));
     c.setLocations(strings(r.locations()));
     c.setFollowerMin(r.followerMin());
     c.setFollowerMax(r.followerMax());
-    c.setBudgetMin(r.budgetMin());
-    c.setBudgetMax(r.budgetMax());
+    c.setBrief(BrandContextData.text(r.brief()));
+    c.setCreatorMode(r.creatorMode());
+    c.setTargetCreatorCount(r.targetCreatorCount());
+    c.setDeliverables(
+        r.deliverables() == null
+            ? List.of()
+            : r.deliverables().stream()
+                .map(
+                    d ->
+                        new CampaignDeliverable(d.platform(), d.contentType().trim(), d.quantity()))
+                .distinct()
+                .sorted(
+                    Comparator.comparing((CampaignDeliverable d) -> d.platform().name())
+                        .thenComparing(CampaignDeliverable::contentType)
+                        .thenComparing(CampaignDeliverable::quantity))
+                .toList());
+    c.setTotalBudget(r.totalBudget());
+    c.setCurrency(r.currency() == null ? "VND" : r.currency());
+    c.setCreatorFeeMin(r.creatorFeeMin());
+    c.setCreatorFeeMax(r.creatorFeeMax());
   }
 
   private List<String> strings(List<String> values) {
-    return values == null
-        ? List.of()
-        : values.stream().map(String::trim).filter(v -> !v.isEmpty()).distinct().toList();
+    return BrandContextData.list(values);
   }
 
   private CampaignResponse loadResponse(Campaign c) {
@@ -365,6 +447,11 @@ public class CampaignService {
   }
 
   private CampaignResponse response(Campaign c) {
+    var ctx = m3.latest(c.getId());
+    var view =
+        ctx == null || ctx.getEmbeddingSourceContextId() == null
+            ? null
+            : embeddings.view(ctx.getEmbeddingSourceContextId());
     return new CampaignResponse(
         c.getId(),
         c.getBrandProfile().getId(),
@@ -384,7 +471,23 @@ public class CampaignService {
         c.getBudgetMin(),
         c.getBudgetMax(),
         c.getCreatedAt(),
-        c.getUpdatedAt());
+        c.getUpdatedAt(),
+        c.getBrief(),
+        c.getCreatorMode(),
+        c.getTargetCreatorCount(),
+        c.getDeliverables(),
+        c.getTotalBudget(),
+        c.getCurrency(),
+        c.getCreatorFeeMin(),
+        c.getCreatorFeeMax(),
+        "UNAVAILABLE",
+        c.getCampaignRevision(),
+        ctx == null ? null : ctx.getContextVersion(),
+        ctx == null ? null : ctx.getEmbeddingSourceContextId(),
+        view == null ? "NOT_REQUESTED" : view.status(),
+        view == null ? null : view.model(),
+        view == null ? null : view.modelVersion(),
+        view == null ? null : view.readyAt());
   }
 
   private BusinessException notFound(String detail) {

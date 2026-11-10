@@ -35,6 +35,9 @@ public class CampaignContext extends BaseEntity {
   @Column(nullable = false)
   private int contextVersion;
 
+  private java.util.UUID brandContextId;
+  private java.util.UUID embeddingSourceContextId;
+
   @JdbcTypeCode(SqlTypes.JSON)
   @Column(nullable = false)
   private JsonNode contextData;
@@ -43,4 +46,10 @@ public class CampaignContext extends BaseEntity {
   private boolean active;
 
   @Column private LocalDateTime archivedAt;
+
+  @PrePersist
+  void assignEmbeddingSource() {
+    if (embeddingSourceContextId == null && contextData != null && contextData.has("embeddingText"))
+      embeddingSourceContextId = getId();
+  }
 }

@@ -16,7 +16,7 @@ class JwtAuthVersionTest {
   private final String secret = "404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970";
 
   @Test
-  void legacyVersionZeroIsAcceptedOnlyUntilRevoked() {
+  void legacyTokenWithoutSessionIsAlwaysRejected() {
     var provider = new JwtTokenProvider();
     ReflectionTestUtils.setField(provider, "secretKey", secret);
     var user =
@@ -36,7 +36,7 @@ class JwtAuthVersionTest {
             .expiration(new Date(System.currentTimeMillis() + 60000))
             .signWith(Keys.hmacShaKeyFor(Decoders.BASE64.decode(secret)))
             .compact();
-    assertThat(provider.isTokenValid(legacy, user)).isTrue();
+    assertThat(provider.isTokenValid(legacy, user)).isFalse();
     user.setAuthVersion(1);
     assertThat(provider.isTokenValid(legacy, user)).isFalse();
     user.setAuthVersion(0);

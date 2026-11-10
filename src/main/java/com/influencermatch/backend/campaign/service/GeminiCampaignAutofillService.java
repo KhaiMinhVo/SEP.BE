@@ -35,9 +35,8 @@ public class GeminiCampaignAutofillService {
   // ───────────────────────────────────────────────────────────────────────────
 
   /**
-   * Given a short natural-language brand prompt, calls Gemini to generate a
-   * fully populated CampaignAutofillResponse that the frontend can use to
-   * pre-fill the campaign creation form.
+   * Given a short natural-language brand prompt, calls Gemini to generate a fully populated
+   * CampaignAutofillResponse that the frontend can use to pre-fill the campaign creation form.
    */
   public CampaignAutofillResponse autofill(CampaignAutofillRequest request) {
     String prompt = buildPrompt(request.prompt());
@@ -55,53 +54,60 @@ public class GeminiCampaignAutofillService {
     LocalDate defaultEnd = today.plusDays(37);
 
     return """
-        You are a marketing campaign assistant for an influencer marketing platform.
-        A brand user has described their campaign in natural language. Your task is to
-        extract and infer all relevant campaign parameters and return them as a strict
-        JSON object – no markdown, no code fences, just raw JSON.
+You are a marketing campaign assistant for an influencer marketing platform.
+A brand user has described their campaign in natural language. Your task is to
+extract and infer all relevant campaign parameters and return them as a strict
+JSON object – no markdown, no code fences, just raw JSON.
 
-        === PLATFORM ENUM VALUES (use exactly these strings) ===
-        INSTAGRAM, TIKTOK, YOUTUBE, FACEBOOK, TWITTER, THREADS
+=== PLATFORM ENUM VALUES (use exactly these strings) ===
+INSTAGRAM, TIKTOK, YOUTUBE, FACEBOOK, TWITTER, THREADS
 
-        === OBJECTIVE ENUM VALUES (use exactly these strings) ===
-        AWARENESS, ENGAGEMENT, TRAFFIC, CONVERSION
+=== OBJECTIVE ENUM VALUES (use exactly these strings) ===
+AWARENESS, ENGAGEMENT, TRAFFIC, CONVERSION
 
-        === OUTPUT FORMAT (return ONLY this JSON, nothing else) ===
-        {
-          "name": "string – concise campaign name (max 200 chars)",
-          "productService": "string – what product/service is being promoted (max 500 chars)",
-          "objective": "AWARENESS | ENGAGEMENT | TRAFFIC | CONVERSION",
-          "targetAudiences": ["array of audience segments, e.g. 'Women 18-35', 'Skincare enthusiasts'"],
-          "contentType": "string – e.g. 'Short video review', 'Unboxing', 'Tutorial post'",
-          "startDate": "YYYY-MM-DD (default to %s if not mentioned)",
-          "endDate": "YYYY-MM-DD (default to %s if not mentioned)",
-          "platforms": ["array of platform enum values"],
-          "niches": ["relevant niches, e.g. 'beauty', 'skincare', 'lifestyle'"],
-          "locations": ["target locations, e.g. 'Vietnam', 'Ho Chi Minh City' – infer from context or use ['Vietnam'] as default"],
-          "followerMin": number | null (minimum follower count, e.g. 10000),
-          "followerMax": number | null (maximum follower count, e.g. 500000),
-          "budgetMin": number | null (minimum budget in VND, e.g. 5000000),
-          "budgetMax": number | null (maximum budget in VND, e.g. 20000000),
-          "aiExplanation": "string – 2-3 sentences explaining why you made these choices"
-        }
+=== OUTPUT FORMAT (return ONLY this JSON, nothing else) ===
+{
+  "name": "string – concise campaign name (max 200 chars)",
+  "productService": "string – what product/service is being promoted (max 500 chars)",
+  "objective": "AWARENESS | ENGAGEMENT | TRAFFIC | CONVERSION",
+  "targetAudiences": ["array of audience segments, e.g. 'Women 18-35', 'Skincare enthusiasts'"],
+  "contentType": "string – e.g. 'Short video review', 'Unboxing', 'Tutorial post'",
+  "startDate": "YYYY-MM-DD (default to %s if not mentioned)",
+  "endDate": "YYYY-MM-DD (default to %s if not mentioned)",
+  "platforms": ["array of platform enum values"],
+  "niches": ["relevant niches, e.g. 'beauty', 'skincare', 'lifestyle'"],
+  "locations": ["target locations, e.g. 'Vietnam', 'Ho Chi Minh City' – infer from context or use ['Vietnam'] as default"],
+  "followerMin": number | null (minimum follower count, e.g. 10000),
+  "followerMax": number | null (maximum follower count, e.g. 500000),
+  "brief": "Detailed editable campaign brief",
+  "creatorMode": "SINGLE or MULTI or null when unspecified",
+  "targetCreatorCount": null,
+  "deliverables": [{"platform":"TIKTOK","contentType":"Review video","quantity":1}],
+  "totalBudget": null,
+  "currency":"VND",
+  "creatorFeeMin":null,
+  "creatorFeeMax":null,
+  "aiExplanation": "string – 2-3 sentences explaining why you made these choices"
+}
 
-        === BUDGET INTERPRETATION GUIDELINES ===
-        - "budget tầm tầm" or "budget trung bình" → budgetMin: 10000000, budgetMax: 30000000
-        - "budget thấp" or "budget ít" → budgetMin: 2000000, budgetMax: 10000000
-        - "budget cao" or "budget lớn" → budgetMin: 50000000, budgetMax: 200000000
-        - Specific amount mentioned → use that; if only one end given, set the other proportionally
+=== BUDGET INTERPRETATION GUIDELINES ===
+- Separate totalBudget for the entire campaign from creatorFeeMin/creatorFeeMax per Creator.
+- Do not divide totalBudget by targetCreatorCount or invent unspecified amounts.
+- Only VND is supported. Never suggest a hard fee constraint.
+- Deliverables apply to EACH Creator. All suggestions require Brand review.
 
-        === FOLLOWER INTERPRETATION GUIDELINES ===
-        - "micro influencer" → followerMin: 10000, followerMax: 100000
-        - "macro influencer" → followerMin: 100000, followerMax: 1000000
-        - "mega influencer" or "KOL lớn" → followerMin: 500000, followerMax: null
-        - If not mentioned, infer from budget: low budget → micro; high budget → macro
+=== FOLLOWER INTERPRETATION GUIDELINES ===
+- "micro influencer" → followerMin: 10000, followerMax: 100000
+- "macro influencer" → followerMin: 100000, followerMax: 1000000
+- "mega influencer" or "KOL lớn" → followerMin: 500000, followerMax: null
+- If not mentioned, infer from budget: low budget → micro; high budget → macro
 
-        === BRAND DESCRIPTION ===
-        %s
+=== BRAND DESCRIPTION ===
+%s
 
-        Remember: Return ONLY the JSON object, no other text.
-        """.formatted(defaultStart, defaultEnd, userInput);
+Remember: Return ONLY the JSON object, no other text.
+"""
+        .formatted(defaultStart, defaultEnd, userInput);
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -147,7 +153,9 @@ public class GeminiCampaignAutofillService {
                       "generationConfig",
                       new java.util.LinkedHashMap<String, Object>() {
                         {
-                          put("maxOutputTokens", Math.max(geminiProperties.getMaxOutputTokens(), 2048));
+                          put(
+                              "maxOutputTokens",
+                              Math.max(geminiProperties.getMaxOutputTokens(), 2048));
                           put("temperature", geminiProperties.getTemperature());
                           put("responseMimeType", "application/json");
                           put("thinkingConfig", Map.of("thinkingBudget", 0));
@@ -237,14 +245,50 @@ public class GeminiCampaignAutofillService {
         strings(node, "locations"),
         longVal(node, "followerMin"),
         longVal(node, "followerMax"),
-        decimal(node, "budgetMin"),
-        decimal(node, "budgetMax"),
+        text(node, "brief"),
+        mode(node),
+        node.path("targetCreatorCount").canConvertToInt()
+            ? node.path("targetCreatorCount").intValue()
+            : null,
+        deliverables(node),
+        decimal(node, "totalBudget"),
+        "VND",
+        decimal(node, "creatorFeeMin"),
+        decimal(node, "creatorFeeMax"),
         text(node, "aiExplanation"));
   }
 
   // ───────────────────────────────────────────────────────────────────────────
   //  JSON helpers
   // ───────────────────────────────────────────────────────────────────────────
+
+  private com.influencermatch.backend.campaign.enums.CreatorMode mode(JsonNode n) {
+    try {
+      return com.influencermatch.backend.campaign.enums.CreatorMode.valueOf(
+          n.path("creatorMode").asText());
+    } catch (IllegalArgumentException e) {
+      return null;
+    }
+  }
+
+  private List<com.influencermatch.backend.campaign.dto.CampaignDeliverable> deliverables(
+      JsonNode n) {
+    var out = new ArrayList<com.influencermatch.backend.campaign.dto.CampaignDeliverable>();
+    if (n.path("deliverables").isArray())
+      for (var d : n.path("deliverables")) {
+        try {
+          var platform = Platform.valueOf(d.path("platform").asText());
+          var type = d.path("contentType").asText();
+          int q = d.path("quantity").asInt();
+          if (!type.isBlank() && q > 0)
+            out.add(
+                new com.influencermatch.backend.campaign.dto.CampaignDeliverable(
+                    platform, type, q));
+        } catch (IllegalArgumentException ignored) {
+        }
+      }
+    return out;
+  }
 
   private String text(JsonNode node, String field) {
     JsonNode v = node.get(field);

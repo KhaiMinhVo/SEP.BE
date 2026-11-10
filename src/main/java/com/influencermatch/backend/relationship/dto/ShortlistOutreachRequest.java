@@ -30,6 +30,10 @@ public class ShortlistOutreachRequest {
   @Schema(description = "Proposed campaign fee", example = "15000000")
   private BigDecimal proposedFee;
 
+  @jakarta.validation.Valid
+  private java.util.List<com.influencermatch.backend.cooperation.CooperationDtos.Deliverable>
+      deliverables;
+
   @Builder.Default
   @Schema(description = "Currency code", example = "VND")
   private String currency = "VND";

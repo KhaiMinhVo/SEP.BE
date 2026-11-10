@@ -20,4 +20,3 @@ public class UpdateRelationshipStageRequest {
 
     private String nextAction;
 }
-

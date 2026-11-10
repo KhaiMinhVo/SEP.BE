@@ -53,6 +53,8 @@ class AdminUserServiceTest {
     @Mock
     private BrandProfileRepository profiles;
 
+    @Mock private com.influencermatch.backend.user.service.AdminAccessGuard guard;
+
     @InjectMocks
     private AdminUserService adminUserService;
 
@@ -66,6 +68,7 @@ class AdminUserServiceTest {
                 .status(UserStatus.ACTIVE)
                 .build();
         setSecurityContext(adminPrincipal);
+        lenient().when(guard.lock(any(),any())).thenAnswer(i->users.findById(i.getArgument(0)).orElseThrow());
     }
 
     @AfterEach
@@ -83,12 +86,12 @@ class AdminUserServiceTest {
     @DisplayName("list - Success")
     void list_Success() {
         Page<User> usersPage = new PageImpl<>(List.of(User.builder().id(UUID.randomUUID()).role(Role.BRAND).build()));
-        when(users.findAll(any(PageRequest.class))).thenReturn(usersPage);
+        when(users.findAll(any(org.springframework.data.jpa.domain.Specification.class),any(org.springframework.data.domain.Pageable.class))).thenReturn(usersPage);
         
         Page<AdminUserResponse> result = adminUserService.list(PageRequest.of(0, 10));
         
         assertThat(result).hasSize(1);
-        verify(users).findAll(any(PageRequest.class));
+        verify(users).findAll(any(org.springframework.data.jpa.domain.Specification.class),any(org.springframework.data.domain.Pageable.class));
     }
 
     @Test
@@ -137,9 +140,9 @@ class AdminUserServiceTest {
         
         assertThat(response.status()).isEqualTo(UserStatus.LOCKED);
         assertThat(targetUser.getAuthVersion()).isEqualTo(2L);
-        verify(users).lockRoleChanges();
+        verify(guard).lock(eq(userId),any());
         verify(refreshTokens).revokeAll(userId);
-        verify(audit).record(eq("CHANGE_USER_STATUS"), eq("User"), eq(userId), anyMap(), anyMap(), eq("Violated terms"));
+        verify(audit).recordAs(eq(adminPrincipal.getId()),eq("CHANGE_USER_STATUS"), eq("User"), eq(userId), anyMap(), anyMap(), eq("Violated terms"));
     }
 
     @Test
@@ -155,7 +158,7 @@ class AdminUserServiceTest {
         
         assertThat(response.status()).isEqualTo(UserStatus.ACTIVE);
         verify(users, never()).save(any());
-        verify(audit, never()).record(anyString(), anyString(), any(), anyMap(), anyMap(), anyString());
+        verifyNoInteractions(audit,refreshTokens);
     }
 
     @Test
@@ -186,9 +189,9 @@ class AdminUserServiceTest {
         
         assertThat(response.role()).isEqualTo(Role.ADMIN);
         assertThat(targetUser.getAuthVersion()).isEqualTo(2L);
-        verify(users).lockRoleChanges();
+        verify(guard).lock(eq(userId),any());
         verify(refreshTokens).revokeAll(userId);
-        verify(audit).record(eq("ASSIGN_USER_ROLE"), eq("User"), eq(userId), anyMap(), anyMap(), eq("Promoted"));
+        verify(audit).recordAs(eq(adminPrincipal.getId()),eq("ASSIGN_USER_ROLE"), eq("User"), eq(userId), anyMap(), anyMap(), eq("Promoted"));
     }
 
     @Test

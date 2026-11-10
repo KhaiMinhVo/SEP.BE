@@ -13,7 +13,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ShortlistCrawlEvent {
-  private String eventType; // CRAWL_STARTED, CRAWL_COMPLETED, CRAWL_FAILED, CONNECTED
+  private String eventType; // CRAWL_REQUESTED, CRAWL_REQUEST_FAILED, CRAWL_COMPLETED, CONNECTED
+  private UUID metricId;
+  private LocalDateTime collectedAt;
   private UUID campaignId;
   private UUID creatorId;
   private String creatorName;

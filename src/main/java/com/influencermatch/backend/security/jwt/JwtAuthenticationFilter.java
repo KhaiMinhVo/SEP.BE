@@ -52,12 +52,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
         UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
-        if (((User) userDetails).isEmailVerified() && userDetails.isEnabled()
+        if (((User) userDetails).isEmailVerified()
+            && userDetails.isEnabled()
             && userDetails.isAccountNonLocked()
             && jwtTokenProvider.isTokenValid(jwt, userDetails)) {
           UsernamePasswordAuthenticationToken authToken =
               new UsernamePasswordAuthenticationToken(
-                  userDetails, null, effectivePermissions.authorities(((User) userDetails).getRole(), request));
+                  userDetails,
+                  null,
+                  effectivePermissions.authorities(((User) userDetails).getRole(), request));
+          request.setAttribute(
+              "authSessionId",
+              java.util.UUID.fromString(
+                  jwtTokenProvider.extractClaim(jwt, c -> c.get("sid", String.class))));
           authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
           SecurityContextHolder.getContext().setAuthentication(authToken);
           log.debug("JWT authenticated user '{}' for '{}'", username, request.getRequestURI());

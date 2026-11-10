@@ -54,13 +54,24 @@ public class CollaborationController {
   @Operation(
       summary = "Confirm a creator collaboration",
       description =
-          "Owned ACTIVE campaign; COLLABORATING, INTERESTED, or CONTACTED relationship from the same"
-              + " campaign. Agreed fee is optional metadata (not a platform payment).")
+          "Compatibility entrypoint for Deal confirmation. Requires dealId, expectedRevision,"
+              + " agreement source/evidence and Idempotency-Key. Creates PLANNED; no direct"
+              + " CONTACTED bypass.")
   @ApiResponse(responseCode = "201", description = "Collaboration created")
   public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<CollaborationResponse>>
-      create(@PathVariable UUID id, @Valid @RequestBody CreateCollaborationRequest request) {
+      create(
+          @PathVariable UUID id,
+          @Valid @RequestBody CreateCollaborationRequest request,
+          @RequestHeader(value = "Idempotency-Key", required = false) String key) {
     return ResponseEntity.status(HttpStatus.CREATED)
-        .body(com.influencermatch.backend.common.dto.ApiResponse.ok(service.create(id, request)));
+        .body(
+            com.influencermatch.backend.common.dto.ApiResponse.ok(
+                service.create(id, request, key)));
+  }
+
+  public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<CollaborationResponse>>
+      create(UUID id, CreateCollaborationRequest request) {
+    return create(id, request, null);
   }
 
   @GetMapping("/campaigns/{id}/collaborations")
@@ -71,7 +82,8 @@ public class CollaborationController {
           "Owned campaign. Returns paginated collaborations with creator info and deliverables"
               + " progress.")
   @ApiResponse(responseCode = "200", description = "Collaboration list retrieved")
-  public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<PageResponse<CollaborationSummaryDto>>>
+  public ResponseEntity<
+          com.influencermatch.backend.common.dto.ApiResponse<PageResponse<CollaborationSummaryDto>>>
       getCampaignCollaborations(
           @PathVariable UUID id,
           @RequestParam(name = "status", required = false) CollaborationStatus status,
@@ -89,11 +101,11 @@ public class CollaborationController {
           "Owned by campaign brand owner or assigned creator master. Returns full detail with"
               + " outcome, review, and evidence assets.")
   @ApiResponse(responseCode = "200", description = "Collaboration detail retrieved")
-  public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<CollaborationDetailResponse>>
+  public ResponseEntity<
+          com.influencermatch.backend.common.dto.ApiResponse<CollaborationDetailResponse>>
       getCollaborationDetail(@PathVariable UUID id) {
     return ResponseEntity.ok(
-        com.influencermatch.backend.common.dto.ApiResponse.ok(
-            service.getCollaborationDetail(id)));
+        com.influencermatch.backend.common.dto.ApiResponse.ok(service.getCollaborationDetail(id)));
   }
 
   @PostMapping("/collaborations/{id}/evidence")
@@ -101,14 +113,15 @@ public class CollaborationController {
   @Operation(
       summary = "Submit deliverables and evidence for a collaboration",
       description =
-          "Allowed for campaign brand owner or assigned creator master. Submits post link, screenshots,"
-              + " or draft videos during or after execution.")
+          "Allowed for campaign brand owner or assigned creator master. Submits post link,"
+              + " screenshots, or draft videos during or after execution.")
   @ApiResponse(responseCode = "201", description = "Evidence asset submitted")
   public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<EvidenceAssetResponse>>
-      submitEvidence(
-          @PathVariable UUID id, @Valid @RequestBody SubmitEvidenceRequest request) {
+      submitEvidence(@PathVariable UUID id, @Valid @RequestBody SubmitEvidenceRequest request) {
     return ResponseEntity.status(HttpStatus.CREATED)
-        .body(com.influencermatch.backend.common.dto.ApiResponse.ok(service.submitEvidence(id, request)));
+        .body(
+            com.influencermatch.backend.common.dto.ApiResponse.ok(
+                service.submitEvidence(id, request)));
   }
 
   @GetMapping("/collaborations/{id}/evidence")
@@ -116,22 +129,24 @@ public class CollaborationController {
   @Operation(
       summary = "Get list of evidence assets for a collaboration",
       description =
-          "Allowed for campaign brand owner or assigned creator master. Returns all submitted evidence assets.")
+          "Allowed for campaign brand owner or assigned creator master. Returns all submitted"
+              + " evidence assets.")
   @ApiResponse(responseCode = "200", description = "Evidence assets retrieved")
-  public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<java.util.List<EvidenceAssetResponse>>>
+  public ResponseEntity<
+          com.influencermatch.backend.common.dto.ApiResponse<java.util.List<EvidenceAssetResponse>>>
       getEvidenceAssets(@PathVariable UUID id) {
     return ResponseEntity.ok(
         com.influencermatch.backend.common.dto.ApiResponse.ok(service.getEvidenceAssets(id)));
   }
 
-  @PostMapping("/collaborations/{id}/outcome")
+  // Outcome execution routes are handled by CollaborationExecutionController.
   @PreAuthorize("hasAuthority('RECORD_OWN_OUTCOME')")
   @Operation(
       summary = "Record a collaboration outcome",
       description =
           "Owned ACTIVE campaign and IN_PROGRESS collaboration. At least one metric and an HTTP(S)"
-              + " post link are required. Metrics are SELF_REPORTED. Completes the collaboration"
-              + " and relationship.")
+              + " post link are required. Historical Java compatibility only; HTTP execution uses"
+              + " revision-aware outcomes and explicit acceptance. Recording never completes work.")
   @ApiResponse(responseCode = "201", description = "Outcome recorded")
   public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<OutcomeResponse>>
       outcome(@PathVariable UUID id, @Valid @RequestBody RecordOutcomeRequest request) {
@@ -141,7 +156,7 @@ public class CollaborationController {
                 service.recordOutcome(id, request)));
   }
 
-  @PostMapping("/collaborations/{id}/review")
+  // Final review route is handled by CollaborationExecutionController.
   @PreAuthorize("hasAuthority('RECORD_OWN_CREATOR_REVIEW')")
   @Operation(
       summary = "Review a completed collaboration",

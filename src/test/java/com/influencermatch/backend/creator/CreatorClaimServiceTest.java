@@ -45,7 +45,7 @@ class CreatorClaimServiceTest {
     service = com.influencermatch.backend.support.CreatorServiceFixtures.wire(new CreatorClaimService(creators, masters, claims, identities, users, audit, em, factory.getValidator(), Optional.empty()));
     owner = User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
     creator = Creator.builder().id(UUID.randomUUID()).build();
-    lenient().when(masters.save(any())).thenAnswer(i->i.getArgument(0));
+    lenient().when(masters.save(any())).thenAnswer(i->{CreatorMaster m=i.getArgument(0);m.setId(UUID.randomUUID());return m;});
     login(owner);
   }
   @AfterEach void cleanup() { SecurityContextHolder.clearContext(); factory.close(); }

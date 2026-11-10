@@ -20,6 +20,8 @@ import lombok.Setter;
 public class UserProfileResponse {
 
   private UUID id;
+  private UUID brandProfileId;
+  private String onboardingStatus;
   private String email;
   private String fullName;
   private String role;

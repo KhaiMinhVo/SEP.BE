@@ -10,14 +10,42 @@ import java.util.*;
 
 public final class CompareDtos {
   private CompareDtos() {}
-  public record Request(@NotNull @Size(min=2,max=5) List<@NotNull UUID> creatorIds) {}
+
+  public record Request(@NotNull @Size(min = 2, max = 5) List<@NotNull UUID> creatorIds) {}
+
   public record Response(UUID campaignId, List<Item> creators) {}
-  public record Item(UUID creatorId, String platform, String userName, String displayName,
-      String profileUrl, String avatarUrl, String location, String creatorType,
-      ShortlistPriority priority, String note, CreatorSourceType sourceType,
-      boolean verifiedByInfluencerMatch, LocalDateTime authorizedAt,
-      @JsonInclude(JsonInclude.Include.ALWAYS) Metrics metrics) {}
-  public record Metrics(UUID metricId, String niche, Long followers, BigDecimal avgViews,
-      BigDecimal avgLikes, BigDecimal avgComments, BigDecimal avgShares, BigDecimal engagementRate,
-      BigDecimal dataConfidence, MetricDataStatus freshnessStatus, LocalDateTime collectedAt) {}
+
+  public record Item(
+      UUID creatorId,
+      UUID masterId,
+      com.influencermatch.backend.relationship.enums.ShortlistStatus status,
+      String feeAssessmentStatus,
+      String platform,
+      String userName,
+      String displayName,
+      String profileUrl,
+      String avatarUrl,
+      String location,
+      String creatorType,
+      ShortlistPriority priority,
+      String note,
+      CreatorSourceType sourceType,
+      boolean verifiedByInfluencerMatch,
+      LocalDateTime authorizedAt,
+      @JsonInclude(JsonInclude.Include.ALWAYS) Metrics metrics,
+      com.influencermatch.backend.creator.portal.PortalDtos.Verification verification,
+      com.influencermatch.backend.creator.portal.PortalDtos.DeclaredProfile declaredProfile) {}
+
+  public record Metrics(
+      UUID metricId,
+      String niche,
+      Long followers,
+      BigDecimal avgViews,
+      BigDecimal avgLikes,
+      BigDecimal avgComments,
+      BigDecimal avgShares,
+      BigDecimal engagementRate,
+      BigDecimal dataConfidence,
+      MetricDataStatus freshnessStatus,
+      LocalDateTime collectedAt) {}
 }

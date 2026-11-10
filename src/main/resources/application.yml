@@ -85,10 +85,47 @@ spring:
 #  JWT Security
 # ------------------------------------------------------------------------------------
 application:
+  campaign-embedding:
+    enabled: ${CAMPAIGN_EMBEDDING_ENABLED:false}
+    model: ${CAMPAIGN_EMBEDDING_MODEL:bkai-foundation-models/vietnamese-bi-encoder}
+    model-version: ${CAMPAIGN_EMBEDDING_MODEL_VERSION:m3-embed-v1}
+  brand-embedding:
+    enabled: ${BRAND_EMBEDDING_ENABLED:false}
+    model: ${BRAND_EMBEDDING_MODEL:bkai-foundation-models/vietnamese-bi-encoder}
+    model-version: ${BRAND_EMBEDDING_MODEL_VERSION:m4-embed-v1}
+  policies:
+    terms-version: ${TERMS_VERSION:terms-v1}
+    privacy-version: ${PRIVACY_VERSION:privacy-v1}
+  google-login:
+    enabled: ${GOOGLE_LOGIN_ENABLED:false}
+    client-id: ${GOOGLE_LOGIN_CLIENT_ID:}
+  instagram:
+    enabled: ${INSTAGRAM_OAUTH_ENABLED:false}
+    app-id: ${INSTAGRAM_APP_ID:}
+    app-secret: ${INSTAGRAM_APP_SECRET:}
+    graph-api-version: ${INSTAGRAM_GRAPH_API_VERSION:}
+    redirect-uri: ${INSTAGRAM_REDIRECT_URI:}
+    encryption-key: ${INSTAGRAM_OAUTH_ENCRYPTION_KEY:}
+  tiktok:
+    enabled: ${TIKTOK_SANDBOX_LOGIN_ENABLED:false}
+    client-key: ${TIKTOK_SANDBOX_CLIENT_KEY:}
+    client-secret: ${TIKTOK_SANDBOX_CLIENT_SECRET:}
+    redirect-uri: ${TIKTOK_SANDBOX_REDIRECT_URI:}
+    scope: ${TIKTOK_SANDBOX_SCOPE:user.info.basic,user.info.profile}
+  meta:
+    enabled: ${META_OAUTH_ENABLED:false}
+    app-id: ${META_APP_ID:}
+    app-secret: ${META_APP_SECRET:}
+    login-config-id: ${META_LOGIN_CONFIG_ID:}
+    graph-api-version: ${META_GRAPH_API_VERSION:}
+    redirect-uri: ${META_REDIRECT_URI:}
+    encryption-key: ${META_OAUTH_ENCRYPTION_KEY:}
+    cleanup-enabled: true
   claim-email:
     encryption-key: ${EMAIL_OUTBOX_ENCRYPTION_KEY:}
     dispatch-enabled: ${CLAIM_EMAIL_DISPATCH_ENABLED:true}
   auth:
+    cookie-secure: ${AUTH_COOKIE_SECURE:false}
     email-verification:
       enabled: ${EMAIL_VERIFICATION_ENABLED:false}
       from: ${SMTP_FROM:}
@@ -108,7 +145,7 @@ application:
       auth-url: ${TIKTOK_SANDBOX_AUTH_URL:https://www.tiktok.com/v2/auth/authorize/}
       token-url: ${TIKTOK_SANDBOX_TOKEN_URL:https://open.tiktokapis.com/v2/oauth/token/}
       user-info-url: ${TIKTOK_SANDBOX_USER_INFO_URL:https://open.tiktokapis.com/v2/user/info/}
-      scope: ${TIKTOK_SANDBOX_SCOPE:user.info.basic,video.list}
+      scope: ${TIKTOK_SANDBOX_SCOPE:user.info.basic,user.info.profile}
     google:
       client-id: ${GOOGLE_TESTING_CLIENT_ID:}
       client-secret: ${GOOGLE_TESTING_CLIENT_SECRET:}

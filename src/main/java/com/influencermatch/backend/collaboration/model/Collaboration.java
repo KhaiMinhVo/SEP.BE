@@ -12,10 +12,7 @@ import java.util.UUID;
 import lombok.*;
 
 @Entity
-@Table(
-    name = "collaboration",
-    uniqueConstraints =
-        @UniqueConstraint(name = "ux_collaboration_relationship", columnNames = "relationship_id"))
+@Table(name = "collaboration")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -28,7 +25,7 @@ public class Collaboration {
   @Column
   private UUID id;
 
-  @OneToOne(fetch = FetchType.LAZY, optional = false)
+  @ManyToOne(fetch = FetchType.LAZY, optional = false)
   @JoinColumn(nullable = false)
   private BrandCreatorRelationship relationship;
 
@@ -71,4 +68,6 @@ public class Collaboration {
 
   @Column(nullable = false)
   private LocalDateTime updatedAt;
+
+  @Builder.Default private String executionSource = "LEGACY";
 }

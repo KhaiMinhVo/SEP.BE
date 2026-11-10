@@ -13,6 +13,8 @@ import com.influencermatch.backend.collaboration.model.*;
 import com.influencermatch.backend.collaboration.repository.*;
 import com.influencermatch.backend.collaboration.service.CollaborationService;
 import com.influencermatch.backend.creator.model.Creator;
+import com.influencermatch.backend.creator.model.CreatorMaster;
+import com.influencermatch.backend.creator.repository.CreatorMasterRepository;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.relationship.enums.RelationshipStage;
 import com.influencermatch.backend.relationship.model.BrandCreatorRelationship;
@@ -27,11 +29,9 @@ import java.util.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import com.influencermatch.backend.creator.model.CreatorMaster;
-import com.influencermatch.backend.creator.repository.CreatorMasterRepository;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 class CollaborationServiceTest {
@@ -45,6 +45,8 @@ class CollaborationServiceTest {
   EntityManager em = mock(EntityManager.class);
   jakarta.validation.ValidatorFactory factory;
   CollaborationService service;
+  com.influencermatch.backend.cooperation.DealService gateway =
+      mock(com.influencermatch.backend.cooperation.DealService.class);
   User owner;
   Campaign campaign;
   BrandCreatorRelationship relationship;
@@ -64,6 +66,7 @@ class CollaborationServiceTest {
             evidenceAssets,
             em,
             factory.getValidator());
+    org.springframework.test.util.ReflectionTestUtils.setField(service, "deals", gateway);
     owner = User.builder().id(UUID.randomUUID()).role(Role.BRAND).status(UserStatus.ACTIVE).build();
     authenticate(owner);
     campaign =
@@ -96,6 +99,11 @@ class CollaborationServiceTest {
     when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
     when(collaborations.findLockedById(collaboration.getId()))
         .thenReturn(Optional.of(collaboration));
+    when(gateway.confirmLegacy(eq(campaign.getId()), any(), any()))
+        .thenReturn(
+            new com.fasterxml.jackson.databind.ObjectMapper()
+                .createObjectNode()
+                .put("collaborationId", collaboration.getId().toString()));
   }
 
   @AfterEach
@@ -125,26 +133,24 @@ class CollaborationServiceTest {
 
   @Test
   void createsAndSynchronizesFeeAndStage() {
-    when(collaborations.save(any()))
-        .thenAnswer(
-            i -> {
-              Collaboration c = i.getArgument(0);
-              c.setId(UUID.randomUUID());
-              return c;
-            });
-    var response = service.create(campaign.getId(), request());
+    collaboration.setStatus(CollaborationStatus.PLANNED);
+    collaboration.setCurrency("VND");
+    collaboration.setAgreedFee(new BigDecimal("1200000.50"));
+    collaboration.setPaymentStatus(CollaborationPaymentStatus.PENDING);
+    collaboration.setNote("note");
+    var response = service.create(campaign.getId(), request(), "confirm-key");
     assertThat(response.currency()).isEqualTo("VND");
-    assertThat(response.status()).isEqualTo(CollaborationStatus.IN_PROGRESS);
+    assertThat(response.status()).isEqualTo(CollaborationStatus.PLANNED);
     assertThat(response.paymentStatus()).isEqualTo(CollaborationPaymentStatus.PENDING);
-    assertThat(response.startAt()).isNotNull();
+    assertThat(response.startAt()).isNull();
     assertThat(response.note()).isEqualTo("note");
-    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.COLLABORATING);
-    assertThat(relationship.getAgreedFee()).isEqualByComparingTo("1200000.50");
-    verify(em).refresh(relationship);
+    assertThat(response.agreedFee()).isEqualByComparingTo("1200000.50");
+    verify(gateway).confirmLegacy(eq(campaign.getId()), any(), eq("confirm-key"));
+    verify(collaborations, never()).save(any());
   }
 
   @Test
-  void outcomeCompletesOnlyCollaborationAndPreservesPayment() {
+  void legacyOutcomePreservesExecutionAndPayment() {
     when(outcomes.save(any()))
         .thenAnswer(
             i -> {
@@ -157,8 +163,8 @@ class CollaborationServiceTest {
     assertThat(response.clicks()).isEqualTo(20L);
     assertThat(response.source()).isEqualTo("SELF_REPORTED");
     assertThat(collaboration.getPublishedContentUrl()).isEqualTo("https://example.com/post");
-    assertThat(collaboration.getStatus()).isEqualTo(CollaborationStatus.COMPLETED);
-    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.COMPLETED);
+    assertThat(collaboration.getStatus()).isEqualTo(CollaborationStatus.IN_PROGRESS);
+    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.CONFIRMED);
     assertThat(campaign.getStatus()).isEqualTo(CampaignStatus.ACTIVE);
     assertThat(collaboration.getPaymentStatus()).isEqualTo(CollaborationPaymentStatus.PAID);
   }
@@ -200,8 +206,8 @@ class CollaborationServiceTest {
     assertThat(response.comments()).isEqualTo(60L);
     assertThat(response.shares()).isEqualTo(15L);
     assertThat(response.publishedContentUrl()).isEqualTo("https://youtube.com/watch?v=abc");
-    assertThat(collaboration.getStatus()).isEqualTo(CollaborationStatus.COMPLETED);
-    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.COMPLETED);
+    assertThat(collaboration.getStatus()).isEqualTo(CollaborationStatus.IN_PROGRESS);
+    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.CONFIRMED);
   }
 
   @Test
@@ -219,8 +225,9 @@ class CollaborationServiceTest {
     var response = service.recordOutcome(collaboration.getId(), req);
 
     assertThat(response.publishedContentUrl()).isEqualTo("https://tiktok.com/@koc/phase3video");
-    assertThat(collaboration.getPublishedContentUrl()).isEqualTo("https://tiktok.com/@koc/phase3video");
-    assertThat(collaboration.getStatus()).isEqualTo(CollaborationStatus.COMPLETED);
+    assertThat(collaboration.getPublishedContentUrl())
+        .isEqualTo("https://tiktok.com/@koc/phase3video");
+    assertThat(collaboration.getStatus()).isEqualTo(CollaborationStatus.IN_PROGRESS);
   }
 
   @Test
@@ -228,9 +235,7 @@ class CollaborationServiceTest {
     collaboration.setPublishedContentUrl(null);
     RecordOutcomeRequest req =
         new RecordOutcomeRequest(2000L, null, 100L, null, null, null, "No post link anywhere");
-    assertCode(
-        () -> service.recordOutcome(collaboration.getId(), req),
-        ErrorCode.VALIDATION_ERROR);
+    assertCode(() -> service.recordOutcome(collaboration.getId(), req), ErrorCode.VALIDATION_ERROR);
   }
 
   @Test
@@ -286,12 +291,16 @@ class CollaborationServiceTest {
 
     serviceWithPublisher.review(collaboration.getId(), review());
 
-    verify(publisher).publishEvent(any(com.influencermatch.backend.collaboration.event.CollaborationReviewedEvent.class));
+    verify(publisher)
+        .publishEvent(
+            any(com.influencermatch.backend.collaboration.event.CollaborationReviewedEvent.class));
   }
 
   @Test
   void duplicateOperationsHaveSpecificConflictCodes() {
-    when(collaborations.existsByRelationshipId(relationship.getId())).thenReturn(true);
+    doThrow(new ConflictException(ErrorCode.COLLABORATION_ALREADY_EXISTS, "Duplicate"))
+        .when(gateway)
+        .confirmLegacy(any(), any(), any());
     assertCode(
         () -> service.create(campaign.getId(), request()), ErrorCode.COLLABORATION_ALREADY_EXISTS);
     when(outcomes.existsByCollaborationId(collaboration.getId())).thenReturn(true);
@@ -324,11 +333,24 @@ class CollaborationServiceTest {
       names = {"DRAFT", "READY_FOR_DISCOVERY", "COMPLETED", "ARCHIVED"})
   void createAndOutcomeRequireActiveCampaign(CampaignStatus status) {
     campaign.setStatus(status);
-    assertCode(
-        () -> service.create(campaign.getId(), request()), ErrorCode.INVALID_COLLABORATION_STATE);
+    if (status == CampaignStatus.READY_FOR_DISCOVERY) {
+      collaboration.setStatus(CollaborationStatus.PLANNED);
+      assertThat(service.create(campaign.getId(), request()).status())
+          .isEqualTo(CollaborationStatus.PLANNED);
+      collaboration.setStatus(CollaborationStatus.IN_PROGRESS);
+    } else {
+      doThrow(
+              new ConflictException(
+                  ErrorCode.INVALID_COLLABORATION_STATE, "Campaign cannot be confirmed"))
+          .when(gateway)
+          .confirmLegacy(any(), any(), any());
+      assertCode(
+          () -> service.create(campaign.getId(), request()), ErrorCode.INVALID_COLLABORATION_STATE);
+    }
     assertCode(
         () -> service.recordOutcome(collaboration.getId(), outcome()),
         ErrorCode.INVALID_COLLABORATION_STATE);
+    verify(collaborations, never()).save(any());
   }
 
   @ParameterizedTest
@@ -337,65 +359,64 @@ class CollaborationServiceTest {
       names = {"SHORTLISTED", "NOT_INTERESTED", "COMPLETED"})
   void createRejectsIneligibleRelationshipStages(RelationshipStage stage) {
     relationship.setStage(stage);
+    doThrow(
+            new ConflictException(
+                ErrorCode.INVALID_COLLABORATION_STATE, "Relationship cannot be confirmed"))
+        .when(gateway)
+        .confirmLegacy(any(), any(), any());
     assertCode(
         () -> service.create(campaign.getId(), request()), ErrorCode.INVALID_COLLABORATION_STATE);
+    verify(collaborations, never()).save(any());
   }
 
   @Test
   void createFromCollaboratingStageSucceeds() {
-    when(collaborations.save(any()))
-        .thenAnswer(
-            i -> {
-              Collaboration c = i.getArgument(0);
-              c.setId(UUID.randomUUID());
-              return c;
-            });
     relationship.setStage(RelationshipStage.COLLABORATING);
-    CollaborationResponse response = service.create(campaign.getId(), request());
-    assertThat(response.status()).isEqualTo(CollaborationStatus.IN_PROGRESS);
+    doThrow(new ValidationException("Deal confirmation with consent is required"))
+        .when(gateway)
+        .confirmLegacy(any(), any(), any());
+    assertCode(() -> service.create(campaign.getId(), request()), ErrorCode.VALIDATION_ERROR);
     assertThat(relationship.getStage()).isEqualTo(RelationshipStage.COLLABORATING);
+    verify(collaborations, never()).save(any());
   }
 
   @Test
   void createWithOptionalFeeAndCurrencyFallsBackToRelationship() {
-    when(collaborations.save(any()))
-        .thenAnswer(
-            i -> {
-              Collaboration c = i.getArgument(0);
-              c.setId(UUID.randomUUID());
-              return c;
-            });
-    relationship.setStage(RelationshipStage.COLLABORATING);
     relationship.setAgreedFee(new BigDecimal("1800000.00"));
     relationship.setCurrency("VND");
-    CreateCollaborationRequest req =
-        new CreateCollaborationRequest(relationship.getId(), null, null, "Optional fee note");
-    CollaborationResponse response = service.create(campaign.getId(), req);
-    assertThat(response.agreedFee()).isEqualByComparingTo("1800000.00");
-    assertThat(response.currency()).isEqualTo("VND");
-    assertThat(response.status()).isEqualTo(CollaborationStatus.IN_PROGRESS);
-  }
-
-  @Test
-  void crossCampaignAndInvalidCurrencyDoNotWrite() {
-    relationship.setCampaign(Campaign.builder().id(UUID.randomUUID()).build());
-    assertCode(() -> service.create(campaign.getId(), request()), ErrorCode.VALIDATION_ERROR);
-    relationship.setCampaign(campaign);
+    doThrow(new ValidationException("Missing Deal and consent"))
+        .when(gateway)
+        .confirmLegacy(any(), any(), any());
     assertCode(
         () ->
             service.create(
                 campaign.getId(),
-                new CreateCollaborationRequest(relationship.getId(), BigDecimal.ZERO, "ZZZ", null)),
+                new CreateCollaborationRequest(relationship.getId(), null, null, "note")),
+        ErrorCode.VALIDATION_ERROR);
+    assertThat(relationship.getAgreedFee()).isEqualByComparingTo("1800000.00");
+    verify(collaborations, never()).save(any());
+  }
+
+  @Test
+  void crossCampaignAndInvalidCurrencyDoNotWrite() {
+    doThrow(new ValidationException("Relationship belongs to another Campaign"))
+        .when(gateway)
+        .confirmLegacy(any(), any(), any());
+    assertCode(() -> service.create(campaign.getId(), request()), ErrorCode.VALIDATION_ERROR);
+    assertCode(
+        () ->
+            service.create(
+                campaign.getId(),
+                new CreateCollaborationRequest(relationship.getId(), BigDecimal.ONE, "ZZZ", null)),
         ErrorCode.VALIDATION_ERROR);
     verify(collaborations, never()).save(any());
   }
 
   @Test
   void foreignCampaignAndRelationshipOwnerAreForbidden() {
-    campaign.getBrandProfile().setUser(User.builder().id(UUID.randomUUID()).build());
-    assertCode(() -> service.create(campaign.getId(), request()), ErrorCode.ACCESS_DENIED);
-    campaign.getBrandProfile().setUser(owner);
-    relationship.setUser(User.builder().id(UUID.randomUUID()).build());
+    doThrow(new ForbiddenException("Foreign Campaign or Relationship"))
+        .when(gateway)
+        .confirmLegacy(any(), any(), any());
     assertCode(() -> service.create(campaign.getId(), request()), ErrorCode.ACCESS_DENIED);
     verify(collaborations, never()).save(any());
   }
@@ -492,7 +513,8 @@ class CollaborationServiceTest {
         User.builder().id(UUID.randomUUID()).role(Role.BRAND).status(UserStatus.ACTIVE).build();
     authenticate(stranger);
     when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
-    assertCode(() -> service.getCollaborationDetail(collaboration.getId()), ErrorCode.ACCESS_DENIED);
+    assertCode(
+        () -> service.getCollaborationDetail(collaboration.getId()), ErrorCode.ACCESS_DENIED);
   }
 
   @Test
@@ -500,6 +522,8 @@ class CollaborationServiceTest {
     User creatorUser =
         User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
     authenticate(creatorUser);
+    when(gateway.canAccessCollaboration(creatorUser.getId(), collaboration.getId()))
+        .thenReturn(true);
     CreatorMaster master =
         CreatorMaster.builder()
             .id(UUID.randomUUID())
@@ -538,16 +562,14 @@ class CollaborationServiceTest {
 
     SubmitEvidenceRequest req =
         new SubmitEvidenceRequest(
-            "POST_LINK",
-            "https://tiktok.com/@koc/video/999",
-            null,
-            "Published link");
+            "POST_LINK", "https://tiktok.com/@koc/video/999", null, "Published link");
 
     EvidenceAssetResponse response = service.submitEvidence(collaboration.getId(), req);
     assertThat(response.assetType()).isEqualTo("POST_LINK");
     assertThat(response.source()).isEqualTo("BRAND_UPLOAD");
     assertThat(response.storageUrl()).isEqualTo("https://tiktok.com/@koc/video/999");
-    assertThat(collaboration.getPublishedContentUrl()).isEqualTo("https://tiktok.com/@koc/video/999");
+    assertThat(collaboration.getPublishedContentUrl())
+        .isEqualTo("https://tiktok.com/@koc/video/999");
   }
 
   @Test
@@ -555,8 +577,9 @@ class CollaborationServiceTest {
     User creatorUser =
         User.builder().id(UUID.randomUUID()).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
     authenticate(creatorUser);
-    CreatorMaster master =
-        CreatorMaster.builder().id(UUID.randomUUID()).user(creatorUser).build();
+    when(gateway.canAccessCollaboration(creatorUser.getId(), collaboration.getId()))
+        .thenReturn(true);
+    CreatorMaster master = CreatorMaster.builder().id(UUID.randomUUID()).user(creatorUser).build();
     collaboration.setMaster(master);
 
     when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
@@ -588,8 +611,7 @@ class CollaborationServiceTest {
     when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
 
     SubmitEvidenceRequest req =
-        new SubmitEvidenceRequest(
-            "POST_LINK", "https://example.com/post", null, null);
+        new SubmitEvidenceRequest("POST_LINK", "https://example.com/post", null, null);
 
     assertCode(() -> service.submitEvidence(collaboration.getId(), req), ErrorCode.ACCESS_DENIED);
   }

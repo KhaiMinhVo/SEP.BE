@@ -22,7 +22,15 @@ public class GlobalExceptionHandler {
 
   @ExceptionHandler(BusinessException.class)
   ResponseEntity<ProblemDetail> business(BusinessException ex, HttpServletRequest req) {
-    return response(ex.code(), ex.getMessage(), req, Map.of());
+    var result =
+        response(
+            ex.code(),
+            ex.getMessage(),
+            req,
+            ex instanceof ProfileIncompleteException p ? p.fields() : Map.of());
+    if (ex instanceof CampaignEmbeddingPendingException pending)
+      result.getBody().setProperty("embeddingStatus", pending.status());
+    return result;
   }
 
   @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -50,7 +58,8 @@ public class GlobalExceptionHandler {
   @ExceptionHandler({
     MethodArgumentTypeMismatchException.class,
     ConstraintViolationException.class,
-    MissingServletRequestParameterException.class
+    MissingServletRequestParameterException.class,
+    MissingRequestHeaderException.class
   })
   ResponseEntity<ProblemDetail> invalid(Exception ex, HttpServletRequest req) {
     return response(ErrorCode.VALIDATION_ERROR, "Request parameter is invalid", req, Map.of());

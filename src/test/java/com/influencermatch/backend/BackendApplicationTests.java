@@ -13,12 +13,8 @@ import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -27,16 +23,25 @@ import org.springframework.test.web.servlet.MockMvc;
  * <p>Integration suite backed by PostgreSQL Testcontainers so JSONB, arrays, Flyway, constraints
  * and optimistic locking use the same database semantics as production.
  */
-@org.springframework.test.context.TestPropertySource(properties="application.auth.email-verification.secret=test-email-otp-secret-at-least-32-characters")
+@org.springframework.test.context.TestPropertySource(
+    properties =
+        "application.auth.email-verification.secret=test-email-otp-secret-at-least-32-characters")
 class BackendApplicationTests extends com.influencermatch.backend.support.PostgresApiTestSupport {
-  @org.springframework.boot.test.mock.mockito.MockBean com.influencermatch.backend.auth.service.VerificationEmailSender sender;
-  private void verifyEmail(String email) throws Exception {
-    var otp=org.mockito.ArgumentCaptor.forClass(String.class);
-    org.mockito.Mockito.verify(sender,org.mockito.Mockito.atLeastOnce()).send(org.mockito.ArgumentMatchers.eq(email),otp.capture());
-    mvc.perform(post("/auth/verify-email").contentType(MediaType.APPLICATION_JSON)
-        .content(objectMapper.writeValueAsBytes(java.util.Map.of("email",email,"otp",otp.getValue())))).andExpect(status().isOk());
-  }
+  @org.springframework.boot.test.mock.mockito.MockBean
+  com.influencermatch.backend.auth.service.VerificationEmailSender sender;
 
+  private void verifyEmail(String email) throws Exception {
+    var otp = org.mockito.ArgumentCaptor.forClass(String.class);
+    org.mockito.Mockito.verify(sender, org.mockito.Mockito.atLeastOnce())
+        .send(org.mockito.ArgumentMatchers.eq(email), otp.capture());
+    mvc.perform(
+            post("/auth/verify-email")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    objectMapper.writeValueAsBytes(
+                        java.util.Map.of("email", email, "otp", otp.getValue()))))
+        .andExpect(status().isOk());
+  }
 
   @Autowired MockMvc mvc;
   @Autowired UserRepository users;
@@ -74,10 +79,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
     mvc.perform(
             post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"email\":\""
-                        + email
-                        + "\",\"password\":\"Password123!\",\"fullName\":\"Registered Brand\"}"))
+                .content(registrationBody(email, "Registered Brand")))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.success").value(true));
     User registered = users.findByEmail(email).orElseThrow();
@@ -105,30 +107,26 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
     mvc.perform(
             post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"email\":\""
-                        + brandEmail
-                        + "\",\"password\":\"Password123!\",\"fullName\":\"PoC"
-                        + " Brand\"}"))
+                .content(registrationBody(brandEmail, "PoC Brand")))
         .andExpect(status().isCreated());
     assertThat(users.findByEmail(brandEmail)).get().extracting("role").isEqualTo(Role.BRAND);
 
     verifyEmail(brandEmail);
-    JsonNode brandLogin =
-        json(
-            mvc.perform(
-                    post("/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(
-                            "{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.user.lastLoginAt").isNotEmpty())
-                .andExpect(jsonPath("$.data.user.passwordHash").doesNotExist())
-                .andReturn()
-                .getResponse()
-                .getContentAsString());
+    var brandLoginResult =
+        mvc.perform(
+                post("/auth/login")
+                    .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.user.lastLoginAt").isNotEmpty())
+            .andExpect(jsonPath("$.data.user.passwordHash").doesNotExist())
+            .andReturn()
+            .getResponse();
+    JsonNode brandLogin = json(brandLoginResult.getContentAsString());
+    assertThat(brandLogin.at("/data").has("refreshToken")).isFalse();
     String brandAccess = brandLogin.at("/data/accessToken").asText();
-    String brandRefresh = brandLogin.at("/data/refreshToken").asText();
+    String brandRefresh = brandLoginResult.getCookie("IM_REFRESH").getValue();
 
     mvc.perform(get("/auth/me").header("Authorization", "Bearer " + brandAccess))
         .andExpect(status().isOk())
@@ -152,6 +150,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
         json(
             mvc.perform(
                     post("/auth/login")
+                        .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(
                             "{\"email\":\""
@@ -166,26 +165,32 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.items").isArray());
 
-    JsonNode rotated =
-        json(
-            mvc.perform(
-                    post("/auth/refresh")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"refreshToken\":\"" + brandRefresh + "\"}"))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString());
+    var rotatedResult =
+        mvc.perform(
+                post("/auth/refresh")
+                    .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                    .cookie(new jakarta.servlet.http.Cookie("IM_REFRESH", brandRefresh))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"refreshToken\":\"" + brandRefresh + "\"}"))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse();
+    JsonNode rotated = json(rotatedResult.getContentAsString());
+    assertThat(rotated.at("/data").has("refreshToken")).isFalse();
     String newAccess = rotated.at("/data/accessToken").asText();
-    String newRefresh = rotated.at("/data/refreshToken").asText();
+    String newRefresh = rotatedResult.getCookie("IM_REFRESH").getValue();
     mvc.perform(
             post("/auth/logout")
+                .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                .cookie(new jakarta.servlet.http.Cookie("IM_REFRESH", newRefresh))
                 .header("Authorization", "Bearer " + newAccess)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"refreshToken\":\"" + newRefresh + "\"}"))
         .andExpect(status().isNoContent());
     mvc.perform(
             post("/auth/refresh")
+                .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                .cookie(new jakarta.servlet.http.Cookie("IM_REFRESH", newRefresh))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"refreshToken\":\"" + newRefresh + "\"}"))
         .andExpect(status().isUnauthorized())
@@ -203,13 +208,14 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
             patch("/admin/users/" + brand.getId() + "/status")
                 .header("Authorization", "Bearer " + adminAccess)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"LOCKED\"}"))
+                .content("{\"status\":\"LOCKED\",\"reason\":\"Test status change\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("LOCKED"));
     mvc.perform(get("/auth/me").header("Authorization", "Bearer " + brandAccess))
         .andExpect(status().isUnauthorized());
     mvc.perform(
             post("/auth/login")
+                .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
         .andExpect(status().isUnauthorized())
@@ -219,10 +225,11 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
             patch("/admin/users/" + brand.getId() + "/status")
                 .header("Authorization", "Bearer " + adminAccess)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"ACTIVE\"}"))
+                .content("{\"status\":\"ACTIVE\",\"reason\":\"Test status change\"}"))
         .andExpect(status().isOk());
     mvc.perform(
             post("/auth/login")
+                .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
         .andExpect(status().isOk());
@@ -231,11 +238,12 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
             patch("/admin/users/" + brand.getId() + "/status")
                 .header("Authorization", "Bearer " + adminAccess)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"DISABLED\"}"))
+                .content("{\"status\":\"DISABLED\",\"reason\":\"Test disable\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("DISABLED"));
     mvc.perform(
             post("/auth/login")
+                .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
         .andExpect(status().isUnauthorized())
@@ -281,6 +289,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
     String updatedBrand = brandBody.replace("Friendly", "Expert");
     mvc.perform(
             put("/brands/" + brandId)
+                .with(com.influencermatch.backend.support.TestBrandHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(updatedBrand))
@@ -292,7 +301,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
 {"name":"Summer Awareness","productService":"Daily Serum","objective":"AWARENESS",
  "targetAudiences":["Gen Z"],"contentType":"SHORT_VIDEO","startDate":"2026-10-01","endDate":"2026-10-31",
  "platforms":["TIKTOK"],"niches":["skincare"],"locations":["HCMC"],
- "followerMin":10000,"followerMax":50000,"budgetMin":3000000,"budgetMax":5000000}
+ "followerMin":10000,"followerMax":50000,"totalBudget":5000000,"currency":"VND","brief":"Serum launch","creatorMode":"SINGLE","targetCreatorCount":1,"deliverables":[{"platform":"TIKTOK","contentType":"Review","quantity":1}]}
 """;
     String invalidCampaignBody =
         campaignBody.replace(
@@ -322,16 +331,19 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
         .andExpect(status().isForbidden());
     mvc.perform(
             patch("/campaigns/" + campaignId + "/archive")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("ARCHIVED"));
     mvc.perform(
             patch("/campaigns/" + campaignId + "/archive")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("ARCHIVED"));
     mvc.perform(
             put("/campaigns/" + campaignId)
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(campaignBody))
@@ -360,9 +372,9 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
             .asText();
     String campaignBody =
         """
-        {"name":"Workflow Campaign","productService":"Serum","objective":"AWARENESS",
-         "platforms":["TIKTOK"],"niches":["skincare"],"locations":["HCMC"]}
-        """;
+{"name":"Workflow Campaign","productService":"Serum","objective":"AWARENESS",
+ "platforms":["TIKTOK"],"niches":["skincare"],"locations":["HCMC"],"brief":"Workflow brief","startDate":"2026-11-01","endDate":"2026-12-01","totalBudget":1000000,"currency":"VND","creatorMode":"SINGLE","targetCreatorCount":1,"deliverables":[{"platform":"TIKTOK","contentType":"Review","quantity":1}]}
+""";
     String campaignId =
         json(mvc.perform(
                     post("/brands/" + brandId + "/campaigns")
@@ -378,13 +390,15 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
 
     mvc.perform(
             patch("/campaigns/" + campaignId + "/status")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"ACTIVE\"}"))
+                .content("{\"status\":\"ACTIVE\",\"reason\":\"Test status change\"}"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("INVALID_CAMPAIGN_TRANSITION"));
     mvc.perform(
             patch("/campaigns/" + campaignId + "/status")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"READY_FOR_DISCOVERY\"}"))
@@ -401,41 +415,62 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
             });
     mvc.perform(
             patch("/campaigns/" + campaignId + "/status")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"ACTIVE\"}"))
+                .content("{\"status\":\"ACTIVE\",\"reason\":\"Test status change\"}"))
         .andExpect(status().isOk());
     mvc.perform(
             patch("/campaigns/" + campaignId + "/status")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
                 .header("Authorization", "Bearer " + ownerToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"COMPLETED\"}"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("COMPLETED"));
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("INVALID_COLLABORATION_STATE"));
+    assertThat(
+            jdbc.queryForObject(
+                "select status from campaign where id=?",
+                String.class,
+                java.util.UUID.fromString(campaignId)))
+        .isEqualTo("ACTIVE");
   }
 
   private String registerAndLogin(String email, String fullName) throws Exception {
-    mvc.perform(
-            post("/auth/register")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"email\":\""
-                        + email
-                        + "\",\"password\":\"Password123!\",\"fullName\":\""
-                        + fullName
-                        + "\"}"))
-        .andExpect(status().isCreated());
-    verifyEmail(email);
-    String body =
-        mvc.perform(
-                post("/auth/login")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"email\":\"" + email + "\",\"password\":\"Password123!\"}"))
-            .andExpect(status().isOk())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
-    return json(body).at("/data/accessToken").asText();
+    users.saveAndFlush(
+        User.builder()
+            .email(email)
+            .fullName(fullName)
+            .passwordHash(passwordEncoder.encode("Password123!"))
+            .role(Role.BRAND)
+            .status(UserStatus.ACTIVE)
+            .emailVerified(true)
+            .build());
+    return call(
+            null,
+            post("/auth/login"),
+            java.util.Map.of("email", email, "password", "Password123!"),
+            200)
+        .path("data")
+        .path("accessToken")
+        .asText();
+  }
+
+  private byte[] registrationBody(String email, String name) throws Exception {
+    return objectMapper.writeValueAsBytes(
+        java.util.Map.of(
+            "email",
+            email,
+            "password",
+            "Password123!",
+            "fullName",
+            name,
+            "businessName",
+            "Brand",
+            "phoneNumber",
+            "0912345678",
+            "policyAcceptance",
+            com.influencermatch.backend.support.TestAuthHttp.acceptance()));
   }
 
   private String createAdminAndLogin(String email) throws Exception {
@@ -449,6 +484,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
             .build());
     return json(mvc.perform(
                 post("/auth/login")
+                    .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"email\":\"" + email + "\",\"password\":\"AdminPassword123!\"}"))
             .andExpect(status().isOk())

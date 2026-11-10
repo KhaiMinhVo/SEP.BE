@@ -11,9 +11,7 @@ import com.influencermatch.backend.auth.repository.*;
 import com.influencermatch.backend.auth.service.*;
 import com.influencermatch.backend.auth.service.AuthService;
 import com.influencermatch.backend.common.dto.ApiResponse;
-
 import com.influencermatch.backend.exception.BusinessException;
-import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.user.model.User;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -38,18 +36,52 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
   private final AuthService authService;
+  private final AuthCookies cookies;
+  private final RefreshTokenService refreshTokens;
+  private final RegistrationSupport registration;
+
+  @GetMapping("/policies")
+  @Operation(
+      summary = "Current Terms and Privacy versions",
+      security = {})
+  public ApiResponse<java.util.Map<String, String>> policies() {
+    return ApiResponse.ok(registration.policies());
+  }
+
+  @GetMapping("/csrf")
+  @Operation(
+      summary = "Get browser CSRF token before authentication requests",
+      security = {})
+  public ApiResponse<java.util.Map<String, String>> csrf(
+      jakarta.servlet.http.HttpServletRequest request,
+      jakarta.servlet.http.HttpServletResponse response) {
+    var token =
+        (org.springframework.security.web.csrf.CsrfToken)
+            request.getAttribute(org.springframework.security.web.csrf.CsrfToken.class.getName());
+    response.setHeader("Cache-Control", "no-store");
+    return ApiResponse.ok(
+        java.util.Map.of("token", token.getToken(), "headerName", token.getHeaderName()));
+  }
+
   private final EmailVerificationService verification;
 
   @PostMapping("/verify-email")
-  @Operation(summary="Verify email with a six-digit OTP", security={})
+  @Operation(
+      summary = "Verify email with a six-digit OTP",
+      security = {})
   public ApiResponse<Void> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
-    verification.verify(request.email(), request.otp()); return ApiResponse.empty();
+    verification.verify(request.email(), request.otp());
+    return ApiResponse.empty();
   }
 
   @PostMapping("/resend-verification")
-  @Operation(summary="Resend email verification OTP", security={})
-  public ApiResponse<Void> resend(@Valid @RequestBody CreatorRegistrationDtos.PasswordSetupRequest request) {
-    verification.resend(request.email()); return ApiResponse.ok("If eligible, a verification email has been sent.", null);
+  @Operation(
+      summary = "Resend email verification OTP",
+      security = {})
+  public ApiResponse<Void> resend(
+      @Valid @RequestBody CreatorRegistrationDtos.PasswordSetupRequest request) {
+    verification.resend(request.email());
+    return ApiResponse.ok("If eligible, a verification email has been sent.", null);
   }
 
   @Operation(
@@ -58,7 +90,8 @@ public class AuthController {
   @PostMapping("/register")
   public ResponseEntity<ApiResponse<Void>> register(@Valid @RequestBody RegisterRequest request) {
     authService.register(request);
-    return ResponseEntity.created(URI.create("/api/v1/auth/me")).body(ApiResponse.ok("Account created; verification email sent.", null));
+    return ResponseEntity.created(URI.create("/api/v1/auth/me"))
+        .body(ApiResponse.ok("Account created; verification email sent.", null));
   }
 
   @Operation(
@@ -66,25 +99,47 @@ public class AuthController {
       security = {})
   @PostMapping("/login")
   public ResponseEntity<ApiResponse<LoginResponse>> login(
-      @Valid @RequestBody LoginRequest request) {
-    return ResponseEntity.ok(ApiResponse.ok("Login successful.", authService.login(request)));
+      @Valid @RequestBody LoginRequest request, jakarta.servlet.http.HttpServletResponse response) {
+    var result = authService.login(request);
+    cookies.write(response, result);
+    return ResponseEntity.ok(ApiResponse.ok("Login successful.", result));
   }
 
   @Operation(
-      summary = "Rotate a refresh token and issue a new token pair",
+      summary = "Rotate IM_REFRESH cookie within the original seven-day session; CSRF required",
       security = {})
   @PostMapping("/refresh")
   public ResponseEntity<ApiResponse<LoginResponse>> refresh(
-      @Valid @RequestBody RefreshTokenRequest request) {
-    return ResponseEntity.ok(ApiResponse.ok(authService.refresh(request)));
+      jakarta.servlet.http.HttpServletRequest request,
+      jakarta.servlet.http.HttpServletResponse response) {
+    try {
+      var result = authService.refresh(new RefreshTokenRequest(cookies.read(request)));
+      cookies.write(response, result);
+      return ResponseEntity.ok(ApiResponse.ok(result));
+    } catch (BusinessException ex) {
+      cookies.clear(response);
+      throw ex;
+    }
   }
 
   @Operation(
-      summary = "Revoke a refresh token",
-      security = @SecurityRequirement(name = "BearerAuth"))
+      summary = "Logout current session using refresh cookie and CSRF; access JWT may be expired",
+      security = {})
   @PostMapping("/logout")
-  public ResponseEntity<Void> logout(@Valid @RequestBody RefreshTokenRequest request) {
-    authService.logout(request);
+  public ResponseEntity<Void> logout(
+      jakarta.servlet.http.HttpServletRequest request,
+      jakarta.servlet.http.HttpServletResponse response) {
+    refreshTokens.revoke(cookies.read(request));
+    cookies.clear(response);
+    return ResponseEntity.noContent().build();
+  }
+
+  @PostMapping("/logout-all")
+  @Operation(summary = "Invalidate every session, including this one")
+  public ResponseEntity<Void> logoutAll(
+      @AuthenticationPrincipal User user, jakarta.servlet.http.HttpServletResponse response) {
+    refreshTokens.logoutAll(user);
+    cookies.clear(response);
     return ResponseEntity.noContent().build();
   }
 

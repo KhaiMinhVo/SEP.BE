@@ -41,7 +41,7 @@ public class AdminIdentityConflictController {
     return ApiResponse.ok(PageResponse.from(result));
   }
 
-  @PostMapping("/{id}/resolve")
+  // Deliberately not exposed: MVP ownership conflicts must not transfer a channel.
   @PreAuthorize("hasAuthority('RESOLVE_CREATOR_DUPLICATE')")
   @Operation(summary = "Resolve creator identity conflict (Approve channel transfer or Reject dispute)")
   public ApiResponse<ConflictDetailDto> resolveConflict(

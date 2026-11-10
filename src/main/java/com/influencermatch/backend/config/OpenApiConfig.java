@@ -40,9 +40,12 @@ public class OpenApiConfig {
     return new OpenAPI()
         .servers(
             List.of(
-                new Server().url("/api/v1").description("Current Host Server (Inherits HTTPS/HTTP)"),
-                new Server().url("https://api.influencermatch.site/api/v1").description("HTTPS Production Server")
-            ))
+                new Server()
+                    .url("/api/v1")
+                    .description("Current Host Server (Inherits HTTPS/HTTP)"),
+                new Server()
+                    .url("https://api.influencermatch.site/api/v1")
+                    .description("HTTPS Production Server")))
         .info(apiInfo())
         .addSecurityItem(new SecurityRequirement().addList(SECURITY_SCHEME_NAME))
         .components(
@@ -66,21 +69,26 @@ public class OpenApiConfig {
         .version("1.0.0")
         .description(
             """
-            REST API for the InfluencerMatch platform.
+REST API for the InfluencerMatch platform.
 
-            Enables Brand/SME users to discover creators, manage campaigns,
-            track performance, and handle end-to-end collaboration workflows.
+Enables Brand/SME users to discover creators, manage campaigns,
+track performance, and handle end-to-end collaboration workflows.
 
-            **Security**: Brand registration, invited Creator registration, OTP verification, password setup, login and refresh are public. Google Login is removed. Registration requires SMTP; channel ownership is a separate Claim flow.
-            `/auth/me` and logout require JWT. Permissions come from the current database role;
-            role/status changes invalidate existing JWT and refresh tokens immediately.
-            BRAND owns its business resources. ADMIN can read support data, not write Brand
-            profiles or campaigns. DATA_MANAGER cannot access private Brand or billing data.
-            Ingestion uses X-Service-Key instead of JWT. VNPay callbacks require a valid gateway
-            signature, matching merchant and transaction amount; they do not use user permissions.
-            Brand channel invitations queue encrypted email jobs before async SMTP; HTTP 200 means QUEUED. Owner Brands can inspect delivery/retry FAILED jobs. Duplicate/owned accounts return 409. Ownership transfer resolution is unavailable in MVP.
-            Notification, Recommendation and CRM permissions are declarations, not new APIs.
-            """)
+**Security**: Brand registration, invited Creator registration, OTP verification, password setup, login and refresh are public. Optional Google Identity Services login is Brand-only and requires a one-time nonce and original browser cookie. Existing password accounts are not automatically linked by email. Registration requires SMTP; channel ownership is a separate Claim flow.
+Authentication POSTs require a CSRF header obtained from GET /auth/csrf. Refresh tokens are cookie-only.
+New Google Brands complete registration before any account/session is created.
+`/auth/me` and logout-all require a live session-bound JWT; logout uses the refresh cookie and CSRF, even when access JWT expired.
+Sessions expire seven days after login; rotation never extends them. Permissions come from the current database role;
+role/status changes invalidate existing JWT and refresh tokens immediately.
+BRAND owns its business resources. ADMIN can read support data, not write Brand
+profiles or campaigns. DATA_MANAGER cannot access private Brand or billing data.
+Ingestion uses X-Service-Key instead of JWT. VNPay callbacks require a valid gateway
+signature, matching merchant and transaction amount; they do not use user permissions.
+Brand channel invitations queue encrypted email jobs before async SMTP; HTTP 200 means QUEUED. Owner Brands can inspect delivery/retry FAILED jobs. Duplicate/owned accounts return 409. Ownership transfer resolution is unavailable in MVP.
+Facebook Page and linked Instagram Professional verification use real Meta OAuth when configured; no Meta mock fallback. Only existing stable official account IDs can be linked. Start in a browser to receive the HttpOnly binding cookie, complete OAuth in that browser, then inspect/confirm the private session with Creator JWT. The public Meta callback returns session ID/status only and never grants ownership. Manual Claim remains available; other simulated provider paths remain dev-only.
+Direct Instagram Login also supports Business/Creator accounts without Facebook or a Page. It uses separate Instagram app configuration and `/integrations/instagram/callback`, then the same private session/confirm APIs. Session `oauthFlow` identifies the login method; direct accounts have no `pageId`. This is channel verification, not InfluencerMatch account sign-in.
+Notification, Recommendation and CRM permissions are declarations, not new APIs.
+""")
         .contact(
             new Contact()
                 .name("InfluencerMatch Engineering")
@@ -105,9 +113,15 @@ public class OpenApiConfig {
       String method = handler.getMethod().getName();
       if (controller == com.influencermatch.backend.auth.controller.AuthController.class
               && !method.equals("me")
-              && !method.equals("logout")
+              && !method.equals("logoutAll")
           || controller == com.influencermatch.backend.billing.controller.PaymentController.class
-              && method.startsWith("vnpay")) operation.setSecurity(List.of());
+              && method.startsWith("vnpay")
+          || controller == com.influencermatch.backend.creator.meta.MetaOAuthController.class
+              && method.equals("callback")
+          || controller == com.influencermatch.backend.creator.tiktok.TikTokOAuthController.class
+              && method.equals("callback")
+          || controller == com.influencermatch.backend.creator.meta.InstagramOAuthController.class
+              && method.equals("callback")) operation.setSecurity(List.of());
       if (controller
           == com.influencermatch.backend.creator.controller.CreatorIngestionController.class)
         operation.setSecurity(List.of(new SecurityRequirement().addList("CreatorServiceKey")));

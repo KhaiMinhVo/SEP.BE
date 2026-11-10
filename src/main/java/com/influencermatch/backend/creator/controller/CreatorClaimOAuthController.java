@@ -33,6 +33,7 @@ public class CreatorClaimOAuthController {
       @RequestParam("token") String token,
       @RequestParam(value = "redirect", defaultValue = "true") boolean redirect) {
 
+    com.influencermatch.backend.creator.meta.MetaPlatformGuard.requireLegacy(platform);
     proofClient.requireConfigured();
     // First ensure token is valid before initiating redirect
     invitationService.verifyInvitationToken(token);

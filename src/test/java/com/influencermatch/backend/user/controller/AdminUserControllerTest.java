@@ -62,7 +62,7 @@ class AdminUserControllerTest {
         );
 
         Page<AdminUserResponse> page = new PageImpl<>(List.of(userResponse));
-        when(adminUserService.list(any(PageRequest.class))).thenReturn(page);
+        when(adminUserService.list(org.mockito.ArgumentMatchers.isNull(),org.mockito.ArgumentMatchers.isNull(),org.mockito.ArgumentMatchers.isNull(),eq(0),eq(20))).thenReturn(page);
 
         mockMvc.perform(get("/admin/users")
                 .param("page", "0")

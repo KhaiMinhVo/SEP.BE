@@ -28,7 +28,6 @@ import com.influencermatch.backend.support.TestActors;
 import com.influencermatch.backend.user.enums.Role;
 import com.influencermatch.backend.user.model.User;
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,39 +70,38 @@ class AiRecommendationFeedbackPhase4Test {
     aiServiceClient = mock(AiServiceClient.class);
     objectMapper = new ObjectMapper();
 
-    service = new AiRecommendationService(
-        subscriptionService,
-        ownership,
-        campaignContextRepository,
-        publicCreatorMetricRepository,
-        historicalCampaignRepository,
-        brandPatternRepository,
-        shortlistItemRepository,
-        recommendationRunRepository,
-        aiServiceClient,
-        objectMapper
-    );
+    service =
+        new AiRecommendationService(
+            subscriptionService,
+            ownership,
+            campaignContextRepository,
+            publicCreatorMetricRepository,
+            historicalCampaignRepository,
+            brandPatternRepository,
+            shortlistItemRepository,
+            recommendationRunRepository,
+            aiServiceClient,
+            objectMapper);
 
+    com.influencermatch.backend.support.TestM4Fixtures.wire(service);
     brandUser = TestActors.user(Role.BRAND);
     TestActors.authenticate(brandUser);
 
     campaignId = UUID.randomUUID();
     brandProfileId = UUID.randomUUID();
 
-    brandProfile = BrandProfile.builder()
-        .id(brandProfileId)
-        .user(brandUser)
-        .build();
+    brandProfile = BrandProfile.builder().id(brandProfileId).user(brandUser).build();
 
-    campaign = Campaign.builder()
-        .id(campaignId)
-        .brandProfile(brandProfile)
-        .name("Beauty Summer Campaign 2026")
-        .budgetMin(BigDecimal.valueOf(10_000_000))
-        .budgetMax(BigDecimal.valueOf(50_000_000))
-        .niches(List.of("BEAUTY", "SKINCARE"))
-        .platforms(List.of("TIKTOK"))
-        .build();
+    campaign =
+        Campaign.builder()
+            .id(campaignId)
+            .brandProfile(brandProfile)
+            .name("Beauty Summer Campaign 2026")
+            .budgetMin(BigDecimal.valueOf(10_000_000))
+            .budgetMax(BigDecimal.valueOf(50_000_000))
+            .niches(List.of("BEAUTY", "SKINCARE"))
+            .platforms(List.of("TIKTOK"))
+            .build();
 
     when(ownership.requireOwned(campaignId)).thenReturn(campaign);
   }
@@ -114,7 +112,9 @@ class AiRecommendationFeedbackPhase4Test {
   }
 
   @Test
-  @DisplayName("TEST-10: Brand rejects KOC with PRICE_TOO_HIGH -> Excludes KOC in context v2, archives v1, and preserves Campaign budget/niches")
+  @DisplayName(
+      "TEST-10: Brand rejects KOC with PRICE_TOO_HIGH -> Excludes KOC in context v2, archives v1,"
+          + " and preserves Campaign budget/niches")
   void testFeedback_rejectPriceTooHigh_preservesBudgetAndExcludesCreator() {
     UUID creatorId = UUID.randomUUID();
 
@@ -126,23 +126,25 @@ class AiRecommendationFeedbackPhase4Test {
     initialData.set("excludedCreatorIds", objectMapper.createArrayNode());
     initialData.set("feedbackHistory", objectMapper.createArrayNode());
 
-    CampaignContext contextV1 = CampaignContext.builder()
-        .id(UUID.randomUUID())
-        .campaign(campaign)
-        .contextVersion(1)
-        .contextData(initialData)
-        .active(true)
-        .build();
+    CampaignContext contextV1 =
+        CampaignContext.builder()
+            .id(UUID.randomUUID())
+            .campaign(campaign)
+            .contextVersion(1)
+            .contextData(initialData)
+            .active(true)
+            .build();
 
     when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
         .thenReturn(List.of(contextV1));
 
-    RecommendationFeedbackRequest req = RecommendationFeedbackRequest.builder()
-        .creatorId(creatorId)
-        .action("REJECT")
-        .reasonCode("PRICE_TOO_HIGH")
-        .reasonNote("KOC báo giá 30 triệu, vượt mức chi trả cho video ngắn")
-        .build();
+    RecommendationFeedbackRequest req =
+        RecommendationFeedbackRequest.builder()
+            .creatorId(creatorId)
+            .action("REJECT")
+            .reasonCode("PRICE_TOO_HIGH")
+            .reasonNote("KOC báo giá 30 triệu, vượt mức chi trả cho video ngắn")
+            .build();
 
     RecommendationFeedbackResponse res = service.processFeedback(campaignId, req);
 
@@ -163,13 +165,13 @@ class AiRecommendationFeedbackPhase4Test {
     // 3. Kiểm tra Context v1 bị archive
     assertThat(contextV1.isActive()).isFalse();
     assertThat(contextV1.getArchivedAt()).isNotNull();
-    verify(campaignContextRepository).save(contextV1);
+    verify(campaignContextRepository).saveAndFlush(contextV1);
 
     // 4. Kiểm tra Context v2 mới được lưu với bối cảnh tiến hóa
     ArgumentCaptor<CampaignContext> contextCaptor = ArgumentCaptor.forClass(CampaignContext.class);
-    verify(campaignContextRepository, times(2)).save(contextCaptor.capture());
+    verify(campaignContextRepository).save(contextCaptor.capture());
 
-    CampaignContext savedV2 = contextCaptor.getAllValues().get(1);
+    CampaignContext savedV2 = contextCaptor.getValue();
     assertThat(savedV2.getContextVersion()).isEqualTo(2);
     assertThat(savedV2.isActive()).isTrue();
 
@@ -189,7 +191,9 @@ class AiRecommendationFeedbackPhase4Test {
   }
 
   @Test
-  @DisplayName("TEST-10 Continuation: Sequential rejections evolve context versions v1 -> v2 -> v3 accumulating exclusions")
+  @DisplayName(
+      "TEST-10 Continuation: Sequential rejections evolve context versions v1 -> v2 -> v3"
+          + " accumulating exclusions")
   void testFeedback_sequentialRejections_accumulateExclusions() {
     UUID kocA = UUID.randomUUID();
     UUID kocB = UUID.randomUUID();
@@ -199,22 +203,24 @@ class AiRecommendationFeedbackPhase4Test {
     dataV1.set("excludedCreatorIds", objectMapper.createArrayNode());
     dataV1.set("feedbackHistory", objectMapper.createArrayNode());
 
-    CampaignContext contextV1 = CampaignContext.builder()
-        .campaign(campaign)
-        .contextVersion(1)
-        .contextData(dataV1)
-        .active(true)
-        .build();
+    CampaignContext contextV1 =
+        CampaignContext.builder()
+            .campaign(campaign)
+            .contextVersion(1)
+            .contextData(dataV1)
+            .active(true)
+            .build();
 
     when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
         .thenReturn(List.of(contextV1));
 
     // Bước 1: Reject KOC A -> tiến hóa lên v2
-    RecommendationFeedbackRequest reqA = RecommendationFeedbackRequest.builder()
-        .creatorId(kocA)
-        .action("REJECT")
-        .reasonCode("NICHE_MISMATCH")
-        .build();
+    RecommendationFeedbackRequest reqA =
+        RecommendationFeedbackRequest.builder()
+            .creatorId(kocA)
+            .action("REJECT")
+            .reasonCode("NICHE_MISMATCH")
+            .build();
 
     RecommendationFeedbackResponse resA = service.processFeedback(campaignId, reqA);
     assertThat(resA.getNewContextVersion()).isEqualTo(2);
@@ -226,22 +232,24 @@ class AiRecommendationFeedbackPhase4Test {
     dataV2.set("excludedCreatorIds", excludedV2);
     dataV2.set("feedbackHistory", objectMapper.createArrayNode());
 
-    CampaignContext contextV2 = CampaignContext.builder()
-        .campaign(campaign)
-        .contextVersion(2)
-        .contextData(dataV2)
-        .active(true)
-        .build();
+    CampaignContext contextV2 =
+        CampaignContext.builder()
+            .campaign(campaign)
+            .contextVersion(2)
+            .contextData(dataV2)
+            .active(true)
+            .build();
 
     when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
         .thenReturn(List.of(contextV2, contextV1));
 
     // Bước 2: Reject KOC B -> tiến hóa lên v3
-    RecommendationFeedbackRequest reqB = RecommendationFeedbackRequest.builder()
-        .creatorId(kocB)
-        .action("REJECT")
-        .reasonCode("LOW_ENGAGEMENT")
-        .build();
+    RecommendationFeedbackRequest reqB =
+        RecommendationFeedbackRequest.builder()
+            .creatorId(kocB)
+            .action("REJECT")
+            .reasonCode("LOW_ENGAGEMENT")
+            .build();
 
     RecommendationFeedbackResponse resB = service.processFeedback(campaignId, reqB);
     assertThat(resB.getPreviousContextVersion()).isEqualTo(2);
@@ -250,7 +258,9 @@ class AiRecommendationFeedbackPhase4Test {
   }
 
   @Test
-  @DisplayName("TEST-10 Idempotence: Rejecting the same creator twice does not duplicate in excludedCreatorIds")
+  @DisplayName(
+      "TEST-10 Idempotence: Rejecting the same creator twice does not duplicate in"
+          + " excludedCreatorIds")
   void testFeedback_idempotentRejection_noDuplicates() {
     UUID creatorId = UUID.randomUUID();
 
@@ -260,21 +270,23 @@ class AiRecommendationFeedbackPhase4Test {
     dataV1.set("excludedCreatorIds", excluded);
     dataV1.set("feedbackHistory", objectMapper.createArrayNode());
 
-    CampaignContext contextV1 = CampaignContext.builder()
-        .campaign(campaign)
-        .contextVersion(1)
-        .contextData(dataV1)
-        .active(true)
-        .build();
+    CampaignContext contextV1 =
+        CampaignContext.builder()
+            .campaign(campaign)
+            .contextVersion(1)
+            .contextData(dataV1)
+            .active(true)
+            .build();
 
     when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
         .thenReturn(List.of(contextV1));
 
-    RecommendationFeedbackRequest req = RecommendationFeedbackRequest.builder()
-        .creatorId(creatorId)
-        .action("REJECT")
-        .reasonCode("PRICE_TOO_HIGH")
-        .build();
+    RecommendationFeedbackRequest req =
+        RecommendationFeedbackRequest.builder()
+            .creatorId(creatorId)
+            .action("REJECT")
+            .reasonCode("PRICE_TOO_HIGH")
+            .build();
 
     RecommendationFeedbackResponse res = service.processFeedback(campaignId, req);
 
@@ -290,22 +302,24 @@ class AiRecommendationFeedbackPhase4Test {
     dataV1.set("excludedCreatorIds", objectMapper.createArrayNode());
     dataV1.set("feedbackHistory", objectMapper.createArrayNode());
 
-    CampaignContext contextV1 = CampaignContext.builder()
-        .campaign(campaign)
-        .contextVersion(1)
-        .contextData(dataV1)
-        .active(true)
-        .build();
+    CampaignContext contextV1 =
+        CampaignContext.builder()
+            .campaign(campaign)
+            .contextVersion(1)
+            .contextData(dataV1)
+            .active(true)
+            .build();
 
     when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
         .thenReturn(List.of(contextV1));
 
-    RecommendationFeedbackRequest req = RecommendationFeedbackRequest.builder()
-        .creatorId(creatorId)
-        .action("ACCEPT")
-        .reasonCode("GOOD_FIT")
-        .reasonNote("Rất phù hợp với concept hè")
-        .build();
+    RecommendationFeedbackRequest req =
+        RecommendationFeedbackRequest.builder()
+            .creatorId(creatorId)
+            .action("ACCEPT")
+            .reasonCode("GOOD_FIT")
+            .reasonNote("Rất phù hợp với concept hè")
+            .build();
 
     RecommendationFeedbackResponse res = service.processFeedback(campaignId, req);
 
@@ -313,11 +327,12 @@ class AiRecommendationFeedbackPhase4Test {
     assertThat(res.getTotalExcludedCount()).isEqualTo(0); // Không bị loại trừ
 
     ArgumentCaptor<CampaignContext> captor = ArgumentCaptor.forClass(CampaignContext.class);
-    verify(campaignContextRepository, times(2)).save(captor.capture());
+    verify(campaignContextRepository).save(captor.capture());
 
-    CampaignContext newCtx = captor.getAllValues().get(1);
+    CampaignContext newCtx = captor.getValue();
     assertThat(newCtx.getContextData().get("excludedCreatorIds")).isEmpty();
     assertThat(newCtx.getContextData().get("feedbackHistory")).hasSize(1);
-    assertThat(newCtx.getContextData().get("feedbackHistory").get(0).get("action").asText()).isEqualTo("ACCEPT");
+    assertThat(newCtx.getContextData().get("feedbackHistory").get(0).get("action").asText())
+        .isEqualTo("ACCEPT");
   }
 }

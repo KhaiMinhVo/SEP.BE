@@ -69,16 +69,19 @@ public class GlobalExceptionHandler {
 
   @ExceptionHandler({BadCredentialsException.class, UsernameNotFoundException.class})
   ResponseEntity<ProblemDetail> credentials(Exception ex, HttpServletRequest req) {
+    log.warn("Authentication failed for request '{}': {}", req.getRequestURI(), ex.getMessage());
     return response(ErrorCode.UNAUTHENTICATED, "Invalid email or password", req, Map.of());
   }
 
   @ExceptionHandler(LockedException.class)
   ResponseEntity<ProblemDetail> locked(Exception ex, HttpServletRequest req) {
+    log.warn("Locked account access attempt for request '{}': {}", req.getRequestURI(), ex.getMessage());
     return response(ErrorCode.ACCOUNT_LOCKED, "Account is locked", req, Map.of());
   }
 
   @ExceptionHandler(DisabledException.class)
   ResponseEntity<ProblemDetail> disabled(Exception ex, HttpServletRequest req) {
+    log.warn("Disabled account access attempt for request '{}': {}", req.getRequestURI(), ex.getMessage());
     return response(ErrorCode.ACCOUNT_DISABLED, "Account is disabled", req, Map.of());
   }
 
@@ -90,6 +93,7 @@ public class GlobalExceptionHandler {
 
   @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
   ResponseEntity<ProblemDetail> denied(Exception ex, HttpServletRequest req) {
+    log.warn("Access denied for request '{}': {}", req.getRequestURI(), ex.getMessage());
     return response(ErrorCode.ACCESS_DENIED, "Permission required", req, Map.of());
   }
 

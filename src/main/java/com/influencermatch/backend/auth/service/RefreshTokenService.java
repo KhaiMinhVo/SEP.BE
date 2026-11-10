@@ -12,10 +12,12 @@ import java.security.*;
 import java.time.LocalDateTime;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class RefreshTokenService {
@@ -44,6 +46,10 @@ public class RefreshTokenService {
     RefreshToken old = tokens.findByTokenHash(hash(raw)).orElseThrow(this::invalid);
     if (!old.active(now)) {
       if (old.getRevokedAt() != null) {
+        log.warn(
+            "SECURITY ALERT: Refresh token replay detected for userId='{}', revoked tokenId='{}'. Revoking all active user sessions.",
+            old.getUserId(),
+            old.getId());
         tokens.revokeAll(old.getUserId(), now);
         // Keep the existing RBAC lock until revocation commits; a new transaction here
         // would contend with the lock held by the caller's refresh transaction.

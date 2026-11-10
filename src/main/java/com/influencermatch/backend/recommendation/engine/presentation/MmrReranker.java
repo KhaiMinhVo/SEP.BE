@@ -15,6 +15,7 @@ import java.util.TreeMap;
 public class MmrReranker {
 
   public static final double DEFAULT_LAMBDA = 0.70;
+  public static final String INTRA_BUCKET_MMR_STATUS = "DISABLED_IN_MVP";
 
   public interface MmrCandidate {
     double matchScore(); // 0 to 100

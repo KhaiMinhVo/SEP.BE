@@ -49,9 +49,22 @@ class AdminRecommendationConfigControllerTest {
     assertThat(dto.getDynamicWeighting().getMinPoolSizeForCritic()).isEqualTo(10);
     assertThat(dto.getDynamicWeighting().getCanonicalObjectiveWeights()).containsKey("AWARENESS");
 
-    // Verify MMR diversity lambda is 0.70
+    // Verify exact canonical business objective weights [M1, M2, M3, M4]
+    assertThat(dto.getDynamicWeighting().getCanonicalObjectiveWeights().get("AWARENESS"))
+        .containsExactly(0.10, 0.35, 0.40, 0.15);
+    assertThat(dto.getDynamicWeighting().getCanonicalObjectiveWeights().get("ENGAGEMENT"))
+        .containsExactly(0.15, 0.35, 0.35, 0.15);
+    assertThat(dto.getDynamicWeighting().getCanonicalObjectiveWeights().get("TRAFFIC"))
+        .containsExactly(0.20, 0.35, 0.30, 0.15);
+    assertThat(dto.getDynamicWeighting().getCanonicalObjectiveWeights().get("CONVERSION"))
+        .containsExactly(0.40, 0.15, 0.30, 0.15);
+    assertThat(dto.getDynamicWeighting().getInterpretationPolicy()).contains("Business Objective Weights");
+
+    // Verify MMR diversity lambda is 0.70 and intra-bucket status is frozen
     assertThat(dto.getDiversityReranking().getDefaultMmrLambda())
         .isEqualTo(MmrReranker.DEFAULT_LAMBDA);
+    assertThat(dto.getDiversityReranking().getIntraBucketMmrStatus())
+        .isEqualTo(MmrReranker.INTRA_BUCKET_MMR_STATUS);
 
     // Verify Half-saturation K constants
     assertThat(dto.getHalfSaturation().getErViewsK().get("TIKTOK"))

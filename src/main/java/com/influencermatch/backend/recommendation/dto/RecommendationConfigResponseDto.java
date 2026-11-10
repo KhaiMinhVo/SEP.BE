@@ -71,6 +71,7 @@ public class RecommendationConfigResponseDto {
     private int minPoolSizeForCritic;
     private String blendFormula;
     private String fallbackMode;
+    private String interpretationPolicy;
     private Map<String, double[]> canonicalObjectiveWeights;
   }
 
@@ -124,21 +125,22 @@ public class RecommendationConfigResponseDto {
         .outlierSanity(
             OutlierSanityConfig.builder()
                 .erExtremeOutlierThreshold(ScoringPolicyConfig.ER_EXTREME_OUTLIER_THRESHOLD)
-                .description("Threshold (1000%) distinguishing data anomalies from viral content.")
+                .description("Extreme Outlier Sanity Threshold (10.0 / 1000%): Rule-based sanity guardrail to flag anomalous or corrupted engagement rates; not a deterministic proof of viral authenticity.")
                 .build())
         .dynamicWeighting(
             DynamicWeightingConfig.builder()
                 .defaultLambda(DynamicWeightBlender.DEFAULT_LAMBDA)
                 .minPoolSizeForCritic(CriticWeightCalculator.MIN_POOL_SIZE)
                 .blendFormula("w_j = (1 - lambda) * b_g,j + lambda * q_j")
-                .fallbackMode("BUSINESS_FALLBACK when variance is absent or lambda == 0")
+                .fallbackMode("BUSINESS_FALLBACK (lambda = 0) engaged when: pool size < 10, criteria variance < EPSILON, active criteria < 2, total information C == 0, or lambda == 0")
+                .interpretationPolicy("Business Objective Weights represent predefined decision priorities across the four evidence dimensions [M1, M2, M3, M4]. They are not direct predictions of campaign-specific traffic, engagement, or conversion outcomes.")
                 .canonicalObjectiveWeights(objectiveWeights)
                 .build())
         .diversityReranking(
             DiversityRerankingConfig.builder()
                 .defaultMmrLambda(MmrReranker.DEFAULT_LAMBDA)
                 .mmrFormula("MMR(i) = lambda * rel(i) - (1 - lambda) * max_{s in S} sim(i, s)")
-                .intraBucketMmrStatus("DISABLED_IN_MVP")
+                .intraBucketMmrStatus(MmrReranker.INTRA_BUCKET_MMR_STATUS)
                 .build())
         .futureScope(
             List.of(

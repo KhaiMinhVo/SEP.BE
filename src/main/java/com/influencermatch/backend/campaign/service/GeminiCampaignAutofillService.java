@@ -35,9 +35,8 @@ public class GeminiCampaignAutofillService {
   // ───────────────────────────────────────────────────────────────────────────
 
   /**
-   * Given a short natural-language brand prompt, calls Gemini to generate a
-   * fully populated CampaignAutofillResponse that the frontend can use to
-   * pre-fill the campaign creation form.
+   * Given a short natural-language brand prompt, calls Gemini to generate a fully populated
+   * CampaignAutofillResponse that the frontend can use to pre-fill the campaign creation form.
    */
   public CampaignAutofillResponse autofill(CampaignAutofillRequest request) {
     String prompt = buildPrompt(request.prompt());
@@ -69,13 +68,13 @@ public class GeminiCampaignAutofillService {
 
         3. PROVENANCE INTEGRITY:
            - "extractedFields" and "inferredFields" MUST be mutually exclusive and together categorize all populated parameters.
-           - Recognized field names: ["name", "productService", "objective", "targetAudiences", "contentType", "startDate", "endDate", "platforms", "niches", "locations", "followerMin", "followerMax", "budgetMin", "budgetMax"].
+           - Recognized field names: ["name", "productService", "objective", "targetAudiences", "contentType", "startDate", "endDate", "platforms", "niches", "locations", "followerMin", "followerMax", "budgetMin", "budgetMax", "brief", "totalBudget"].
 
-        === PLATFORM ENUM VALUES (use exactly these strings) ===
-        INSTAGRAM, TIKTOK, YOUTUBE, FACEBOOK, TWITTER, THREADS
+=== PLATFORM ENUM VALUES (use exactly these strings) ===
+INSTAGRAM, TIKTOK, YOUTUBE, FACEBOOK, TWITTER, THREADS
 
-        === OBJECTIVE ENUM VALUES (use exactly these strings) ===
-        AWARENESS, ENGAGEMENT, TRAFFIC, CONVERSION
+=== OBJECTIVE ENUM VALUES (use exactly these strings) ===
+AWARENESS, ENGAGEMENT, TRAFFIC, CONVERSION
 
         === OUTPUT FORMAT (return ONLY this JSON, nothing else) ===
         {
@@ -93,22 +92,32 @@ public class GeminiCampaignAutofillService {
           "followerMax": number | null (maximum follower count, e.g. 500000),
           "budgetMin": number | null (minimum budget in VND, e.g. 5000000),
           "budgetMax": number | null (maximum budget in VND, e.g. 20000000),
+          "brief": "Detailed editable campaign brief",
+          "creatorMode": "SINGLE or MULTI or null when unspecified",
+          "targetCreatorCount": null,
+          "deliverables": [{"platform":"TIKTOK","contentType":"Review video","quantity":1}],
+          "totalBudget": null,
+          "currency":"VND",
+          "creatorFeeMin":null,
+          "creatorFeeMax":null,
           "extractedFields": ["array of field names provided directly by the user"],
           "inferredFields": ["array of field names inferred by AI because user omitted them"],
           "aiExplanation": "string in Vietnamese – concise explanation clearly stating which parameters were extracted directly from the user and why missing parameters were inferred as suggested"
         }
 
-        === INFERENCE GUIDELINES (Use ONLY when user does NOT explicitly specify) ===
+        === INFERENCE & BUDGET GUIDELINES ===
         - Budget:
           * If user mentions specific budget (e.g. 'ngân sách 20 triệu'), use that exact amount and classify under extractedFields.
           * 'budget tầm tầm' / 'trung bình' -> budgetMin: 10000000, budgetMax: 30000000 (inferred)
           * 'budget thấp' / 'tiết kiệm' -> budgetMin: 2000000, budgetMax: 10000000 (inferred)
           * 'budget lớn' / 'cao' -> budgetMin: 50000000, budgetMax: 200000000 (inferred)
-          * If completely omitted -> infer realistic budget based on product and set inferredFields.
+          * Separate totalBudget for the entire campaign from creatorFeeMin/creatorFeeMax per Creator.
+          * Only VND is supported.
         - Follower count:
           * If user specifies creator tiers or numbers, follow user exactly (extractedFields).
           * 'micro influencer' / 'nano' -> followerMin: 10000, followerMax: 100000 (inferred)
           * 'macro influencer' / 'KOL lớn' -> followerMin: 100000, followerMax: 1000000 (inferred)
+          * 'mega influencer' -> followerMin: 500000, followerMax: null (inferred)
           * If omitted -> align with budget and product tier (inferredFields).
         - Platforms:
           * If user names platforms, use ONLY user platforms (extractedFields).
@@ -164,7 +173,9 @@ public class GeminiCampaignAutofillService {
                       "generationConfig",
                       new java.util.LinkedHashMap<String, Object>() {
                         {
-                          put("maxOutputTokens", Math.max(geminiProperties.getMaxOutputTokens(), 2048));
+                          put(
+                              "maxOutputTokens",
+                              Math.max(geminiProperties.getMaxOutputTokens(), 2048));
                           put("temperature", geminiProperties.getTemperature());
                           put("responseMimeType", "application/json");
                           put("thinkingConfig", Map.of("thinkingBudget", 0));
@@ -267,12 +278,50 @@ public class GeminiCampaignAutofillService {
         decimal(node, "budgetMax"),
         extracted,
         inferred,
+        text(node, "brief"),
+        mode(node),
+        node.path("targetCreatorCount").canConvertToInt()
+            ? node.path("targetCreatorCount").intValue()
+            : null,
+        deliverables(node),
+        decimal(node, "totalBudget"),
+        "VND",
+        decimal(node, "creatorFeeMin"),
+        decimal(node, "creatorFeeMax"),
         text(node, "aiExplanation"));
   }
 
   // ───────────────────────────────────────────────────────────────────────────
   //  JSON helpers
   // ───────────────────────────────────────────────────────────────────────────
+
+  private com.influencermatch.backend.campaign.enums.CreatorMode mode(JsonNode n) {
+    try {
+      return com.influencermatch.backend.campaign.enums.CreatorMode.valueOf(
+          n.path("creatorMode").asText());
+    } catch (IllegalArgumentException e) {
+      return null;
+    }
+  }
+
+  private List<com.influencermatch.backend.campaign.dto.CampaignDeliverable> deliverables(
+      JsonNode n) {
+    var out = new ArrayList<com.influencermatch.backend.campaign.dto.CampaignDeliverable>();
+    if (n.path("deliverables").isArray())
+      for (var d : n.path("deliverables")) {
+        try {
+          var platform = Platform.valueOf(d.path("platform").asText());
+          var type = d.path("contentType").asText();
+          int q = d.path("quantity").asInt();
+          if (!type.isBlank() && q > 0)
+            out.add(
+                new com.influencermatch.backend.campaign.dto.CampaignDeliverable(
+                    platform, type, q));
+        } catch (IllegalArgumentException ignored) {
+        }
+      }
+    return out;
+  }
 
   private String text(JsonNode node, String field) {
     JsonNode v = node.get(field);

@@ -1,9 +1,9 @@
 package com.influencermatch.backend.recommendation.controller;
 
-import com.influencermatch.backend.campaign.model.RecommendationRun;
 import com.influencermatch.backend.campaign.repository.RecommendationRunRepository;
 import com.influencermatch.backend.common.dto.ApiResponse;
 import com.influencermatch.backend.recommendation.dto.*;
+import com.influencermatch.backend.recommendation.engine.presentation.enums.DisplayMode;
 import com.influencermatch.backend.recommendation.service.AiRecommendationService;
 import com.influencermatch.backend.relationship.service.CampaignOwnershipService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -34,8 +34,12 @@ public class AiRecommendationController {
       security = @SecurityRequirement(name = "BearerAuth"))
   public ResponseEntity<ApiResponse<RecommendationResponseDto>> recommendKocs(
       @PathVariable UUID campaignId,
-      @RequestParam(defaultValue = "30") int limit) {
-    RecommendationResponseDto result = recommendationService.recommendKocs(campaignId, limit);
+      @RequestParam(defaultValue = "30") int limit,
+      @RequestParam(required = false, defaultValue = "BEST_MATCH") DisplayMode displayMode,
+      @RequestParam(defaultValue = "SHORTLIST")
+          com.influencermatch.backend.campaign.enums.CandidateSource candidateSource) {
+    RecommendationResponseDto result =
+        recommendationService.recommendKocs(campaignId, limit, candidateSource, displayMode);
     return ResponseEntity.ok(ApiResponse.ok("KOC recommendations generated successfully", result));
   }
 
@@ -44,12 +48,9 @@ public class AiRecommendationController {
   @Operation(
       summary = "Get historical AI recommendation runs for campaign",
       security = @SecurityRequirement(name = "BearerAuth"))
-  public ResponseEntity<ApiResponse<List<RecommendationRun>>> getRecommendationRuns(
+  public ResponseEntity<ApiResponse<List<RecommendationRunView>>> getRecommendationRuns(
       @PathVariable UUID campaignId) {
-    ownership.requireOwned(campaignId);
-    List<RecommendationRun> runs =
-        recommendationRunRepository.findByCampaignIdOrderByCreatedAtDesc(campaignId);
-    return ResponseEntity.ok(ApiResponse.ok(runs));
+    return ResponseEntity.ok(ApiResponse.ok(recommendationService.runs(campaignId)));
   }
 
   @PostMapping("/feedback")
@@ -58,8 +59,7 @@ public class AiRecommendationController {
       summary = "Submit feedback on recommended candidate (e.g. REJECT with reasonCode)",
       security = @SecurityRequirement(name = "BearerAuth"))
   public ResponseEntity<ApiResponse<RecommendationFeedbackResponse>> processFeedback(
-      @PathVariable UUID campaignId,
-      @Valid @RequestBody RecommendationFeedbackRequest request) {
+      @PathVariable UUID campaignId, @Valid @RequestBody RecommendationFeedbackRequest request) {
     RecommendationFeedbackResponse response =
         recommendationService.processFeedback(campaignId, request);
     return ResponseEntity.ok(ApiResponse.ok("Feedback processed successfully", response));

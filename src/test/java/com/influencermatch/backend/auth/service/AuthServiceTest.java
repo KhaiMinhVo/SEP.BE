@@ -1,5 +1,10 @@
 package com.influencermatch.backend.auth.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
 import com.influencermatch.backend.auth.dto.LoginRequest;
 import com.influencermatch.backend.auth.dto.LoginResponse;
 import com.influencermatch.backend.auth.dto.RegisterRequest;
@@ -21,167 +26,184 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
-
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
 
-    @Mock
-    private UserRepository userRepository;
+  @Mock private UserRepository userRepository;
 
-    @Mock
-    private PasswordEncoder passwordEncoder;
+  @Mock private PasswordEncoder passwordEncoder;
 
-    @Mock
-    private JwtTokenProvider jwtTokenProvider;
+  @Mock private JwtTokenProvider jwtTokenProvider;
 
-    @Mock
-    private AuthenticationManager authenticationManager;
+  @Mock private AuthenticationManager authenticationManager;
 
-    @Mock
-    private RefreshTokenService refreshTokenService;
+  @Mock private RefreshTokenService refreshTokenService;
 
-    @Mock
-    private com.influencermatch.backend.security.permission.service.EffectivePermissionService effectivePermissions;
+  @Mock
+  private com.influencermatch.backend.security.permission.service.EffectivePermissionService
+      effectivePermissions;
 
-    @Mock private EmailVerificationService verification;
+  @Mock private EmailVerificationService verification;
+  @Mock private RegistrationSupport registration;
+  @Mock private AuthSessionIssuer issuer;
+  @Mock private com.influencermatch.backend.brand.repository.BrandProfileRepository profiles;
 
-    @InjectMocks
-    private AuthServiceImpl authService;
+  @InjectMocks private AuthServiceImpl authService;
 
-    private User testUser;
+  private User testUser;
 
-    @BeforeEach
-    void setUp() {
-        testUser = createMockUser();
-        lenient().when(effectivePermissions.names(any())).thenAnswer(i ->
-            com.influencermatch.backend.security.permission.RolePermissions.names(i.getArgument(0)));
-    }
+  @BeforeEach
+  void setUp() {
+    testUser = createMockUser();
+    lenient()
+        .when(effectivePermissions.names(any()))
+        .thenAnswer(
+            i ->
+                com.influencermatch.backend.security.permission.RolePermissions.names(
+                    i.getArgument(0)));
+  }
 
-    @Test
-    @DisplayName("Register - Valid request saves new user successfully")
-    void register_ValidRequest_SavesUser() {
-        // GIVEN
-        RegisterRequest request = createValidRegisterRequest();
-        when(userRepository.existsByEmail(request.getEmail())).thenReturn(false);
-        when(passwordEncoder.encode(request.getPassword())).thenReturn("hashed_password");
+  @Test
+  @DisplayName("Register - Valid request saves new user successfully")
+  void register_ValidRequest_SavesUser() {
+    // GIVEN
+    RegisterRequest request = createValidRegisterRequest();
+    when(userRepository.existsByEmail(request.getEmail())).thenReturn(false);
+    when(passwordEncoder.encode(request.getPassword())).thenReturn("hashed_password");
 
-        // WHEN
-        authService.register(request);
+    // WHEN
+    authService.register(request);
 
-        // THEN
-        verify(userRepository, times(1)).saveAndFlush(any(User.class));
-    }
+    // THEN
+    verify(userRepository, times(1)).saveAndFlush(any(User.class));
+  }
 
-    @Test
-    @DisplayName("Register - Existing email throws BusinessException")
-    void register_EmailExists_ThrowsException() {
-        // GIVEN
-        RegisterRequest request = createValidRegisterRequest();
-        when(userRepository.existsByEmail(request.getEmail())).thenReturn(true);
+  @Test
+  @DisplayName("Register - Existing email throws BusinessException")
+  void register_EmailExists_ThrowsException() {
+    // GIVEN
+    RegisterRequest request = createValidRegisterRequest();
+    when(userRepository.existsByEmail(request.getEmail())).thenReturn(true);
 
-        // WHEN & THEN
-        assertThatThrownBy(() -> authService.register(request))
-                .isInstanceOf(BusinessException.class);
-        verify(userRepository, never()).save(any());
-    }
+    // WHEN & THEN
+    assertThatThrownBy(() -> authService.register(request)).isInstanceOf(BusinessException.class);
+    verify(userRepository, never()).save(any());
+  }
 
-    @Test
-    @DisplayName("Login - Valid credentials returns access and refresh tokens")
-    void login_ValidRequest_ReturnsTokens() {
-        // GIVEN
-        LoginRequest request = createValidLoginRequest();
-        
-        Authentication auth = mock(Authentication.class);
-        when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class))).thenReturn(auth);
-        when(auth.getPrincipal()).thenReturn(testUser);
-        
-        when(jwtTokenProvider.generateToken(testUser)).thenReturn("mocked.access.token");
-        when(jwtTokenProvider.extractExpiresInSeconds("mocked.access.token")).thenReturn(3600L);
-        
-        RefreshTokenService.Issued mockIssued = new RefreshTokenService.Issued("mocked.refresh.token", null);
-        when(refreshTokenService.issue(testUser)).thenReturn(mockIssued);
+  @Test
+  @DisplayName("Login - Valid credentials returns access and refresh tokens")
+  void login_ValidRequest_ReturnsTokens() {
+    // GIVEN
+    LoginRequest request = createValidLoginRequest();
 
-        // WHEN
-        LoginResponse response = authService.login(request);
+    Authentication auth = mock(Authentication.class);
+    when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class)))
+        .thenReturn(auth);
+    when(auth.getPrincipal()).thenReturn(testUser);
 
-        // THEN
-        assertThat(response).isNotNull();
-        assertThat(response.getAccessToken()).isEqualTo("mocked.access.token");
-        assertThat(response.getRefreshToken()).isEqualTo("mocked.refresh.token");
-        verify(userRepository, times(1)).save(testUser); // Verifies last login update
-    }
+    when(issuer.issue(testUser, "PASSWORD"))
+        .thenReturn(
+            LoginResponse.builder()
+                .accessToken("mocked.access.token")
+                .refreshToken("mocked.refresh.token")
+                .build());
 
-    @Test
-    @DisplayName("Login - Locked user throws BusinessException")
-    void login_LockedUser_ThrowsException() {
-        // GIVEN
-        LoginRequest request = createValidLoginRequest();
-        User lockedUser = User.builder()
-                .email("test@example.com")
-                .passwordHash("hashed_password")
-                .fullName("Locked User")
-                .role(Role.BRAND)
-                .status(UserStatus.LOCKED)
-                .build();
+    // WHEN
+    LoginResponse response = authService.login(request);
 
-        Authentication auth = mock(Authentication.class);
-        when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class))).thenReturn(auth);
-        when(auth.getPrincipal()).thenReturn(lockedUser);
+    // THEN
+    assertThat(response).isNotNull();
+    assertThat(response.getAccessToken()).isEqualTo("mocked.access.token");
+    assertThat(response.getRefreshToken()).isEqualTo("mocked.refresh.token");
+    verify(userRepository, times(1)).save(testUser); // Verifies last login update
+  }
 
-        // WHEN & THEN
-        // Locked user has isAccountNonLocked() = false, so issue() must throw UNAUTHENTICATED
-        RefreshTokenService.Issued mockIssued = new RefreshTokenService.Issued("token", null);
-        when(refreshTokenService.issue(lockedUser)).thenThrow(new BusinessException(
-                com.influencermatch.backend.exception.ErrorCode.UNAUTHENTICATED, "Refresh token is invalid or expired"));
+  @Test
+  @DisplayName("Login - Locked user throws BusinessException")
+  void login_LockedUser_ThrowsException() {
+    // GIVEN
+    LoginRequest request = createValidLoginRequest();
+    User lockedUser =
+        User.builder()
+            .email("test@example.com")
+            .passwordHash("hashed_password")
+            .fullName("Locked User")
+            .role(Role.BRAND)
+            .status(UserStatus.LOCKED)
+            .build();
 
-        assertThatThrownBy(() -> authService.login(request))
-                .isInstanceOf(BusinessException.class);
-    }
+    Authentication auth = mock(Authentication.class);
+    when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class)))
+        .thenReturn(auth);
+    when(auth.getPrincipal()).thenReturn(lockedUser);
 
-    private User createMockUser() {
-        return User.builder()
-                .email("test@example.com")
-                .passwordHash("hashed_password")
-                .fullName("Test User")
-                .role(Role.BRAND)
-                .status(UserStatus.ACTIVE)
-                .build();
-    }
+    // WHEN & THEN
+    // Locked user has isAccountNonLocked() = false, so issue() must throw UNAUTHENTICATED
+    RefreshTokenService.Issued mockIssued = new RefreshTokenService.Issued("token", null);
+    when(issuer.issue(lockedUser, "PASSWORD"))
+        .thenThrow(
+            new BusinessException(
+                com.influencermatch.backend.exception.ErrorCode.UNAUTHENTICATED,
+                "Refresh token is invalid or expired"));
 
+    assertThatThrownBy(() -> authService.login(request)).isInstanceOf(BusinessException.class);
+  }
 
-    private RegisterRequest createValidRegisterRequest() {
-        return RegisterRequest.builder()
-                .email("new@example.com")
-                .password("Password123!")
-                .fullName("New User")
-                .build();
-    }
+  private User createMockUser() {
+    return User.builder()
+        .email("test@example.com")
+        .passwordHash("hashed_password")
+        .fullName("Test User")
+        .role(Role.BRAND)
+        .status(UserStatus.ACTIVE)
+        .build();
+  }
 
-    private LoginRequest createValidLoginRequest() {
-        return LoginRequest.builder()
-                .email("test@example.com")
-                .password("Password123!")
-                .build();
-    }
-    @Test
-    void registerTrimsEmailAndNameAndNeverPersistsPlainPassword() {
-        var req=RegisterRequest.builder().email("  CASE@EXAMPLE.TEST  ").password("Password123!").fullName("  Test  ").build();
-        when(passwordEncoder.encode(req.getPassword())).thenReturn("encoded");
-        authService.register(req);
-        var saved=org.mockito.ArgumentCaptor.forClass(User.class);verify(userRepository).saveAndFlush(saved.capture());
-        assertThat(saved.getValue().getEmail()).isEqualTo("case@example.test");
-        assertThat(saved.getValue().getFullName()).isEqualTo("Test");assertThat(saved.getValue().getRole()).isEqualTo(Role.BRAND);
-        assertThat(saved.getValue().getPasswordHash()).isEqualTo("encoded");
-    }
-    @Test
-    void invalidPasswordDoesNotGenerateAnyTokens() {
-        when(authenticationManager.authenticate(any())).thenThrow(new org.springframework.security.authentication.BadCredentialsException("Bad password"));
-        assertThatThrownBy(()->authService.login(createValidLoginRequest())).isInstanceOf(org.springframework.security.authentication.BadCredentialsException.class);
-        verifyNoInteractions(jwtTokenProvider,refreshTokenService);verify(userRepository,never()).save(any());
-    }
+  private RegisterRequest createValidRegisterRequest() {
+    return RegisterRequest.builder()
+        .email("new@example.com")
+        .password("Password123!")
+        .fullName("New User")
+        .businessName("Brand")
+        .phoneNumber("0912345678")
+        .policyAcceptance(com.influencermatch.backend.support.TestAuthHttp.acceptance())
+        .build();
+  }
 
+  private LoginRequest createValidLoginRequest() {
+    return LoginRequest.builder().email("test@example.com").password("Password123!").build();
+  }
+
+  @Test
+  void registerTrimsEmailAndNameAndNeverPersistsPlainPassword() {
+    var req =
+        RegisterRequest.builder()
+            .email("  CASE@EXAMPLE.TEST  ")
+            .password("Password123!")
+            .fullName("  Test  ")
+            .businessName("Brand")
+            .phoneNumber("0912345678")
+            .policyAcceptance(com.influencermatch.backend.support.TestAuthHttp.acceptance())
+            .build();
+    when(passwordEncoder.encode(req.getPassword())).thenReturn("encoded");
+    authService.register(req);
+    var saved = org.mockito.ArgumentCaptor.forClass(User.class);
+    verify(userRepository).saveAndFlush(saved.capture());
+    assertThat(saved.getValue().getEmail()).isEqualTo("case@example.test");
+    assertThat(saved.getValue().getFullName()).isEqualTo("Test");
+    assertThat(saved.getValue().getRole()).isEqualTo(Role.BRAND);
+    assertThat(saved.getValue().getPasswordHash()).isEqualTo("encoded");
+  }
+
+  @Test
+  void invalidPasswordDoesNotGenerateAnyTokens() {
+    when(authenticationManager.authenticate(any()))
+        .thenThrow(
+            new org.springframework.security.authentication.BadCredentialsException(
+                "Bad password"));
+    assertThatThrownBy(() -> authService.login(createValidLoginRequest()))
+        .isInstanceOf(org.springframework.security.authentication.BadCredentialsException.class);
+    verifyNoInteractions(jwtTokenProvider, refreshTokenService);
+    verify(userRepository, never()).save(any());
+  }
 }

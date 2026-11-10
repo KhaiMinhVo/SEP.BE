@@ -1,429 +1,274 @@
 package com.influencermatch.backend.relationship;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 
-import com.influencermatch.backend.brand.model.BrandProfile;
-import com.influencermatch.backend.campaign.model.Campaign;
-import com.influencermatch.backend.campaign.repository.RecommendationRunRepository;
-import com.influencermatch.backend.creator.dto.InvitationResponse;
-import com.influencermatch.backend.creator.enums.CreatorSourceType;
-import com.influencermatch.backend.creator.model.Creator;
-import com.influencermatch.backend.creator.model.CreatorInvitation;
-import com.influencermatch.backend.creator.model.CreatorMaster;
-import com.influencermatch.backend.creator.model.PublicCreatorMetric;
-import com.influencermatch.backend.creator.repository.CreatorInvitationRepository;
-import com.influencermatch.backend.creator.repository.CreatorRepository;
-import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
+import com.influencermatch.backend.auth.service.VerificationEmailSender;
+import com.influencermatch.backend.creator.model.*;
+import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.creator.service.CreatorInvitationService;
-import com.influencermatch.backend.exception.BusinessException;
-import com.influencermatch.backend.relationship.dto.*;
-import com.influencermatch.backend.relationship.enums.RelationshipStage;
-import com.influencermatch.backend.relationship.enums.ShortlistPriority;
-import com.influencermatch.backend.relationship.enums.ShortlistStatus;
-import com.influencermatch.backend.relationship.model.BrandCreatorRelationship;
-import com.influencermatch.backend.relationship.model.ShortlistItem;
-import com.influencermatch.backend.relationship.repository.BrandCreatorRelationshipRepository;
-import com.influencermatch.backend.relationship.repository.ShortlistItemRepository;
-import com.influencermatch.backend.relationship.service.CampaignOwnershipService;
-import com.influencermatch.backend.relationship.service.RelationshipServiceImpl;
-import com.influencermatch.backend.relationship.service.ShortlistServiceImpl;
-import com.influencermatch.backend.support.TestActors;
-import com.influencermatch.backend.user.enums.Role;
+import com.influencermatch.backend.support.*;
+import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
-import com.influencermatch.backend.user.repository.UserRepository;
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.*;
 import java.util.*;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.junit.jupiter.api.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.mock.mockito.MockBean;
 
-class ShortlistOutreachPhase4Test {
-
-  private ShortlistItemRepository shortlistItemRepository;
-  private CampaignOwnershipService ownership;
-  private CreatorRepository creatorRepository;
-  private UserRepository userRepository;
-  private RecommendationRunRepository recommendationRunRepository;
-  private PublicCreatorMetricRepository publicCreatorMetricRepository;
-  private BrandCreatorRelationshipRepository relationshipRepository;
-  private CreatorInvitationService creatorInvitationService;
-  private CreatorInvitationRepository creatorInvitationRepository;
-
-  private ShortlistServiceImpl shortlistService;
-  private RelationshipServiceImpl relationshipService;
-
-  private User brandUser;
-  private BrandProfile brandProfile;
-  private Campaign campaign;
-  private UUID campaignId;
+/**
+ * Outreach no longer sends Claim invitations; these scenarios now exercise PostgreSQL, not Mockito
+ * transactions.
+ */
+class ShortlistOutreachPhase4Test extends PostgresApiTestSupport {
+  @Autowired CreatorRepository creators;
+  @Autowired CreatorMasterRepository masters;
+  @Autowired PublicCreatorMetricRepository metrics;
+  @MockBean VerificationEmailSender sender;
+  @MockBean CreatorInvitationService claimInvitations;
+  User brand;
+  UUID campaign;
+  Creator c;
+  UUID item;
 
   @BeforeEach
-  void setUp() {
-    shortlistItemRepository = mock(ShortlistItemRepository.class);
-    ownership = mock(CampaignOwnershipService.class);
-    creatorRepository = mock(CreatorRepository.class);
-    userRepository = mock(UserRepository.class);
-    recommendationRunRepository = mock(RecommendationRunRepository.class);
-    publicCreatorMetricRepository = mock(PublicCreatorMetricRepository.class);
-    relationshipRepository = mock(BrandCreatorRelationshipRepository.class);
-    creatorInvitationService = mock(CreatorInvitationService.class);
-    creatorInvitationRepository = mock(CreatorInvitationRepository.class);
-
-    shortlistService =
-        new ShortlistServiceImpl(
-            shortlistItemRepository,
-            ownership,
-            creatorRepository,
-            userRepository,
-            recommendationRunRepository,
-            publicCreatorMetricRepository,
-            relationshipRepository,
-            creatorInvitationService,
-            creatorInvitationRepository);
-
-    relationshipService =
-        new RelationshipServiceImpl(
-            relationshipRepository,
-            shortlistItemRepository,
-            ownership,
-            creatorRepository,
-            userRepository);
-
-    brandUser = TestActors.user(Role.BRAND);
-    brandUser.setEmail("brand@company.com");
-    TestActors.authenticate(brandUser);
-
-    brandProfile =
-        BrandProfile.builder()
-            .businessName("Brand Corp")
-            .user(brandUser)
-            .build();
-    brandProfile.setId(UUID.randomUUID());
-
-    campaignId = UUID.randomUUID();
-    campaign =
-        Campaign.builder()
-            .name("Autumn Launch 2026")
-            .productService("Smart Watch")
-            .brandProfile(brandProfile)
-            .build();
-    campaign.setId(campaignId);
-
-    TestActors.authenticate(brandUser);
-    when(ownership.requireOwned(campaignId)).thenReturn(campaign);
-  }
-
-  @AfterEach
-  void tearDown() {
-    SecurityContextHolder.clearContext();
-  }
-
-  @Test
-  @DisplayName("TEST-F4-09: Brand outreaches to PUBLIC creator with email -> creates CRM relationship and enqueues claim invitation")
-  void testOutreach_Success_PublicCreatorWithEmail() {
-    UUID creatorId = UUID.randomUUID();
-    Creator creator =
-        Creator.builder()
-            .id(creatorId)
-            .platform("TIKTOK")
-            .userName("tech_reviewer")
-            .displayName("Tech Reviewer VN")
-            .sourceType(CreatorSourceType.PUBLIC)
-            .build();
-
-    UUID itemId = UUID.randomUUID();
-    ShortlistItem item =
-        ShortlistItem.builder()
-            .id(itemId)
-            .campaign(campaign)
-            .creator(creator)
-            .status(ShortlistStatus.SAVED)
-            .priority(ShortlistPriority.HIGH)
-            .build();
-
-    when(shortlistItemRepository.findByCampaignIdAndIdIn(eq(campaignId), any()))
-        .thenReturn(List.of(item));
-    when(shortlistItemRepository.save(any(ShortlistItem.class))).thenAnswer(i -> i.getArgument(0));
-
-    // Public metric with contact email
-    PublicCreatorMetric metric =
-        PublicCreatorMetric.builder()
-            .creator(creator)
-            .contact("booking@techreviewer.vn")
-            .contentSummary("Review công nghệ, smartphone, laptop")
-            .build();
-    when(publicCreatorMetricRepository.findByCreatorId(creatorId)).thenReturn(Optional.of(metric));
-
-    // No existing relationship
-    when(relationshipRepository.findByCampaignIdAndCreatorId(campaignId, creatorId))
-        .thenReturn(Optional.empty());
-    when(relationshipRepository.save(any(BrandCreatorRelationship.class)))
-        .thenAnswer(
-            i -> {
-              BrandCreatorRelationship r = i.getArgument(0);
-              if (r.getId() == null) r.setId(UUID.randomUUID());
-              return r;
-            });
-
-    // No existing pending invitation
-    when(creatorInvitationRepository
-            .findFirstByTargetCreatorIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
-                eq(creatorId), eq("PENDING"), any()))
-        .thenReturn(Optional.empty());
-
-    UUID invitationId = UUID.randomUUID();
-    when(creatorInvitationService.sendInvitation(
-            eq(creatorId), eq("booking@techreviewer.vn"), eq(brandProfile.getId()), eq(campaignId)))
-        .thenReturn(
-            InvitationResponse.builder()
-                .id(invitationId)
-                .creatorId(creatorId)
-                .email("booking@techreviewer.vn")
-                .status("PENDING")
-                .emailStatus("QUEUED")
+  void setup() throws Exception {
+    brand = account(Role.BRAND);
+    campaign = createCampaign(brand, createBrand(brand));
+    c =
+        creators.saveAndFlush(
+            Creator.builder()
+                .platform("TIKTOK")
+                .externalId(UUID.randomUUID().toString())
+                .userName("outreach")
+                .displayName("Creator")
+                .profileUrl("https://www.tiktok.com/@outreach")
                 .build());
+    item =
+        UUID.fromString(
+            call(
+                    brand,
+                    post("/campaigns/" + campaign + "/shortlist"),
+                    Map.of("creatorId", c.getId()),
+                    200)
+                .path("data")
+                .path("id")
+                .asText());
+  }
 
-    ShortlistOutreachRequest request =
-        ShortlistOutreachRequest.builder()
-            .shortlistItemIds(List.of(itemId))
-            .outreachMessage("Chào bạn, Brand muốn mời bạn test sản phẩm smartwatch mới")
-            .proposedFee(BigDecimal.valueOf(15_000_000))
-            .currency("VND")
-            .contactMethod("EMAIL_INVITATION")
-            .build();
+  Map<String, Object> body() {
+    return Map.of(
+        "shortlistItemIds",
+        List.of(item),
+        "proposedFee",
+        100000,
+        "currency",
+        "VND",
+        "outreachMessage",
+        "One review video",
+        "deliverables",
+        List.of(Map.of("creatorId", c.getId(), "contentType", "Review", "quantity", 1, "dueAt", "2027-01-01T00:00:00Z", "acceptanceChecklist", List.of("Brief satisfied"), "maxRevisionRounds", 2)));
+  }
 
-    ShortlistOutreachResponse response = shortlistService.outreachShortlist(campaignId, request);
-
-    assertThat(response.getCampaignId()).isEqualTo(campaignId);
-    assertThat(response.getContactedCount()).isEqualTo(1);
-    assertThat(response.getRelationshipIds()).hasSize(1);
-    assertThat(response.getDispatchedInvitationIds()).containsExactly(invitationId);
-    assertThat(item.getStatus()).isEqualTo(ShortlistStatus.CONTACTED);
-
-    ShortlistOutreachResponse.OutreachItemResult result = response.getItems().get(0);
-    assertThat(result.getContactStatus()).isEqualTo("INVITATION_QUEUED");
-    assertThat(result.getInvitationId()).isEqualTo(invitationId);
-
-    verify(creatorInvitationService)
-        .sendInvitation(
-            eq(creatorId), eq("booking@techreviewer.vn"), eq(brandProfile.getId()), eq(campaignId));
+  com.fasterxml.jackson.databind.JsonNode outreach() throws Exception {
+    return call(brand, post("/campaigns/" + campaign + "/shortlist/outreach"), body(), 200)
+        .path("data")
+        .path("items")
+        .get(0);
   }
 
   @Test
-  @DisplayName("Outreach to AUTHORIZED creator -> creates CRM relationship and marks PORTAL_NOTIFIED without email claim")
-  void testOutreach_Success_AuthorizedCreator() {
-    UUID creatorId = UUID.randomUUID();
-    CreatorMaster master = CreatorMaster.builder().id(UUID.randomUUID()).build();
-    Creator creator =
-        Creator.builder()
-            .id(creatorId)
-            .platform("YOUTUBE")
-            .userName("dev_channel")
-            .displayName("Dev Master")
-            .sourceType(CreatorSourceType.AUTHORIZED)
-            .master(master)
-            .build();
-
-    UUID itemId = UUID.randomUUID();
-    ShortlistItem item =
-        ShortlistItem.builder()
-            .id(itemId)
-            .campaign(campaign)
-            .creator(creator)
-            .master(master)
-            .status(ShortlistStatus.READY_TO_CONTACT)
-            .build();
-
-    when(shortlistItemRepository.findByCampaignIdAndIdIn(eq(campaignId), any()))
-        .thenReturn(List.of(item));
-    when(shortlistItemRepository.save(any(ShortlistItem.class))).thenAnswer(i -> i.getArgument(0));
-
-    when(relationshipRepository.findByCampaignIdAndCreatorId(campaignId, creatorId))
-        .thenReturn(Optional.empty());
-    when(relationshipRepository.save(any(BrandCreatorRelationship.class)))
-        .thenAnswer(
-            i -> {
-              BrandCreatorRelationship r = i.getArgument(0);
-              if (r.getId() == null) r.setId(UUID.randomUUID());
-              return r;
-            });
-
-    ShortlistOutreachRequest request =
-        ShortlistOutreachRequest.builder()
-            .shortlistItemIds(List.of(itemId))
-            .outreachMessage("Chào bạn, Brand muốn đề xuất hợp tác trực tiếp")
-            .proposedFee(BigDecimal.valueOf(25_000_000))
-            .build();
-
-    ShortlistOutreachResponse response = shortlistService.outreachShortlist(campaignId, request);
-
-    assertThat(response.getContactedCount()).isEqualTo(1);
-    assertThat(response.getDispatchedInvitationIds()).isEmpty();
-    assertThat(response.getItems().get(0).getContactStatus()).isEqualTo("PORTAL_NOTIFIED");
-    verify(creatorInvitationService, never()).sendInvitation(any(), any(), any(), any());
-  }
-
-  @Test
-  @DisplayName("Outreach when pending invitation already exists -> links existing invitation without duplicate dispatch")
-  void testOutreach_PendingInvitationExists() {
-    UUID creatorId = UUID.randomUUID();
-    Creator creator =
-        Creator.builder()
-            .id(creatorId)
-            .platform("TIKTOK")
-            .userName("beauty_girl")
-            .displayName("Beauty Girl")
-            .sourceType(CreatorSourceType.PUBLIC)
-            .build();
-
-    UUID itemId = UUID.randomUUID();
-    ShortlistItem item =
-        ShortlistItem.builder()
-            .id(itemId)
-            .campaign(campaign)
-            .creator(creator)
-            .status(ShortlistStatus.SAVED)
-            .build();
-
-    when(shortlistItemRepository.findByCampaignIdAndIdIn(eq(campaignId), any()))
-        .thenReturn(List.of(item));
-    when(shortlistItemRepository.save(any(ShortlistItem.class))).thenAnswer(i -> i.getArgument(0));
-
-    PublicCreatorMetric metric =
+  void testOutreach_Success_PublicCreatorWithEmail() throws Exception {
+    metrics.saveAndFlush(
         PublicCreatorMetric.builder()
-            .creator(creator)
-            .contact("beauty@agency.com")
-            .build();
-    when(publicCreatorMetricRepository.findByCreatorId(creatorId)).thenReturn(Optional.of(metric));
-
-    UUID existingInvId = UUID.randomUUID();
-    CreatorInvitation pendingInv =
-        CreatorInvitation.builder()
-            .id(existingInvId)
-            .status("PENDING")
-            .invitedEmail("beauty@agency.com")
-            .expiresAt(LocalDateTime.now().plusDays(5))
-            .build();
-    when(creatorInvitationRepository
-            .findFirstByTargetCreatorIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
-                eq(creatorId), eq("PENDING"), any()))
-        .thenReturn(Optional.of(pendingInv));
-
-    when(relationshipRepository.findByCampaignIdAndCreatorId(campaignId, creatorId))
-        .thenReturn(Optional.empty());
-    when(relationshipRepository.save(any(BrandCreatorRelationship.class)))
-        .thenAnswer(
-            i -> {
-              BrandCreatorRelationship r = i.getArgument(0);
-              if (r.getId() == null) r.setId(UUID.randomUUID());
-              return r;
-            });
-
-    ShortlistOutreachRequest request =
-        ShortlistOutreachRequest.builder()
-            .shortlistItemIds(List.of(itemId))
-            .proposedFee(BigDecimal.valueOf(10_000_000))
-            .build();
-
-    ShortlistOutreachResponse response = shortlistService.outreachShortlist(campaignId, request);
-
-    assertThat(response.getDispatchedInvitationIds()).containsExactly(existingInvId);
-    assertThat(response.getItems().get(0).getContactStatus()).isEqualTo("PENDING_INVITATION_EXISTS");
-    verify(creatorInvitationService, never()).sendInvitation(any(), any(), any(), any());
+            .creator(c)
+            .collectedAt(LocalDateTime.now())
+            .contact("new@example.test")
+            .freshnessStatus(com.influencermatch.backend.creator.enums.MetricDataStatus.FRESH)
+            .build());
+    var result = outreach();
+    assertThat(result.path("contactStatus").asText()).isEqualTo("QUEUED");
+    assertThat(result.path("relationshipId").asText()).isNotBlank();
+    assertThat(
+            jdbc.queryForObject(
+                "select stage from relationship where id=?",
+                String.class,
+                UUID.fromString(result.path("relationshipId").asText())))
+        .isEqualTo("NEGOTIATING");
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from cooperation_invitation where id=?",
+                Long.class,
+                UUID.fromString(result.path("invitationId").asText())))
+        .isOne();
+    verifyNoInteractions(claimInvitations);
+    assertThat(creators.findById(c.getId()).orElseThrow().getMaster()).isNull();
   }
 
   @Test
-  @DisplayName("Outreach creator with social link but no email -> records MANUAL_SOCIAL_LINK")
-  void testOutreach_ManualSocialLink() {
-    UUID creatorId = UUID.randomUUID();
-    Creator creator =
-        Creator.builder()
-            .id(creatorId)
-            .platform("TIKTOK")
-            .userName("no_email_koc")
-            .profileUrl("https://tiktok.com/@no_email_koc")
-            .sourceType(CreatorSourceType.PUBLIC)
-            .build();
-
-    UUID itemId = UUID.randomUUID();
-    ShortlistItem item =
-        ShortlistItem.builder()
-            .id(itemId)
-            .campaign(campaign)
-            .creator(creator)
-            .status(ShortlistStatus.SAVED)
-            .build();
-
-    when(shortlistItemRepository.findByCampaignIdAndIdIn(eq(campaignId), any()))
-        .thenReturn(List.of(item));
-    when(shortlistItemRepository.save(any(ShortlistItem.class))).thenAnswer(i -> i.getArgument(0));
-
-    when(publicCreatorMetricRepository.findByCreatorId(creatorId)).thenReturn(Optional.empty());
-    when(relationshipRepository.findByCampaignIdAndCreatorId(campaignId, creatorId))
-        .thenReturn(Optional.empty());
-    when(relationshipRepository.save(any(BrandCreatorRelationship.class)))
-        .thenAnswer(
-            i -> {
-              BrandCreatorRelationship r = i.getArgument(0);
-              if (r.getId() == null) r.setId(UUID.randomUUID());
-              return r;
-            });
-
-    ShortlistOutreachRequest request =
-        ShortlistOutreachRequest.builder()
-            .shortlistItemIds(List.of(itemId))
-            .build();
-
-    ShortlistOutreachResponse response = shortlistService.outreachShortlist(campaignId, request);
-
-    assertThat(response.getContactedCount()).isEqualTo(1);
-    assertThat(response.getItems().get(0).getContactStatus()).isEqualTo("MANUAL_SOCIAL_LINK");
+  void testOutreach_Success_AuthorizedCreator() throws Exception {
+    var user = account(Role.CREATOR);
+    var master =
+        masters.saveAndFlush(CreatorMaster.builder().user(user).canonicalName("Owner").build());
+    jdbc.update(
+        "update creator set master_id=?,source_type='AUTHORIZED',authorized_at=now() where id=?",
+        master.getId(),
+        c.getId());
+    var result = outreach();
+    assertThat(result.path("contactStatus").asText()).isEqualTo("QUEUED");
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from notification where user_id=? and"
+                    + " type='COOPERATION_INVITATION'",
+                Long.class,
+                user.getId()))
+        .isOne();
+    verifyNoInteractions(claimInvitations);
   }
 
   @Test
-  @DisplayName("CRM State Machine: updateStage transitions to COLLABORATING and updates agreedFee and nextAction")
-  void testRelationship_UpdateStage_WithAgreedFee() {
-    UUID relId = UUID.randomUUID();
-    UUID creatorId = UUID.randomUUID();
-    Creator creator =
-        Creator.builder().id(creatorId).displayName("Super Creator").platform("TIKTOK").build();
+  void testOutreach_PendingInvitationExists() throws Exception {
+    var first = outreach();
+    var second = outreach();
+    assertThat(second.path("contactStatus").asText()).isEqualTo("ALREADY_EXISTS");
+    assertThat(second.path("dealId")).isEqualTo(first.path("dealId"));
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from cooperation_invitation where deal_id=?",
+                Long.class,
+                UUID.fromString(first.path("dealId").asText())))
+        .isOne();
+    verifyNoInteractions(claimInvitations);
+  }
 
-    BrandCreatorRelationship relationship =
-        BrandCreatorRelationship.builder()
-            .id(relId)
-            .campaign(campaign)
-            .creator(creator)
-            .user(brandUser)
-            .stage(RelationshipStage.CONTACTED)
-            .quotedFee(BigDecimal.valueOf(15_000_000))
-            .currency("VND")
-            .createdAt(LocalDateTime.now())
-            .updatedAt(LocalDateTime.now())
-            .build();
+  @Test
+  void testOutreach_ManualSocialLink() throws Exception {
+    var result = outreach();
+    assertThat(result.path("contactStatus").asText()).isEqualTo("MANUAL_REQUIRED");
+    assertThat(result.path("invitationId").asText()).isNotBlank();
+    var link =
+        call(
+            brand,
+            get(
+                "/cooperation-invitations/"
+                    + result.path("invitationId").asText()
+                    + "/manual-link"),
+            null,
+            200);
+    assertThat(link.path("data").path("link").asText()).contains("/cooperation-invitations?token=");
+    verifyNoInteractions(sender, claimInvitations);
+  }
 
-    when(relationshipRepository.findByIdAndCampaignIdAndUserId(relId, campaignId, brandUser.getId()))
-        .thenReturn(Optional.of(relationship));
-    when(relationshipRepository.save(any(BrandCreatorRelationship.class)))
-        .thenAnswer(i -> i.getArgument(0));
+  @Test
+  void testRelationship_UpdateStage_WithAgreedFee() throws Exception {
+    UUID relationship =
+        UUID.fromString(
+            call(
+                    brand,
+                    post("/campaigns/" + campaign + "/relationships"),
+                    Map.of("creatorId", c.getId()),
+                    200)
+                .path("data")
+                .path("id")
+                .asText());
+    call(
+        brand,
+        patch("/campaigns/" + campaign + "/relationships/" + relationship + "/stage"),
+        Map.of("stage", "CONFIRMED", "agreedFee", 100000),
+        400);
+    assertThat(
+            jdbc.queryForObject(
+                "select stage from relationship where id=?", String.class, relationship))
+        .isEqualTo("CONTACTED");
+    assertThat(
+            jdbc.queryForObject(
+                "select agreed_fee from relationship where id=?",
+                java.math.BigDecimal.class,
+                relationship))
+        .isNull();
+    call(
+        brand,
+        patch("/campaigns/" + campaign + "/relationships/" + relationship + "/stage"),
+        Map.of("stage", "NEGOTIATING", "nextAction", "Discuss proposal"),
+        200);
+    assertThat(
+            jdbc.queryForObject(
+                "select next_action from relationship where id=?", String.class, relationship))
+        .isEqualTo("Discuss proposal");
+  }
 
-    UpdateRelationshipStageRequest stageRequest =
-        UpdateRelationshipStageRequest.builder()
-            .stage(RelationshipStage.COLLABORATING)
-            .agreedFee(BigDecimal.valueOf(18_000_000))
-            .nextAction("Gửi kịch bản mẫu trước ngày 10/11")
-            .build();
+  @Test
+  void testF409NewestBookingEmailIsUsedWithoutClaiming() throws Exception {
+    metrics.saveAndFlush(
+        PublicCreatorMetric.builder()
+            .creator(c)
+            .collectedAt(LocalDateTime.now().minusDays(1))
+            .contact("old@example.test")
+            .freshnessStatus(com.influencermatch.backend.creator.enums.MetricDataStatus.FRESH)
+            .build());
+    metrics.saveAndFlush(
+        PublicCreatorMetric.builder()
+            .creator(c)
+            .collectedAt(LocalDateTime.now())
+            .contact("new@example.test")
+            .freshnessStatus(com.influencermatch.backend.creator.enums.MetricDataStatus.FRESH)
+            .build());
+    var result = outreach();
+    String payload =
+        jdbc.queryForObject(
+            "select payload from cooperation_email_job where invitation_id=?",
+            String.class,
+            UUID.fromString(result.path("invitationId").asText()));
+    var cipher =
+        new com.influencermatch.backend.creator.email.ClaimEmailCipher(
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", json);
+    assertThat(cipher.decrypt(payload).email()).isEqualTo("new@example.test");
+    assertThat(result.path("contactStatus").asText()).isEqualTo("QUEUED");
+    verifyNoInteractions(claimInvitations);
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from collaboration where campaign_id=?", Long.class, campaign))
+        .isZero();
+  }
 
-    RelationshipDto dto = relationshipService.updateStage(campaignId, relId, stageRequest);
-
-    assertThat(dto.getStage()).isEqualTo(RelationshipStage.COLLABORATING);
-    assertThat(dto.getAgreedFee()).isEqualByComparingTo(BigDecimal.valueOf(18_000_000));
-    assertThat(dto.getNextAction()).isEqualTo("Gửi kịch bản mẫu trước ngày 10/11");
+  @Test
+  void testF410CrmNegotiationCannotWriteAgreedFeeOrConfirmByDragging() throws Exception {
+    UUID r =
+        UUID.fromString(
+            call(
+                    brand,
+                    post("/campaigns/" + campaign + "/relationships"),
+                    Map.of("creatorId", c.getId(), "offeredFee", 100000, "currency", "VND"),
+                    200)
+                .path("data")
+                .path("id")
+                .asText());
+    call(
+        brand,
+        patch("/campaigns/" + campaign + "/relationships/" + r + "/stage"),
+        Map.of("stage", "NEGOTIATING", "nextAction", "Discuss deliverables"),
+        200);
+    call(
+        brand,
+        patch("/campaigns/" + campaign + "/relationships/" + r + "/stage"),
+        Map.of("stage", "CONFIRMED"),
+        409);
+    call(
+        brand,
+        patch("/campaigns/" + campaign + "/relationships/" + r + "/details"),
+        Map.of("agreedFee", 100000),
+        400);
+    assertThat(
+            jdbc.queryForObject(
+                "select offered_fee from relationship where id=?", java.math.BigDecimal.class, r))
+        .isEqualByComparingTo("100000");
+    assertThat(
+            jdbc.queryForObject(
+                "select agreed_fee from relationship where id=?", java.math.BigDecimal.class, r))
+        .isNull();
+    assertThat(
+            jdbc.queryForObject("select next_action from relationship where id=?", String.class, r))
+        .isEqualTo("Discuss deliverables");
   }
 }

@@ -21,8 +21,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
 public class AdminUserService {
   private final UserRepository users;
+  private final AdminAccessGuard guard;
   private final RefreshTokenService refreshTokens;
   private final AuditService audit;
   private final BrandProfileRepository profiles;
@@ -31,27 +33,41 @@ public class AdminUserService {
 
   @Transactional(readOnly = true)
   public Page<AdminUserResponse> list(Pageable pageable) {
+    return list(null, null, null, pageable.getPageNumber(), pageable.getPageSize());
+  }
+
+  @Transactional(readOnly = true)
+  public Page<AdminUserResponse> list(Role role, UserStatus status, String q, int page, int size) {
     Permissions.require(Permission.VIEW_USER);
-    return users.findAll(pageable).map(AdminUserResponse::from);
+    guard.read(Permission.VIEW_USER);
+    var pagination = UserAccountSearch.page(page, size);
+    return users
+        .findAll(UserAccountSearch.filter(role, status, q), pagination)
+        .map(AdminUserResponse::from);
   }
 
   @Transactional(readOnly = true)
   public AdminUserResponse get(UUID id) {
     Permissions.require(Permission.VIEW_USER);
+    guard.read(Permission.VIEW_USER);
     return AdminUserResponse.from(find(id));
   }
 
   @Transactional
   public AdminUserResponse changeStatus(UUID id, UpdateUserStatusRequest request) {
     Permissions.require(Permission.CHANGE_USER_STATUS);
-    users.lockRoleChanges();
-    User user = find(id);
+    if (request == null || request.status() == null)
+      throw new ValidationException("Status required");
+    validateReason(request.reason());
+    UUID actor = Permissions.actor().getId();
+    User user = guard.lock(id, Permission.CHANGE_USER_STATUS);
     if (user.getStatus() == request.status()) return AdminUserResponse.from(user);
     protectLastAdmin(user, user.getRole(), request.status());
     String before = user.getStatus().name();
     user.setStatus(request.status());
     invalidate(user);
-    audit.record(
+    audit.recordAs(
+        actor,
         "CHANGE_USER_STATUS",
         "User",
         id,
@@ -64,13 +80,19 @@ public class AdminUserService {
   @Transactional
   public AdminUserResponse changeRole(UUID id, UpdateUserRoleRequest request) {
     Permissions.require(Permission.ASSIGN_USER_ROLE);
-    users.lockRoleChanges();
-    User user = find(id);
+    if (request == null || request.role() == null) throw new ValidationException("Role required");
+    validateReason(request.reason());
+    UUID actor = Permissions.actor().getId();
+    User user = guard.lock(id, Permission.ASSIGN_USER_ROLE);
     if (user.getRole() == request.role()) return AdminUserResponse.from(user);
-    if (user.getRole() == Role.CREATOR && request.role() != Role.CREATOR
-        && (creators.existsByMasterUserId(id) || claims.existsByClaimantIdAndStatus(id,
-            com.influencermatch.backend.creator.enums.CreatorClaimStatus.PENDING)))
-      throw new BusinessException(ErrorCode.CREATOR_ROLE_CHANGE_CONFLICT,"Resolve pending claims and revoke channel ownership before changing this role");
+    if (user.getRole() == Role.CREATOR
+        && request.role() != Role.CREATOR
+        && (creators.existsByMasterUserId(id)
+            || claims.existsByClaimantIdAndStatus(
+                id, com.influencermatch.backend.creator.enums.CreatorClaimStatus.PENDING)))
+      throw new BusinessException(
+          ErrorCode.CREATOR_ROLE_CHANGE_CONFLICT,
+          "Resolve pending claims and revoke channel ownership before changing this role");
     if (request.role() != Role.BRAND && profiles.existsByUserId(id))
       throw new BusinessException(
           ErrorCode.BRAND_ROLE_CHANGE_CONFLICT, "Use a separate internal account");
@@ -78,7 +100,8 @@ public class AdminUserService {
     String before = user.getRole().name();
     user.setRole(request.role());
     invalidate(user);
-    audit.record(
+    audit.recordAs(
+        actor,
         "ASSIGN_USER_ROLE",
         "User",
         id,
@@ -86,6 +109,11 @@ public class AdminUserService {
         java.util.Map.of("role", user.getRole().name()),
         request.reason());
     return AdminUserResponse.from(user);
+  }
+
+  private static void validateReason(String reason) {
+    if (reason == null || reason.isBlank() || reason.length() > 500)
+      throw new ValidationException("Reason required (1-500 characters)");
   }
 
   private void invalidate(User user) {

@@ -32,12 +32,42 @@ public class AiServiceClient {
       base = base.substring(0, base.length() - 1);
     }
 
-    this.restClient =
-        RestClient.builder()
-            .baseUrl(base)
-            .requestFactory(requestFactory)
-            .build();
+    this.restClient = RestClient.builder().baseUrl(base).requestFactory(requestFactory).build();
     log.info("Initialized AiServiceClient with base endpoint: {}", base);
+  }
+
+  /** Strict M4 embedding contract; failures propagate to durable retries. */
+  public List<Float> getBrandEmbedding(String text, String expectedModel) {
+    if (text == null || text.isBlank())
+      throw new IllegalArgumentException("No semantic Brand context");
+    var response =
+        restClient
+            .post()
+            .uri("/embed")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(Map.of("text", text))
+            .retrieve()
+            .body(com.fasterxml.jackson.databind.JsonNode.class);
+    if (response == null
+        || !"success".equals(response.path("status").asText())
+        || !expectedModel.equals(response.path("model").asText())
+        || response.path("dimensions").asInt() != 768
+        || !response.path("vector").isArray()
+        || response.path("vector").size() != 768)
+      throw new IllegalStateException("Invalid embedding response contract");
+    var values = new java.util.ArrayList<Float>();
+    boolean nonzero = false;
+    for (var value : response.path("vector")) {
+      if (!value.isNumber()
+          || !Double.isFinite(value.asDouble())
+          || !Float.isFinite(value.floatValue()))
+        throw new IllegalStateException("Invalid embedding component");
+      float f = value.floatValue();
+      values.add(f);
+      nonzero |= f != 0;
+    }
+    if (!nonzero) throw new IllegalStateException("Zero embedding is invalid");
+    return List.copyOf(values);
   }
 
   @SuppressWarnings("unchecked")
@@ -54,9 +84,7 @@ public class AiServiceClient {
 
       if (response != null && response.containsKey("vector")) {
         List<?> rawVector = (List<?>) response.get("vector");
-        return rawVector.stream()
-            .map(val -> ((Number) val).floatValue())
-            .toList();
+        return rawVector.stream().map(val -> ((Number) val).floatValue()).toList();
       }
     } catch (Exception e) {
       log.error("Failed to fetch embedding from Python AI Service: {}", e.getMessage());
@@ -64,9 +92,7 @@ public class AiServiceClient {
     return Collections.emptyList();
   }
 
-  /**
-   * XAI Engine Integration (POST /api/v1/ai/explain) kèm Fallback Circuit Breaker.
-   */
+  /** XAI Engine Integration (POST /api/v1/ai/explain) kèm Fallback Circuit Breaker. */
   public ExplainResponseDto getExplanation(ExplainRequestDto request) {
     try {
       ExplainResponseDto response =
@@ -83,17 +109,20 @@ public class AiServiceClient {
         return response;
       }
     } catch (Exception e) {
-      log.warn("Python AI Service /explain unavailable or timed out: {}. Using fallback card.", e.getMessage());
+      log.warn(
+          "Python AI Service /explain unavailable or timed out: {}. Using fallback card.",
+          e.getMessage());
     }
 
-    // Circuit Breaker Fallback: Trả về thẻ mặc định với explanationAvailable = false, không tạo bằng chứng giả
+    // Circuit Breaker Fallback: Trả về thẻ mặc định với explanationAvailable = false, không tạo
+    // bằng chứng giả
     return ExplainResponseDto.builder()
         .status("fallback")
         .summary("Ứng viên được đề xuất dựa trên mô hình xếp hạng Four-Memory.")
-        .reasons(List.of(
-            "Quy mô người theo dõi và tỷ lệ tương tác phù hợp với mục tiêu đề ra",
-            "Nội dung và danh mục hoạt động tương thích với tiêu chí của chiến dịch"
-        ))
+        .reasons(
+            List.of(
+                "Quy mô người theo dõi và tỷ lệ tương tác phù hợp với mục tiêu đề ra",
+                "Nội dung và danh mục hoạt động tương thích với tiêu chí của chiến dịch"))
         .explanationAvailable(false)
         .build();
   }

@@ -25,12 +25,15 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RestController
 @RequestMapping("/campaigns/{campaignId}/shortlist")
 @RequiredArgsConstructor
-@Tag(name = "Shortlist Management", description = "Campaign Shortlist Cart and Contact Readiness Management")
+@Tag(
+    name = "Shortlist Management",
+    description = "Campaign Shortlist Cart and Contact Readiness Management")
 public class ShortlistController {
 
   private final ShortlistService shortlistService;
   private final ShortlistCompareService compareService;
-  private final com.influencermatch.backend.relationship.service.ShortlistNotificationService notificationService;
+  private final com.influencermatch.backend.relationship.service.ShortlistNotificationService
+      notificationService;
 
   @PostMapping("/compare")
   @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
@@ -38,8 +41,7 @@ public class ShortlistController {
       summary = "Compare 2–5 shortlisted Creators without ranking",
       security = @SecurityRequirement(name = "BearerAuth"))
   public ApiResponse<CompareDtos.Response> compare(
-      @PathVariable UUID campaignId,
-      @Valid @RequestBody CompareDtos.Request request) {
+      @PathVariable UUID campaignId, @Valid @RequestBody CompareDtos.Request request) {
     return ApiResponse.ok(compareService.compare(campaignId, request));
   }
 
@@ -49,10 +51,19 @@ public class ShortlistController {
   @PostMapping(value = {"", "/items"})
   @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
   public ResponseEntity<ApiResponse<ShortlistItemDto>> addCreatorToShortlist(
-      @PathVariable UUID campaignId,
-      @Valid @RequestBody AddShortlistItemRequest request) {
+      @PathVariable UUID campaignId, @Valid @RequestBody AddShortlistItemRequest request) {
     ShortlistItemDto dto = shortlistService.addCreatorToShortlist(campaignId, request);
     return ResponseEntity.ok(ApiResponse.ok(dto.getMessage(), dto));
+  }
+
+  @PostMapping("/batch")
+  @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
+  @Operation(
+      summary = "Add 1-100 distinct channels; partial success, original order; no booking",
+      security = @SecurityRequirement(name = "BearerAuth"))
+  public ApiResponse<BatchAddShortlistResponse> addBatch(
+      @PathVariable UUID campaignId, @Valid @RequestBody BatchAddShortlistRequest request) {
+    return ApiResponse.ok(shortlistService.addBatch(campaignId, request));
   }
 
   @Operation(
@@ -103,8 +114,7 @@ public class ShortlistController {
   @PatchMapping("/batch-status")
   @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
   public ResponseEntity<ApiResponse<List<ShortlistItemDto>>> batchUpdateStatus(
-      @PathVariable UUID campaignId,
-      @Valid @RequestBody BatchUpdateStatusRequest request) {
+      @PathVariable UUID campaignId, @Valid @RequestBody BatchUpdateStatusRequest request) {
     List<ShortlistItemDto> updated = shortlistService.batchUpdateStatus(campaignId, request);
     return ResponseEntity.ok(ApiResponse.ok("Batch status updated", updated));
   }
@@ -115,8 +125,7 @@ public class ShortlistController {
   @DeleteMapping(value = {"/{shortlistItemId}", "/items/{shortlistItemId}"})
   @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
   public ResponseEntity<ApiResponse<Void>> removeCreatorFromShortlist(
-      @PathVariable UUID campaignId,
-      @PathVariable UUID shortlistItemId) {
+      @PathVariable UUID campaignId, @PathVariable UUID shortlistItemId) {
     shortlistService.removeCreatorFromShortlist(campaignId, shortlistItemId);
     return ResponseEntity.ok(ApiResponse.empty());
   }
@@ -139,8 +148,7 @@ public class ShortlistController {
   @PostMapping("/outreach")
   @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
   public ResponseEntity<ApiResponse<ShortlistOutreachResponse>> outreach(
-      @PathVariable UUID campaignId,
-      @Valid @RequestBody ShortlistOutreachRequest request) {
+      @PathVariable UUID campaignId, @Valid @RequestBody ShortlistOutreachRequest request) {
     ShortlistOutreachResponse response = shortlistService.outreachShortlist(campaignId, request);
     return ResponseEntity.ok(ApiResponse.ok("Shortlist outreach processed", response));
   }
@@ -154,4 +162,3 @@ public class ShortlistController {
     return notificationService.subscribe(campaignId);
   }
 }
-

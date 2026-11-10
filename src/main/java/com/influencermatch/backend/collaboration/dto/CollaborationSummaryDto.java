@@ -22,4 +22,44 @@ public record CollaborationSummaryDto(
     LocalDateTime completedAt,
     LocalDateTime updatedAt,
     boolean hasOutcome,
-    boolean hasReview) {}
+    boolean hasReview,
+    java.util.List<CollaborationChannelDto> channels) {
+  public CollaborationSummaryDto(
+      UUID id,
+      UUID campaignId,
+      UUID relationshipId,
+      UUID creatorId,
+      String creatorName,
+      String platform,
+      String avatarUrl,
+      BigDecimal agreedFee,
+      String currency,
+      CollaborationStatus status,
+      String publishedContentUrl,
+      String note,
+      LocalDateTime startAt,
+      LocalDateTime completedAt,
+      LocalDateTime updatedAt,
+      boolean hasOutcome,
+      boolean hasReview) {
+    this(
+        id,
+        campaignId,
+        relationshipId,
+        creatorId,
+        creatorName,
+        platform,
+        avatarUrl,
+        agreedFee,
+        currency,
+        status,
+        publishedContentUrl,
+        note,
+        startAt,
+        completedAt,
+        updatedAt,
+        hasOutcome,
+        hasReview,
+        java.util.List.of());
+  }
+}

@@ -109,69 +109,28 @@ class CreatorIdentityConflictServiceTest {
   }
 
   @Test
-  void resolveConflict_approveTransfer_updatesMasterAndDualRefs() {
-    when(conflictRepository.findById(pendingConflict.getId()))
-        .thenReturn(Optional.of(pendingConflict));
-    when(conflictRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-
-    ConflictDetailDto result = conflictService.resolveConflict(
-        pendingConflict.getId(),
-        ConflictResolutionDecision.APPROVE_TRANSFER,
-        "Ownership verified via identity documents",
-        mockManager
-    );
-
-    assertThat(result.getStatus()).isEqualTo("RESOLVED");
-    assertThat(pendingConflict.getStatus()).isEqualTo("RESOLVED");
-    assertThat(pendingConflict.getResolvedBy()).isEqualTo(mockManager);
-    assertThat(pendingConflict.getResolutionNotes()).isEqualTo("Ownership verified via identity documents");
-
-    // Transferred to claimant master
-    assertThat(disputedAccount.getMaster()).isEqualTo(claimantMaster);
-    verify(creatorRepository).save(disputedAccount);
-
-    // Dual references updated
-    verify(shortlistItemRepository).updateMasterForCreator(disputedAccount.getId(), claimantMaster);
-    verify(relationshipRepository).updateMasterForCreator(disputedAccount.getId(), claimantMaster);
-
-    verify(auditRepository).save(any());
+  void resolveConflict_transferIsDeniedAndReferencesStayUnchanged() {
+    var original = disputedAccount.getMaster();
+    assertThatThrownBy(() -> conflictService.resolveConflict(pendingConflict.getId(), ConflictResolutionDecision.APPROVE_TRANSFER, "Legacy request", mockManager)).isInstanceOf(ConflictException.class);
+    assertThat(disputedAccount.getMaster()).isSameAs(original);
+    assertThat(pendingConflict.getStatus()).isEqualTo("PENDING_MANAGER");
+    verifyNoInteractions(creatorRepository,shortlistItemRepository,relationshipRepository,auditRepository);
   }
 
   @Test
-  void resolveConflict_reject_keepsCurrentMaster() {
-    when(conflictRepository.findById(pendingConflict.getId()))
-        .thenReturn(Optional.of(pendingConflict));
-    when(conflictRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-
-    ConflictDetailDto result = conflictService.resolveConflict(
-        pendingConflict.getId(),
-        ConflictResolutionDecision.REJECT,
-        "Insufficient proof provided",
-        mockManager
-    );
-
-    assertThat(result.getStatus()).isEqualTo("REJECTED");
-    assertThat(pendingConflict.getStatus()).isEqualTo("REJECTED");
-
-    // Master remains original master
-    assertThat(disputedAccount.getMaster()).isEqualTo(originalMaster);
-    verify(creatorRepository, never()).save(any());
-    verify(shortlistItemRepository, never()).updateMasterForCreator(any(), any());
-
-    verify(auditRepository).save(any());
+  void resolveConflict_legacyDecisionIsReadOnlyAndKeepsCurrentMaster() {
+    assertThatThrownBy(() -> conflictService.resolveConflict(pendingConflict.getId(), ConflictResolutionDecision.REJECT, "Legacy request", mockManager)).isInstanceOf(ConflictException.class);
+    assertThat(disputedAccount.getMaster()).isSameAs(originalMaster);
+    assertThat(pendingConflict.getStatus()).isEqualTo("PENDING_MANAGER");
+    verifyNoInteractions(creatorRepository,shortlistItemRepository,relationshipRepository,auditRepository);
   }
 
   @Test
   void resolveConflict_alreadyResolved_throwsConflict() {
-    pendingConflict.setStatus("RESOLVED");
-    when(conflictRepository.findById(pendingConflict.getId()))
-        .thenReturn(Optional.of(pendingConflict));
-
-    assertThatThrownBy(() -> conflictService.resolveConflict(
-        pendingConflict.getId(),
-        ConflictResolutionDecision.APPROVE_TRANSFER,
-        "Trying again",
-        mockManager
-    )).isInstanceOf(ConflictException.class);
+    var original = disputedAccount.getMaster();
+    assertThatThrownBy(() -> conflictService.resolveConflict(pendingConflict.getId(), ConflictResolutionDecision.APPROVE_TRANSFER, "Legacy request", mockManager)).isInstanceOf(ConflictException.class);
+    assertThat(disputedAccount.getMaster()).isSameAs(original);
+    assertThat(pendingConflict.getStatus()).isEqualTo("PENDING_MANAGER");
+    verifyNoInteractions(creatorRepository,shortlistItemRepository,relationshipRepository,auditRepository);
   }
 }

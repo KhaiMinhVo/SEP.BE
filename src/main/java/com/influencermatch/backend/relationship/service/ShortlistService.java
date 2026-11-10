@@ -9,6 +9,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 public interface ShortlistService {
+  BatchAddShortlistResponse addBatch(UUID campaignId, BatchAddShortlistRequest request);
+
   ShortlistItemDto addCreatorToShortlist(UUID campaignId, AddShortlistItemRequest request);
 
   List<ShortlistItemDto> batchAddCreatorsToShortlist(UUID campaignId, BatchAddShortlistItemRequest request);
@@ -29,10 +31,7 @@ public interface ShortlistService {
 
   void removeCreatorFromShortlist(UUID campaignId, UUID shortlistItemId);
 
-  ContactReadinessResponse checkContactReadiness(
-      UUID campaignId, ContactReadinessRequest request);
+  ContactReadinessResponse checkContactReadiness(UUID campaignId, ContactReadinessRequest request);
 
-  ShortlistOutreachResponse outreachShortlist(
-      UUID campaignId, ShortlistOutreachRequest request);
+  ShortlistOutreachResponse outreachShortlist(UUID campaignId, ShortlistOutreachRequest request);
 }
-

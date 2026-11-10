@@ -41,6 +41,10 @@
     <!--  Dependencies                                -->
     <!-- ─────────────────────────────────────────── -->
     <dependencies>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
+        </dependency>
 
         <!-- Web -->
         <dependency>
@@ -220,6 +224,15 @@
                             <version>${mapstruct.version}</version>
                         </path>
                     </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+
+            <!-- Maven Surefire Plugin with adequate heap for Spring/Mockito contexts -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>@{argLine} -Xmx1536m -XX:+EnableDynamicAgentLoading</argLine>
                 </configuration>
             </plugin>
 

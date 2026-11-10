@@ -25,6 +25,19 @@ public class AuditService {
       Object oldValue,
       Object newValue,
       String reason) {
+    recordAs(Permissions.actor().getId(), action, entityType, entityId, oldValue, newValue, reason);
+  }
+
+  /** For browser-bound OAuth callbacks whose actor was revalidated from the persisted session. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void recordAs(
+      UUID actorId,
+      String action,
+      String entityType,
+      UUID entityId,
+      Object oldValue,
+      Object newValue,
+      String reason) {
     var attrs = RequestContextHolder.getRequestAttributes();
     String ip =
         attrs instanceof ServletRequestAttributes servlet
@@ -32,7 +45,7 @@ public class AuditService {
             : null;
     logs.save(
         AuditLog.builder()
-            .userId(Permissions.actor().getId())
+            .userId(actorId)
             .action(action)
             .entityType(entityType)
             .entityId(entityId)

@@ -20,6 +20,16 @@ import com.influencermatch.backend.creator.repository.PublicCreatorMetricReposit
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.recommendation.dto.*;
+import com.influencermatch.backend.recommendation.engine.FourMemoryTopsisEngine;
+import com.influencermatch.backend.recommendation.engine.confidence.model.ConfidenceAssessment;
+import com.influencermatch.backend.recommendation.engine.phase0.Phase0Orchestrator;
+import com.influencermatch.backend.recommendation.engine.phase0.model.NormalizedCandidateContext;
+import com.influencermatch.backend.recommendation.engine.presentation.DeterministicReasoningGenerator;
+import com.influencermatch.backend.recommendation.engine.presentation.DisplaySorter;
+import com.influencermatch.backend.recommendation.engine.presentation.MmrReranker;
+import com.influencermatch.backend.recommendation.engine.presentation.enums.DisplayMode;
+import com.influencermatch.backend.recommendation.engine.presentation.enums.PriceStatus;
+import com.influencermatch.backend.recommendation.engine.presentation.pricing.PriceStatusResolver;
 import com.influencermatch.backend.relationship.enums.ShortlistStatus;
 import com.influencermatch.backend.relationship.model.ShortlistItem;
 import com.influencermatch.backend.relationship.repository.ShortlistItemRepository;
@@ -29,6 +39,7 @@ import com.influencermatch.backend.security.permission.Permissions;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -51,27 +62,101 @@ public class AiRecommendationService {
   private final AiServiceClient aiServiceClient;
   private final ObjectMapper objectMapper;
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.creator.repository.PostRepository postRepository;
+
+  public void setPostRepository(
+      com.influencermatch.backend.creator.repository.PostRepository postRepository) {
+    this.postRepository = postRepository;
+  }
+
+  private final Phase0Orchestrator phase0Orchestrator = new Phase0Orchestrator();
+  private final FourMemoryTopsisEngine fourMemoryTopsisEngine = new FourMemoryTopsisEngine();
+  private final DisplaySorter displaySorter = new DisplaySorter();
+  private final MmrReranker mmrReranker = new MmrReranker();
+  private final DeterministicReasoningGenerator deterministicReasoningGenerator =
+      new DeterministicReasoningGenerator();
+
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.brand.repository.BrandContextRepository brandContexts;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.campaign.service.CampaignM3ContextService m3;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.campaign.embedding.CampaignEmbeddingStore m3Embeddings;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.campaign.service.CampaignWriteLock campaignLocks;
+
+  @Transactional
+  public RecommendationResponseDto recommendKocs(
+      UUID id,
+      int limit,
+      com.influencermatch.backend.campaign.enums.CandidateSource source,
+      DisplayMode mode) {
+    return run(id, limit, mode, source);
+  }
+
+  @Transactional
+  public RecommendationResponseDto recommendKocs(
+      UUID id, int limit, com.influencermatch.backend.campaign.enums.CandidateSource source) {
+    return run(id, limit, DisplayMode.BEST_MATCH, source);
+  }
+
+  @Transactional(readOnly = true)
+  public List<RecommendationRunView> runs(UUID id) {
+    Permissions.require(Permission.VIEW_OWN_RECOMMENDATION);
+    ownership.requireOwned(id);
+    return recommendationRunRepository.findByCampaignIdOrderByCreatedAtDesc(id).stream()
+        .map(RecommendationRunView::from)
+        .toList();
+  }
+
   private static final UUID DUMMY_UUID = UUID.fromString("00000000-0000-0000-0000-000000000000");
 
   /**
-   * Flow 3 Core: Thực thi AI Recommendation theo Four-Memory Framework.
-   * Gồm: Two-Phase Quota Reservation -> Nạp 4 tầng bộ nhớ -> pgvector Search ->
-   * Four-Memory Feature Scorer -> Master-aware Grouping -> XAI Reasoning Card.
+   * Flow 3 Core: Thực thi AI Recommendation theo Four-Memory Framework (default
+   * DisplayMode.BEST_MATCH).
    */
   @Transactional
   public RecommendationResponseDto recommendKocs(UUID campaignId, int limit) {
+    return recommendKocs(campaignId, limit, DisplayMode.BEST_MATCH);
+  }
+
+  /**
+   * Flow 3 Core: Thực thi AI Recommendation theo Four-Memory Framework với DisplayMode chỉ định.
+   * Gồm: Two-Phase Quota Reservation -> Nạp 4 tầng bộ nhớ -> pgvector Search -> Four-Memory Feature
+   * Scorer -> Master-aware Grouping -> Post-Processing & Presentation -> XAI Reasoning Card.
+   */
+  @Transactional
+  public RecommendationResponseDto recommendKocs(
+      UUID campaignId, int limit, DisplayMode displayMode) {
+    return run(campaignId, limit, displayMode, null);
+  }
+
+  private RecommendationResponseDto run(
+      UUID campaignId,
+      int limit,
+      DisplayMode displayMode,
+      com.influencermatch.backend.campaign.enums.CandidateSource source) {
+    DisplayMode mode = (displayMode != null) ? displayMode : DisplayMode.BEST_MATCH;
     Permissions.require(Permission.RUN_RECOMMENDATION);
     Campaign campaign = ownership.requireOwned(campaignId);
+    var preparedContext = m3.prepare(campaignId);
+    var preparedEmbedding = m3Embeddings.ready(preparedContext.getEmbeddingSourceContextId());
+    if (preparedEmbedding == null)
+      throw new com.influencermatch.backend.exception.CampaignEmbeddingPendingException(
+          m3Embeddings.view(preparedContext.getEmbeddingSourceContextId()).status());
     UUID brandProfileId = campaign.getBrandProfile().getId();
 
     // 1. Two-Phase Quota Reservation (Đặt trước Quota)
-    UUID subscriptionId = subscriptionService.reserveRecommendationQuota(brandProfileId);
-    log.info("Reserved AI recommendation quota for brand {} with subscription {}", brandProfileId, subscriptionId);
+    UUID subscriptionId = null;
 
     try {
-      // 2. Nạp Bối cảnh M3 (CampaignContext) & trích xuất danh sách bị từ chối (Negative Constraints)
-      List<CampaignContext> contexts =
-          campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId);
+      // 2. Nạp Bối cảnh M3 (CampaignContext) & trích xuất danh sách bị từ chối (Negative
+      // Constraints)
+      List<CampaignContext> contexts = List.of(preparedContext);
       int contextVersion = 1;
       Set<UUID> excludedIds = new HashSet<>();
 
@@ -79,7 +164,9 @@ public class AiRecommendationService {
         CampaignContext activeContext = contexts.get(0);
         contextVersion = activeContext.getContextVersion();
         JsonNode data = activeContext.getContextData();
-        if (data != null && data.has("excludedCreatorIds") && data.get("excludedCreatorIds").isArray()) {
+        if (data != null
+            && data.has("excludedCreatorIds")
+            && data.get("excludedCreatorIds").isArray()) {
           for (JsonNode idNode : data.get("excludedCreatorIds")) {
             try {
               excludedIds.add(UUID.fromString(idNode.asText()));
@@ -90,9 +177,8 @@ public class AiRecommendationService {
       }
 
       // 3. Chuẩn bị truy vấn ngữ nghĩa (Query Brief) & sinh Vector 768 chiều
-      String queryBrief = buildQueryBrief(campaign);
-      List<Float> embedding = aiServiceClient.getEmbedding(queryBrief);
-      String briefVectorStr = formatVectorForPgvector(embedding);
+      String queryBrief = preparedEmbedding.text();
+      String briefVectorStr = preparedEmbedding.vector();
 
       // 4. Ưu tiên truy vấn ứng viên ĐÃ CÓ TRONG SHORTLIST của Campaign
       boolean hasExcluded = !excludedIds.isEmpty();
@@ -100,17 +186,21 @@ public class AiRecommendationService {
 
       List<RecommendationCandidateProjection> rawCandidates =
           publicCreatorMetricRepository.findCandidatesByShortlist(
-              campaignId,
-              briefVectorStr,
-              hasExcluded,
-              safeExcluded
-          );
+              campaignId, briefVectorStr, hasExcluded, safeExcluded);
 
       // Nếu Shortlist chưa có ai, fallback sang quét toàn bộ kho Discovery (cho phép khám phá rộng)
-      if (rawCandidates.isEmpty()) {
-        boolean hasPlatforms = campaign.getPlatforms() != null && !campaign.getPlatforms().isEmpty();
-        Collection<String> safePlatforms = hasPlatforms ? campaign.getPlatforms() : List.of("TIKTOK");
+      if (source == com.influencermatch.backend.campaign.enums.CandidateSource.DISCOVERY
+          || (source == null && rawCandidates.isEmpty())) {
+        boolean hasPlatforms =
+            campaign.getPlatforms() != null && !campaign.getPlatforms().isEmpty();
+        Collection<String> safePlatforms =
+            hasPlatforms ? campaign.getPlatforms() : List.of("TIKTOK");
 
+        int retrievalLimit = Math.max(limit * 3, 50);
+        // Theo kiến trúc InfluencerMatch: Follower Range là Soft Preference mặc định (không được
+        // lọc cứng ở SQL làm mất ứng viên tốt).
+        // Chỉ Platform và Negative Constraints (Brand Exclusion) là Hard Constraints được lọc trước
+        // ở SQL.
         rawCandidates =
             publicCreatorMetricRepository.findTopCandidatesByEmbedding(
                 briefVectorStr,
@@ -118,80 +208,380 @@ public class AiRecommendationService {
                 safeExcluded,
                 hasPlatforms,
                 safePlatforms,
-                campaign.getFollowerMin(),
-                campaign.getFollowerMax(),
-                50
-            );
-        log.info("Shortlist was empty. Retrieved {} raw candidates via pgvector search for campaign {}", rawCandidates.size(), campaignId);
+                null, // followerMin = null (Soft Preference)
+                null, // followerMax = null (Soft Preference)
+                retrievalLimit);
+        log.info(
+            "Shortlist was empty. Retrieved {} raw candidates via pgvector search for campaign {}",
+            rawCandidates.size(),
+            campaignId);
       } else {
-        log.info("Retrieved {} candidates from shortlist for campaign {}", rawCandidates.size(), campaignId);
+        log.info(
+            "Retrieved {} candidates from shortlist for campaign {}",
+            rawCandidates.size(),
+            campaignId);
       }
 
-      // 5. Four-Memory Feature Scorer
-      List<ScoredCandidate> scoredList = new ArrayList<>();
+      if (rawCandidates.isEmpty())
+        throw new BusinessException(
+            ErrorCode.RECOMMENDATION_NO_CANDIDATES, "No eligible candidates in selected source");
+      subscriptionId = subscriptionService.reserveRecommendationQuota(brandProfileId);
+      log.info(
+          "Reserved AI recommendation quota for brand {} with subscription {}",
+          brandProfileId,
+          subscriptionId);
+      // 5. Phase 0: Eligibility Checking, Evidence Validation & Policy-Based Normalization
+      Map<UUID, List<com.influencermatch.backend.creator.model.Post>> postsByCreator =
+          Collections.emptyMap();
+      if (postRepository != null && !rawCandidates.isEmpty()) {
+        List<UUID> candidateIds =
+            rawCandidates.stream()
+                .map(RecommendationCandidateProjection::getCreatorId)
+                .filter(Objects::nonNull)
+                .toList();
+        List<com.influencermatch.backend.creator.model.Post> posts =
+            postRepository.findByCreatorIdIn(candidateIds);
+        if (posts != null && !posts.isEmpty()) {
+          // Gom nhóm toàn bộ bài đăng theo creatorId để EvidenceValidator đánh giá đúng Historical
+          // Count
+          // và tự động chọn chính xác cửa sổ 3 bài gần nhất qua selectRecentWindow()
+          postsByCreator =
+              posts.stream()
+                  .filter(
+                      p -> p != null && p.getCreator() != null && p.getCreator().getId() != null)
+                  .collect(Collectors.groupingBy(p -> p.getCreator().getId()));
+        }
+      }
+
+      List<NormalizedCandidateContext> phase0Results =
+          phase0Orchestrator.execute(rawCandidates, campaign, excludedIds, postsByCreator);
+
+      Map<UUID, NormalizedCandidateContext> phase0Map =
+          phase0Results.stream()
+              .collect(
+                  Collectors.toMap(NormalizedCandidateContext::creatorId, r -> r, (a, b) -> a));
+
+      // Filter candidates: Tách biệt hoàn toàn Main Ranking Pool (chỉ SCORE_READY) và Provisional
+      // Pool
+      List<RecommendationCandidateProjection> scoreReadyCandidates = new ArrayList<>();
+      List<RecommendationCandidateProjection> provisionalCandidates = new ArrayList<>();
+
       for (RecommendationCandidateProjection cand : rawCandidates) {
-        ScoreBreakdownDto breakdown = calculateFourMemoryScores(cand, campaign, brandProfileId);
-        scoredList.add(new ScoredCandidate(cand, breakdown));
+        NormalizedCandidateContext p0 = phase0Map.get(cand.getCreatorId());
+        if (p0 == null) continue;
+
+        if (!p0.isCampaignEligible()) {
+          log.info(
+              "Candidate {} excluded: Ineligible for campaign: {}",
+              cand.getCreatorId(),
+              p0.eligibilityReasons());
+          continue;
+        }
+
+        // Phân luồng tường minh theo ScoringReadiness - tuyệt đối không dùng else mặc định để tránh
+        // NOT_SCORABLE lọt vào Provisional Pool
+        switch (p0.scoringReadiness()) {
+          case SCORE_READY -> {
+            scoreReadyCandidates.add(cand);
+          }
+          case PROVISIONAL -> {
+            log.info(
+                "Candidate {} routed to provisional pool (lacks full stability evidence): {}",
+                cand.getCreatorId(),
+                p0.dataQualityReasons());
+            provisionalCandidates.add(cand);
+          }
+          case NOT_SCORABLE -> {
+            log.info(
+                "Candidate {} excluded: Not scorable under current SM2 policy: {}",
+                cand.getCreatorId(),
+                p0.dataQualityReasons());
+          }
+          case INVALID_DATA -> {
+            log.warn(
+                "Candidate {} excluded: Data quality error (not a campaign violation): {}",
+                cand.getCreatorId(),
+                p0.dataQualityReasons());
+          }
+        }
       }
 
-      // 6. Master-aware Grouping (Khử trùng lặp đa kênh - Mỗi KOC chỉ lấy 1 kênh điểm cao nhất)
-      Map<String, ScoredCandidate> uniqueKocs = new LinkedHashMap<>();
-      for (ScoredCandidate item : scoredList) {
-        String masterKey = item.candidate.getMasterId() != null
-            ? item.candidate.getMasterId().toString()
-            : item.candidate.getCreatorId().toString();
+      // 6. Phase 1-5: BẢNG XẾP HẠNG CHÍNH - Chỉ SCORE_READY được tham gia CRITIC Reference Pool &
+      // TOPSIS chính!
+      List<BrandPattern> brandPatterns =
+          brandPatternRepository.findByBrandProfileId(brandProfileId);
+      Function<RecommendationCandidateProjection, List<HistoricalCampaign>> historyProvider =
+          cand -> {
+            List<HistoricalCampaign> past =
+                historicalCampaignRepository.findByCreatorId(cand.getCreatorId());
+            if (past.isEmpty() && cand.getMasterId() != null) {
+              past = historicalCampaignRepository.findByMasterId(cand.getMasterId());
+            }
+            return past;
+          };
+
+      // Pricing Data Integration:
+      // Trích xuất benchmark giá từ lịch sử hợp tác theo quy tắc chuẩn hóa:
+      // 1. Phải thuộc đúng tài khoản Creator (Platform Account) đang xét (tránh lấy nhầm giá TikTok
+      // gán cho Instagram của cùng Master)
+      // 2. Sắp xếp theo recordedAt giảm dần để lấy giao dịch hoàn tất gần nhất
+      // 3. Nếu không có dữ liệu giá hợp lệ, tuyệt đối không bịa số liệu mà trả về PRICE_UNKNOWN
+      // (Zero Hallucination)
+      Function<RecommendationCandidateProjection, PriceStatus> priceStatusProvider =
+          cand -> {
+            List<HistoricalCampaign> past = historyProvider.apply(cand);
+            BigDecimal historicalFee = null;
+            if (past != null && !past.isEmpty()) {
+              List<HistoricalCampaign> platformSpecific =
+                  past.stream()
+                      .filter(
+                          hc ->
+                              hc != null
+                                  && hc.getCreator() != null
+                                  && Objects.equals(hc.getCreator().getId(), cand.getCreatorId()))
+                      .sorted(
+                          Comparator.comparing(
+                              HistoricalCampaign::getRecordedAt,
+                              Comparator.nullsLast(Comparator.reverseOrder())))
+                      .toList();
+
+              for (HistoricalCampaign hc : platformSpecific) {
+                if (hc.getCollaboration() != null && hc.getCollaboration().getAgreedFee() != null) {
+                  com.influencermatch.backend.collaboration.enums.CollaborationStatus st =
+                      hc.getCollaboration().getStatus();
+                  if (st == null
+                      || st
+                          == com.influencermatch.backend.collaboration.enums.CollaborationStatus
+                              .COMPLETED) {
+                    historicalFee = hc.getCollaboration().getAgreedFee();
+                    break;
+                  }
+                }
+              }
+            }
+            return PriceStatusResolver.resolve(historicalFee, false, campaign);
+          };
+
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> evaluatedReadyList = Collections.emptyList();
+      if (!scoreReadyCandidates.isEmpty()) {
+        evaluatedReadyList =
+            fourMemoryTopsisEngine.evaluateAndRank(
+                scoreReadyCandidates,
+                phase0Map,
+                campaign,
+                historyProvider,
+                brandPatterns,
+                priceStatusProvider);
+      }
+
+      // Lấy weight vector của run: nếu bảng chính có ứng viên thì dùng weights của run, ngược lại
+      // dùng fallback
+      com.influencermatch.backend.recommendation.engine.critic.model.EngineWeights runWeights =
+          !evaluatedReadyList.isEmpty()
+              ? evaluatedReadyList.get(0).weights()
+              : fourMemoryTopsisEngine.getFallbackWeights(
+                  campaign != null && campaign.getObjective() != null
+                      ? campaign.getObjective().name()
+                      : "AWARENESS");
+
+      // Đánh giá sơ bộ (Provisional Reference Score) độc lập với cùng bộ trọng số runWeights
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> evaluatedProvisionalList = new ArrayList<>();
+      for (RecommendationCandidateProjection cand : provisionalCandidates) {
+        NormalizedCandidateContext p0 = phase0Map.get(cand.getCreatorId());
+        List<HistoricalCampaign> past = historyProvider.apply(cand);
+        PriceStatus pStatus = priceStatusProvider.apply(cand);
+        evaluatedProvisionalList.add(
+            fourMemoryTopsisEngine.evaluateSingle(
+                cand, p0, campaign, past, brandPatterns, runWeights, pStatus));
+      }
+
+      // 7. Master-aware Grouping trên Main Ranking Pool (SCORE_READY)
+      // Master Dedup diễn ra trước limit, dùng chung Comparator với Display Sorting
+      Comparator<DisplaySorter.DisplayableItem> dedupComparator =
+          DisplaySorter.resolveComparator(mode);
+      Map<String, FourMemoryTopsisEngine.EvaluatedCandidate> uniqueKocs = new LinkedHashMap<>();
+      for (FourMemoryTopsisEngine.EvaluatedCandidate item : evaluatedReadyList) {
+        String masterKey =
+            item.candidate().getMasterId() != null
+                ? item.candidate().getMasterId().toString()
+                : item.candidate().getCreatorId().toString();
 
         if (!uniqueKocs.containsKey(masterKey)) {
           uniqueKocs.put(masterKey, item);
         } else {
-          ScoredCandidate existing = uniqueKocs.get(masterKey);
-          if (item.breakdown.getFinalScore() > existing.breakdown.getFinalScore()) {
+          FourMemoryTopsisEngine.EvaluatedCandidate existing = uniqueKocs.get(masterKey);
+          if (dedupComparator.compare(item, existing) < 0) {
             uniqueKocs.put(masterKey, item);
           }
         }
       }
 
-      // 7. Sắp xếp điểm FinalScore giảm dần và chọn Top N (hoặc toàn bộ Shortlist nếu nhỏ hơn limit)
+      // 8. Sắp xếp hiển thị và đa dạng hóa (Post-Processing & Presentation)
       int effectiveLimit = limit > 0 ? Math.min(limit, 50) : 30;
-      List<ScoredCandidate> topList =
-          uniqueKocs.values().stream()
-              .sorted(Comparator.comparingDouble((ScoredCandidate sc) -> sc.breakdown.getFinalScore()).reversed())
-              .limit(effectiveLimit)
-              .toList();
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> pool = new ArrayList<>(uniqueKocs.values());
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> topList;
 
-      // 8. Tích hợp XAI Engine (POST /api/v1/ai/explain kèm Circuit Breaker)
+      switch (mode) {
+        case DIVERSIFIED_MATCH -> {
+          // 1. Initial relevance ordering strictly by TOPSIS MatchScore
+          List<FourMemoryTopsisEngine.EvaluatedCandidate> relevanceSorted =
+              displaySorter.sort(pool, DisplayMode.BEST_MATCH);
+          // 2. MMR diversity reranking with lambda = 0.70
+          topList = mmrReranker.rerank(relevanceSorted, effectiveLimit, MmrReranker.DEFAULT_LAMBDA);
+        }
+        case BUDGET_READY_FIRST -> {
+          // Bucketed by PriceStatus priority, then MatchScore descending
+          List<FourMemoryTopsisEngine.EvaluatedCandidate> budgetSorted =
+              displaySorter.sort(pool, DisplayMode.BUDGET_READY_FIRST);
+          topList = budgetSorted.stream().limit(effectiveLimit).toList();
+        }
+        case BEST_MATCH -> {
+          // Pure relevance: strictly ordered by TOPSIS MatchScore descending without diversity
+          // perturbation
+          List<FourMemoryTopsisEngine.EvaluatedCandidate> matchSorted =
+              displaySorter.sort(pool, DisplayMode.BEST_MATCH);
+          topList = matchSorted.stream().limit(effectiveLimit).toList();
+        }
+        default -> {
+          List<FourMemoryTopsisEngine.EvaluatedCandidate> matchSorted =
+              displaySorter.sort(pool, DisplayMode.BEST_MATCH);
+          topList = matchSorted.stream().limit(effectiveLimit).toList();
+        }
+      }
+
+      // 9. Tích hợp XAI Engine (POST /api/v1/ai/explain kèm Circuit Breaker & Fallback) cho Bảng
+      // chính
+      // Hợp đồng DTO: recommendations CHỈ chứa ứng viên SCORE_READY (hoàn tất Four-Memory)
       List<CreatorRecommendationItemDto> recommendationItems = new ArrayList<>();
-      for (ScoredCandidate item : topList) {
-        ReasoningCardDto reasoning = fetchReasoningCard(item.candidate, campaign, item.breakdown);
+      for (FourMemoryTopsisEngine.EvaluatedCandidate item : topList) {
+        ScoreBreakdownDto breakdown = fourMemoryTopsisEngine.toScoreBreakdownDto(item);
+        ReasoningCardDto reasoning =
+            fetchReasoningCard(item.candidate(), campaign, breakdown, item.confidence());
 
         Optional<ShortlistItem> shortlistItemOpt =
-            shortlistItemRepository.findByCampaignIdAndCreatorId(campaignId, item.candidate.getCreatorId());
-        boolean inShortlist = shortlistItemOpt.isPresent() && shortlistItemOpt.get().getStatus() != ShortlistStatus.REMOVED;
+            shortlistItemRepository.findByCampaignIdAndCreatorId(
+                campaignId, item.candidate().getCreatorId());
+        boolean inShortlist =
+            shortlistItemOpt.isPresent()
+                && shortlistItemOpt.get().getStatus() != ShortlistStatus.REMOVED;
         ShortlistStatus itemStatus = shortlistItemOpt.map(ShortlistItem::getStatus).orElse(null);
 
         recommendationItems.add(
             CreatorRecommendationItemDto.builder()
-                .creatorId(item.candidate.getCreatorId())
-                .masterId(item.candidate.getMasterId())
-                .platform(item.candidate.getPlatform())
-                .displayName(item.candidate.getDisplayName() != null ? item.candidate.getDisplayName() : item.candidate.getUserName())
-                .userName(item.candidate.getUserName())
-                .avatarUrl(item.candidate.getAvatarUrl())
-                .followers(item.candidate.getFollowers())
-                .avgViews(item.candidate.getAvgViews())
-                .avgLikes(item.candidate.getAvgLikes())
-                .engagementRate(item.candidate.getEngagementRate())
-                .niche(item.candidate.getNiche())
-                .category(item.candidate.getCategory())
-                .creatorType(item.candidate.getCreatorType())
-                .isClaimed(item.candidate.getMasterId() != null)
+                .creatorId(item.candidate().getCreatorId())
+                .masterId(item.candidate().getMasterId())
+                .platform(item.candidate().getPlatform())
+                .displayName(
+                    item.candidate().getDisplayName() != null
+                        ? item.candidate().getDisplayName()
+                        : item.candidate().getUserName())
+                .userName(item.candidate().getUserName())
+                .avatarUrl(item.candidate().getAvatarUrl())
+                .followers(item.candidate().getFollowers())
+                .avgViews(item.candidate().getAvgViews())
+                .avgLikes(item.candidate().getAvgLikes())
+                .engagementRate(item.candidate().getEngagementRate())
+                .niche(item.candidate().getNiche())
+                .category(item.candidate().getCategory())
+                .creatorType(item.candidate().getCreatorType())
+                .isClaimed(item.candidate().getMasterId() != null)
                 .isInShortlist(inShortlist)
                 .shortlistStatus(itemStatus)
-                .finalScore(roundToTwoDecimals(item.breakdown.getFinalScore()))
-                .scoreBreakdown(item.breakdown)
+                .finalScore(breakdown.getFinalScore())
+                .scoreBreakdown(breakdown)
                 .reasoning(reasoning)
-                .build()
-        );
+                .priceStatus(item.priceStatus())
+                .isScoreReady(true)
+                .isProvisional(false)
+                .build());
+      }
+
+      // 10. Master-aware Grouping trên Provisional Pool & Xây dựng danh sách Provisional tách bạch
+      // hoàn toàn
+      // Hợp đồng DTO: provisionalRecommendations CHỈ chứa ứng viên PROVISIONAL (đánh giá sơ bộ
+      // thiếu STAB)
+      // Bảo đảm tính không giao nhau:
+      // 1. Về creatorId: recommendations ∩ provisionalRecommendations = ∅
+      // 2. Về masterId: Creator Master đã có kênh đại diện trong Bảng chính (SCORE_READY) thì không
+      // xuất hiện lại trong Provisional
+      Set<String> recommendedMasterKeys =
+          topList.stream()
+              .map(
+                  item ->
+                      item.candidate().getMasterId() != null
+                          ? item.candidate().getMasterId().toString()
+                          : item.candidate().getCreatorId().toString())
+              .collect(Collectors.toSet());
+
+      Map<String, FourMemoryTopsisEngine.EvaluatedCandidate> uniqueProvisionalKocs =
+          new LinkedHashMap<>();
+      for (FourMemoryTopsisEngine.EvaluatedCandidate item : evaluatedProvisionalList) {
+        String masterKey =
+            item.candidate().getMasterId() != null
+                ? item.candidate().getMasterId().toString()
+                : item.candidate().getCreatorId().toString();
+
+        if (recommendedMasterKeys.contains(masterKey)) {
+          continue; // Creator Master này đã có kênh đại diện trong Bảng chính
+        }
+
+        if (!uniqueProvisionalKocs.containsKey(masterKey)) {
+          uniqueProvisionalKocs.put(masterKey, item);
+        } else {
+          FourMemoryTopsisEngine.EvaluatedCandidate existing = uniqueProvisionalKocs.get(masterKey);
+          if (dedupComparator.compare(item, existing) < 0) {
+            uniqueProvisionalKocs.put(masterKey, item);
+          }
+        }
+      }
+
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> sortedProvisional =
+          displaySorter.sort(new ArrayList<>(uniqueProvisionalKocs.values()), mode);
+      List<FourMemoryTopsisEngine.EvaluatedCandidate> topProvisional =
+          sortedProvisional.stream().limit(effectiveLimit).toList();
+
+      List<CreatorRecommendationItemDto> provisionalItems = new ArrayList<>();
+      for (FourMemoryTopsisEngine.EvaluatedCandidate item : topProvisional) {
+        ScoreBreakdownDto breakdown = fourMemoryTopsisEngine.toScoreBreakdownDto(item);
+        ReasoningCardDto reasoning =
+            fetchReasoningCard(item.candidate(), campaign, breakdown, item.confidence());
+
+        Optional<ShortlistItem> shortlistItemOpt =
+            shortlistItemRepository.findByCampaignIdAndCreatorId(
+                campaignId, item.candidate().getCreatorId());
+        boolean inShortlist =
+            shortlistItemOpt.isPresent()
+                && shortlistItemOpt.get().getStatus() != ShortlistStatus.REMOVED;
+        ShortlistStatus itemStatus = shortlistItemOpt.map(ShortlistItem::getStatus).orElse(null);
+
+        provisionalItems.add(
+            CreatorRecommendationItemDto.builder()
+                .creatorId(item.candidate().getCreatorId())
+                .masterId(item.candidate().getMasterId())
+                .platform(item.candidate().getPlatform())
+                .displayName(
+                    item.candidate().getDisplayName() != null
+                        ? item.candidate().getDisplayName()
+                        : item.candidate().getUserName())
+                .userName(item.candidate().getUserName())
+                .avatarUrl(item.candidate().getAvatarUrl())
+                .followers(item.candidate().getFollowers())
+                .avgViews(item.candidate().getAvgViews())
+                .avgLikes(item.candidate().getAvgLikes())
+                .engagementRate(item.candidate().getEngagementRate())
+                .niche(item.candidate().getNiche())
+                .category(item.candidate().getCategory())
+                .creatorType(item.candidate().getCreatorType())
+                .isClaimed(item.candidate().getMasterId() != null)
+                .isInShortlist(inShortlist)
+                .shortlistStatus(itemStatus)
+                .finalScore(breakdown.getFinalScore())
+                .scoreBreakdown(breakdown)
+                .reasoning(reasoning)
+                .priceStatus(item.priceStatus())
+                .isScoreReady(false)
+                .isProvisional(true)
+                .build());
       }
 
       // 9. Lưu vết RecommendationRun
@@ -201,11 +591,28 @@ public class AiRecommendationService {
                   .campaign(campaign)
                   .brandProfile(campaign.getBrandProfile())
                   .contextVersion(contextVersion)
+                  .campaignContextId(preparedContext.getId())
+                  .embeddingContextId(preparedEmbedding.contextId())
+                  .embeddingJobId(preparedEmbedding.jobId())
+                  .embeddingModel(preparedEmbedding.model())
+                  .embeddingModelVersion(preparedEmbedding.modelVersion())
+                  .candidateSource(source == null ? "LEGACY_AUTO" : source.name())
+                  .brandContextId(preparedContext.getBrandContextId())
+                  .brandContextVersion(
+                      preparedContext.getBrandContextId() == null
+                          ? null
+                          : brandContexts
+                              .findById(preparedContext.getBrandContextId())
+                              .map(
+                                  com.influencermatch.backend.brand.model.BrandContext
+                                      ::getContextVersion)
+                              .orElse(null))
+                  .scoringPolicyVersion("develop-topsis")
+                  .scoringSnapshot(objectMapper.valueToTree(recommendationItems))
                   .status("COMPLETED")
                   .candidatesCount(recommendationItems.size())
                   .queryBrief(queryBrief)
-                  .build()
-          );
+                  .build());
 
       return RecommendationResponseDto.builder()
           .recommendationRunId(run.getId())
@@ -213,179 +620,144 @@ public class AiRecommendationService {
           .contextVersion(contextVersion)
           .totalCandidates(recommendationItems.size())
           .recommendations(recommendationItems)
+          .provisionalRecommendations(provisionalItems)
           .build();
 
     } catch (Exception e) {
       // Rollback hoàn trả Quota nếu có bất kỳ ngoại lệ nào xảy ra trong quá trình xử lý
-      subscriptionService.releaseRecommendationQuota(subscriptionId);
-      log.error("AI recommendation failed for campaign {}, rolled back quota: {}", campaignId, e.getMessage());
+      if (subscriptionId != null) subscriptionService.releaseRecommendationQuota(subscriptionId);
+      log.error(
+          "AI recommendation failed for campaign {}, rolled back quota: {}",
+          campaignId,
+          e.getMessage());
       if (e instanceof BusinessException) {
         throw e;
       }
-      throw new BusinessException(ErrorCode.INTERNAL_ERROR, "Failed to run AI recommendation: " + e.getMessage());
+      throw new BusinessException(
+          ErrorCode.INTERNAL_ERROR, "Failed to run AI recommendation: " + e.getMessage());
     }
   }
 
   /**
-   * Tính toán điểm 4 tầng bộ nhớ theo Single Source of Truth của Java Backend:
-   * FinalScore = 0.50 * Score_M2 + 0.30 * Score_M1 + 0.20 * Score_M4
+   * Flow 6.1 Four-Memory Feature Scorer & Fixed-Ideal TOPSIS Engine: Chấm điểm độc lập 4 tầng bộ
+   * nhớ (SM1..SM4) trên thang chuẩn hóa [0, 1] và xếp hạng bằng thuật toán Fixed-Ideal TOPSIS theo
+   * trọng số mục tiêu Campaign (w_j).
    */
   public ScoreBreakdownDto calculateFourMemoryScores(
       RecommendationCandidateProjection cand, Campaign campaign, UUID brandProfileId) {
+    return calculateFourMemoryScores(cand, campaign, brandProfileId, null);
+  }
 
-    // --- 1. Score M2 (Public Creator Fit) ---
-    // a. Follower Score (Hàm log10 phi đối xứng)
-    long minFollowers = campaign.getFollowerMin() != null ? campaign.getFollowerMin() : 10_000L;
-    long maxFollowers = campaign.getFollowerMax() != null ? campaign.getFollowerMax() : 500_000L;
-    long candFollowers = cand.getFollowers() != null ? cand.getFollowers() : 0L;
+  public ScoreBreakdownDto calculateFourMemoryScores(
+      RecommendationCandidateProjection cand,
+      Campaign campaign,
+      UUID brandProfileId,
+      NormalizedCandidateContext p0) {
 
-    double followerScore;
-    if (candFollowers >= minFollowers && candFollowers <= maxFollowers) {
-      followerScore = 100.0;
-    } else if (candFollowers < minFollowers) {
-      double ordersUnder = Math.log10((double) minFollowers / Math.max(candFollowers, 1));
-      followerScore = Math.max(0.0, 100.0 - (ordersUnder * 50.0));
-    } else {
-      double ordersOver = Math.log10((double) candFollowers / Math.max(maxFollowers, 1));
-      followerScore = Math.max(60.0, 100.0 - (ordersOver * 30.0)); // Sàn 60 điểm khi vượt trần
-    }
-
-    // b. Engagement Score (Chuẩn hóa 5.0% cho video ngắn TikTok/Reels/Shorts)
-    double effectiveEr = 0.0;
-    if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && cand.getAvgLikes() != null) {
-      effectiveEr = (cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue()) * 100.0;
-    } else if (cand.getEngagementRate() != null) {
-      effectiveEr = cand.getEngagementRate().doubleValue();
-    }
-
-    boolean isShortVideo = "TIKTOK".equalsIgnoreCase(cand.getPlatform())
-        || "INSTAGRAM".equalsIgnoreCase(cand.getPlatform())
-        || "YOUTUBE".equalsIgnoreCase(cand.getPlatform());
-
-    double benchmarkEr = isShortVideo ? 5.0 : 3.0;
-    double engagementScore = Math.min(100.0, (effectiveEr / benchmarkEr) * 100.0);
-
-    // c. Semantic Match Score (Min-Max Rescaling dải Cosine [0.30, 0.85] -> [0.0, 100.0])
-    double rawCosine = cand.getSemanticScore() != null ? cand.getSemanticScore() : 0.50;
-    double clampedCosine = Math.max(0.30, Math.min(0.85, rawCosine));
-    double semanticMatchScore = ((clampedCosine - 0.30) / (0.85 - 0.30)) * 100.0;
-
-    // d. Niche Match Score (So khớp 6 cấp độ động)
-    double nicheMatchScore = 50.0;
-    List<String> campaignNiches = campaign.getNiches() != null ? campaign.getNiches() : Collections.emptyList();
-    String candNiche = cand.getNiche() != null ? cand.getNiche().toLowerCase() : "";
-    String candCat = cand.getCategory() != null ? cand.getCategory().toLowerCase() : "";
-
-    boolean exactMatch = campaignNiches.stream().anyMatch(n -> n.equalsIgnoreCase(candNiche));
-    boolean catMatch = campaignNiches.stream().anyMatch(n -> n.equalsIgnoreCase(candCat) || candCat.contains(n.toLowerCase()));
-
-    if (exactMatch) {
-      nicheMatchScore = 100.0;
-    } else if (catMatch) {
-      nicheMatchScore = 85.0;
-    } else if (!candNiche.isEmpty() && campaignNiches.stream().anyMatch(n -> candNiche.contains(n.toLowerCase()))) {
-      nicheMatchScore = 75.0;
-    }
-
-    double m2Score = (0.20 * followerScore) + (0.25 * engagementScore) + (0.30 * semanticMatchScore) + (0.25 * nicheMatchScore);
-
-    // --- 2. Score M1 (Historical Reliability) ---
-    // TEST-05: KOC chưa từng có lịch sử tự động gán trung tính 50.0 điểm
-    double m1Score = 50.0;
-    List<HistoricalCampaign> pastCampaigns = historicalCampaignRepository.findByCreatorId(cand.getCreatorId());
+    List<HistoricalCampaign> pastCampaigns =
+        historicalCampaignRepository.findByCreatorId(cand.getCreatorId());
     if (pastCampaigns.isEmpty() && cand.getMasterId() != null) {
       pastCampaigns = historicalCampaignRepository.findByMasterId(cand.getMasterId());
     }
 
-    if (!pastCampaigns.isEmpty()) {
-      double baseM1 = 60.0;
-      int count = 0;
-      for (HistoricalCampaign hist : pastCampaigns) {
-        if (hist.getOutcome() != null && hist.getOutcome().getRoi() != null) {
-          double roi = hist.getOutcome().getRoi().doubleValue();
-          if (roi >= 1.5) baseM1 += 15.0;
-          else if (roi >= 1.0) baseM1 += 8.0;
-          count++;
-        }
-      }
-      m1Score = Math.min(100.0, Math.max(30.0, baseM1));
-    }
+    List<BrandPattern> patterns =
+        (brandProfileId != null)
+            ? brandPatternRepository.findByBrandProfileId(brandProfileId)
+            : Collections.emptyList();
 
-    // --- 3. Score M4 (Brand Preference Match) ---
-    double m4Score = 50.0;
-    List<BrandPattern> patterns = brandPatternRepository.findByBrandProfileId(brandProfileId);
-    if (!patterns.isEmpty()) {
-      BrandPattern pattern = patterns.get(0);
-      if (pattern.getPreferredEngagementRate() != null) {
-        double preferredEr = pattern.getPreferredEngagementRate().doubleValue();
-        double diff = Math.abs(effectiveEr - preferredEr);
-        m4Score = Math.max(0.0, 100.0 - (diff * 12.0));
-      }
-      if (pattern.getPlatform() != null && pattern.getPlatform().equalsIgnoreCase(cand.getPlatform())) {
-        m4Score = Math.min(100.0, m4Score + 10.0);
-      }
-    }
+    FourMemoryTopsisEngine.EvaluatedCandidate evaluated =
+        fourMemoryTopsisEngine.evaluateSingle(cand, p0, campaign, pastCampaigns, patterns);
 
-    // --- 4. Final Weighted Score ---
-    double finalScore = (0.50 * m2Score) + (0.30 * m1Score) + (0.20 * m4Score);
-
-    return ScoreBreakdownDto.builder()
-        .m2Score(roundToTwoDecimals(m2Score))
-        .m1Score(roundToTwoDecimals(m1Score))
-        .m4Score(roundToTwoDecimals(m4Score))
-        .followerScore(roundToTwoDecimals(followerScore))
-        .engagementScore(roundToTwoDecimals(engagementScore))
-        .semanticMatchScore(roundToTwoDecimals(semanticMatchScore))
-        .nicheMatchScore(roundToTwoDecimals(nicheMatchScore))
-        .finalScore(roundToTwoDecimals(finalScore))
-        .build();
+    return fourMemoryTopsisEngine.toScoreBreakdownDto(evaluated);
   }
 
   private ReasoningCardDto fetchReasoningCard(
       RecommendationCandidateProjection cand, Campaign campaign, ScoreBreakdownDto breakdown) {
+    return fetchReasoningCard(cand, campaign, breakdown, null);
+  }
+
+  private ReasoningCardDto fetchReasoningCard(
+      RecommendationCandidateProjection cand,
+      Campaign campaign,
+      ScoreBreakdownDto breakdown,
+      ConfidenceAssessment confidence) {
 
     double candEr = cand.getEngagementRate() != null ? cand.getEngagementRate().doubleValue() : 0.0;
-    Double erViews = (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && cand.getAvgLikes() != null)
-        ? (cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue()) * 100.0
-        : null;
+    Double erViews =
+        (cand.getAvgViews() != null
+                && cand.getAvgViews().doubleValue() > 0
+                && cand.getAvgLikes() != null)
+            ? (cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue()) * 100.0
+            : null;
 
-    ExplainRequestDto explainReq = ExplainRequestDto.builder()
-        .creatorName(cand.getDisplayName() != null ? cand.getDisplayName() : cand.getUserName())
-        .followers(cand.getFollowers() != null ? cand.getFollowers() : 0L)
-        .engagementRate(candEr)
-        .engagementRateViews(erViews)
-        .platform(cand.getPlatform() != null ? cand.getPlatform() : "TIKTOK")
-        .niche(cand.getNiche() != null ? cand.getNiche() : "general")
-        .category(cand.getCategory() != null ? cand.getCategory() : "Lifestyle")
-        .creatorType(cand.getCreatorType() != null ? cand.getCreatorType() : "KOC")
-        .avgViews(cand.getAvgViews() != null ? cand.getAvgViews().doubleValue() : 0.0)
-        .avgLikes(cand.getAvgLikes() != null ? cand.getAvgLikes().doubleValue() : 0.0)
-        .similarityScore(cand.getSemanticScore() != null ? cand.getSemanticScore() : 0.50)
-        .campaignBrief(campaign.getProductService() != null ? campaign.getProductService() : campaign.getName())
-        .build();
+    ExplainRequestDto explainReq =
+        ExplainRequestDto.builder()
+            .creatorName(cand.getDisplayName() != null ? cand.getDisplayName() : cand.getUserName())
+            .followers(cand.getFollowers() != null ? cand.getFollowers() : 0L)
+            .engagementRate(candEr)
+            .engagementRateViews(erViews)
+            .platform(cand.getPlatform() != null ? cand.getPlatform() : "TIKTOK")
+            .niche(cand.getNiche() != null ? cand.getNiche() : "general")
+            .category(cand.getCategory() != null ? cand.getCategory() : "Lifestyle")
+            .creatorType(cand.getCreatorType() != null ? cand.getCreatorType() : "KOC")
+            .avgViews(cand.getAvgViews() != null ? cand.getAvgViews().doubleValue() : 0.0)
+            .avgLikes(cand.getAvgLikes() != null ? cand.getAvgLikes().doubleValue() : 0.0)
+            .similarityScore(cand.getSemanticScore() != null ? cand.getSemanticScore() : 0.50)
+            .campaignBrief(
+                campaign.getProductService() != null
+                    ? campaign.getProductService()
+                    : campaign.getName())
+            .build();
 
-    ExplainResponseDto response = aiServiceClient.getExplanation(explainReq);
+    try {
+      ExplainResponseDto response = aiServiceClient.getExplanation(explainReq);
+      if (response != null
+          && response.isExplanationAvailable()
+          && response.getSummary() != null
+          && !response.getSummary().isBlank()) {
+        List<String> combinedReasons = new ArrayList<>();
+        if (response.getReasons() != null) {
+          combinedReasons.addAll(response.getReasons());
+        }
+        List<String> warnings =
+            (confidence != null && confidence.evidenceWarnings() != null)
+                ? confidence.evidenceWarnings()
+                : Collections.emptyList();
+        for (String warning : warnings) {
+          combinedReasons.add("Lưu ý: " + warning);
+        }
+        return ReasoningCardDto.builder()
+            .summary(response.getSummary())
+            .reasons(combinedReasons)
+            .explanationAvailable(true)
+            .evidenceWarnings(warnings)
+            .build();
+      }
+    } catch (Exception e) {
+      log.warn(
+          "AI service explanation call failed for creator {}, falling back to deterministic"
+              + " template: {}",
+          cand.getCreatorId(),
+          e.getMessage());
+    }
 
-    return ReasoningCardDto.builder()
-        .summary(response.getSummary())
-        .reasons(response.getReasons())
-        .explanationAvailable(response.isExplanationAvailable())
-        .build();
+    return deterministicReasoningGenerator.generate(cand, campaign, breakdown, confidence);
   }
 
   /**
-   * Phase 4: Feedback Loop & Tiến hóa bối cảnh M3 (Negative Constraints).
-   * Brand từ chối hoặc phản hồi về KOC -> Bổ sung vào excludedCreatorIds, lưu feedbackHistory,
-   * tiến hóa phiên bản CampaignContext (v_N + 1), cập nhật M4 BrandPattern.
-   * QUY TẮC AN TOÀN: Tuyệt đối không thay đổi ngân sách hoặc lĩnh vực của Campaign!
+   * Phase 4: Feedback Loop & Tiến hóa bối cảnh M3 (Negative Constraints). Brand từ chối hoặc phản
+   * hồi về KOC -> Bổ sung vào excludedCreatorIds, lưu feedbackHistory, tiến hóa phiên bản
+   * CampaignContext (v_N + 1), cập nhật M4 BrandPattern. QUY TẮC AN TOÀN: Tuyệt đối không thay đổi
+   * ngân sách hoặc lĩnh vực của Campaign!
    */
   @Transactional
   public RecommendationFeedbackResponse processFeedback(
       UUID campaignId, RecommendationFeedbackRequest request) {
     Permissions.require(Permission.RUN_RECOMMENDATION);
-    Campaign campaign = ownership.requireOwned(campaignId);
+    Campaign campaign = campaignLocks.owned(campaignId);
 
-    String action = request.getAction() != null ? request.getAction().trim().toUpperCase() : "REJECT";
+    String action =
+        request.getAction() != null ? request.getAction().trim().toUpperCase() : "REJECT";
     UUID creatorId = request.getCreatorId();
 
     List<CampaignContext> contexts =
@@ -466,44 +838,57 @@ public class AiRecommendationService {
     // 3. Quy tắc an toàn: Tuyệt đối KHÔNG thay đổi campaign.budgetMax, budgetMin, hay niches
     // Campaign entity trên database hoàn toàn giữ nguyên giá trị ban đầu.
 
-    // 4. Tiến hóa phiên bản: Lưu trữ bản ghi cũ (active = false), tạo bản ghi mới (contextVersion = v_N + 1)
+    // 4. Tiến hóa phiên bản: Lưu trữ bản ghi cũ (active = false), tạo bản ghi mới (contextVersion =
+    // v_N + 1)
     if (activeContext != null) {
       activeContext.setActive(false);
       activeContext.setArchivedAt(LocalDateTime.now());
-      campaignContextRepository.save(activeContext);
+      campaignContextRepository.saveAndFlush(activeContext);
     }
 
     int nextVersion = (activeContext != null) ? prevVersion + 1 : 1;
-    CampaignContext newContext = CampaignContext.builder()
-        .campaign(campaign)
-        .contextVersion(nextVersion)
-        .contextData(dataNode)
-        .active(true)
-        .build();
+    CampaignContext newContext =
+        CampaignContext.builder()
+            .campaign(campaign)
+            .contextVersion(nextVersion)
+            .brandContextId(activeContext == null ? null : activeContext.getBrandContextId())
+            .embeddingSourceContextId(
+                activeContext == null ? null : activeContext.getEmbeddingSourceContextId())
+            .contextData(dataNode)
+            .active(true)
+            .build();
     campaignContextRepository.save(newContext);
 
     // 5. Ghi nhận mô thức dài hạn M4 (BrandPattern)
     if (campaign.getBrandProfile() != null && request.getReasonCode() != null) {
       try {
         UUID brandProfileId = campaign.getBrandProfile().getId();
-        BrandPattern pattern = brandPatternRepository
-            .findByBrandProfileIdAndPatternType(brandProfileId, "REJECTION_FEEDBACK")
-            .orElseGet(() -> BrandPattern.builder()
-                .brandProfile(campaign.getBrandProfile())
-                .patternType("REJECTION_FEEDBACK")
-                .confidence(BigDecimal.valueOf(0.5))
-                .evidenceCount(0)
-                .learnedAt(LocalDateTime.now())
-                .build());
+        BrandPattern pattern =
+            brandPatternRepository
+                .findByBrandProfileIdAndPatternType(brandProfileId, "REJECTION_FEEDBACK")
+                .orElseGet(
+                    () ->
+                        BrandPattern.builder()
+                            .brandProfile(campaign.getBrandProfile())
+                            .patternType("REJECTION_FEEDBACK")
+                            .confidence(BigDecimal.valueOf(0.5))
+                            .evidenceCount(0)
+                            .learnedAt(LocalDateTime.now())
+                            .build());
 
         pattern.setEvidenceCount(pattern.getEvidenceCount() + 1);
-        pattern.setConfidence(BigDecimal.valueOf(Math.min(1.0, 0.5 + 0.05 * pattern.getEvidenceCount())));
+        pattern.setConfidence(
+            BigDecimal.valueOf(Math.min(1.0, 0.5 + 0.05 * pattern.getEvidenceCount())));
         pattern.setLearnedAt(LocalDateTime.now());
 
-        ObjectNode patternValue = (pattern.getPatternValue() instanceof ObjectNode)
-            ? (ObjectNode) pattern.getPatternValue()
-            : objectMapper.createObjectNode();
-        int count = patternValue.has(request.getReasonCode()) ? patternValue.get(request.getReasonCode()).asInt() : 0;
+        ObjectNode patternValue =
+            (pattern.getPatternValue() instanceof ObjectNode)
+                ? (ObjectNode) pattern.getPatternValue()
+                : objectMapper.createObjectNode();
+        int count =
+            patternValue.has(request.getReasonCode())
+                ? patternValue.get(request.getReasonCode()).asInt()
+                : 0;
         patternValue.put(request.getReasonCode(), count + 1);
         pattern.setPatternValue(patternValue);
 
@@ -513,8 +898,12 @@ public class AiRecommendationService {
       }
     }
 
-    log.info("Feedback processed for campaign {}: creator {}, action {}, new context version {}",
-        campaignId, creatorId, action, nextVersion);
+    log.info(
+        "Feedback processed for campaign {}: creator {}, action {}, new context version {}",
+        campaignId,
+        creatorId,
+        action,
+        nextVersion);
 
     return RecommendationFeedbackResponse.builder()
         .campaignId(campaignId)
@@ -524,9 +913,11 @@ public class AiRecommendationService {
         .previousContextVersion(prevVersion)
         .newContextVersion(nextVersion)
         .totalExcludedCount(excludedArray.size())
-        .message(action.equals("REJECT")
-            ? "Đã loại trừ ứng viên khỏi các lượt gợi ý sau. Bối cảnh M3 tiến hóa lên v" + nextVersion
-            : "Đã ghi nhận phản hồi. Bối cảnh M3 cập nhật lên v" + nextVersion)
+        .message(
+            action.equals("REJECT")
+                ? "Đã loại trừ ứng viên khỏi các lượt gợi ý sau. Bối cảnh M3 tiến hóa lên v"
+                    + nextVersion
+                : "Đã ghi nhận phản hồi. Bối cảnh M3 cập nhật lên v" + nextVersion)
         .build();
   }
 
@@ -538,7 +929,8 @@ public class AiRecommendationService {
     if (c.getNiches() != null && !c.getNiches().isEmpty()) {
       sb.append("Lĩnh vực: ").append(String.join(", ", c.getNiches())).append(". ");
     }
-    if (c.getContentType() != null) sb.append("Hình thức: ").append(c.getContentType()).append(". ");
+    if (c.getContentType() != null)
+      sb.append("Hình thức: ").append(c.getContentType()).append(". ");
     return sb.toString().trim();
   }
 
@@ -554,5 +946,6 @@ public class AiRecommendationService {
     return Math.round(val * 100.0) / 100.0;
   }
 
-  private record ScoredCandidate(RecommendationCandidateProjection candidate, ScoreBreakdownDto breakdown) {}
+  private record ScoredCandidate(
+      RecommendationCandidateProjection candidate, ScoreBreakdownDto breakdown) {}
 }

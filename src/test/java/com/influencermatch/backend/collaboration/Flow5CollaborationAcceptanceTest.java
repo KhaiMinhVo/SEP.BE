@@ -7,7 +7,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.influencermatch.backend.brand.model.BrandPattern;
 import com.influencermatch.backend.brand.model.BrandProfile;
 import com.influencermatch.backend.brand.repository.BrandPatternRepository;
 import com.influencermatch.backend.brand.repository.BrandProfileRepository;
@@ -63,9 +62,10 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 
 /**
- * Acceptance Test Suite toàn diện cho FLOW 5: Campaign Collaboration & Performance Tracking.
- * Bao gồm đầy đủ 10 kịch bản chuẩn mực (TEST-F5-01 -> TEST-F5-10) kiểm chứng chu trình:
- * Khởi tạo Hợp tác -> Đọc dữ liệu Brand/Creator -> Nộp Bằng chứng -> Nghiệm thu KPI -> Đánh giá & Học vào M1/M4 AI.
+ * Acceptance Test Suite toàn diện cho FLOW 5: Campaign Collaboration & Performance Tracking. Bao
+ * gồm đầy đủ 10 kịch bản chuẩn mực (TEST-F5-01 -> TEST-F5-10) kiểm chứng chu trình: Khởi tạo Hợp
+ * tác -> Đọc dữ liệu Brand/Creator -> Nộp Bằng chứng -> Nghiệm thu KPI -> Đánh giá & Học vào M1/M4
+ * AI.
  */
 class Flow5CollaborationAcceptanceTest {
 
@@ -84,6 +84,7 @@ class Flow5CollaborationAcceptanceTest {
   private ObjectMapper objectMapper;
 
   private CollaborationService collaborationService;
+  private com.influencermatch.backend.cooperation.DealService gateway;
   private CollaborationCompletedEventListener memorySyncListener;
   private CollaborationController collaborationController;
   private CreatorPortalCollaborationController creatorPortalController;
@@ -110,6 +111,7 @@ class Flow5CollaborationAcceptanceTest {
     brandPatterns = mock(BrandPatternRepository.class);
     brandProfiles = mock(BrandProfileRepository.class);
     em = mock(EntityManager.class);
+
     eventPublisher = mock(ApplicationEventPublisher.class);
     objectMapper = new ObjectMapper();
 
@@ -126,6 +128,9 @@ class Flow5CollaborationAcceptanceTest {
             Validation.buildDefaultValidatorFactory().getValidator(),
             eventPublisher);
 
+    gateway = mock(com.influencermatch.backend.cooperation.DealService.class);
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        collaborationService, "deals", gateway);
     memorySyncListener =
         new CollaborationCompletedEventListener(
             historicalCampaigns,
@@ -216,11 +221,20 @@ class Flow5CollaborationAcceptanceTest {
             .updatedAt(LocalDateTime.now())
             .build();
 
-    when(campaigns.findLockedForCollaborationById(campaign.getId())).thenReturn(Optional.of(campaign));
+    when(campaigns.findLockedForCollaborationById(campaign.getId()))
+        .thenReturn(Optional.of(campaign));
     when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
-    when(collaborations.findLockedById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    when(collaborations.findLockedById(collaboration.getId()))
+        .thenReturn(Optional.of(collaboration));
     when(relationships.findLockedById(relationship.getId())).thenReturn(Optional.of(relationship));
 
+    when(gateway.canAccessCollaboration(eq(creatorUser.getId()), eq(collaboration.getId())))
+        .thenReturn(true);
+    when(gateway.confirmLegacy(eq(campaign.getId()), any(), any()))
+        .thenReturn(
+            objectMapper
+                .createObjectNode()
+                .put("collaborationId", collaboration.getId().toString()));
     authenticate(brandOwner);
   }
 
@@ -234,55 +248,73 @@ class Flow5CollaborationAcceptanceTest {
   // TEST-F5-01: Khởi tạo Hợp tác từ Relationship ở Stage COLLABORATING
   // =========================================================================
   @Test
-  @DisplayName("TEST-F5-01 [Collab From Collaborating]: Khởi tạo Collaboration thành công từ stage COLLABORATING")
+  @DisplayName(
+      "TEST-F5-01 [Collab From Collaborating]: Khởi tạo Collaboration thành công từ stage"
+          + " COLLABORATING")
   void testF501_CreateCollaboration_FromCollaboratingStage_Succeeds() {
     when(collaborations.existsByRelationshipId(relationship.getId())).thenReturn(false);
-    when(collaborations.save(any(Collaboration.class))).thenAnswer(i -> {
-      Collaboration c = i.getArgument(0);
-      c.setId(UUID.randomUUID());
-      return c;
-    });
+    when(collaborations.save(any(Collaboration.class)))
+        .thenAnswer(
+            i -> {
+              Collaboration c = i.getArgument(0);
+              c.setId(UUID.randomUUID());
+              return c;
+            });
 
+    collaboration.setStatus(CollaborationStatus.PLANNED);
+    collaboration.setStartAt(null);
+    relationship.setStage(RelationshipStage.CONFIRMED);
     // Request không truyền agreedFee -> Tự động fallback về agreedFee từ relationship
     CreateCollaborationRequest req =
-        new CreateCollaborationRequest(relationship.getId(), null, null, "Kế hoạch bàn giao 1 video TikTok");
+        new CreateCollaborationRequest(
+            relationship.getId(), null, null, "Kế hoạch bàn giao 1 video TikTok");
 
     ResponseEntity<ApiResponse<CollaborationResponse>> response =
-        collaborationController.create(campaign.getId(), req);
+        collaborationController.create(campaign.getId(), req, "confirm-key");
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
     assertThat(response.getBody()).isNotNull();
     CollaborationResponse data = response.getBody().data();
-    assertThat(data.status()).isEqualTo(CollaborationStatus.IN_PROGRESS);
+    assertThat(data.status()).isEqualTo(CollaborationStatus.PLANNED);
     assertThat(data.agreedFee()).isEqualByComparingTo(new BigDecimal("3500000.00"));
     assertThat(data.currency()).isEqualTo("VND");
-    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.COLLABORATING);
+    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.CONFIRMED);
   }
 
   // =========================================================================
   // TEST-F5-02: Chặn tạo trùng lặp Collaboration cho cùng Relationship
   // =========================================================================
   @Test
-  @DisplayName("TEST-F5-02 [Collab Anti-Duplicate]: Chặn tạo trùng lặp Collaboration cho cùng một Relationship")
+  @DisplayName(
+      "TEST-F5-02 [Collab Anti-Duplicate]: Chặn tạo trùng lặp Collaboration cho cùng một"
+          + " Relationship")
   void testF502_CreateCollaboration_DuplicateForSameRelationship_ThrowsConflict() {
+    doThrow(new ConflictException(ErrorCode.COLLABORATION_ALREADY_EXISTS, "Duplicate confirmation"))
+        .when(gateway)
+        .confirmLegacy(any(), any(), any());
     when(campaigns.findById(campaign.getId())).thenReturn(Optional.of(campaign));
     when(relationships.findLockedById(relationship.getId())).thenReturn(Optional.of(relationship));
     when(collaborations.existsByRelationshipId(relationship.getId())).thenReturn(true);
 
     CreateCollaborationRequest req =
-        new CreateCollaborationRequest(relationship.getId(), new BigDecimal("4000000"), "VND", "Thử trùng");
+        new CreateCollaborationRequest(
+            relationship.getId(), new BigDecimal("4000000"), "VND", "Thử trùng");
 
-    assertThatThrownBy(() -> collaborationController.create(campaign.getId(), req))
+    assertThatThrownBy(() -> collaborationController.create(campaign.getId(), req, "confirm-key"))
         .isInstanceOf(ConflictException.class)
-        .satisfies(ex -> assertThat(((ConflictException) ex).code())
-            .isEqualTo(ErrorCode.COLLABORATION_ALREADY_EXISTS));
+        .satisfies(
+            ex ->
+                assertThat(((ConflictException) ex).code())
+                    .isEqualTo(ErrorCode.COLLABORATION_ALREADY_EXISTS));
   }
 
   // =========================================================================
   // TEST-F5-03: Brand truy vấn danh sách hợp tác trong Campaign
   // =========================================================================
   @Test
-  @DisplayName("TEST-F5-03 [Brand Query List]: Brand truy vấn danh sách phân trang các hợp tác trong Campaign")
+  @DisplayName(
+      "TEST-F5-03 [Brand Query List]: Brand truy vấn danh sách phân trang các hợp tác trong"
+          + " Campaign")
   void testF503_GetCampaignCollaborations_BrandQueriesCollaborations_ReturnsPaginatedList() {
     when(campaigns.findById(campaign.getId())).thenReturn(Optional.of(campaign));
     when(collaborations.findByCampaignId(eq(campaign.getId()), any()))
@@ -291,7 +323,8 @@ class Flow5CollaborationAcceptanceTest {
     when(reviews.existsByCollaborationId(collaboration.getId())).thenReturn(false);
 
     ResponseEntity<ApiResponse<PageResponse<CollaborationSummaryDto>>> response =
-        collaborationController.getCampaignCollaborations(campaign.getId(), null, PageRequest.of(0, 20));
+        collaborationController.getCampaignCollaborations(
+            campaign.getId(), null, PageRequest.of(0, 20));
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(response.getBody()).isNotNull();
@@ -309,7 +342,9 @@ class Flow5CollaborationAcceptanceTest {
   // TEST-F5-04: Brand xem chi tiết một hợp tác cụ thể
   // =========================================================================
   @Test
-  @DisplayName("TEST-F5-04 [Brand Collab Detail]: Brand xem chi tiết hợp tác gồm outcome, review, evidence assets")
+  @DisplayName(
+      "TEST-F5-04 [Brand Collab Detail]: Brand xem chi tiết hợp tác gồm outcome, review, evidence"
+          + " assets")
   void testF504_GetCollaborationDetail_BrandQueriesSpecificCollaboration_ReturnsDetailedResponse() {
     when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
     when(outcomes.findByCollaborationId(collaboration.getId())).thenReturn(Optional.empty());
@@ -344,12 +379,13 @@ class Flow5CollaborationAcceptanceTest {
   // TEST-F5-05: KOC xem danh sách hợp tác qua Creator Portal
   // =========================================================================
   @Test
-  @DisplayName("TEST-F5-05 [Creator Portal View]: KOC xem danh sách công việc hợp tác được giao qua Creator Portal")
+  @DisplayName(
+      "TEST-F5-05 [Creator Portal View]: KOC xem danh sách công việc hợp tác được giao qua Creator"
+          + " Portal")
   void testF505_CreatorPortalCollaborations_KocQueriesAssignedCollaborations_ReturnsList() {
     authenticate(creatorUser);
     when(creatorMasters.findByUserId(creatorUser.getId())).thenReturn(Optional.of(creatorMaster));
-    when(collaborations.findByMasterId(creatorMaster.getId()))
-        .thenReturn(List.of(collaboration));
+    when(collaborations.findByMasterId(creatorMaster.getId())).thenReturn(List.of(collaboration));
     when(outcomes.findByCollaborationId(collaboration.getId())).thenReturn(Optional.empty());
     when(reviews.existsByCollaborationId(collaboration.getId())).thenReturn(false);
 
@@ -370,15 +406,18 @@ class Flow5CollaborationAcceptanceTest {
   // TEST-F5-06: KOC nộp đường dẫn bài đăng & ảnh Insights khi IN_PROGRESS
   // =========================================================================
   @Test
-  @DisplayName("TEST-F5-06 [Submit Evidence]: KOC nộp link bài đăng và ảnh chụp Insights khi IN_PROGRESS")
+  @DisplayName(
+      "TEST-F5-06 [Submit Evidence]: KOC nộp link bài đăng và ảnh chụp Insights khi IN_PROGRESS")
   void testF506_SubmitEvidence_KocOrBrandSubmitsAsset_UpdatesPostUrlAndPersistsEvidence() {
     authenticate(creatorUser);
     when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
-    when(evidenceAssets.save(any(EvidenceAsset.class))).thenAnswer(i -> {
-      EvidenceAsset a = i.getArgument(0);
-      a.setId(UUID.randomUUID());
-      return a;
-    });
+    when(evidenceAssets.save(any(EvidenceAsset.class)))
+        .thenAnswer(
+            i -> {
+              EvidenceAsset a = i.getArgument(0);
+              a.setId(UUID.randomUUID());
+              return a;
+            });
 
     SubmitEvidenceRequest req =
         new SubmitEvidenceRequest(
@@ -403,22 +442,33 @@ class Flow5CollaborationAcceptanceTest {
   // TEST-F5-07: Brand nghiệm thu hiệu quả tương tác mạng xã hội
   // =========================================================================
   @Test
-  @DisplayName("TEST-F5-07 [Record Outcome Metrics]: Brand nghiệm thu Views, Clicks, Likes, chuyển COMPLETED")
+  @DisplayName(
+      "TEST-F5-07 [Record Outcome Metrics]: Brand nghiệm thu Views, Clicks, Likes, chuyển"
+          + " COMPLETED")
   void testF507_RecordOutcome_BrandRecordsMetrics_CompletesCollaborationAndRelationship() {
     authenticate(brandOwner);
-    when(collaborations.findLockedById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    when(collaborations.findLockedById(collaboration.getId()))
+        .thenReturn(Optional.of(collaboration));
     when(campaigns.findById(campaign.getId())).thenReturn(Optional.of(campaign));
     when(relationships.findLockedById(relationship.getId())).thenReturn(Optional.of(relationship));
     when(outcomes.existsByCollaborationId(collaboration.getId())).thenReturn(false);
-    when(outcomes.save(any(CampaignOutcome.class))).thenAnswer(i -> {
-      CampaignOutcome o = i.getArgument(0);
-      o.setId(UUID.randomUUID());
-      return o;
-    });
+    when(outcomes.save(any(CampaignOutcome.class)))
+        .thenAnswer(
+            i -> {
+              CampaignOutcome o = i.getArgument(0);
+              o.setId(UUID.randomUUID());
+              return o;
+            });
 
     RecordOutcomeRequest req =
         new RecordOutcomeRequest(
-            25000L, 450L, 1800L, 120L, 40L, "https://tiktok.com/@glow.beauty/video/1234567", "Tương tác vượt KPI");
+            25000L,
+            450L,
+            1800L,
+            120L,
+            40L,
+            "https://tiktok.com/@glow.beauty/video/1234567",
+            "Tương tác vượt KPI");
 
     ResponseEntity<ApiResponse<OutcomeResponse>> response =
         collaborationController.outcome(collaboration.getId(), req);
@@ -433,32 +483,43 @@ class Flow5CollaborationAcceptanceTest {
     assertThat(outcomeDto.shares()).isEqualTo(40L);
     assertThat(outcomeDto.source()).isEqualTo("SELF_REPORTED");
 
-    assertThat(collaboration.getStatus()).isEqualTo(CollaborationStatus.COMPLETED);
-    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.COMPLETED);
+    assertThat(collaboration.getStatus()).isEqualTo(CollaborationStatus.IN_PROGRESS);
+    assertThat(relationship.getStage()).isEqualTo(RelationshipStage.CONFIRMED);
   }
 
   // =========================================================================
   // TEST-F5-08: Nghiệm thu thành công phi tài chính (không đòi hỏi ROI)
   // =========================================================================
   @Test
-  @DisplayName("TEST-F5-08 [Outcome No Financial ROI]: Nghiệm thu thành công không cần trường doanh thu/chi phí")
+  @DisplayName(
+      "TEST-F5-08 [Outcome No Financial ROI]: Nghiệm thu thành công không cần trường doanh thu/chi"
+          + " phí")
   void testF508_RecordOutcome_NonFinancialOutcome_NoFinancialRevenueOrRoiRequired() {
     authenticate(brandOwner);
-    when(collaborations.findLockedById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    when(collaborations.findLockedById(collaboration.getId()))
+        .thenReturn(Optional.of(collaboration));
     when(campaigns.findById(campaign.getId())).thenReturn(Optional.of(campaign));
     when(relationships.findLockedById(relationship.getId())).thenReturn(Optional.of(relationship));
     when(outcomes.existsByCollaborationId(collaboration.getId())).thenReturn(false);
 
     ArgumentCaptor<CampaignOutcome> outcomeCaptor = ArgumentCaptor.forClass(CampaignOutcome.class);
-    when(outcomes.save(outcomeCaptor.capture())).thenAnswer(i -> {
-      CampaignOutcome o = i.getArgument(0);
-      o.setId(UUID.randomUUID());
-      return o;
-    });
+    when(outcomes.save(outcomeCaptor.capture()))
+        .thenAnswer(
+            i -> {
+              CampaignOutcome o = i.getArgument(0);
+              o.setId(UUID.randomUUID());
+              return o;
+            });
 
     RecordOutcomeRequest req =
         new RecordOutcomeRequest(
-            5000L, 50L, null, null, null, "https://tiktok.com/@glow.beauty/video/1234567", "Nghiệm thu phi tài chính");
+            5000L,
+            50L,
+            null,
+            null,
+            null,
+            "https://tiktok.com/@glow.beauty/video/1234567",
+            "Nghiệm thu phi tài chính");
 
     collaborationController.outcome(collaboration.getId(), req);
 
@@ -473,7 +534,9 @@ class Flow5CollaborationAcceptanceTest {
   // TEST-F5-09: Brand gửi đánh giá Creator Review và phát sinh Event
   // =========================================================================
   @Test
-  @DisplayName("TEST-F5-09 [Creator Review]: Brand đánh giá sao, brandFitRating và phát sinh CollaborationReviewedEvent")
+  @DisplayName(
+      "TEST-F5-09 [Creator Review]: Brand đánh giá sao, brandFitRating và phát sinh"
+          + " CollaborationReviewedEvent")
   void testF509_CreatorReview_BrandSubmitsReview_SavesReviewAndPublishesEvent() {
     authenticate(brandOwner);
     collaboration.setStatus(CollaborationStatus.COMPLETED);
@@ -486,15 +549,19 @@ class Flow5CollaborationAcceptanceTest {
             .likes(1800L)
             .build();
 
-    when(collaborations.findLockedById(collaboration.getId())).thenReturn(Optional.of(collaboration));
+    when(collaborations.findLockedById(collaboration.getId()))
+        .thenReturn(Optional.of(collaboration));
     when(campaigns.findById(campaign.getId())).thenReturn(Optional.of(campaign));
-    when(outcomes.findByCollaborationId(collaboration.getId())).thenReturn(Optional.of(storedOutcome));
+    when(outcomes.findByCollaborationId(collaboration.getId()))
+        .thenReturn(Optional.of(storedOutcome));
     when(reviews.existsByCollaborationId(collaboration.getId())).thenReturn(false);
-    when(reviews.save(any(CreatorReview.class))).thenAnswer(i -> {
-      CreatorReview r = i.getArgument(0);
-      r.setId(UUID.randomUUID());
-      return r;
-    });
+    when(reviews.save(any(CreatorReview.class)))
+        .thenAnswer(
+            i -> {
+              CreatorReview r = i.getArgument(0);
+              r.setId(UUID.randomUUID());
+              return r;
+            });
 
     CreateCreatorReviewRequest req =
         new CreateCreatorReviewRequest(5, 5, true, "KOC làm việc cực kỳ chuyên nghiệp và đúng hạn");
@@ -523,7 +590,9 @@ class Flow5CollaborationAcceptanceTest {
   // TEST-F5-10: Event Listener chuyển hóa kết quả nghiệm thu thành M1 & M4
   // =========================================================================
   @Test
-  @DisplayName("TEST-F5-10 [Memory Sync]: Hoàn tất Review tự động sinh bản ghi M1 HistoricalCampaign & cập nhật M4 BrandPattern")
+  @DisplayName(
+      "TEST-F5-10 [Memory Sync]: Hoàn tất Review tự động sinh bản ghi M1 HistoricalCampaign & cập"
+          + " nhật M4 BrandPattern")
   void testF510_MemorySync_EventListenerProcessesEvent_SyncsM1HistoricalAndM4BrandPattern() {
     collaboration.setStatus(CollaborationStatus.COMPLETED);
     collaboration.setPublishedContentUrl("https://tiktok.com/@glow.beauty/video/1234567");
@@ -540,9 +609,11 @@ class Flow5CollaborationAcceptanceTest {
             .build();
 
     when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
-    when(outcomes.findByCollaborationId(collaboration.getId())).thenReturn(Optional.of(storedOutcome));
+    when(outcomes.findByCollaborationId(collaboration.getId()))
+        .thenReturn(Optional.of(storedOutcome));
     when(brandProfiles.findById(brandProfile.getId())).thenReturn(Optional.of(brandProfile));
-    when(brandPatterns.findByBrandProfileIdAndPatternType(brandProfile.getId(), "COLLABORATION_SUCCESS"))
+    when(brandPatterns.findByBrandProfileIdAndPatternType(
+            brandProfile.getId(), "COLLABORATION_SUCCESS"))
         .thenReturn(Optional.empty());
 
     CollaborationReviewedEvent event =
@@ -560,31 +631,39 @@ class Flow5CollaborationAcceptanceTest {
             true,
             "Video lên xu hướng, phản hồi rất tích cực");
 
-    // Thực thi Listener
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        memorySyncListener, "reviews", reviews);
+    when(reviews.findById(event.reviewId()))
+        .thenReturn(
+            Optional.of(
+                CreatorReview.builder()
+                    .id(event.reviewId())
+                    .collaboration(collaboration)
+                    .outcome(storedOutcome)
+                    .overallRating((short) 5)
+                    .brandFitRating((short) 5)
+                    .wouldCollaborateAgain(true)
+                    .note("Stored review")
+                    .build()));
+    // The event is a notification; ratings are read from the persisted review.
     memorySyncListener.onCollaborationReviewed(event);
 
     // 1. Kiểm chứng bản ghi Bộ nhớ 1 (M1 HistoricalCampaign)
     ArgumentCaptor<HistoricalCampaign> m1Captor = ArgumentCaptor.forClass(HistoricalCampaign.class);
     verify(historicalCampaigns).save(m1Captor.capture());
     HistoricalCampaign m1 = m1Captor.getValue();
-    assertThat(m1.getQuality()).isEqualTo("VERIFIED");
+    assertThat(m1.getQuality()).isEqualTo("SELF_REPORTED");
     assertThat(m1.getEvidenceType()).isEqualTo("COLLABORATION_REVIEW");
     assertThat(m1.getCreator().getId()).isEqualTo(creator.getId());
     assertThat(m1.getMaster().getId()).isEqualTo(creatorMaster.getId());
-    assertThat(m1.getEvidenceValue().get("reliabilityScore").asDouble()).isEqualTo(1.0);
+    assertThat(m1.getEvidenceValue().path("overallRating").asInt()).isEqualTo(5);
+    assertThat(m1.getEvidenceValue().path("brandAccepted").asBoolean()).isFalse();
     assertThat(m1.getEvidenceValue().get("views").asLong()).isEqualTo(30000L);
     assertThat(m1.getEvidenceValue().get("likes").asLong()).isEqualTo(2500L);
     assertThat(m1.getEvidenceValue().get("publishedContentUrl").asText())
         .isEqualTo("https://tiktok.com/@glow.beauty/video/1234567");
 
-    // 2. Kiểm chứng bản ghi Bộ nhớ 4 (M4 BrandPattern)
-    ArgumentCaptor<BrandPattern> m4Captor = ArgumentCaptor.forClass(BrandPattern.class);
-    verify(brandPatterns).save(m4Captor.capture());
-    BrandPattern m4 = m4Captor.getValue();
-    assertThat(m4.getPatternType()).isEqualTo("COLLABORATION_SUCCESS");
-    assertThat(m4.getEvidenceCount()).isEqualTo(1);
-    assertThat(m4.getConfidence()).isEqualByComparingTo(new BigDecimal("0.5500"));
-    assertThat(m4.getAverageSuccessfulScore()).isEqualByComparingTo(new BigDecimal("5.0000"));
-    assertThat(m4.getPatternValue().get("successCount").asInt()).isEqualTo(1);
+    // Derived learned M4 is rebuilt from reviews, never incremented by this event.
+    verify(brandPatterns, never()).save(any());
   }
 }

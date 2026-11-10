@@ -8,7 +8,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.influencermatch.backend.billing.enums.SubscriptionStatus;
 import com.influencermatch.backend.billing.model.Plan;
@@ -28,9 +27,10 @@ import com.influencermatch.backend.campaign.repository.RecommendationRunReposito
 import com.influencermatch.backend.creator.client.AiServiceClient;
 import com.influencermatch.backend.creator.dto.RecommendationCandidateProjection;
 import com.influencermatch.backend.creator.model.Creator;
-import com.influencermatch.backend.creator.model.CreatorMaster;
+import com.influencermatch.backend.creator.model.Post;
 import com.influencermatch.backend.creator.model.PublicCreatorMetric;
 import com.influencermatch.backend.creator.repository.CreatorRepository;
+import com.influencermatch.backend.creator.repository.PostRepository;
 import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
 import com.influencermatch.backend.exception.BusinessException;
 import com.influencermatch.backend.exception.ConflictException;
@@ -56,7 +56,6 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -65,8 +64,8 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 /**
- * Phase 6: Comprehensive Automated Verification Test Suite (TEST-01 to TEST-10).
- * Validates the complete Four-Memory AI Recommendation & Campaign Shortlist Cart lifecycle.
+ * Phase 6: Comprehensive Automated Verification Test Suite (TEST-01 to TEST-10). Validates the
+ * complete Four-Memory AI Recommendation & Campaign Shortlist Cart lifecycle.
  */
 class Flow3ComprehensiveAcceptancePhase6Test {
 
@@ -81,6 +80,7 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   private RecommendationRunRepository recommendationRunRepository;
   private AiServiceClient aiServiceClient;
   private ObjectMapper objectMapper;
+  private PostRepository postRepository;
 
   private AiRecommendationService aiRecommendationService;
 
@@ -112,40 +112,86 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     aiServiceClient = mock(AiServiceClient.class);
     objectMapper = new ObjectMapper();
 
-    aiRecommendationService = new AiRecommendationService(
-        subscriptionService,
-        ownership,
-        campaignContextRepository,
-        publicCreatorMetricRepository,
-        historicalCampaignRepository,
-        brandPatternRepository,
-        shortlistItemRepository,
-        recommendationRunRepository,
-        aiServiceClient,
-        objectMapper
-    );
+    aiRecommendationService =
+        new AiRecommendationService(
+            subscriptionService,
+            ownership,
+            campaignContextRepository,
+            publicCreatorMetricRepository,
+            historicalCampaignRepository,
+            brandPatternRepository,
+            shortlistItemRepository,
+            recommendationRunRepository,
+            aiServiceClient,
+            objectMapper);
+
+    postRepository = mock(PostRepository.class);
+    when(postRepository.findByCreatorIdIn(any()))
+        .thenAnswer(
+            inv -> {
+              Collection<UUID> ids = inv.getArgument(0);
+              if (ids == null) return Collections.emptyList();
+              List<Post> list = new ArrayList<>();
+              for (UUID id : ids) {
+                Creator c = Creator.builder().id(id).build();
+                list.add(
+                    Post.builder()
+                        .id(UUID.randomUUID())
+                        .creator(c)
+                        .views(10_000L)
+                        .likes(500L)
+                        .comments(50L)
+                        .shares(10L)
+                        .postedAt("2026-03-01T10:00:00Z")
+                        .build());
+                list.add(
+                    Post.builder()
+                        .id(UUID.randomUUID())
+                        .creator(c)
+                        .views(12_000L)
+                        .likes(600L)
+                        .comments(60L)
+                        .shares(12L)
+                        .postedAt("2026-03-02T10:00:00Z")
+                        .build());
+                list.add(
+                    Post.builder()
+                        .id(UUID.randomUUID())
+                        .creator(c)
+                        .views(15_000L)
+                        .likes(700L)
+                        .comments(70L)
+                        .shares(15L)
+                        .postedAt("2026-03-03T10:00:00Z")
+                        .build());
+              }
+              return list;
+            });
+    aiRecommendationService.setPostRepository(postRepository);
+    com.influencermatch.backend.support.TestM4Fixtures.wire(aiRecommendationService);
 
     creatorRepository = mock(CreatorRepository.class);
     userRepository = mock(UserRepository.class);
     relationshipRepository = mock(BrandCreatorRelationshipRepository.class);
 
-    shortlistService = new ShortlistServiceImpl(
-        shortlistItemRepository,
-        ownership,
-        creatorRepository,
-        userRepository,
-        recommendationRunRepository,
-        publicCreatorMetricRepository,
-        relationshipRepository
-    );
+    shortlistService =
+        new ShortlistServiceImpl(
+            shortlistItemRepository,
+            ownership,
+            creatorRepository,
+            userRepository,
+            recommendationRunRepository,
+            publicCreatorMetricRepository,
+            relationshipRepository);
 
+    com.influencermatch.backend.support.TestShortlistFixtures.wire(shortlistService);
     Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
-    shortlistCompareService = new ShortlistCompareService(
-        mock(com.influencermatch.backend.campaign.repository.CampaignRepository.class),
-        shortlistItemRepository,
-        publicCreatorMetricRepository,
-        validator
-    );
+    shortlistCompareService =
+        new ShortlistCompareService(
+            mock(com.influencermatch.backend.campaign.repository.CampaignRepository.class),
+            shortlistItemRepository,
+            publicCreatorMetricRepository,
+            validator);
 
     brandUser = TestActors.user(Role.BRAND);
     TestActors.authenticate(brandUser);
@@ -154,30 +200,31 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     brandProfileId = UUID.randomUUID();
     subscriptionId = UUID.randomUUID();
 
-    brandProfile = BrandProfile.builder()
-        .id(brandProfileId)
-        .user(brandUser)
-        .build();
+    brandProfile = BrandProfile.builder().id(brandProfileId).user(brandUser).build();
 
-    campaign = Campaign.builder()
-        .id(campaignId)
-        .brandProfile(brandProfile)
-        .name("Summer Beauty Campaign 2026")
-        .budgetMin(BigDecimal.valueOf(10_000_000))
-        .budgetMax(BigDecimal.valueOf(50_000_000))
-        .niches(List.of("BEAUTY", "SKINCARE"))
-        .platforms(List.of("TIKTOK"))
-        .build();
+    campaign =
+        Campaign.builder()
+            .id(campaignId)
+            .brandProfile(brandProfile)
+            .name("Summer Beauty Campaign 2026")
+            .budgetMin(BigDecimal.valueOf(10_000_000))
+            .budgetMax(BigDecimal.valueOf(50_000_000))
+            .niches(List.of("BEAUTY", "SKINCARE"))
+            .platforms(List.of("TIKTOK"))
+            .build();
 
     when(ownership.requireOwned(campaignId)).thenReturn(campaign);
-    when(recommendationRunRepository.save(any(RecommendationRun.class))).thenAnswer(inv -> {
-      RecommendationRun r = inv.getArgument(0);
-      if (r.getId() == null) {
-        r.setId(UUID.randomUUID());
-      }
-      return r;
-    });
-    when(shortlistItemRepository.save(any(ShortlistItem.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(recommendationRunRepository.save(any(RecommendationRun.class)))
+        .thenAnswer(
+            inv -> {
+              RecommendationRun r = inv.getArgument(0);
+              if (r.getId() == null) {
+                r.setId(UUID.randomUUID());
+              }
+              return r;
+            });
+    when(shortlistItemRepository.save(any(ShortlistItem.class)))
+        .thenAnswer(inv -> inv.getArgument(0));
   }
 
   @AfterEach
@@ -189,34 +236,35 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   // TEST-01: Phase 1 Quota Concurrency Guard
   // =========================================================================
   @Test
-  @DisplayName("TEST-01 [Phase 1]: Bắn đồng thời 2 request khi chỉ còn 1 Quota -> Chỉ 1 thành công, 1 nhận HTTP 409 QUOTA_EXCEEDED")
+  @DisplayName(
+      "TEST-01 [Phase 1]: Bắn đồng thời 2 request khi chỉ còn 1 Quota -> Chỉ 1 thành công, 1 nhận"
+          + " HTTP 409 QUOTA_EXCEEDED")
   void test01_concurrentQuotaReservation_blocksSecondRequest() {
     SubscriptionRepository subRepo = mock(SubscriptionRepository.class);
-    SubscriptionService realSubService = new SubscriptionService(
-        subRepo,
-        mock(PlanService.class),
-        mock(PlanRepository.class),
-        mock(com.influencermatch.backend.brand.repository.BrandProfileRepository.class),
-        mock(com.influencermatch.backend.audit.service.AuditService.class),
-        mock(jakarta.persistence.EntityManager.class)
-    );
+    SubscriptionService realSubService =
+        new SubscriptionService(
+            subRepo,
+            mock(PlanService.class),
+            mock(PlanRepository.class),
+            mock(com.influencermatch.backend.brand.repository.BrandProfileRepository.class),
+            mock(com.influencermatch.backend.audit.service.AuditService.class),
+            mock(jakarta.persistence.EntityManager.class));
 
     Plan plan = Plan.builder().planName("Pro Plan").recommendationQuota(10).build();
-    Subscription sub = Subscription.builder()
-        .id(subscriptionId)
-        .brandProfile(brandProfile)
-        .plan(plan)
-        .status(SubscriptionStatus.ACTIVE)
-        .startDate(java.time.LocalDate.now().minusDays(1))
-        .expirationDate(java.time.LocalDate.now().plusDays(29))
-        .usedRecommendationQuota(9) // Chỉ còn 1 lượt khả dụng
-        .build();
+    Subscription sub =
+        Subscription.builder()
+            .id(subscriptionId)
+            .brandProfile(brandProfile)
+            .plan(plan)
+            .status(SubscriptionStatus.ACTIVE)
+            .startDate(java.time.LocalDate.now().minusDays(1))
+            .expirationDate(java.time.LocalDate.now().plusDays(29))
+            .usedRecommendationQuota(9) // Chỉ còn 1 lượt khả dụng
+            .build();
 
     when(subRepo.findByBrandProfileId(brandProfileId)).thenReturn(List.of(sub));
     // Request đầu tiên thành công (1), request thứ hai bị vượt quota (0)
-    when(subRepo.reserveQuotaAtomically(subscriptionId))
-        .thenReturn(1)
-        .thenReturn(0);
+    when(subRepo.reserveQuotaAtomically(subscriptionId)).thenReturn(1).thenReturn(0);
 
     UUID firstReservation = realSubService.reserveRecommendationQuota(brandProfileId);
     assertThat(firstReservation).isEqualTo(subscriptionId);
@@ -232,14 +280,20 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   // TEST-02: Phase 1 Rollback on AI Microservice Failure
   // =========================================================================
   @Test
-  @DisplayName("TEST-02 [Phase 1]: Python AI Service bị timeout hoặc lỗi -> Tự động rollback giải phóng Quota tạm giữ")
-  void test02_aiServiceFailure_rollsBackReservedQuota() {
+  @DisplayName(
+      "TEST-02 [Phase 1]: Downstream read lỗi sau reserve quota -> Tự động rollback giải phóng"
+          + " Quota tạm giữ")
+  void test02_downstreamFailure_rollsBackReservedQuota() {
     when(subscriptionService.reserveRecommendationQuota(brandProfileId)).thenReturn(subscriptionId);
     when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
         .thenReturn(Collections.emptyList());
-    when(aiServiceClient.getEmbedding(anyString()))
-        .thenThrow(new RuntimeException("Connection timed out to Python AI microservice"));
-
+    var candidate = mock(RecommendationCandidateProjection.class);
+    when(candidate.getCreatorId()).thenReturn(UUID.randomUUID());
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
+        .thenReturn(List.of(candidate));
+    when(postRepository.findByCreatorIdIn(any()))
+        .thenThrow(new RuntimeException("Downstream read failed"));
     assertThatThrownBy(() -> aiRecommendationService.recommendKocs(campaignId, 10))
         .isInstanceOf(BusinessException.class);
 
@@ -251,7 +305,9 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   // TEST-03: Phase 1 Native Query pgvector trên c.embedding
   // =========================================================================
   @Test
-  @DisplayName("TEST-03 [Phase 1]: Native Query pgvector trên c.embedding -> Không lỗi tsvector, lọc đúng observed_at mới nhất")
+  @DisplayName(
+      "TEST-03 [Phase 1]: Native Query pgvector trên c.embedding -> Không lỗi tsvector, lọc đúng"
+          + " observed_at mới nhất")
   void test03_pgvectorQueryStructure_verified() {
     // Đảm bảo Projection contract nhận diện đầy đủ trường
     RecommendationCandidateProjection cand = mock(RecommendationCandidateProjection.class);
@@ -270,20 +326,22 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   // TEST-04: Phase 2 Master-aware Grouping (Khử trùng lặp đa kênh)
   // =========================================================================
   @Test
-  @DisplayName("TEST-04 [Phase 2]: 1 KOC có kênh TikTok & Instagram điểm cao -> Chỉ hiển thị 1 kênh tốt nhất trong Top 10")
+  @DisplayName(
+      "TEST-04 [Phase 2]: 1 KOC có kênh TikTok & Instagram điểm cao -> Chỉ hiển thị 1 kênh tốt nhất"
+          + " trong Top 10")
   void test04_masterAwareGrouping_deduplicatesAcrossChannels() {
     when(subscriptionService.reserveRecommendationQuota(brandProfileId)).thenReturn(subscriptionId);
     when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
         .thenReturn(Collections.emptyList());
-    when(aiServiceClient.getEmbedding(anyString()))
-        .thenReturn(Collections.nCopies(768, 0.1f));
+    when(aiServiceClient.getEmbedding(anyString())).thenReturn(Collections.nCopies(768, 0.1f));
 
     UUID masterId = UUID.randomUUID();
     UUID tikTokId = UUID.randomUUID();
     UUID instaId = UUID.randomUUID();
 
     // Ứng viên TikTok: Điểm tương tác cao hơn
-    RecommendationCandidateProjection tikTokCandidate = mock(RecommendationCandidateProjection.class);
+    RecommendationCandidateProjection tikTokCandidate =
+        mock(RecommendationCandidateProjection.class);
     when(tikTokCandidate.getCreatorId()).thenReturn(tikTokId);
     when(tikTokCandidate.getMasterId()).thenReturn(masterId);
     when(tikTokCandidate.getPlatform()).thenReturn("TIKTOK");
@@ -293,9 +351,11 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     when(tikTokCandidate.getAvgLikes()).thenReturn(BigDecimal.valueOf(6_000)); // ER = 6.0%
     when(tikTokCandidate.getSemanticScore()).thenReturn(0.80);
     when(tikTokCandidate.getNiche()).thenReturn("BEAUTY");
+    when(tikTokCandidate.getAccountStatus()).thenReturn("ACTIVE");
 
     // Ứng viên Instagram: Điểm tương tác thấp hơn
-    RecommendationCandidateProjection instaCandidate = mock(RecommendationCandidateProjection.class);
+    RecommendationCandidateProjection instaCandidate =
+        mock(RecommendationCandidateProjection.class);
     when(instaCandidate.getCreatorId()).thenReturn(instaId);
     when(instaCandidate.getMasterId()).thenReturn(masterId);
     when(instaCandidate.getPlatform()).thenReturn("INSTAGRAM");
@@ -305,22 +365,24 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     when(instaCandidate.getAvgLikes()).thenReturn(BigDecimal.valueOf(800)); // ER = 2.0%
     when(instaCandidate.getSemanticScore()).thenReturn(0.60);
     when(instaCandidate.getNiche()).thenReturn("BEAUTY");
+    when(instaCandidate.getAccountStatus()).thenReturn("ACTIVE");
 
     when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-        anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
         .thenReturn(List.of(tikTokCandidate, instaCandidate));
 
     when(historicalCampaignRepository.findByCreatorId(any())).thenReturn(Collections.emptyList());
     when(brandPatternRepository.findByBrandProfileId(any())).thenReturn(Collections.emptyList());
-    when(shortlistItemRepository.findByCampaignIdAndCreatorIdIn(any(), any())).thenReturn(Collections.emptyList());
+    when(shortlistItemRepository.findByCampaignIdAndCreatorIdIn(any(), any()))
+        .thenReturn(Collections.emptyList());
 
-    when(aiServiceClient.getExplanation(any())).thenReturn(
-        ExplainResponseDto.builder()
-            .summary("Chau Bui là gương mặt tiêu biểu phong cách Beauty")
-            .reasons(List.of("ER TikTok vượt trội 6%"))
-            .explanationAvailable(true)
-            .build()
-    );
+    when(aiServiceClient.getExplanation(any()))
+        .thenReturn(
+            ExplainResponseDto.builder()
+                .summary("Chau Bui là gương mặt tiêu biểu phong cách Beauty")
+                .reasons(List.of("ER TikTok vượt trội 6%"))
+                .explanationAvailable(true)
+                .build());
 
     RecommendationResponseDto response = aiRecommendationService.recommendKocs(campaignId, 10);
 
@@ -334,13 +396,14 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   // TEST-05: Phase 2 M1 Neutral Default (50.0 điểm cho KOC mới)
   // =========================================================================
   @Test
-  @DisplayName("TEST-05 [Phase 2]: KOC chưa từng có lịch sử hợp tác -> Điểm M1 tự động gán trung tính 50.0 điểm")
+  @DisplayName(
+      "TEST-05 [Phase 2]: KOC chưa từng có lịch sử hợp tác -> Điểm M1 tự động gán trung tính 50.0"
+          + " điểm")
   void test05_newCreatorHistoricalReliability_receivesNeutral50() {
     when(subscriptionService.reserveRecommendationQuota(brandProfileId)).thenReturn(subscriptionId);
     when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
         .thenReturn(Collections.emptyList());
-    when(aiServiceClient.getEmbedding(anyString()))
-        .thenReturn(Collections.nCopies(768, 0.1f));
+    when(aiServiceClient.getEmbedding(anyString())).thenReturn(Collections.nCopies(768, 0.1f));
 
     UUID newCreatorId = UUID.randomUUID();
     RecommendationCandidateProjection cand = mock(RecommendationCandidateProjection.class);
@@ -352,18 +415,23 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     when(cand.getAvgLikes()).thenReturn(BigDecimal.valueOf(1_500));
     when(cand.getSemanticScore()).thenReturn(0.70);
     when(cand.getNiche()).thenReturn("BEAUTY");
+    when(cand.getAccountStatus()).thenReturn("ACTIVE");
 
     when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-        anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
         .thenReturn(List.of(cand));
 
     // KOC chưa có bất kỳ lịch sử nào
-    when(historicalCampaignRepository.findByCreatorId(newCreatorId)).thenReturn(Collections.emptyList());
+    when(historicalCampaignRepository.findByCreatorId(newCreatorId))
+        .thenReturn(Collections.emptyList());
     when(brandPatternRepository.findByBrandProfileId(any())).thenReturn(Collections.emptyList());
 
-    when(aiServiceClient.getExplanation(any())).thenReturn(
-        ExplainResponseDto.builder().summary("Ứng viên mới").explanationAvailable(true).build()
-    );
+    when(aiServiceClient.getExplanation(any()))
+        .thenReturn(
+            ExplainResponseDto.builder()
+                .summary("Ứng viên mới")
+                .explanationAvailable(true)
+                .build());
 
     RecommendationResponseDto response = aiRecommendationService.recommendKocs(campaignId, 10);
 
@@ -376,21 +444,24 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   // TEST-06: Phase 3 1-Click Candidate Cart Idempotency
   // =========================================================================
   @Test
-  @DisplayName("TEST-06 [Phase 3]: Bấm 'Thêm vào Shortlist' 2 lần liên tiếp -> Trả về ALREADY_EXISTS, giữ nguyên ghi chú Brand, không lỗi 409")
+  @DisplayName(
+      "TEST-06 [Phase 3]: Bấm 'Thêm vào Shortlist' 2 lần liên tiếp -> Trả về ALREADY_EXISTS, giữ"
+          + " nguyên ghi chú Brand, không lỗi 409")
   void test06_addToShortlistIdempotency_returnsAlreadyExistsWithout409() {
     UUID creatorId = UUID.randomUUID();
     Creator creator = Creator.builder().id(creatorId).displayName("Trang Dao").build();
 
-    ShortlistItem existingItem = ShortlistItem.builder()
-        .id(UUID.randomUUID())
-        .campaign(campaign)
-        .creator(creator)
-        .user(brandUser)
-        .priority(ShortlistPriority.MEDIUM)
-        .status(ShortlistStatus.SAVED)
-        .note("Ghi chú cá nhân của Brand không được bị ghi đè")
-        .addedAt(LocalDateTime.now())
-        .build();
+    ShortlistItem existingItem =
+        ShortlistItem.builder()
+            .id(UUID.randomUUID())
+            .campaign(campaign)
+            .creator(creator)
+            .user(brandUser)
+            .priority(ShortlistPriority.MEDIUM)
+            .status(ShortlistStatus.SAVED)
+            .note("Ghi chú cá nhân của Brand không được bị ghi đè")
+            .addedAt(LocalDateTime.now())
+            .build();
 
     when(creatorRepository.findById(creatorId)).thenReturn(Optional.of(creator));
     when(shortlistItemRepository.findByCampaignIdAndCreatorId(campaignId, creatorId))
@@ -398,17 +469,19 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     when(shortlistItemRepository.countByCampaignIdAndStatusNot(campaignId, ShortlistStatus.REMOVED))
         .thenReturn(7L);
 
-    AddShortlistItemRequest req = AddShortlistItemRequest.builder()
-        .creatorAccountId(creatorId)
-        .priority(ShortlistPriority.HIGH)
-        .build();
+    AddShortlistItemRequest req =
+        AddShortlistItemRequest.builder()
+            .creatorAccountId(creatorId)
+            .priority(ShortlistPriority.HIGH)
+            .build();
 
     ShortlistItemDto dto = shortlistService.addCreatorToShortlist(campaignId, req);
 
     assertThat(dto.getAction()).isEqualTo("ALREADY_EXISTS");
     assertThat(dto.getIsInShortlist()).isTrue();
     assertThat(dto.getNote()).isEqualTo("Ghi chú cá nhân của Brand không được bị ghi đè");
-    assertThat(dto.getPriority()).isEqualTo(ShortlistPriority.HIGH); // Cập nhật priority mới
+    assertThat(dto.getPriority())
+        .isEqualTo(ShortlistPriority.MEDIUM); // Repeated add preserves metadata
     assertThat(dto.getTotalShortlistCount()).isEqualTo(7L);
     verify(shortlistItemRepository, never()).delete(any(ShortlistItem.class));
   }
@@ -417,18 +490,22 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   // TEST-07: Phase 3 Soft Removal Preserves CRM Relationships
   // =========================================================================
   @Test
-  @DisplayName("TEST-07 [Phase 3]: Xóa KOC khỏi Shortlist khi đã có CRM -> KOC chuyển status = REMOVED, bảo toàn lịch sử CRM relationship")
+  @DisplayName(
+      "TEST-07 [Phase 3]: Xóa KOC khỏi Shortlist khi đã có CRM -> KOC chuyển status = REMOVED, bảo"
+          + " toàn lịch sử CRM relationship")
   void test07_removeShortlistItem_softDeletePreservesCrm() {
     UUID itemId = UUID.randomUUID();
     UUID creatorId = UUID.randomUUID();
     Creator creator = Creator.builder().id(creatorId).build();
 
-    ShortlistItem item = ShortlistItem.builder()
-        .id(itemId)
-        .campaign(campaign)
-        .creator(creator)
-        .status(ShortlistStatus.SAVED)
-        .build();
+    ShortlistItem item =
+        ShortlistItem.builder()
+            .id(itemId)
+            .user(brandUser)
+            .campaign(campaign)
+            .creator(creator)
+            .status(ShortlistStatus.SAVED)
+            .build();
 
     when(shortlistItemRepository.findByIdAndCampaignId(itemId, campaignId))
         .thenReturn(Optional.of(item));
@@ -445,7 +522,9 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   // TEST-08: Phase 3 SL-03 Compare without AI Quota Deduction
   // =========================================================================
   @Test
-  @DisplayName("TEST-08 [Phase 3]: Chọn 3 KOC và bấm So sánh -> Trả về bảng so sánh đầy đủ chỉ số, không trừ Quota AI")
+  @DisplayName(
+      "TEST-08 [Phase 3]: Chọn 3 KOC và bấm So sánh -> Trả về bảng so sánh đầy đủ chỉ số, không trừ"
+          + " Quota AI")
   void test08_compareCreators_noAiQuotaDeducted() {
     UUID c1 = UUID.randomUUID();
     UUID c2 = UUID.randomUUID();
@@ -463,38 +542,40 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   // TEST-09: Phase 3 SL-04 Contact Readiness via Booking Email
   // =========================================================================
   @Test
-  @DisplayName("TEST-09 [Phase 3]: KOC chưa Claim nhưng có email booking -> Trạng thái READY qua SYSTEM_EMAIL_OUTBOX")
+  @DisplayName(
+      "TEST-09 [Phase 3]: KOC chưa Claim nhưng có email booking -> Trạng thái READY qua"
+          + " SYSTEM_EMAIL_OUTBOX")
   void test09_contactReadiness_unclaimedWithBookingEmail() {
     UUID creatorId = UUID.randomUUID();
     UUID itemId = UUID.randomUUID();
 
-    Creator creator = Creator.builder()
-        .id(creatorId)
-        .displayName("KOC Booking")
-        .platform("TIKTOK")
-        .build();
+    Creator creator =
+        Creator.builder().id(creatorId).displayName("KOC Booking").platform("TIKTOK").build();
 
-    ShortlistItem item = ShortlistItem.builder()
-        .id(itemId)
-        .campaign(campaign)
-        .creator(creator)
-        .status(ShortlistStatus.READY_TO_CONTACT)
-        .build();
+    ShortlistItem item =
+        ShortlistItem.builder()
+            .id(itemId)
+            .user(brandUser)
+            .campaign(campaign)
+            .creator(creator)
+            .status(ShortlistStatus.READY_TO_CONTACT)
+            .build();
 
-    PublicCreatorMetric metric = PublicCreatorMetric.builder()
-        .creator(creator)
-        .contact("Booking job qua email: booking.koc@brand.vn")
-        .build();
+    PublicCreatorMetric metric =
+        PublicCreatorMetric.builder()
+            .creator(creator)
+            .contact("Booking job qua email: booking.koc@brand.vn")
+            .build();
 
     when(shortlistItemRepository.findByCampaignIdAndIdIn(campaignId, List.of(itemId)))
         .thenReturn(List.of(item));
     when(relationshipRepository.existsByCampaignIdAndCreatorId(campaignId, creatorId))
         .thenReturn(false);
-    when(publicCreatorMetricRepository.findByCreatorId(creatorId))
-        .thenReturn(Optional.of(metric));
+    when(publicCreatorMetricRepository.findByCreatorId(creatorId)).thenReturn(Optional.of(metric));
 
-    ContactReadinessResponse response = shortlistService.checkContactReadiness(
-        campaignId, ContactReadinessRequest.builder().itemIds(List.of(itemId)).build());
+    ContactReadinessResponse response =
+        shortlistService.checkContactReadiness(
+            campaignId, ContactReadinessRequest.builder().itemIds(List.of(itemId)).build());
 
     assertThat(response.getReadyCount()).isEqualTo(1);
     assertThat(response.getItems()).hasSize(1);
@@ -509,7 +590,9 @@ class Flow3ComprehensiveAcceptancePhase6Test {
   // TEST-10: Phase 4 Feedback Loop & Negative Constraints Evolution
   // =========================================================================
   @Test
-  @DisplayName("TEST-10 [Phase 4]: Brand Reject KOC với PRICE_TOO_HIGH -> KOC vào excludedCreatorIds, lần sau không xuất hiện, Campaign budgetMax/niches giữ nguyên")
+  @DisplayName(
+      "TEST-10 [Phase 4]: Brand Reject KOC với PRICE_TOO_HIGH -> KOC vào excludedCreatorIds, lần"
+          + " sau không xuất hiện, Campaign budgetMax/niches giữ nguyên")
   void test10_feedbackRejectPriceTooHigh_preservesBudgetAndExcludesOnNextRun() {
     UUID rejectedKocId = UUID.randomUUID();
 
@@ -521,23 +604,25 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     dataV1.set("excludedCreatorIds", objectMapper.createArrayNode());
     dataV1.set("feedbackHistory", objectMapper.createArrayNode());
 
-    CampaignContext contextV1 = CampaignContext.builder()
-        .campaign(campaign)
-        .contextVersion(1)
-        .contextData(dataV1)
-        .active(true)
-        .build();
+    CampaignContext contextV1 =
+        CampaignContext.builder()
+            .campaign(campaign)
+            .contextVersion(1)
+            .contextData(dataV1)
+            .active(true)
+            .build();
 
     when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
         .thenReturn(List.of(contextV1));
 
     // 1. Brand gửi phản hồi REJECT KOC với lý do PRICE_TOO_HIGH
-    RecommendationFeedbackRequest req = RecommendationFeedbackRequest.builder()
-        .creatorId(rejectedKocId)
-        .action("REJECT")
-        .reasonCode("PRICE_TOO_HIGH")
-        .reasonNote("KOC báo giá 30 triệu, vượt mức chi trả cho video ngắn")
-        .build();
+    RecommendationFeedbackRequest req =
+        RecommendationFeedbackRequest.builder()
+            .creatorId(rejectedKocId)
+            .action("REJECT")
+            .reasonCode("PRICE_TOO_HIGH")
+            .reasonNote("KOC báo giá 30 triệu, vượt mức chi trả cho video ngắn")
+            .build();
 
     RecommendationFeedbackResponse res = aiRecommendationService.processFeedback(campaignId, req);
 
@@ -558,9 +643,10 @@ class Flow3ComprehensiveAcceptancePhase6Test {
 
     // Context v2 được tạo mới và chứa rejectedKocId
     ArgumentCaptor<CampaignContext> captor = ArgumentCaptor.forClass(CampaignContext.class);
-    verify(campaignContextRepository, times(2)).save(captor.capture());
+    verify(campaignContextRepository).saveAndFlush(contextV1);
+    verify(campaignContextRepository).save(captor.capture());
 
-    CampaignContext savedV2 = captor.getAllValues().get(1);
+    CampaignContext savedV2 = captor.getValue();
     assertThat(savedV2.getContextVersion()).isEqualTo(2);
     assertThat(savedV2.isActive()).isTrue();
     assertThat(savedV2.getContextData().get("excludedCreatorIds").get(0).asText())
@@ -574,10 +660,19 @@ class Flow3ComprehensiveAcceptancePhase6Test {
 
     ArgumentCaptor<Collection<UUID>> excludedCaptor = ArgumentCaptor.forClass(Collection.class);
     when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-        anyString(), eq(true), excludedCaptor.capture(), anyBoolean(), any(), any(), any(), anyInt()))
+            anyString(),
+            eq(true),
+            excludedCaptor.capture(),
+            anyBoolean(),
+            any(),
+            any(),
+            any(),
+            anyInt()))
         .thenReturn(Collections.emptyList());
 
-    aiRecommendationService.recommendKocs(campaignId, 10);
+    assertThatThrownBy(() -> aiRecommendationService.recommendKocs(campaignId, 10))
+        .isInstanceOf(com.influencermatch.backend.exception.BusinessException.class)
+        .hasMessageContaining("No eligible candidates");
 
     // Xác nhận danh sách loại trừ trong truy vấn SQL chứa chính xác rejectedKocId
     assertThat(excludedCaptor.getValue()).contains(rejectedKocId);

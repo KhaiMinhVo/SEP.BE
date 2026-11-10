@@ -57,6 +57,13 @@ public class BrandCreatorRelationship {
   private String contactMethod;
 
   @Column(precision = 19, scale = 2)
+  private BigDecimal offeredFee;
+
+  private BigDecimal counterofferFee;
+
+  @io.swagger.v3.oas.annotations.media.Schema(
+      deprecated = true,
+      description = "Legacy quote with unknown source; read only")
   private BigDecimal quotedFee;
 
   @Column(precision = 19, scale = 2)

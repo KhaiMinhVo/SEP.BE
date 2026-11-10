@@ -14,7 +14,9 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 @Entity
-@Table(name = "brand_context")
+@Table(
+    name = "brand_context",
+    uniqueConstraints = @UniqueConstraint(columnNames = {"brand_profile_id", "context_version"}))
 @Getter
 @Setter
 @NoArgsConstructor
@@ -22,8 +24,8 @@ import org.hibernate.type.SqlTypes;
 @SuperBuilder
 public class BrandContext extends BaseEntity {
 
-  @OneToOne(fetch = FetchType.LAZY, optional = false)
-  @JoinColumn(nullable = false, unique = true)
+  @ManyToOne(fetch = FetchType.LAZY, optional = false)
+  @JoinColumn(nullable = false)
   private BrandProfile brandProfile;
 
   @Column(nullable = false)
@@ -42,7 +44,6 @@ public class BrandContext extends BaseEntity {
   private JsonNode evidenceRefs;
 
   public void updateProfileContext(JsonNode value) {
-    profileContext = value;
-    contextVersion++;
+    throw new UnsupportedOperationException("Brand contexts are immutable; append a new version");
   }
 }

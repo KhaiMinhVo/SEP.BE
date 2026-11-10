@@ -11,6 +11,37 @@ public final class PermissionCatalog {
   private static final Map<Permission, Entry> ENTRIES = new EnumMap<>(Permission.class);
 
   static {
+    add(
+        "Campaign History",
+        Permission.VIEW_OWN_HISTORY_AND_INSIGHTS,
+        "Read own Campaign History and preview Duplicate Brief");
+    add(
+        "Recommendation",
+        Permission.RUN_RECOMMENDATION,
+        "Run recommendation on authorized candidate sources");
+    add("Recommendation", Permission.VIEW_OWN_RECOMMENDATION, "Read own recommendation results");
+    add(
+        "Creator Portal",
+        Permission.MANAGE_OWN_CREATOR_PROFILE,
+        "Manage own declared Creator profile");
+    add(
+        "Creator Contacts",
+        Permission.VIEW_CREATOR_CONTACT,
+        "Read permitted Creator contact fields");
+    add(
+        "Cooperation Portal",
+        Permission.RESPOND_OWN_COOPERATION,
+        "Respond to own cooperation proposals");
+    add("Notifications", Permission.VIEW_OWN_NOTIFICATION, "Read own cooperation notifications");
+    add("Notifications", Permission.MANAGE_OWN_NOTIFICATION, "Mark own notifications as read");
+    add(
+        "Identity Catalog",
+        Permission.VIEW_CREATOR_MASTER_CATALOG,
+        "Read Master Catalog and unclaimed channels");
+    add(
+        "Identity History",
+        Permission.VIEW_CREATOR_IDENTITY_HISTORY,
+        "Read whitelisted identity history");
     add("Creator Registration", Permission.INVITE_CREATOR, "Invite Creator registration");
     add("Authentication", Permission.VIEW_OWN_PROFILE, "View own profile");
     add("Creators", Permission.VIEW_CREATOR_PROFILE, "View creator profile");

@@ -8,6 +8,7 @@ import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.relationship.service.ShortlistNotificationService;
 import java.time.LocalDateTime;
+import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -17,11 +18,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class CreatorIngestionService {
 
+  public static final int MAX_RECENT_POSTS = 3;
+
   private final CreatorRepository creatorRepository;
   private final PublicCreatorMetricRepository metricRepository;
   private final PostRepository postRepository;
   private final jakarta.persistence.EntityManager entityManager;
   private final ShortlistNotificationService shortlistNotificationService;
+
+  @Autowired private org.springframework.context.ApplicationEventPublisher shortlistEvents;
 
   @Autowired
   public CreatorIngestionService(
@@ -67,6 +72,10 @@ public class CreatorIngestionService {
     }
 
     // 1. Advisory Lock to prevent concurrent ingestion of the exact same account
+    if ("TIKTOK".equalsIgnoreCase(request.getPlatform())) {
+      creatorRepository.acquireIdentityLock(
+          com.influencermatch.backend.creator.tiktok.TikTokUsernames.MATCH_LOCK);
+    }
     creatorRepository.acquireIdentityLock(request.getPlatform() + ":" + request.getExternalId());
 
     // 2. Find existing creator or create new one
@@ -80,7 +89,10 @@ public class CreatorIngestionService {
                         .sourceType(CreatorSourceType.PUBLIC)
                         .platform(request.getPlatform())
                         .externalId(request.getExternalId())
-                        .isStableId(request.getIsStableExternalId() != null ? request.getIsStableExternalId() : true)
+                        .isStableId(
+                            request.getIsStableExternalId() != null
+                                ? request.getIsStableExternalId()
+                                : true)
                         .build());
 
     if (creator.getId() != null) {
@@ -107,11 +119,14 @@ public class CreatorIngestionService {
 
     final Creator savedCreator = creatorRepository.save(creator);
 
-    // 3. Snapshot Idempotency check: if crawlRunId already recorded for this creator, skip duplicate metric snapshot
+    // 3. Snapshot Idempotency check: if crawlRunId already recorded for this creator, skip
+    // duplicate metric snapshot
     if (request.getCrawlRunId() != null
         && savedCreator.getId() != null
-        && metricRepository.existsByCreatorIdAndCrawlRunId(savedCreator.getId(), request.getCrawlRunId())) {
-      PublicCreatorMetric existingMetric = metricRepository.findByCreatorId(savedCreator.getId()).orElse(null);
+        && metricRepository.existsByCreatorIdAndCrawlRunId(
+            savedCreator.getId(), request.getCrawlRunId())) {
+      PublicCreatorMetric existingMetric =
+          metricRepository.findByCreatorId(savedCreator.getId()).orElse(null);
       return CreatorIngestionResponse.builder()
           .creatorId(savedCreator.getId())
           .metricId(existingMetric != null ? existingMetric.getId() : null)
@@ -132,8 +147,9 @@ public class CreatorIngestionService {
 
     // Upsert metric: update existing metric if found, otherwise create new one
     PublicCreatorMetric metric =
-        metricRepository.findByCreatorId(savedCreator.getId()).orElseGet(
-            () -> PublicCreatorMetric.builder().creator(savedCreator).build());
+        metricRepository
+            .findByCreatorId(savedCreator.getId())
+            .orElseGet(() -> PublicCreatorMetric.builder().creator(savedCreator).build());
 
     // Tính toán độ tăng trưởng follower (Follower Growth Tracking)
     Long oldFollowers = metric.getFollowers();
@@ -162,9 +178,10 @@ public class CreatorIngestionService {
     metric.setEngagementRate(request.getEngagementRate());
     metric.setNiche(request.getNiche());
     metric.setContentSummary(request.getContentSummary());
-    metric.setCollectedAt(LocalDateTime.now());
+    metric.setCollectedAt(LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS));
     metric.setCrawlRunId(request.getCrawlRunId());
-    metric.setObservedAt(request.getObservedAt() != null ? request.getObservedAt() : LocalDateTime.now());
+    metric.setObservedAt(
+        request.getObservedAt() != null ? request.getObservedAt() : LocalDateTime.now());
     metric.setCreatorType(request.getCreatorType());
     metric.setFreshnessStatus(status);
     metric.setDataConfidence(request.getDataConfidence());
@@ -188,11 +205,21 @@ public class CreatorIngestionService {
 
     if (request.getRecentPosts() != null && !request.getRecentPosts().isEmpty()) {
       postRepository.deleteByCreatorId(savedCreator.getId());
+      java.util.Set<String> seenPostIds = new java.util.HashSet<>();
+      int count = 0;
       for (PostDto dto : request.getRecentPosts()) {
+        if (dto == null) continue;
+        String pid = dto.getPlatformPostId() != null ? dto.getPlatformPostId().trim() : "";
+        if (!pid.isEmpty()) {
+          if (seenPostIds.contains(pid)) {
+            continue; // Chống trùng lặp theo platformPostId trong cùng một snapshot
+          }
+          seenPostIds.add(pid);
+        }
         Post post =
             Post.builder()
                 .creator(savedCreator)
-                .platformPostId(dto.getPlatformPostId())
+                .platformPostId(!pid.isEmpty() ? pid : UUID.randomUUID().toString())
                 .postUrl(dto.getPostUrl())
                 .caption(dto.getCaption())
                 .views(dto.getViews())
@@ -202,6 +229,10 @@ public class CreatorIngestionService {
                 .postedAt(dto.getPostedAt())
                 .build();
         postRepository.save(post);
+        count++;
+        if (count >= MAX_RECENT_POSTS) {
+          break; // Tuân thủ hợp đồng snapshot tối đa 3 bài hiện hành
+        }
       }
     }
 
@@ -209,23 +240,29 @@ public class CreatorIngestionService {
       creatorRepository.updateEmbedding(savedCreator.getId(), request.getEmbedding().toString());
     }
 
-    if (shortlistNotificationService != null) {
-      try {
-        shortlistNotificationService.notifyCrawlCompleted(
-            savedCreator.getId(),
-            savedCreator.getPlatform(),
-            savedCreator.getUserName(),
-            savedCreator.getDisplayName(),
-            savedCreator.getAvatarUrl(),
-            request.getFollowers(),
-            request.getAvgViews(),
-            request.getAvgLikes(),
-            request.getAvgComments(),
-            request.getAvgShares(),
-            request.getEngagementRate());
-      } catch (Exception e) {
-        log.warn("Failed to notify shortlist crawl completion for creator {}: {}", savedCreator.getId(), e.getMessage());
-      }
+    if (shortlistEvents != null) {
+      var event =
+          com.influencermatch.backend.relationship.dto.ShortlistCrawlEvent.builder()
+              .eventType("CRAWL_COMPLETED")
+              .creatorId(savedCreator.getId())
+              .platform(savedCreator.getPlatform())
+              .userName(savedCreator.getUserName())
+              .creatorName(savedCreator.getDisplayName())
+              .avatarUrl(savedCreator.getAvatarUrl())
+              .metricId(metric.getId())
+              .collectedAt(metric.getCollectedAt())
+              .followers(metric.getFollowers())
+              .avgViews(metric.getAvgViews())
+              .avgLikes(metric.getAvgLikes())
+              .avgComments(metric.getAvgComments())
+              .avgShares(metric.getAvgShares())
+              .engagementRate(metric.getEngagementRate())
+              .message("Public metric update committed")
+              .timestamp(metric.getCollectedAt())
+              .build();
+      shortlistEvents.publishEvent(
+          new com.influencermatch.backend.relationship.service.ShortlistRefreshEvents.Completed(
+              event));
     }
 
     return CreatorIngestionResponse.builder()

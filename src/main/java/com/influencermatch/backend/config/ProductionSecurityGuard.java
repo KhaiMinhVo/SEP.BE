@@ -17,8 +17,13 @@ public class ProductionSecurityGuard {
   @Value("${application.cors.allowed-origins:}")
   private String origins;
 
+  @Value("${application.auth.cookie-secure:false}")
+  private boolean cookieSecure;
+
   @PostConstruct
   void validate() {
+    if (!cookieSecure)
+      throw new IllegalStateException("Secure authentication cookies are required in production");
     if (secret.isBlank() || DEMO.equals(secret))
       throw new IllegalStateException("Production JWT secret must be supplied securely");
     if (origins.contains("*"))

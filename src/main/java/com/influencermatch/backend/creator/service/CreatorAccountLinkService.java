@@ -118,6 +118,7 @@ public class CreatorAccountLinkService {
         .orElseThrow(() -> new ResourceNotFoundException("CreatorMaster", "userId", userId));
 
     // 1. Proof of control via OAuth Provider
+    com.influencermatch.backend.creator.meta.MetaPlatformGuard.requireLegacy(platform);
     OAuthProofClient.ProofResult proof = oAuthProofClient.exchangeAndVerify(
         platform, authorizationCode, null, null);
 
@@ -300,7 +301,7 @@ public class CreatorAccountLinkService {
 
       if (publicCreatorMetricRepository != null) {
         Optional<PublicCreatorMetric> metricOpt =
-            publicCreatorMetricRepository.findByCreatorId(channel.getId());
+            publicCreatorMetricRepository.latestForCreators(List.of(channel.getId())).stream().findFirst();
         if (metricOpt.isPresent()) {
           PublicCreatorMetric m = metricOpt.get();
           if (m.getFollowers() != null) followers = m.getFollowers();
@@ -318,8 +319,8 @@ public class CreatorAccountLinkService {
       Optional<CreatorAccountVerification> verOpt =
           accountVerificationRepository.findFirstByCreatorIdOrderByVerifiedAtDesc(channel.getId());
 
-      String tokenStatus = "ACTIVE";
-      String verificationMethod = "OAUTH_OFFICIAL_SANDBOX";
+      String tokenStatus = "NOT_STORED";
+      String verificationMethod = null;
       if (verOpt.isPresent()) {
         CreatorAccountVerification v = verOpt.get();
         if (v.getVerificationMethod() != null) {
@@ -335,7 +336,7 @@ public class CreatorAccountLinkService {
           tokenStatus = v.getStatus().toUpperCase();
         }
       } else if (channel.getSourceType() == CreatorSourceType.AUTHORIZED) {
-        tokenStatus = "ACTIVE";
+        tokenStatus = "NOT_STORED";
       } else {
         tokenStatus = "UNVERIFIED";
       }

@@ -17,11 +17,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Creates fresh disposable identities, never impersonates or links an existing account. */
-@Service @RequiredArgsConstructor
+@Service
+@RequiredArgsConstructor
 @Profile("dev & !prod")
-@ConditionalOnProperty(name="application.auth.creator-mock.enabled",havingValue="true")
+@ConditionalOnProperty(name = "application.auth.creator-mock.enabled", havingValue = "true")
 public class DevCreatorLoginService {
   private final UserRepository users;
+  private final AuthSessionIssuer issuer;
   private final com.influencermatch.backend.creator.repository.CreatorMasterRepository masters;
   private final ExternalIdentityRepository identities;
   private final JwtTokenProvider jwt;
@@ -31,18 +33,30 @@ public class DevCreatorLoginService {
   @Transactional
   public LoginResponse login() {
     users.lockRoleChanges();
-    String subject=UUID.randomUUID().toString();
-    User user=users.saveAndFlush(User.builder().email("creator-"+subject+"@creator-mock.invalid")
-        .fullName("Development Mock Creator").role(Role.CREATOR).status(UserStatus.ACTIVE)
-        .lastLoginAt(LocalDateTime.now()).build());
-    masters.save(com.influencermatch.backend.creator.model.CreatorMaster.builder().user(user).canonicalName(user.getFullName()).status("ACTIVE").build());
-    identities.save(ExternalIdentity.builder().user(user).provider(ExternalIdentityProvider.DEV_MOCK)
-        .providerSubject(subject).providerEmail(user.getEmail()).emailVerified(false).build());
-    String access=jwt.generateToken(user);
-    return LoginResponse.builder().accessToken(access).refreshToken(refreshTokens.issue(user).raw())
-        .tokenType("Bearer").expiresIn(jwt.extractExpiresInSeconds(access))
-        .user(LoginResponse.UserProfile.builder().id(user.getId()).email(user.getEmail()).fullName(user.getFullName())
-            .role(user.getRole().name()).status(user.getStatus().name()).permissions(effectivePermissions.names(user.getRole()))
-            .lastLoginAt(user.getLastLoginAt()).build()).build();
+    String subject = UUID.randomUUID().toString();
+    User user =
+        users.saveAndFlush(
+            User.builder()
+                .email("creator-" + subject + "@creator-mock.invalid")
+                .fullName("Development Mock Creator")
+                .role(Role.CREATOR)
+                .status(UserStatus.ACTIVE)
+                .lastLoginAt(LocalDateTime.now())
+                .build());
+    masters.save(
+        com.influencermatch.backend.creator.model.CreatorMaster.builder()
+            .user(user)
+            .canonicalName(user.getFullName())
+            .status("ACTIVE")
+            .build());
+    identities.save(
+        ExternalIdentity.builder()
+            .user(user)
+            .provider(ExternalIdentityProvider.DEV_MOCK)
+            .providerSubject(subject)
+            .providerEmail(user.getEmail())
+            .emailVerified(false)
+            .build());
+    return issuer.issue(user, "DEV_MOCK");
   }
 }

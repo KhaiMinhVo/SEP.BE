@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -22,8 +21,10 @@ public class CrawlerServiceClient {
   private final RestClient restClient;
   private final RestClient monitorRestClient;
 
+  @org.springframework.beans.factory.annotation.Autowired
   public CrawlerServiceClient(
-      @Value("${crawler.service.url:http://localhost:8000/api/v1/crawl}") String crawlerServiceUrl) {
+      @Value("${crawler.service.url:http://localhost:8000/api/v1/crawl}")
+          String crawlerServiceUrl) {
     SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
     requestFactory.setConnectTimeout(Duration.ofSeconds(5));
     // SSR parsing can take 10-25s for live scraping, set read timeout to 35s
@@ -45,32 +46,47 @@ public class CrawlerServiceClient {
     log.info("Initialized CrawlerServiceClient with endpoints: crawl={}, monitor={}", crawlerServiceUrl, monitorUrl);
   }
 
-  public void triggerShortlistCrawlAsync(String platform, String username, UUID creatorId, UUID campaignId) {
-    CompletableFuture.runAsync(() -> {
-      try {
-        Map<String, Object> body = Map.of(
-            "platform", platform != null ? platform.trim().toUpperCase() : "UNKNOWN",
-            "username", username != null ? username : "",
-            "creatorId", creatorId != null ? creatorId.toString() : "",
-            "campaignId", campaignId != null ? campaignId.toString() : ""
-        );
-        restClient.post()
+  public CrawlerServiceClient(RestClient restClient) {
+    this.restClient = restClient;
+    this.monitorRestClient = restClient;
+  }
+
+  /** Synchronous transport only; the after-commit dispatcher supplies the bounded executor. */
+  public void requestShortlistCrawl(
+      String platform, String username, UUID creatorId, UUID campaignId) {
+    var response =
+        restClient
+            .post()
             .uri("/shortlist-trigger")
             .contentType(MediaType.APPLICATION_JSON)
-            .body(body)
+            .body(
+                Map.of(
+                    "platform",
+                    platform == null
+                        ? "UNKNOWN"
+                        : platform.trim().toUpperCase(java.util.Locale.ROOT),
+                    "username",
+                    username == null ? "" : username,
+                    "creatorId",
+                    creatorId.toString(),
+                    "campaignId",
+                    campaignId.toString()))
             .retrieve()
             .toBodilessEntity();
-        log.info("Successfully triggered crawl for shortlisted creator @{} ({})", username, platform);
-      } catch (Exception e) {
-        log.warn("Failed to trigger crawler for @{}: {}", username, e.getMessage());
-      }
-    });
+    if (!response.getStatusCode().is2xxSuccessful())
+      throw new IllegalStateException("Crawler did not accept request");
   }
 
   /**
-   * Resolves TikTok Author ID (permanent numeric ID) via Crawler SSR preflight.
+   * Resolves TikTok Author ID (permanent numeric ID) via Crawler SSR preflight. Useful when KOC
+   * changed username (e.g. mixigaming -> domixi) before OAuth verification.
+   *
+   * @param username current TikTok username (e.g. "domixi")
+   * @param expectedExternalId expected permanent ID stored in database (nullable)
+   * @return CrawlerResolveAuthorResponse containing author_id and is_matched flag
    */
-  public Optional<CrawlerResolveAuthorResponse> resolveTikTokAuthor(String username, String expectedExternalId) {
+  public Optional<CrawlerResolveAuthorResponse> resolveTikTokAuthor(
+      String username, String expectedExternalId) {
     if (username == null || username.isBlank()) {
       return Optional.empty();
     }
@@ -83,16 +99,21 @@ public class CrawlerServiceClient {
       }
       body.put("auto_update_staging", false);
 
-      CrawlerResolveAuthorResponse response = restClient.post()
-          .uri("/tiktok/resolve-author")
-          .contentType(MediaType.APPLICATION_JSON)
-          .body(body)
-          .retrieve()
-          .body(CrawlerResolveAuthorResponse.class);
+      CrawlerResolveAuthorResponse response =
+          restClient
+              .post()
+              .uri("/tiktok/resolve-author")
+              .contentType(MediaType.APPLICATION_JSON)
+              .body(body)
+              .retrieve()
+              .body(CrawlerResolveAuthorResponse.class);
 
       return Optional.ofNullable(response);
     } catch (Exception e) {
-      log.warn("Failed to resolve TikTok author ID via crawler for @{}: {}", cleanUsername, e.getMessage());
+      log.warn(
+          "Failed to resolve TikTok author ID via crawler for @{}: {}",
+          cleanUsername,
+          e.getMessage());
       return Optional.empty();
     }
   }
@@ -274,6 +295,23 @@ public class CrawlerServiceClient {
     } catch (Exception e) {
       log.warn("Failed to retry crawl for @{} ({}): {}", cleanUser, plat, e.getMessage());
       return Optional.empty();
+    }
+  }
+
+  /** Strict identity-only request used by OAuth; never queues crawl or changes staging. */
+  public CrawlerResolveAuthorResponse resolveTikTokIdentity(String username) {
+    try {
+      return restClient
+          .post()
+          .uri("/tiktok/resolve-author")
+          .contentType(MediaType.APPLICATION_JSON)
+          .body(Map.of("username", username, "auto_update_staging", false))
+          .retrieve()
+          .body(CrawlerResolveAuthorResponse.class);
+    } catch (Exception ex) {
+      throw new com.influencermatch.backend.exception.BusinessException(
+          com.influencermatch.backend.exception.ErrorCode.TIKTOK_IDENTITY_RESOLUTION_FAILED,
+          "Unable to verify TikTok identity; start a new connection");
     }
   }
 }

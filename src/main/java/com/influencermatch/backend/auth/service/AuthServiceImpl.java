@@ -35,6 +35,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuthServiceImpl implements AuthService {
 
   private final UserRepository userRepository;
+  private final RegistrationSupport registration;
+  private final AuthSessionIssuer issuer;
+  private final com.influencermatch.backend.brand.repository.BrandProfileRepository profiles;
   private final EmailVerificationService verification;
   private final PasswordEncoder passwordEncoder;
   private final JwtTokenProvider jwtTokenProvider;
@@ -45,6 +48,8 @@ public class AuthServiceImpl implements AuthService {
   @Override
   @Transactional
   public void register(RegisterRequest request) {
+    registration.validate(request.getPolicyAcceptance());
+    RegistrationSupport.phone(request.getPhoneNumber());
     verification.requireConfigured();
     String normalizedEmail = request.getEmail().trim().toLowerCase(java.util.Locale.ROOT);
     userRepository.lockRegistrationEmail(normalizedEmail);
@@ -59,11 +64,14 @@ public class AuthServiceImpl implements AuthService {
             .email(normalizedEmail)
             .passwordHash(passwordEncoder.encode(request.getPassword()))
             .fullName(request.getFullName().trim())
-            .role(Role.BRAND).emailVerified(false) // new users must verify email
+            .role(Role.BRAND)
+            .emailVerified(false) // new users must verify email
             .status(UserStatus.ACTIVE)
             .build();
 
     userRepository.saveAndFlush(user);
+    registration.brand(user, request.getBusinessName(), request.getPhoneNumber());
+    registration.consent(user, request.getPolicyAcceptance(), "PASSWORD_REGISTRATION");
     verification.sendInitial(user);
     log.info("Registered new user: email='{}'", normalizedEmail);
   }
@@ -78,56 +86,18 @@ public class AuthServiceImpl implements AuthService {
                 request.getEmail().trim().toLowerCase(), request.getPassword()));
 
     User user = (User) authentication.getPrincipal();
-    if (!user.isEmailVerified()) throw new BusinessException(ErrorCode.EMAIL_NOT_VERIFIED, "Verify your email before login");
+    if (!user.isEmailVerified())
+      throw new BusinessException(ErrorCode.EMAIL_NOT_VERIFIED, "Verify your email before login");
     user.setLastLoginAt(LocalDateTime.now());
     userRepository.save(user);
-    String accessToken = jwtTokenProvider.generateToken(user);
-    String refreshToken = refreshTokenService.issue(user).raw();
-
-    log.info("User logged in: email='{}', role='{}'", user.getEmail(), user.getRole());
-
-    return LoginResponse.builder()
-        .accessToken(accessToken)
-        .refreshToken(refreshToken)
-        .tokenType("Bearer")
-        .expiresIn(jwtTokenProvider.extractExpiresInSeconds(accessToken))
-        .user(
-            LoginResponse.UserProfile.builder()
-                .id(user.getId())
-                .email(user.getEmail())
-                .fullName(user.getFullName())
-                .role(user.getRole().name())
-                .status(user.getStatus().name())
-                .permissions(
-                    effectivePermissions.names(user.getRole()))
-                .lastLoginAt(user.getLastLoginAt())
-                .build())
-        .build();
+    return issuer.issue(user, "PASSWORD");
   }
 
   @Override
   @Transactional(noRollbackFor = RefreshTokenReplayException.class)
   public LoginResponse refresh(RefreshTokenRequest request) {
     RefreshTokenService.Rotated rotated = refreshTokenService.rotate(request.refreshToken());
-    User user = rotated.user();
-    String accessToken = jwtTokenProvider.generateToken(user);
-    return LoginResponse.builder()
-        .accessToken(accessToken)
-        .refreshToken(rotated.refreshToken())
-        .tokenType("Bearer")
-        .expiresIn(jwtTokenProvider.extractExpiresInSeconds(accessToken))
-        .user(
-            LoginResponse.UserProfile.builder()
-                .id(user.getId())
-                .email(user.getEmail())
-                .fullName(user.getFullName())
-                .role(user.getRole().name())
-                .status(user.getStatus().name())
-                .permissions(
-                    effectivePermissions.names(user.getRole()))
-                .lastLoginAt(user.getLastLoginAt())
-                .build())
-        .build();
+    return issuer.response(rotated.user(), rotated.sessionId(), rotated.refreshToken());
   }
 
   @Override
@@ -138,19 +108,29 @@ public class AuthServiceImpl implements AuthService {
 
   @Override
   public UserProfileResponse getProfile(User currentUser) {
-    Permissions.require(
-        Permission.VIEW_OWN_PROFILE);
-    return UserProfileResponse.builder()
-        .id(currentUser.getId())
-        .email(currentUser.getEmail())
-        .fullName(currentUser.getFullName())
-        .role(currentUser.getRole().name())
-        .status(currentUser.getStatus().name())
-        .permissions(
-            effectivePermissions.names(currentUser.getRole()))
-        .createdAt(currentUser.getCreatedAt())
-        .updatedAt(currentUser.getUpdatedAt())
-        .lastLoginAt(currentUser.getLastLoginAt())
-        .build();
+    Permissions.require(Permission.VIEW_OWN_PROFILE);
+    var result =
+        UserProfileResponse.builder()
+            .id(currentUser.getId())
+            .email(currentUser.getEmail())
+            .fullName(currentUser.getFullName())
+            .role(currentUser.getRole().name())
+            .status(currentUser.getStatus().name())
+            .permissions(effectivePermissions.names(currentUser.getRole()))
+            .createdAt(currentUser.getCreatedAt())
+            .updatedAt(currentUser.getUpdatedAt())
+            .lastLoginAt(currentUser.getLastLoginAt())
+            .build();
+    if (currentUser.getRole() == Role.BRAND) {
+      result.setOnboardingStatus("PENDING");
+      profiles
+          .findByUserId(currentUser.getId())
+          .ifPresent(
+              p -> {
+                result.setBrandProfileId(p.getId());
+                result.setOnboardingStatus(p.getOnboardingStatus());
+              });
+    }
+    return result;
   }
 }

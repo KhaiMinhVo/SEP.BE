@@ -6,6 +6,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 public final class CreatorServiceFixtures {
   public static <T> T wire(T service) {
     set(service,"invitations",mock(com.influencermatch.backend.creator.repository.CreatorInvitationRepository.class));
+    set(service,"guard",mock(ManualClaimGuard.class));
     set(service,"clock",java.time.Clock.systemDefaultZone());
     set(service,"frontend","https://frontend.example.test");
     set(service,"sender",mock(com.influencermatch.backend.auth.service.VerificationEmailSender.class));

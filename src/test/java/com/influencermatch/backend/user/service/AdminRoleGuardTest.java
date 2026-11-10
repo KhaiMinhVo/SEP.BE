@@ -25,8 +25,9 @@ class AdminRoleGuardTest {
   final BrandProfileRepository profiles=mock(BrandProfileRepository.class);
   final CreatorRepository creators=mock(CreatorRepository.class);
   final CreatorClaimRepository claims=mock(CreatorClaimRepository.class);
-  final AdminUserService service=new AdminUserService(users,refresh,audit,profiles,creators,claims);
-  @BeforeEach void login(){TestActors.authenticate(TestActors.user(Role.ADMIN));}
+  final AdminAccessGuard guard=mock(AdminAccessGuard.class);
+  final AdminUserService service=new AdminUserService(users,guard,refresh,audit,profiles,creators,claims);
+  @BeforeEach void login(){TestActors.authenticate(TestActors.user(Role.ADMIN));when(guard.lock(any(),any())).thenAnswer(i->users.findById(i.getArgument(0)).orElseThrow());}
   @AfterEach void clear(){SecurityContextHolder.clearContext();}
   @Test void sameRoleDoesNotRevokeOrAudit(){
     var target=TestActors.user(Role.CREATOR);target.setAuthVersion(5);

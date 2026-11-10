@@ -21,7 +21,8 @@ public class LoginResponse {
 
   private String accessToken;
 
-  private String refreshToken;
+  @com.fasterxml.jackson.annotation.JsonIgnore private String refreshToken;
+  @com.fasterxml.jackson.annotation.JsonIgnore private java.time.Instant refreshExpiresAt;
 
   @Builder.Default private String tokenType = "Bearer";
 
@@ -37,6 +38,8 @@ public class LoginResponse {
   @Builder
   public static class UserProfile {
     private UUID id;
+    private UUID brandProfileId;
+    private String onboardingStatus;
     private String email;
     private String fullName;
     private String role;

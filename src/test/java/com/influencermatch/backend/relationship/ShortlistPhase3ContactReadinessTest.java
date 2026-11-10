@@ -57,15 +57,16 @@ class ShortlistPhase3ContactReadinessTest {
     publicCreatorMetricRepository = mock(PublicCreatorMetricRepository.class);
     relationshipRepository = mock(BrandCreatorRelationshipRepository.class);
 
-    service = new ShortlistServiceImpl(
-        shortlistItemRepository,
-        ownership,
-        creatorRepository,
-        userRepository,
-        recommendationRunRepository,
-        publicCreatorMetricRepository,
-        relationshipRepository
-    );
+    service =
+        new ShortlistServiceImpl(
+            shortlistItemRepository,
+            ownership,
+            creatorRepository,
+            userRepository,
+            recommendationRunRepository,
+            publicCreatorMetricRepository,
+            relationshipRepository);
+    com.influencermatch.backend.support.TestShortlistFixtures.wire(service);
 
     brandUser = TestActors.user(Role.BRAND);
     TestActors.authenticate(brandUser);
@@ -81,28 +82,34 @@ class ShortlistPhase3ContactReadinessTest {
   }
 
   @Test
-  @DisplayName("SL-02: updateShortlistItem updates priority, note, and transitions status SAVED -> READY_TO_CONTACT")
+  @DisplayName(
+      "SL-02: updateShortlistItem updates priority, note, and transitions status SAVED ->"
+          + " READY_TO_CONTACT")
   void testUpdateShortlistItem_success() {
     UUID itemId = UUID.randomUUID();
     Creator creator = Creator.builder().id(UUID.randomUUID()).displayName("Thao Nhi").build();
-    ShortlistItem item = ShortlistItem.builder()
-        .id(itemId)
-        .campaign(campaign)
-        .creator(creator)
-        .user(brandUser)
-        .priority(ShortlistPriority.LOW)
-        .status(ShortlistStatus.SAVED)
-        .addedAt(LocalDateTime.now())
-        .build();
+    ShortlistItem item =
+        ShortlistItem.builder()
+            .id(itemId)
+            .campaign(campaign)
+            .creator(creator)
+            .user(brandUser)
+            .priority(ShortlistPriority.LOW)
+            .status(ShortlistStatus.SAVED)
+            .addedAt(LocalDateTime.now())
+            .build();
 
-    when(shortlistItemRepository.findByIdAndCampaignId(itemId, campaignId)).thenReturn(Optional.of(item));
-    when(shortlistItemRepository.save(any(ShortlistItem.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(shortlistItemRepository.findByIdAndCampaignId(itemId, campaignId))
+        .thenReturn(Optional.of(item));
+    when(shortlistItemRepository.save(any(ShortlistItem.class)))
+        .thenAnswer(inv -> inv.getArgument(0));
 
-    UpdateShortlistItemRequest req = UpdateShortlistItemRequest.builder()
-        .priority(ShortlistPriority.HIGH)
-        .note("Ưu tiên liên hệ trước")
-        .status(ShortlistStatus.READY_TO_CONTACT)
-        .build();
+    UpdateShortlistItemRequest req =
+        UpdateShortlistItemRequest.builder()
+            .priority(ShortlistPriority.HIGH)
+            .note("Ưu tiên liên hệ trước")
+            .status(ShortlistStatus.READY_TO_CONTACT)
+            .build();
 
     ShortlistItemDto updated = service.updateShortlistItem(campaignId, itemId, req);
 
@@ -120,17 +127,35 @@ class ShortlistPhase3ContactReadinessTest {
     Creator c1 = Creator.builder().id(UUID.randomUUID()).displayName("KOC 1").build();
     Creator c2 = Creator.builder().id(UUID.randomUUID()).displayName("KOC 2").build();
 
-    ShortlistItem item1 = ShortlistItem.builder().id(id1).campaign(campaign).creator(c1).status(ShortlistStatus.SAVED).addedAt(LocalDateTime.now()).build();
-    ShortlistItem item2 = ShortlistItem.builder().id(id2).campaign(campaign).creator(c2).status(ShortlistStatus.SAVED).addedAt(LocalDateTime.now()).build();
+    ShortlistItem item1 =
+        ShortlistItem.builder()
+            .user(brandUser)
+            .id(id1)
+            .campaign(campaign)
+            .creator(c1)
+            .status(ShortlistStatus.SAVED)
+            .addedAt(LocalDateTime.now())
+            .build();
+    ShortlistItem item2 =
+        ShortlistItem.builder()
+            .user(brandUser)
+            .id(id2)
+            .campaign(campaign)
+            .creator(c2)
+            .status(ShortlistStatus.SAVED)
+            .addedAt(LocalDateTime.now())
+            .build();
 
     when(shortlistItemRepository.findByCampaignIdAndIdIn(campaignId, List.of(id1, id2)))
         .thenReturn(List.of(item1, item2));
-    when(shortlistItemRepository.save(any(ShortlistItem.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(shortlistItemRepository.save(any(ShortlistItem.class)))
+        .thenAnswer(inv -> inv.getArgument(0));
 
-    BatchUpdateStatusRequest req = BatchUpdateStatusRequest.builder()
-        .itemIds(List.of(id1, id2))
-        .status(ShortlistStatus.READY_TO_CONTACT)
-        .build();
+    BatchUpdateStatusRequest req =
+        BatchUpdateStatusRequest.builder()
+            .itemIds(List.of(id1, id2))
+            .status(ShortlistStatus.READY_TO_CONTACT)
+            .build();
 
     List<ShortlistItemDto> results = service.batchUpdateStatus(campaignId, req);
 
@@ -140,39 +165,41 @@ class ShortlistPhase3ContactReadinessTest {
   }
 
   @Test
-  @DisplayName("TEST-09 & SL-04: Case 2 - Chưa Claim nhưng có booking email -> READY qua SYSTEM_EMAIL_OUTBOX")
+  @DisplayName(
+      "TEST-09 & SL-04: Case 2 - Chưa Claim nhưng có booking email -> READY qua"
+          + " SYSTEM_EMAIL_OUTBOX")
   void testContactReadiness_unclaimedWithBookingEmail() {
     UUID creatorId = UUID.randomUUID();
     UUID itemId = UUID.randomUUID();
 
-    Creator creator = Creator.builder()
-        .id(creatorId)
-        .displayName("Mai Anh")
-        .platform("TIKTOK")
-        .build();
+    Creator creator =
+        Creator.builder().id(creatorId).displayName("Mai Anh").platform("TIKTOK").build();
 
-    ShortlistItem item = ShortlistItem.builder()
-        .id(itemId)
-        .campaign(campaign)
-        .creator(creator)
-        .status(ShortlistStatus.READY_TO_CONTACT)
-        .addedAt(LocalDateTime.now())
-        .build();
+    ShortlistItem item =
+        ShortlistItem.builder()
+            .user(brandUser)
+            .id(itemId)
+            .campaign(campaign)
+            .creator(creator)
+            .status(ShortlistStatus.READY_TO_CONTACT)
+            .addedAt(LocalDateTime.now())
+            .build();
 
-    PublicCreatorMetric metric = PublicCreatorMetric.builder()
-        .creator(creator)
-        .contact("Booking công việc qua mail: maianh.work@gmail.com - phone 0901234567")
-        .build();
+    PublicCreatorMetric metric =
+        PublicCreatorMetric.builder()
+            .creator(creator)
+            .contact("Booking công việc qua mail: maianh.work@gmail.com - phone 0901234567")
+            .build();
 
     when(shortlistItemRepository.findByCampaignIdAndIdIn(campaignId, List.of(itemId)))
         .thenReturn(List.of(item));
     when(relationshipRepository.existsByCampaignIdAndCreatorId(campaignId, creatorId))
         .thenReturn(false);
-    when(publicCreatorMetricRepository.findByCreatorId(creatorId))
-        .thenReturn(Optional.of(metric));
+    when(publicCreatorMetricRepository.findByCreatorId(creatorId)).thenReturn(Optional.of(metric));
 
-    ContactReadinessResponse response = service.checkContactReadiness(
-        campaignId, ContactReadinessRequest.builder().itemIds(List.of(itemId)).build());
+    ContactReadinessResponse response =
+        service.checkContactReadiness(
+            campaignId, ContactReadinessRequest.builder().itemIds(List.of(itemId)).build());
 
     assertThat(response.getReadyCount()).isEqualTo(1);
     assertThat(response.getItems()).hasSize(1);
@@ -189,67 +216,74 @@ class ShortlistPhase3ContactReadinessTest {
     UUID creatorId = UUID.randomUUID();
     UUID itemId = UUID.randomUUID();
 
-    User claimedUser = User.builder().id(UUID.randomUUID()).email("creator.portal@gmail.com").build();
+    User claimedUser =
+        User.builder().id(UUID.randomUUID()).email("creator.portal@gmail.com").build();
     CreatorMaster master = CreatorMaster.builder().id(UUID.randomUUID()).user(claimedUser).build();
 
-    Creator creator = Creator.builder()
-        .id(creatorId)
-        .master(master)
-        .displayName("Trang Dao Verified")
-        .platform("TIKTOK")
-        .build();
+    Creator creator =
+        Creator.builder()
+            .id(creatorId)
+            .master(master)
+            .displayName("Trang Dao Verified")
+            .platform("TIKTOK")
+            .build();
 
-    ShortlistItem item = ShortlistItem.builder()
-        .id(itemId)
-        .campaign(campaign)
-        .creator(creator)
-        .status(ShortlistStatus.READY_TO_CONTACT)
-        .addedAt(LocalDateTime.now())
-        .build();
+    ShortlistItem item =
+        ShortlistItem.builder()
+            .user(brandUser)
+            .id(itemId)
+            .campaign(campaign)
+            .creator(creator)
+            .status(ShortlistStatus.READY_TO_CONTACT)
+            .addedAt(LocalDateTime.now())
+            .build();
 
     when(shortlistItemRepository.findByCampaignIdAndIdIn(campaignId, List.of(itemId)))
         .thenReturn(List.of(item));
     when(relationshipRepository.existsByCampaignIdAndCreatorId(campaignId, creatorId))
         .thenReturn(false);
 
-    ContactReadinessResponse response = service.checkContactReadiness(
-        campaignId, ContactReadinessRequest.builder().itemIds(List.of(itemId)).build());
+    ContactReadinessResponse response =
+        service.checkContactReadiness(
+            campaignId, ContactReadinessRequest.builder().itemIds(List.of(itemId)).build());
 
     assertThat(response.getReadyCount()).isEqualTo(1);
     var itemRes = response.getItems().get(0);
     assertThat(itemRes.getReadinessStatus()).isEqualTo("READY");
     assertThat(itemRes.getContactChannel()).isEqualTo("IN_APP_PORTAL");
-    assertThat(itemRes.getContactTarget()).isEqualTo("creator.portal@gmail.com");
+    assertThat(itemRes.getContactTarget()).isNull();
+    assertThat(response.toString()).doesNotContain("creator.portal@gmail.com");
     assertThat(itemRes.isCanProceed()).isTrue();
   }
 
   @Test
-  @DisplayName("SL-04: Case 5 - KOC đã có quan hệ CRM đang hoạt động -> ALREADY_CONTACTED chặn gửi trùng")
+  @DisplayName(
+      "SL-04: Case 5 - KOC đã có quan hệ CRM đang hoạt động -> ALREADY_CONTACTED chặn gửi trùng")
   void testContactReadiness_alreadyContacted() {
     UUID creatorId = UUID.randomUUID();
     UUID itemId = UUID.randomUUID();
 
-    Creator creator = Creator.builder()
-        .id(creatorId)
-        .displayName("KOC In CRM")
-        .platform("TIKTOK")
-        .build();
+    Creator creator =
+        Creator.builder().id(creatorId).displayName("KOC In CRM").platform("TIKTOK").build();
 
-    ShortlistItem item = ShortlistItem.builder()
-        .id(itemId)
-        .campaign(campaign)
-        .creator(creator)
-        .status(ShortlistStatus.READY_TO_CONTACT)
-        .addedAt(LocalDateTime.now())
-        .build();
+    ShortlistItem item =
+        ShortlistItem.builder()
+            .user(brandUser)
+            .id(itemId)
+            .campaign(campaign)
+            .creator(creator)
+            .status(ShortlistStatus.READY_TO_CONTACT)
+            .addedAt(LocalDateTime.now())
+            .build();
 
     when(shortlistItemRepository.findByCampaignIdAndIdIn(campaignId, List.of(itemId)))
         .thenReturn(List.of(item));
     when(relationshipRepository.existsByCampaignIdAndCreatorId(campaignId, creatorId))
         .thenReturn(true);
 
-    ContactReadinessResponse response = service.checkContactReadiness(
-        campaignId, ContactReadinessRequest.builder().itemIds(List.of(itemId)).build());
+    ContactReadinessResponse response =
+        service.checkContactReadiness(
+            campaignId, ContactReadinessRequest.builder().itemIds(List.of(itemId)).build());
 
     assertThat(response.getAlreadyContactedCount()).isEqualTo(1);
     var itemRes = response.getItems().get(0);
@@ -264,30 +298,33 @@ class ShortlistPhase3ContactReadinessTest {
     UUID creatorId = UUID.randomUUID();
     UUID itemId = UUID.randomUUID();
 
-    Creator creator = Creator.builder()
-        .id(creatorId)
-        .displayName("KOC Social Only")
-        .platform("TIKTOK")
-        .profileUrl("https://tiktok.com/@koc_social")
-        .build();
+    Creator creator =
+        Creator.builder()
+            .id(creatorId)
+            .displayName("KOC Social Only")
+            .platform("TIKTOK")
+            .profileUrl("https://tiktok.com/@koc_social")
+            .build();
 
-    ShortlistItem item = ShortlistItem.builder()
-        .id(itemId)
-        .campaign(campaign)
-        .creator(creator)
-        .status(ShortlistStatus.READY_TO_CONTACT)
-        .addedAt(LocalDateTime.now())
-        .build();
+    ShortlistItem item =
+        ShortlistItem.builder()
+            .user(brandUser)
+            .id(itemId)
+            .campaign(campaign)
+            .creator(creator)
+            .status(ShortlistStatus.READY_TO_CONTACT)
+            .addedAt(LocalDateTime.now())
+            .build();
 
     when(shortlistItemRepository.findByCampaignIdAndIdIn(campaignId, List.of(itemId)))
         .thenReturn(List.of(item));
     when(relationshipRepository.existsByCampaignIdAndCreatorId(campaignId, creatorId))
         .thenReturn(false);
-    when(publicCreatorMetricRepository.findByCreatorId(creatorId))
-        .thenReturn(Optional.empty());
+    when(publicCreatorMetricRepository.findByCreatorId(creatorId)).thenReturn(Optional.empty());
 
-    ContactReadinessResponse response = service.checkContactReadiness(
-        campaignId, ContactReadinessRequest.builder().itemIds(List.of(itemId)).build());
+    ContactReadinessResponse response =
+        service.checkContactReadiness(
+            campaignId, ContactReadinessRequest.builder().itemIds(List.of(itemId)).build());
 
     assertThat(response.getManualCount()).isEqualTo(1);
     var itemRes = response.getItems().get(0);

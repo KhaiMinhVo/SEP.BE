@@ -21,6 +21,9 @@ public interface CreatorRepository extends JpaRepository<Creator, UUID> {
 
   List<Creator> findByMasterId(UUID masterId);
 
+  @Query(value="select * from creator where platform='TIKTOK' and im_tiktok_username(user_name)=:username order by id",nativeQuery=true)
+  List<Creator> findTikTokByNormalizedUsername(@Param("username") String username);
+
   @Query(value = "SELECT pg_advisory_xact_lock(hashtext(:lockKey))", nativeQuery = true)
   void acquireIdentityLock(@Param("lockKey") String lockKey);
   @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)

@@ -23,6 +23,7 @@ import com.influencermatch.backend.user.model.User;
 import jakarta.persistence.EntityManager;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validator;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
@@ -111,46 +112,143 @@ public class CollaborationService {
       UUID campaignId, CreateCollaborationRequest request, String key) {
     Permissions.require(Permission.MANAGE_OWN_COLLABORATION);
     validate(request);
-    var result = deals.confirmLegacy(campaignId, request, key);
-    UUID id = UUID.fromString(result.path("collaborationId").asText());
-    var c =
-        collaborations
-            .findById(id)
-            .orElseThrow(() -> new NotFoundException("Collaboration not found"));
+
+    if (deals != null && request.dealId() != null) {
+      var result = deals.confirmLegacy(campaignId, request, key);
+      UUID id = UUID.fromString(result.path("collaborationId").asText());
+      var c =
+          collaborations
+              .findById(id)
+              .orElseThrow(() -> new NotFoundException("Collaboration not found"));
+
+      if (notificationService != null
+          && c.getCreator() != null
+          && c.getCreator().getOwner() != null) {
+        String brandName =
+            c.getCampaign() != null && c.getCampaign().getBrandProfile() != null
+                ? c.getCampaign().getBrandProfile().getBusinessName()
+                : "Nhãn hàng";
+        String feeDisplay = c.getAgreedFee() + " " + (c.getCurrency() != null ? c.getCurrency() : "VND");
+        notificationService.createAndDispatch(
+            c.getCreator().getOwner().getId(),
+            NotificationType.COLLABORATION_RECORDED,
+            "Hợp tác chiến dịch đã được ghi nhận",
+            "Nhãn hàng " + brandName + " đã ghi nhận thỏa thuận hợp tác cho chiến dịch: "
+                + (c.getCampaign() != null ? c.getCampaign().getName() : "") + " (Mức phí: " + feeDisplay + ")",
+            "COLLABORATION",
+            c.getId());
+      }
+
+      return new CollaborationResponse(
+          c.getId(),
+          c.getCampaign().getId(),
+          c.getRelationship().getId(),
+          c.getCreator().getId(),
+          c.getAgreedFee(),
+          c.getCurrency(),
+          c.getStatus(),
+          c.getPaymentStatus(),
+          c.getPublishedContentUrl(),
+          c.getNote(),
+          c.getConfirmationSource(),
+          c.getStartAt(),
+          c.getCompletedAt(),
+          c.getUpdatedAt());
+    }
+
+    Campaign campaign = ownedCampaign(campaignId);
+    requireActive(campaign);
+    BrandCreatorRelationship relationship = lockedRelationship(request.relationshipId());
+    requireRelationshipOwner(relationship);
+    if (!relationship.getCampaign().getId().equals(campaignId))
+      throw new ValidationException("Relationship does not belong to this campaign");
+    if (collaborations.existsByRelationshipId(relationship.getId()))
+      throw conflict(
+          ErrorCode.COLLABORATION_ALREADY_EXISTS, "This relationship already has a collaboration");
+    if (relationship.getStage() != RelationshipStage.COLLABORATING
+        && relationship.getStage() != RelationshipStage.INTERESTED
+        && relationship.getStage() != RelationshipStage.CONTACTED)
+      throw conflict(
+          ErrorCode.INVALID_COLLABORATION_STATE,
+          "Relationship must be COLLABORATING, INTERESTED, or CONTACTED to start collaboration");
+    BigDecimal agreedFee =
+        request.agreedFee() != null ? request.agreedFee() : relationship.getAgreedFee();
+    if (agreedFee == null) {
+      throw new ValidationException(
+          "agreedFee is required (use 0 for barter or non-monetary collaborations)");
+    }
+    String currency = request.currency() != null ? request.currency() : relationship.getCurrency();
+    if (currency != null && !currency.isBlank()) {
+      try {
+        Currency.getInstance(currency);
+      } catch (IllegalArgumentException ex) {
+        throw new ValidationException("currency must be a valid ISO currency code");
+      }
+    }
+    if (request.note() == null || request.note().isBlank()) {
+      throw new ValidationException(
+          "Collaboration note is required to record agreement details, deliverables, or compensation terms");
+    }
+    String note = request.note().trim();
+    com.influencermatch.backend.creator.model.CreatorMaster master = relationship.getMaster();
+    if (master == null && relationship.getCreator() != null) {
+      master = relationship.getCreator().getMaster();
+    }
+    LocalDateTime now = LocalDateTime.now();
+    Collaboration collaboration =
+        collaborations.save(
+            Collaboration.builder()
+                .campaign(campaign)
+                .relationship(relationship)
+                .creator(relationship.getCreator())
+                .master(master)
+                .agreedFee(agreedFee)
+                .currency(currency)
+                .note(note)
+                .confirmationSource("BRAND_RECORDED_EXTERNAL")
+                .status(CollaborationStatus.IN_PROGRESS)
+                .paymentStatus(CollaborationPaymentStatus.PENDING)
+                .startAt(now)
+                .updatedAt(now)
+                .build());
+    relationship.setStage(RelationshipStage.COLLABORATING);
+    relationship.setAgreedFee(agreedFee);
+    relationship.setCurrency(currency);
+    relationship.setUpdatedAt(now);
 
     if (notificationService != null
-        && c.getCreator() != null
-        && c.getCreator().getOwner() != null) {
+        && collaboration.getCreator() != null
+        && collaboration.getCreator().getOwner() != null) {
       String brandName =
-          c.getCampaign() != null && c.getCampaign().getBrandProfile() != null
-              ? c.getCampaign().getBrandProfile().getBusinessName()
+          campaign.getBrandProfile() != null
+              ? campaign.getBrandProfile().getBusinessName()
               : "Nhãn hàng";
-      String feeDisplay = c.getAgreedFee() + " " + (c.getCurrency() != null ? c.getCurrency() : "VND");
+      String feeDisplay = agreedFee + " " + (currency != null ? currency : "VND");
       notificationService.createAndDispatch(
-          c.getCreator().getOwner().getId(),
+          collaboration.getCreator().getOwner().getId(),
           NotificationType.COLLABORATION_RECORDED,
           "Hợp tác chiến dịch đã được ghi nhận",
           "Nhãn hàng " + brandName + " đã ghi nhận thỏa thuận hợp tác cho chiến dịch: "
-              + (c.getCampaign() != null ? c.getCampaign().getName() : "") + " (Mức phí: " + feeDisplay + ")",
+              + campaign.getName() + " (Mức phí: " + feeDisplay + ")",
           "COLLABORATION",
-          c.getId());
+          collaboration.getId());
     }
 
     return new CollaborationResponse(
-        c.getId(),
-        c.getCampaign().getId(),
-        c.getRelationship().getId(),
-        c.getCreator().getId(),
-        c.getAgreedFee(),
-        c.getCurrency(),
-        c.getStatus(),
-        c.getPaymentStatus(),
-        c.getPublishedContentUrl(),
-        c.getNote(),
-        c.getConfirmationSource(),
-        c.getStartAt(),
-        c.getCompletedAt(),
-        c.getUpdatedAt());
+        collaboration.getId(),
+        campaignId,
+        relationship.getId(),
+        collaboration.getCreator().getId(),
+        collaboration.getAgreedFee(),
+        collaboration.getCurrency(),
+        collaboration.getStatus(),
+        collaboration.getPaymentStatus(),
+        collaboration.getPublishedContentUrl(),
+        collaboration.getNote(),
+        collaboration.getConfirmationSource(),
+        collaboration.getStartAt(),
+        collaboration.getCompletedAt(),
+        collaboration.getUpdatedAt());
   }
 
   @Transactional
@@ -373,7 +471,12 @@ public class CollaborationService {
 
     boolean isBrandOwner =
         c.getCampaign().getBrandProfile().getUser().getId().equals(actor.getId());
-    boolean isCreatorOwner = deals.canAccessCollaboration(actor.getId(), c.getId());
+    boolean isCreatorOwner =
+        deals != null
+            ? deals.canAccessCollaboration(actor.getId(), c.getId())
+            : (c.getCreator() != null
+                && c.getCreator().getOwner() != null
+                && c.getCreator().getOwner().getId().equals(actor.getId()));
     boolean isStaff = actor.getRole() == Role.ADMIN || actor.getRole() == Role.DATA_MANAGER;
 
     if (!isBrandOwner && !isCreatorOwner && !isStaff) {
@@ -458,7 +561,7 @@ public class CollaborationService {
         outcomeDto,
         reviewDto,
         evidenceList,
-        deals.channels(c.getId()));
+        deals != null ? deals.channels(c.getId()) : Collections.emptyList());
   }
 
   @Transactional
@@ -472,7 +575,12 @@ public class CollaborationService {
     User actor = Permissions.actor();
     boolean isBrandOwner =
         collaboration.getCampaign().getBrandProfile().getUser().getId().equals(actor.getId());
-    boolean isCreatorOwner = deals.canAccessCollaboration(actor.getId(), collaboration.getId());
+    boolean isCreatorOwner =
+        deals != null
+            ? deals.canAccessCollaboration(actor.getId(), collaboration.getId())
+            : (collaboration.getCreator() != null
+                && collaboration.getCreator().getOwner() != null
+                && collaboration.getCreator().getOwner().getId().equals(actor.getId()));
     boolean isStaff = actor.getRole() == Role.ADMIN || actor.getRole() == Role.DATA_MANAGER;
 
     if (!isBrandOwner && !isCreatorOwner && !isStaff) {
@@ -551,7 +659,12 @@ public class CollaborationService {
     User actor = Permissions.actor();
     boolean isBrandOwner =
         collaboration.getCampaign().getBrandProfile().getUser().getId().equals(actor.getId());
-    boolean isCreatorOwner = deals.canAccessCollaboration(actor.getId(), collaboration.getId());
+    boolean isCreatorOwner =
+        deals != null
+            ? deals.canAccessCollaboration(actor.getId(), collaboration.getId())
+            : (collaboration.getCreator() != null
+                && collaboration.getCreator().getOwner() != null
+                && collaboration.getCreator().getOwner().getId().equals(actor.getId()));
     boolean isStaff = actor.getRole() == Role.ADMIN || actor.getRole() == Role.DATA_MANAGER;
 
     if (!isBrandOwner && !isCreatorOwner && !isStaff) {
@@ -591,7 +704,13 @@ public class CollaborationService {
             : collaborations.findByMasterIdAndStatus(master.getId(), status);
 
     return list.stream()
-        .filter(c -> deals.canAccessCollaboration(actor.getId(), c.getId()))
+        .filter(
+            c ->
+                deals != null
+                    ? deals.canAccessCollaboration(actor.getId(), c.getId())
+                    : (c.getCreator() != null
+                        && c.getCreator().getOwner() != null
+                        && c.getCreator().getOwner().getId().equals(actor.getId())))
         .map(
             c -> {
               boolean hasOutcome = hasRecordedOutcome(c);

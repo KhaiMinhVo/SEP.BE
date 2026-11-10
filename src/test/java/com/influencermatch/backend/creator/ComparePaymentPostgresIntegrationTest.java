@@ -42,7 +42,7 @@ import org.testcontainers.utility.DockerImageName;
 
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=validate","spring.flyway.enabled=true",
     "application.bootstrap-admin.enabled=false","application.oauth2.google.enabled=false",
-    "application.payment.mock.enabled=true","spring.jpa.show-sql=false"})
+    "spring.jpa.show-sql=false"})
 @ActiveProfiles("dev") @AutoConfigureMockMvc @Testcontainers
 class ComparePaymentPostgresIntegrationTest {
   @Container static final PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>(
@@ -74,16 +74,6 @@ class ComparePaymentPostgresIntegrationTest {
     return result.isBlank()?json.nullNode():json.readTree(result).path("data");
   }
   String compare(Campaign c) { return "/campaigns/"+c.getId()+"/shortlist/compare"; }
-  String mock="/billing/mock/webhook";
-  Map<String,Object> outcome(Payment p,String status) { return Map.of("transactionCode",p.getTransactionCode(),"outcome",status); }
-  Plan plan() { return plans.saveAndFlush(Plan.builder().planName(UUID.randomUUID().toString()).price(new BigDecimal("100000"))
-      .currency("VND").durationDays(30).status(PlanStatus.ACTIVE).createdAt(LocalDateTime.now()).build()); }
-  Payment payment(BrandProfile b,Plan plan) {
-    var sub=subscriptions.saveAndFlush(Subscription.builder().brandProfile(b).plan(plan).status(SubscriptionStatus.PENDING)
-        .startDate(LocalDate.now().minusDays(3)).expirationDate(LocalDate.now().plusDays(27)).build());
-    return payments.saveAndFlush(Payment.builder().brandProfile(b).subscription(sub).amount(plan.getPrice()).currency("VND")
-        .paymentGateway("VNPAY").transactionCode(UUID.randomUUID().toString()).status(PaymentStatus.PENDING).createdAt(LocalDateTime.now()).build());
-  }
 
   @Test void comparePreservesOrderLatestMetricsAndVerification() throws Exception {
     var u=user(Role.BRAND); var c=campaign(brand(u)); var a=creator(); var b=creator(); add(c,a,u);add(c,b,u);
@@ -118,61 +108,6 @@ class ComparePaymentPostgresIntegrationTest {
     call(u,post(compare(c)),Map.of("creatorIds",List.of(a.getId(),a.getId())),400);
     call(u,post(compare(c)),Map.of("creatorIds",List.of(a.getId())),400);
     call(u,post(compare(c)),Map.of("creatorIds",Collections.nCopies(6,a.getId())),400);
-  }
-
-  @Test void checkoutExposesTransactionCodeAndMockActivatesIdempotently() throws Exception {
-    var u=user(Role.BRAND);brand(u);var plan=plan();
-    var checkout=call(u,post("/billing/subscribe"),Map.of("planId",plan.getId()),200);
-    assertThat(checkout.path("paymentUrl").asText()).contains(checkout.path("transactionCode").asText());
-    var p=payments.findByTransactionCode(checkout.path("transactionCode").asText()).orElseThrow();
-    var first=call(u,post(mock),outcome(p,"SUCCESS"),200);
-    assertThat(first.path("paymentStatus").asText()).isEqualTo("PAID");
-    assertThat(first.path("subscriptionStatus").asText()).isEqualTo("ACTIVE");
-    assertThat(call(u,post(mock),outcome(p,"SUCCESS"),200)).isEqualTo(first);
-    call(u,post(mock),outcome(p,"FAILED"),409);
-    assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id=? AND action='MOCK_PAYMENT_WEBHOOK'",Integer.class,p.getId())).isEqualTo(1);
-  }
-
-  @Test void mockFailureOwnershipPermissionsAndValidation() throws Exception {
-    var u=user(Role.BRAND);var p=payment(brand(u),plan());
-    call(null,post(mock),outcome(p,"FAILED"),401);
-    call(user(Role.DATA_MANAGER),post(mock),outcome(p,"FAILED"),403);
-    call(user(Role.BRAND),post(mock),outcome(p,"FAILED"),404);
-    call(u,post(mock),Map.of("transactionCode","missing","outcome","SUCCESS"),404);
-    call(u,post(mock),Map.of("transactionCode",p.getTransactionCode(),"outcome","INVALID"),400);
-    var failed=call(u,post(mock),outcome(p,"FAILED"),200);
-    assertThat(failed.path("subscriptionStatus").asText()).isEqualTo("CANCELLED");
-    assertThat(call(u,post(mock),outcome(p,"FAILED"),200)).isEqualTo(failed);
-    call(u,post(mock),outcome(p,"SUCCESS"),409);
-  }
-
-  @Test void parallelPaymentsForSameBrandCannotActivateTwoSubscriptions() throws Exception {
-    var u=user(Role.BRAND);var brand=brand(u);var plan=plan();var a=payment(brand,plan);var b=payment(brand,plan);
-    var start=new CountDownLatch(1);
-    try(var pool=Executors.newFixedThreadPool(2)) {
-      List<Future<Integer>> results=new ArrayList<>();
-      for(var p:List.of(a,b))results.add(pool.submit(()->{
-        start.await(); return mvc.perform(post(mock).header("Authorization","Bearer "+jwt.generateToken(u))
-            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(outcome(p,"SUCCESS"))))
-            .andReturn().getResponse().getStatus();
-      }));
-      start.countDown();
-      assertThat(List.of(results.get(0).get(30,TimeUnit.SECONDS),results.get(1).get(30,TimeUnit.SECONDS)))
-          .containsExactlyInAnyOrder(200,409);
-    }
-  }
-
-  @Test void concurrentDuplicateCallbacksCreateOneAuditAndPreserveQuota() throws Exception {
-    var u=user(Role.BRAND);var p=payment(brand(u),plan());
-    jdbc.update("UPDATE subscription SET used_campaign_quota=3 WHERE id=?",p.getSubscription().getId());
-    var start=new CountDownLatch(1);
-    try(var pool=Executors.newFixedThreadPool(2)) {
-      List<Future<JsonNode>> results=new ArrayList<>();
-      for(int i=0;i<2;i++)results.add(pool.submit(()->{start.await();return call(u,post(mock),outcome(p,"SUCCESS"),200);}));
-      start.countDown();assertThat(results.get(0).get(30,TimeUnit.SECONDS)).isEqualTo(results.get(1).get(30,TimeUnit.SECONDS));
-    }
-    assertThat(jdbc.queryForObject("SELECT used_campaign_quota FROM subscription WHERE id=?",Integer.class,p.getSubscription().getId())).isEqualTo(3);
-    assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id=? AND action='MOCK_PAYMENT_WEBHOOK'",Integer.class,p.getId())).isEqualTo(1);
   }
 
   @Test void anotherBrandCannotReadOrMutateShortlistAndRelationships() throws Exception {
@@ -310,45 +245,4 @@ class ComparePaymentPostgresIntegrationTest {
     assertThat(m.path("followers").isMissingNode()||m.path("followers").isNull()).isTrue();
     assertThat(result.get(1).path("metrics").isNull()).isTrue();
   }
-
-  @org.junit.jupiter.params.ParameterizedTest
-  @org.junit.jupiter.params.provider.ValueSource(strings={"SUCCESS","FAILED"})
-  void terminalPaymentOutcomePreservesDatesQuotasAndSingleAudit(String outcome) throws Exception {
-    var u=user(Role.BRAND);var plan=plan();var p=payment(brand(u),plan);var subId=p.getSubscription().getId();
-    jdbc.update("UPDATE subscription SET used_campaign_quota=3,used_ai_quota=4,used_refresh_quota=5 WHERE id=?",subId);
-    LocalDate today=LocalDate.now();
-    var first=call(u,post(mock),outcome(p,outcome),200);
-    var saved=subscriptions.findById(subId).orElseThrow();
-    if(outcome.equals("SUCCESS")) {
-      assertThat(saved.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
-      assertThat(saved.getStartDate()).isBetween(today,LocalDate.now());
-      assertThat(saved.getExpirationDate()).isEqualTo(saved.getStartDate().plusDays(plan.getDurationDays()));
-    } else {
-      assertThat(saved.getStatus()).isEqualTo(SubscriptionStatus.CANCELLED);
-      assertThat(saved.getStartDate()).isEqualTo(p.getSubscription().getStartDate());
-      assertThat(saved.getExpirationDate()).isEqualTo(p.getSubscription().getExpirationDate());
-    }
-    var paidAt=payments.findById(p.getId()).orElseThrow().getPaidAt();
-    assertThat(call(u,post(mock),outcome(p,outcome),200)).isEqualTo(first);
-    call(u,post(mock),outcome(p,outcome.equals("SUCCESS")?"FAILED":"SUCCESS"),409);
-    var after=subscriptions.findById(subId).orElseThrow();
-    assertThat(after.getStartDate()).isEqualTo(saved.getStartDate());assertThat(after.getExpirationDate()).isEqualTo(saved.getExpirationDate());
-    assertThat(after.getUsedCampaignQuota()).isEqualTo(3);assertThat(after.getUsedRecommendationQuota()).isEqualTo(4);assertThat(after.getUsedRefreshQuota()).isEqualTo(5);
-    assertThat(payments.findById(p.getId()).orElseThrow().getPaidAt()).isEqualTo(paidAt);
-    assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id=? AND action='MOCK_PAYMENT_WEBHOOK'",Integer.class,p.getId())).isEqualTo(1);
-  }
-
-  @Test void mockAuditFailureRollsBackPaymentAndSubscriptionActivation() throws Exception {
-    var u=user(Role.BRAND);var p=payment(brand(u),plan());var subId=p.getSubscription().getId();
-    jdbc.execute("CREATE FUNCTION mock_payment_test_audit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='MOCK_PAYMENT_WEBHOOK' AND NEW.entity_id='"+p.getId()+"'::uuid THEN RAISE EXCEPTION 'mock payment audit test failure'; END IF; RETURN NEW; END $$");
-    jdbc.execute("CREATE TRIGGER mock_payment_test_audit_failure BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION mock_payment_test_audit_failure()");
-    try {call(u,post(mock),outcome(p,"SUCCESS"),500);}
-    finally {jdbc.execute("DROP TRIGGER mock_payment_test_audit_failure ON audit_log");jdbc.execute("DROP FUNCTION mock_payment_test_audit_failure()");}
-    var stored=payments.findById(p.getId()).orElseThrow();var sub=subscriptions.findById(subId).orElseThrow();
-    assertThat(stored.getStatus()).isEqualTo(PaymentStatus.PENDING);assertThat(stored.getPaidAt()).isNull();
-    assertThat(sub.getStatus()).isEqualTo(SubscriptionStatus.PENDING);assertThat(sub.getStartDate()).isEqualTo(p.getSubscription().getStartDate());
-    assertThat(sub.getExpirationDate()).isEqualTo(p.getSubscription().getExpirationDate());
-    assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id=? AND action='MOCK_PAYMENT_WEBHOOK'",Integer.class,p.getId())).isZero();
-  }
-
 }

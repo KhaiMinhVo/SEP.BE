@@ -60,11 +60,17 @@ class PaymentSettlementServiceTest {
     assertThat(p.getStatus()).isEqualTo(status);assertThat(sub.getStartDate()).isEqualTo(start);
     assertThat(sub.getUsedCampaignQuota()).isEqualTo(2);verifyNoInteractions(payments,subscriptions,em);
   }
-  @Test void activeSubscriptionPreventsActivationWithoutMutatingPendingPayment() {
-    var p=payment();when(subscriptions.existsByBrandProfileIdAndStatusAndExpirationDateGreaterThanEqual(any(),eq(SubscriptionStatus.ACTIVE),any())).thenReturn(true);
-    assertThat(service.apply(p,true,null)).isFalse();assertThat(p.getStatus()).isEqualTo(PaymentStatus.PENDING);
-    assertThat(p.getSubscription().getStatus()).isEqualTo(SubscriptionStatus.PENDING);
-    verify(payments,never()).save(any());verify(subscriptions,never()).save(any());
+  @Test void activeSubscriptionCancelsOldActiveSubscriptionsAndActivatesNew() {
+    var p=payment();
+    var oldSub=Subscription.builder().id(UUID.randomUUID()).status(SubscriptionStatus.ACTIVE).build();
+    when(subscriptions.findByBrandProfileIdAndStatus(eq(p.getBrandProfile().getId()), eq(SubscriptionStatus.ACTIVE)))
+        .thenReturn(List.of(oldSub));
+    assertThat(service.apply(p,true,null)).isTrue();
+    assertThat(p.getStatus()).isEqualTo(PaymentStatus.PAID);
+    assertThat(oldSub.getStatus()).isEqualTo(SubscriptionStatus.CANCELLED);
+    assertThat(p.getSubscription().getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+    verify(subscriptions).save(oldSub);
+    verify(subscriptions).save(p.getSubscription());
   }
   @Test void nonPendingSubscriptionCannotBeActivated() {
     var p=payment();p.getSubscription().setStatus(SubscriptionStatus.CANCELLED);

@@ -117,9 +117,6 @@ application:
       token-url: ${GOOGLE_TESTING_TOKEN_URL:https://oauth2.googleapis.com/token}
       youtube-channel-url: ${GOOGLE_TESTING_YOUTUBE_URL:https://www.googleapis.com/youtube/v3/channels}
       scope: ${GOOGLE_TESTING_SCOPE:https://www.googleapis.com/auth/youtube.readonly}
-  payment:
-    mock:
-      enabled: ${PAYMENT_MOCK_ENABLED:false}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,https://api.influencermatch.site,https://influencermatch.site}
   bootstrap-admin:

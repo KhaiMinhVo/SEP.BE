@@ -238,20 +238,17 @@ class AuthTargetPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
-  void missingCsrfIs403AndRealCsrfEndpointAllowsLogin() throws Exception {
-    var u = account(Role.BRAND);
-    byte[] body = json.writeValueAsBytes(Map.of("email", u.getEmail(), "password", "Password123!"));
-    mvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON).content(body))
+  void missingCsrfIs403AndRealCsrfEndpointAllowsAuth() throws Exception {
+    mvc.perform(post("/auth/logout").contentType(MediaType.APPLICATION_JSON))
         .andExpect(status().isForbidden());
     var csrf = mvc.perform(get("/auth/csrf")).andExpect(status().isOk()).andReturn().getResponse();
     var data = json.readTree(csrf.getContentAsString()).path("data");
     mvc.perform(
-            post("/auth/login")
+            post("/auth/logout")
                 .cookie(csrf.getCookie("IM_CSRF"))
                 .header(data.path("headerName").asText(), data.path("token").asText())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-        .andExpect(status().isOk());
+                .contentType(MediaType.APPLICATION_JSON))
+        .andExpect(status().isNoContent());
   }
 
   @Test

@@ -112,7 +112,6 @@ public class SecurityConfig {
                         return "POST".equals(r.getMethod())
                             && (path.startsWith("/auth/google/")
                                 || java.util.Set.of(
-                                        "/auth/login",
                                         "/auth/refresh",
                                         "/auth/logout",
                                         "/auth/logout-all",

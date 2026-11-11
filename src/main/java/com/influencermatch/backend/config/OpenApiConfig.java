@@ -75,7 +75,7 @@ Enables Brand/SME users to discover creators, manage campaigns,
 track performance, and handle end-to-end collaboration workflows.
 
 **Security**: Brand registration, invited Creator registration, OTP verification, password setup, login and refresh are public. Optional Google Identity Services login is Brand-only and requires a one-time nonce and original browser cookie. Existing password accounts are not automatically linked by email. Registration requires SMTP; channel ownership is a separate Claim flow.
-Authentication POSTs require a CSRF header obtained from GET /auth/csrf. Refresh tokens are cookie-only.
+Authentication endpoints permit standard login. Session rotation (/auth/refresh) and logout require a CSRF header obtained from GET /auth/csrf. Refresh tokens are cookie-only.
 New Google Brands complete registration before any account/session is created.
 `/auth/me` and logout-all require a live session-bound JWT; logout uses the refresh cookie and CSRF, even when access JWT expired.
 Sessions expire seven days after login; rotation never extends them. Permissions come from the current database role;

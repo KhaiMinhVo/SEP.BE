@@ -6,7 +6,6 @@ import com.influencermatch.backend.campaign.model.*;
 import com.influencermatch.backend.campaign.repository.*;
 import com.influencermatch.backend.campaign.service.*;
 import com.influencermatch.backend.common.dto.*;
-import com.influencermatch.backend.creator.dto.CreatorDiscoveryFilterRequest;
 import com.influencermatch.backend.creator.dto.CreatorDiscoveryResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -125,21 +124,17 @@ public class CampaignController {
     return ok(service.retryEmbedding(id, auth));
   }
 
-  @Operation(summary = "Discover creators for a campaign with flexible filters and sorting")
+  @Operation(summary = "Discover creators for a campaign")
   @GetMapping("/campaigns/{id}/discover")
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SEARCH_CREATOR')")
   public ApiResponse<PageResponse<CreatorDiscoveryResponse>> discover(
       @PathVariable UUID id,
-      @ModelAttribute CreatorDiscoveryFilterRequest filter,
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size,
       Authentication auth) {
     return ApiResponse.ok(
         service.discoverCreators(
-            id,
-            filter,
-            PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)),
-            auth));
+            id, PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)), auth));
   }
 
   @Operation(

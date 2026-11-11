@@ -13,10 +13,7 @@ import com.influencermatch.backend.campaign.enums.*;
 import com.influencermatch.backend.campaign.model.*;
 import com.influencermatch.backend.campaign.repository.*;
 import com.influencermatch.backend.common.dto.PageResponse;
-import com.influencermatch.backend.creator.dto.CreatorDiscoveryFilterRequest;
 import com.influencermatch.backend.creator.dto.CreatorDiscoveryResponse;
-import com.influencermatch.backend.creator.enums.CreatorSourceType;
-import com.influencermatch.backend.creator.enums.FollowerFeeTier;
 import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
 import com.influencermatch.backend.creator.repository.PublicCreatorMetricSpecification;
 import com.influencermatch.backend.exception.*;
@@ -101,132 +98,92 @@ public class CampaignService {
   @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SEARCH_CREATOR')")
   public PageResponse<CreatorDiscoveryResponse> discoverCreators(
       UUID campaignId, Pageable pageable, Authentication authentication) {
-    return discoverCreators(campaignId, new CreatorDiscoveryFilterRequest(), pageable, authentication);
-  }
-
-  @Transactional(readOnly = true)
-  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SEARCH_CREATOR')")
-  public PageResponse<CreatorDiscoveryResponse> discoverCreators(
-      UUID campaignId,
-      CreatorDiscoveryFilterRequest filter,
-      Pageable pageable,
-      Authentication authentication) {
     Permissions.require(Permission.SEARCH_CREATOR);
     Campaign campaign = requireCampaign(campaignId);
     brandService.requireAccessible(campaign.getBrandProfile().getId(), authentication);
 
-    if (filter == null) {
-      filter = new CreatorDiscoveryFilterRequest();
-    }
-
-    int TARGET_CANDIDATES = 50;
+    int TARGET_CANDIDATES = 30;
     List<com.influencermatch.backend.creator.model.PublicCreatorMetric> finalCandidates =
         new ArrayList<>();
-    Set<UUID> fallbackCandidateIds = new HashSet<>();
     Set<UUID> seenCreatorIds = new HashSet<>();
     org.springframework.data.domain.PageRequest fetchPage =
-        org.springframework.data.domain.PageRequest.of(0, TARGET_CANDIDATES);
+        org.springframework.data.domain.PageRequest.of(0, TARGET_CANDIDATES, pageable.getSort());
 
-    // 1. HARD CONDITIONS: Platform & Status FRESH
-    Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> baseHardSpec =
-        Specification.where(PublicCreatorMetricSpecification.isFresh());
-    if (filter.getPlatform() != null && !filter.getPlatform().isBlank()) {
-      baseHardSpec = baseHardSpec.and(PublicCreatorMetricSpecification.hasPlatform(filter.getPlatform()));
-    } else if (campaign.getPlatforms() != null && !campaign.getPlatforms().isEmpty()) {
-      baseHardSpec = baseHardSpec.and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()));
-    }
+    // 1. Exact Match
+    Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> spec1 =
+        Specification.where(PublicCreatorMetricSpecification.isFresh())
+            .and(
+                PublicCreatorMetricSpecification.hasFollowersBetween(
+                    campaign.getFollowerMin(), campaign.getFollowerMax()))
+            .and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()))
+            .and(PublicCreatorMetricSpecification.hasNicheIn(campaign.getNiches()))
+            .and(PublicCreatorMetricSpecification.hasLocationIn(campaign.getLocations()));
 
-    // 2. SOFT / FLEXIBLE FILTERS (Manual Filter & Brief Criteria)
-    Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> exactSpec = baseHardSpec;
-
-    // Follower / Tier filter
-    if (filter.getTier() != null && !filter.getTier().isBlank()) {
-      exactSpec = exactSpec.and(PublicCreatorMetricSpecification.hasFollowerTier(filter.getTier()));
-    } else {
-      exactSpec = exactSpec.and(
-          PublicCreatorMetricSpecification.hasFollowersBetween(
-              campaign.getFollowerMin(), campaign.getFollowerMax()));
-    }
-
-    // Niche filter
-    if (filter.getNiche() != null && !filter.getNiche().isBlank()) {
-      exactSpec = exactSpec.and(PublicCreatorMetricSpecification.hasNiche(filter.getNiche()));
-    } else if (campaign.getNiches() != null && !campaign.getNiches().isEmpty()) {
-      exactSpec = exactSpec.and(PublicCreatorMetricSpecification.hasNicheIn(campaign.getNiches()));
-    }
-
-    // Location (from campaign)
-    if (campaign.getLocations() != null && !campaign.getLocations().isEmpty()) {
-      exactSpec = exactSpec.and(PublicCreatorMetricSpecification.hasLocationIn(campaign.getLocations()));
-    }
-
-    // ER filter (minEr, maxEr)
-    if (filter.getMinEr() != null || filter.getMaxEr() != null) {
-      exactSpec = exactSpec.and(
-          PublicCreatorMetricSpecification.hasEngagementRateBetween(filter.getMinEr(), filter.getMaxEr()));
-    }
-
-    // Claimed filter (OAuth)
-    if (filter.getIsClaimed() != null) {
-      exactSpec = exactSpec.and(PublicCreatorMetricSpecification.isClaimed(filter.getIsClaimed()));
-    }
-
-    // Fee range filter
-    if (filter.getMinFee() != null || filter.getMaxFee() != null) {
-      exactSpec = exactSpec.and(
-          PublicCreatorMetricSpecification.hasFeeBetween(filter.getMinFee(), filter.getMaxFee()));
-    }
-
-    // Execute Exact Match
-    List<com.influencermatch.backend.creator.model.PublicCreatorMetric> resExact =
-        metricRepository.findAll(exactSpec, fetchPage).getContent();
-    for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : resExact) {
+    List<com.influencermatch.backend.creator.model.PublicCreatorMetric> res1 =
+        metricRepository.findAll(spec1, fetchPage).getContent();
+    for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : res1) {
       if (seenCreatorIds.add(m.getCreator().getId())) {
         finalCandidates.add(m);
       }
     }
 
-    // 3. SIMILAR FALLBACK (Mục 4.1: Nếu ít kết quả thì mở rộng Similar Fallback và có đánh dấu rõ)
+    // 2. Relax Location
     if (finalCandidates.size() < TARGET_CANDIDATES) {
-      // Relax 1: Relax Location & Niche, keep hard platform + status
-      Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> fallbackSpec1 =
-          baseHardSpec.and(PublicCreatorMetricSpecification.notInCreatorIds(seenCreatorIds));
-      if (filter.getTier() != null && !filter.getTier().isBlank()) {
-        fallbackSpec1 = fallbackSpec1.and(PublicCreatorMetricSpecification.hasFollowerTier(filter.getTier()));
-      }
-      if (filter.getMinFee() != null || filter.getMaxFee() != null) {
-        fallbackSpec1 = fallbackSpec1.and(
-            PublicCreatorMetricSpecification.hasFeeBetween(filter.getMinFee(), filter.getMaxFee()));
-      }
+      Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> spec2 =
+          Specification.where(PublicCreatorMetricSpecification.isFresh())
+              .and(
+                  PublicCreatorMetricSpecification.hasFollowersBetween(
+                      campaign.getFollowerMin(), campaign.getFollowerMax()))
+              .and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()))
+              .and(PublicCreatorMetricSpecification.hasNicheIn(campaign.getNiches()))
+              .and(PublicCreatorMetricSpecification.notInCreatorIds(seenCreatorIds));
 
-      List<com.influencermatch.backend.creator.model.PublicCreatorMetric> resFallback1 =
-          metricRepository.findAll(fallbackSpec1, fetchPage).getContent();
-      for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : resFallback1) {
+      List<com.influencermatch.backend.creator.model.PublicCreatorMetric> res2 =
+          metricRepository.findAll(spec2, fetchPage).getContent();
+      for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : res2) {
         if (finalCandidates.size() >= TARGET_CANDIDATES) break;
         if (seenCreatorIds.add(m.getCreator().getId())) {
           finalCandidates.add(m);
-          fallbackCandidateIds.add(m.getCreator().getId());
         }
       }
     }
 
+    // 3. Relax Follower Range
     if (finalCandidates.size() < TARGET_CANDIDATES) {
-      // Relax 2: Relax follower tier entirely, keep hard platform + status
-      Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> fallbackSpec2 =
-          baseHardSpec.and(PublicCreatorMetricSpecification.notInCreatorIds(seenCreatorIds));
+      Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> spec3 =
+          Specification.where(PublicCreatorMetricSpecification.isFresh())
+              .and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()))
+              .and(PublicCreatorMetricSpecification.hasNicheIn(campaign.getNiches()))
+              .and(PublicCreatorMetricSpecification.notInCreatorIds(seenCreatorIds));
 
-      List<com.influencermatch.backend.creator.model.PublicCreatorMetric> resFallback2 =
-          metricRepository.findAll(fallbackSpec2, fetchPage).getContent();
-      for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : resFallback2) {
+      List<com.influencermatch.backend.creator.model.PublicCreatorMetric> res3 =
+          metricRepository.findAll(spec3, fetchPage).getContent();
+      for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : res3) {
         if (finalCandidates.size() >= TARGET_CANDIDATES) break;
         if (seenCreatorIds.add(m.getCreator().getId())) {
           finalCandidates.add(m);
-          fallbackCandidateIds.add(m.getCreator().getId());
         }
       }
     }
 
-    // 4. Batch fetch recent posts
+    // 4. Relax Niche
+    if (finalCandidates.size() < TARGET_CANDIDATES) {
+      Specification<com.influencermatch.backend.creator.model.PublicCreatorMetric> spec4 =
+          Specification.where(PublicCreatorMetricSpecification.isFresh())
+              .and(PublicCreatorMetricSpecification.hasPlatformIn(campaign.getPlatforms()))
+              .and(PublicCreatorMetricSpecification.notInCreatorIds(seenCreatorIds));
+
+      List<com.influencermatch.backend.creator.model.PublicCreatorMetric> res4 =
+          metricRepository.findAll(spec4, fetchPage).getContent();
+      for (com.influencermatch.backend.creator.model.PublicCreatorMetric m : res4) {
+        if (finalCandidates.size() >= TARGET_CANDIDATES) break;
+        if (seenCreatorIds.add(m.getCreator().getId())) {
+          finalCandidates.add(m);
+        }
+      }
+    }
+
+    // Fetch recent posts in batch to avoid N+1 query problem
     List<UUID> candidateCreatorIds =
         finalCandidates.stream().map(m -> m.getCreator().getId()).toList();
     List<com.influencermatch.backend.creator.model.Post> allPosts =
@@ -237,99 +194,44 @@ public class CampaignService {
         allPosts.stream()
             .collect(java.util.stream.Collectors.groupingBy(p -> p.getCreator().getId()));
 
-    // 5. Map to CreatorDiscoveryResponse
-    List<CreatorDiscoveryResponse> responses = new ArrayList<>();
-    for (com.influencermatch.backend.creator.model.PublicCreatorMetric metric : finalCandidates) {
-      FollowerFeeTier feeTier = FollowerFeeTier.fromFollowers(metric.getFollowers());
-      BigDecimal feeMin = metric.getEstimatedFeeMin() != null ? metric.getEstimatedFeeMin() : feeTier.getMinFee();
-      BigDecimal feeMax = metric.getEstimatedFeeMax() != null ? metric.getEstimatedFeeMax() : feeTier.getMaxFee();
-      boolean isClaimed = metric.getCreator().getSourceType() == CreatorSourceType.AUTHORIZED
-          || metric.getCreator().getAuthorizedAt() != null;
-      boolean isFallback = fallbackCandidateIds.contains(metric.getCreator().getId());
+    // Map to responses
+    List<CreatorDiscoveryResponse> responses =
+        finalCandidates.stream()
+            .map(
+                metric ->
+                    CreatorDiscoveryResponse.builder()
+                        .creatorId(metric.getCreator().getId())
+                        .platform(metric.getCreator().getPlatform())
+                        .userName(metric.getCreator().getUserName())
+                        .profileUrl(metric.getCreator().getProfileUrl())
+                        .followers(metric.getFollowers())
+                        .engagementRate(metric.getEngagementRate())
+                        .niche(metric.getNiche())
+                        .location(metric.getCreator().getLocation())
+                        .contentSummary(metric.getContentSummary())
+                        .displayName(metric.getCreator().getDisplayName())
+                        .avatarUrl(metric.getCreator().getAvatarUrl())
+                        .creatorType(metric.getCreatorType())
+                        .recentPosts(
+                            postsByCreatorId
+                                .getOrDefault(metric.getCreator().getId(), new ArrayList<>())
+                                .stream()
+                                .map(
+                                    p ->
+                                        com.influencermatch.backend.creator.dto.PostDto.builder()
+                                            .platformPostId(p.getPlatformPostId())
+                                            .postUrl(p.getPostUrl())
+                                            .caption(p.getCaption())
+                                            .views(p.getViews())
+                                            .likes(p.getLikes())
+                                            .comments(p.getComments())
+                                            .shares(p.getShares())
+                                            .postedAt(p.getPostedAt())
+                                            .build())
+                                .toList())
+                        .build())
+            .toList();
 
-      responses.add(
-          CreatorDiscoveryResponse.builder()
-              .creatorId(metric.getCreator().getId())
-              .platform(metric.getCreator().getPlatform())
-              .userName(metric.getCreator().getUserName())
-              .profileUrl(metric.getCreator().getProfileUrl())
-              .followers(metric.getFollowers())
-              .followerChange7d(metric.getFollowerChange7d())
-              .followerGrowthRate(metric.getFollowerGrowthRate())
-              .engagementRate(metric.getEngagementRate())
-              .niche(metric.getNiche())
-              .location(metric.getCreator().getLocation())
-              .contentSummary(metric.getContentSummary())
-              .displayName(metric.getCreator().getDisplayName())
-              .avatarUrl(metric.getCreator().getAvatarUrl())
-              .creatorType(metric.getCreatorType())
-              .estimatedFeeMin(feeMin)
-              .estimatedFeeMax(feeMax)
-              .actualFee(metric.getActualFee())
-              .isClaimed(isClaimed)
-              .isSimilarFallback(isFallback)
-              .recentPosts(
-                  postsByCreatorId
-                      .getOrDefault(metric.getCreator().getId(), new ArrayList<>())
-                      .stream()
-                      .map(
-                          p ->
-                              com.influencermatch.backend.creator.dto.PostDto.builder()
-                                  .platformPostId(p.getPlatformPostId())
-                                  .postUrl(p.getPostUrl())
-                                  .caption(p.getCaption())
-                                  .views(p.getViews())
-                                  .likes(p.getLikes())
-                                  .comments(p.getComments())
-                                  .shares(p.getShares())
-                                  .postedAt(p.getPostedAt())
-                                  .build())
-                      .toList())
-              .build());
-    }
-
-    // 6. SORTING (3 kiểu sort theo mục 4.2)
-    String sortBy = filter.getSortBy() != null ? filter.getSortBy().trim().toUpperCase() : "SEMANTIC_RELEVANCE";
-
-    BigDecimal budgetMin = campaign.getBudgetMin() != null ? campaign.getBudgetMin() : BigDecimal.ZERO;
-    BigDecimal budgetMax = campaign.getBudgetMax() != null ? campaign.getBudgetMax() : BigDecimal.valueOf(Double.MAX_VALUE);
-    BigDecimal targetBudgetMid = budgetMin.add(budgetMax).divide(BigDecimal.valueOf(2), 2, java.math.RoundingMode.HALF_UP);
-
-    Comparator<CreatorDiscoveryResponse> comparator;
-    if ("LOWEST_COMPARABLE_FEE".equals(sortBy)) {
-      // Ưu tiên giá chính thức lên Top, rồi so sánh Comparable Fee tăng dần
-      comparator = Comparator
-          .comparing((CreatorDiscoveryResponse r) -> r.actualFee() != null ? 0 : 1)
-          .thenComparing((CreatorDiscoveryResponse r) -> {
-            if (r.actualFee() != null) return r.actualFee();
-            return r.estimatedFeeMin().add(r.estimatedFeeMax()).divide(BigDecimal.valueOf(2), 2, java.math.RoundingMode.HALF_UP);
-          });
-    } else if ("BUDGET_FIT".equals(sortBy)) {
-      // Ưu tiên nằm trong budget [budgetMin, budgetMax], sau đó so sánh khoảng cách tới midpoint
-      comparator = Comparator
-          .comparing((CreatorDiscoveryResponse r) -> {
-            BigDecimal fee = r.actualFee() != null
-                ? r.actualFee()
-                : r.estimatedFeeMin().add(r.estimatedFeeMax()).divide(BigDecimal.valueOf(2), 2, java.math.RoundingMode.HALF_UP);
-            boolean inBudget = fee.compareTo(budgetMin) >= 0 && fee.compareTo(budgetMax) <= 0;
-            return inBudget ? 0 : 1;
-          })
-          .thenComparing((CreatorDiscoveryResponse r) -> {
-            BigDecimal fee = r.actualFee() != null
-                ? r.actualFee()
-                : r.estimatedFeeMin().add(r.estimatedFeeMax()).divide(BigDecimal.valueOf(2), 2, java.math.RoundingMode.HALF_UP);
-            return fee.subtract(targetBudgetMid).abs();
-          });
-    } else {
-      // SEMANTIC_RELEVANCE (hoặc mặc định): Ưu tiên Exact Match lên trước Fallback, sau đó sort theo ER giảm dần
-      comparator = Comparator
-          .comparing((CreatorDiscoveryResponse r) -> Boolean.TRUE.equals(r.isSimilarFallback()) ? 1 : 0)
-          .thenComparing((CreatorDiscoveryResponse r) -> r.engagementRate() != null ? r.engagementRate() : BigDecimal.ZERO, Comparator.reverseOrder());
-    }
-
-    responses.sort(comparator);
-
-    // 7. Slicing pagination
     int start = (int) pageable.getOffset();
     int end = Math.min((start + pageable.getPageSize()), responses.size());
     List<CreatorDiscoveryResponse> pagedResponses =

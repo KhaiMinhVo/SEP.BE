@@ -61,39 +61,6 @@ public class DataQualityService {
     return after;
   }
 
-  @Transactional
-  public QualityItem reject(UUID id, RejectRequest request) {
-    Permissions.require(Permission.REVIEW_CREATOR_CLASSIFICATION);
-    if (request != null) {
-      var violations = validator.validate(request);
-      if (!violations.isEmpty()) throw new ConstraintViolationException(violations);
-    }
-    UUID creatorId = metrics.creatorId(id).orElseThrow(() -> new NotFoundException("Metric not found"));
-    creators.findLockedById(creatorId).orElseThrow(() -> new NotFoundException("Creator not found"));
-    PublicCreatorMetric metric = metrics.findLocked(id).orElseThrow(() -> new NotFoundException("Metric not found"));
-    em.refresh(metric);
-    var latest = metrics.findFirstByCreatorIdOrderByCollectedAtDescIdDesc(creatorId);
-    if (latest.isEmpty() || !latest.get().getId().equals(id) || !"KOC".equals(metric.getCreatorType())
-        || metric.getDataConfidence() == null || metric.getDataConfidence().compareTo(new BigDecimal("0.7")) >= 0
-        || metric.getQualityReviewedAt() != null) {
-      throw new ConflictException(ErrorCode.DATA_QUALITY_REVIEW_CONFLICT, "Snapshot is no longer pending review");
-    }
-    QualityItem before = item(metric);
-    String newType = (request != null && request.reclassifiedType() != null && !request.reclassifiedType().isBlank())
-        ? request.reclassifiedType()
-        : "REJECTED";
-    metric.setCreatorType(newType);
-    metric.setQualityReviewedBy(Permissions.actor());
-    metric.setQualityReviewedAt(LocalDateTime.now());
-    metrics.flush();
-    QualityItem after = item(metric);
-    String reason = (request != null && request.reason() != null && !request.reason().isBlank())
-        ? request.reason()
-        : "Human rejected KOC classification";
-    audit.record("REJECT_DATA_QUALITY", "PublicCreatorMetric", id, before, after, reason);
-    return after;
-  }
-
   private QualityItem item(PublicCreatorMetric metric) {
     var c = metric.getCreator();
     return new QualityItem(metric.getId(), c.getId(), c.getPlatform(), c.getUserName(), c.getDisplayName(),

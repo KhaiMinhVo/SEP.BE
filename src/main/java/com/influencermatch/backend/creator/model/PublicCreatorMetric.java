@@ -36,15 +36,6 @@ public class PublicCreatorMetric {
 
   private Long followers;
 
-  @Column(name = "previous_followers")
-  private Long previousFollowers;
-
-  @Column(name = "follower_change_7d")
-  private Long followerChange7d;
-
-  @Column(name = "follower_growth_rate", precision = 7, scale = 2)
-  private BigDecimal followerGrowthRate;
-
   @Column(name = "avg_views", precision = 19, scale = 2)
   private BigDecimal avgViews;
 
@@ -90,15 +81,6 @@ public class PublicCreatorMetric {
 
   @Column(length = 120)
   private String category;
-
-  @Column(name = "estimated_fee_min", precision = 19, scale = 2)
-  private BigDecimal estimatedFeeMin;
-
-  @Column(name = "estimated_fee_max", precision = 19, scale = 2)
-  private BigDecimal estimatedFeeMax;
-
-  @Column(name = "actual_fee", precision = 19, scale = 2)
-  private BigDecimal actualFee;
   
   // Maps the TSVECTOR column to JPA for use in Criteria API search queries
   @Column(name = "search_vector", columnDefinition = "tsvector", insertable = false, updatable = false)

@@ -14,15 +14,6 @@ public final class DataQualityDtos {
     public ApproveRequest { niche = niche == null ? null : niche.trim(); }
   }
 
-  public record RejectRequest(
-      @Size(max = 255) String reason,
-      @Size(max = 50) String reclassifiedType) {
-    public RejectRequest {
-      reason = reason == null ? null : reason.trim();
-      reclassifiedType = reclassifiedType == null ? null : reclassifiedType.trim().toUpperCase();
-    }
-  }
-
   public record QualityItem(UUID metricId, UUID creatorId, String platform, String userName,
       String displayName, String profileUrl, String niche, String contentSummary,
       BigDecimal dataConfidence, LocalDateTime collectedAt, UUID qualityReviewedBy,

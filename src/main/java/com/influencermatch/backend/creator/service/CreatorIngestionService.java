@@ -151,25 +151,6 @@ public class CreatorIngestionService {
             .findByCreatorId(savedCreator.getId())
             .orElseGet(() -> PublicCreatorMetric.builder().creator(savedCreator).build());
 
-    // Tính toán độ tăng trưởng follower (Follower Growth Tracking)
-    Long oldFollowers = metric.getFollowers();
-    Long newFollowers = request.getFollowers();
-    if (oldFollowers != null && newFollowers != null && oldFollowers > 0) {
-      long delta = newFollowers - oldFollowers;
-      metric.setPreviousFollowers(oldFollowers);
-      metric.setFollowerChange7d(delta);
-      double growth = ((double) delta / oldFollowers) * 100.0;
-      metric.setFollowerGrowthRate(java.math.BigDecimal.valueOf(growth).setScale(2, java.math.RoundingMode.HALF_UP));
-    } else if (request.getFollowerChange7d() != null) {
-      metric.setPreviousFollowers(request.getPreviousFollowers());
-      metric.setFollowerChange7d(request.getFollowerChange7d());
-      metric.setFollowerGrowthRate(request.getFollowerGrowthRate());
-    } else if (metric.getFollowers() == null && newFollowers != null) {
-      metric.setPreviousFollowers(newFollowers);
-      metric.setFollowerChange7d(0L);
-      metric.setFollowerGrowthRate(java.math.BigDecimal.ZERO);
-    }
-
     metric.setFollowers(request.getFollowers());
     metric.setAvgViews(request.getAvgViews());
     metric.setAvgLikes(request.getAvgLikes());
@@ -187,19 +168,6 @@ public class CreatorIngestionService {
     metric.setDataConfidence(request.getDataConfidence());
     metric.setContact(request.getContact());
     metric.setCategory(request.getCategory());
-
-    // Fee Benchmark (Declarative fallback if crawler didn't supply)
-    if (request.getEstimatedFeeMin() != null && request.getEstimatedFeeMax() != null) {
-      metric.setEstimatedFeeMin(request.getEstimatedFeeMin());
-      metric.setEstimatedFeeMax(request.getEstimatedFeeMax());
-    } else {
-      FollowerFeeTier feeTier = FollowerFeeTier.fromFollowers(request.getFollowers());
-      metric.setEstimatedFeeMin(feeTier.getMinFee());
-      metric.setEstimatedFeeMax(feeTier.getMaxFee());
-    }
-    if (request.getActualFee() != null) {
-      metric.setActualFee(request.getActualFee());
-    }
 
     metric = metricRepository.save(metric);
 

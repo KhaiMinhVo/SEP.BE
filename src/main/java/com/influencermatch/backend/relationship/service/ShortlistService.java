@@ -13,8 +13,6 @@ public interface ShortlistService {
 
   ShortlistItemDto addCreatorToShortlist(UUID campaignId, AddShortlistItemRequest request);
 
-  List<ShortlistItemDto> batchAddCreatorsToShortlist(UUID campaignId, BatchAddShortlistItemRequest request);
-
   Page<ShortlistItemDto> getShortlistByCampaign(UUID campaignId, Pageable pageable);
 
   Page<ShortlistItemDto> getShortlistByCampaign(

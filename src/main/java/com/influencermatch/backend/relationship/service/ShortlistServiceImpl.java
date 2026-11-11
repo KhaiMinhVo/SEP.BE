@@ -162,30 +162,6 @@ public class ShortlistServiceImpl implements ShortlistService {
   }
 
   @Override
-  @Transactional
-  public List<ShortlistItemDto> batchAddCreatorsToShortlist(
-      UUID campaignId, BatchAddShortlistItemRequest request) {
-    if (request == null || request.getCreatorIds() == null || request.getCreatorIds().isEmpty()) {
-      return List.of();
-    }
-    List<ShortlistItemDto> results = new ArrayList<>();
-    for (UUID creatorId : request.getCreatorIds()) {
-      if (creatorId != null) {
-        AddShortlistItemRequest singleRequest =
-            AddShortlistItemRequest.builder()
-                .creatorId(creatorId)
-                .priority(request.getPriority())
-                .note(request.getNote())
-                .source(request.getSource())
-                .recommendationRunId(request.getRecommendationRunId())
-                .build();
-        results.add(addCreatorToShortlist(campaignId, singleRequest));
-      }
-    }
-    return results;
-  }
-
-  @Override
   public BatchAddShortlistResponse addBatch(UUID id, BatchAddShortlistRequest request) {
     writer.preflight(id);
     if (request == null

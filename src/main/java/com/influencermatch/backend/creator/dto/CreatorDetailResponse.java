@@ -29,9 +29,6 @@ public class CreatorDetailResponse {
 
     // Metrics
     private Long followers;
-    private Long previousFollowers;
-    private Long followerChange7d;
-    private BigDecimal followerGrowthRate;
     private BigDecimal avgViews;
     private BigDecimal avgLikes;
     private BigDecimal avgComments;
@@ -40,9 +37,6 @@ public class CreatorDetailResponse {
     private String niche;
     private String category;
     private String contentSummary;
-    private BigDecimal estimatedFeeMin;
-    private BigDecimal estimatedFeeMax;
-    private BigDecimal actualFee;
 
     // Recent Posts
     private List<PostDto> recentPosts;

@@ -137,8 +137,8 @@ VALUES ('10000000-0000-0000-0000-000000000007','10000000-0000-0000-0000-00000000
           Flyway.configure()
               .dataSource(fresh.getJdbcUrl(), fresh.getUsername(), fresh.getPassword())
               .load();
-      assertThat(flyway.migrate().migrationsExecuted).isEqualTo(32);
-      assertThat(flyway.info().current().getVersion().toString()).isEqualTo("33");
+      assertThat(flyway.migrate().migrationsExecuted).isEqualTo(33);
+      assertThat(flyway.info().current().getVersion().toString()).isEqualTo("34");
       assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
       assertThat(jdbc.queryForObject("select execution_source from collaboration where id='10000000-0000-0000-0000-000000000006'",String.class)).isEqualTo("LEGACY");
       assertThat(jdbc.queryForObject("select count(*) from collaboration_deliverable where collaboration_id='10000000-0000-0000-0000-000000000006'",Long.class)).isZero();

@@ -1,4 +1,4 @@
--- Migration V20: Add Creator Fee Columns and Discovery Keyword Management
+-- Migration V34: Add Creator Fee Columns and Discovery Keyword Management
 
 -- 1. Add fee columns to public_creator_metric
 ALTER TABLE public_creator_metric

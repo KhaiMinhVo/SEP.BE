@@ -11,6 +11,8 @@ public record CreatorDiscoveryResponse(
     String userName,
     String profileUrl,
     Long followers,
+    Long followerChange7d,
+    BigDecimal followerGrowthRate,
     BigDecimal engagementRate,
     String niche,
     String location,
@@ -18,5 +20,10 @@ public record CreatorDiscoveryResponse(
     String displayName,
     String avatarUrl,
     String creatorType,
+    BigDecimal estimatedFeeMin,
+    BigDecimal estimatedFeeMax,
+    BigDecimal actualFee,
+    Boolean isClaimed,
+    Boolean isSimilarFallback,
     java.util.List<PostDto> recentPosts
 ) {}

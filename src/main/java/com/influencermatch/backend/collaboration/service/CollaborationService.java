@@ -35,7 +35,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
+@RequiredArgsConstructor(onConstructor_ = {@org.springframework.beans.factory.annotation.Autowired})
 public class CollaborationService {
   private final CampaignRepository campaigns;
   private final BrandCreatorRelationshipRepository relationships;

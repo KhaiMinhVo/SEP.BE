@@ -67,6 +67,18 @@ public class ShortlistController {
   }
 
   @Operation(
+      summary = "Batch add creators to campaign shortlist",
+      security = @SecurityRequirement(name = "BearerAuth"))
+  @PostMapping("/batch-add")
+  @PreAuthorize("hasAuthority('MANAGE_OWN_SHORTLIST')")
+  public ResponseEntity<ApiResponse<List<ShortlistItemDto>>> batchAddCreatorsToShortlist(
+      @PathVariable UUID campaignId,
+      @Valid @RequestBody BatchAddShortlistItemRequest request) {
+    List<ShortlistItemDto> dtos = shortlistService.batchAddCreatorsToShortlist(campaignId, request);
+    return ResponseEntity.ok(ApiResponse.ok("Đã thêm các ứng viên vào Shortlist", dtos));
+  }
+
+  @Operation(
       summary = "Get shortlist for a campaign with optional filtering",
       security = @SecurityRequirement(name = "BearerAuth"))
   @GetMapping

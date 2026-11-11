@@ -33,4 +33,10 @@ public class DataQualityController {
   public ApiResponse<QualityItem> approve(@PathVariable UUID id, @Valid @RequestBody ApproveRequest request) {
     return ApiResponse.ok(service.approve(id, request));
   }
+
+  @PutMapping("/{id}/reject")
+  @Operation(summary = "Reject a pending metric snapshot", description = "id is metricId. Reclassifies creator (e.g. BRAND, REJECTED) and records decision in audit log. Excluded from Discovery.")
+  public ApiResponse<QualityItem> reject(@PathVariable UUID id, @Valid @RequestBody(required = false) RejectRequest request) {
+    return ApiResponse.ok(service.reject(id, request != null ? request : new RejectRequest(null, null)));
+  }
 }

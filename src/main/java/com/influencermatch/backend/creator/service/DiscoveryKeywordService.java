@@ -94,15 +94,6 @@ public class DiscoveryKeywordService {
   }
 
   @Transactional
-  public DiscoveryKeywordDto toggleKeyword(UUID id) {
-    DiscoveryKeyword entity = keywordRepository.findById(id)
-        .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy từ khóa: " + id));
-
-    entity.setIsActive(!Boolean.TRUE.equals(entity.getIsActive()));
-    return mapToDto(keywordRepository.save(entity));
-  }
-
-  @Transactional
   public void deleteKeyword(UUID id) {
     if (!keywordRepository.existsById(id)) {
       throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy từ khóa: " + id);

@@ -13,9 +13,9 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/admin/data-quality")
+@RequestMapping({"/data/quality", "/data/data-quality", "/admin/data-quality"})
 @RequiredArgsConstructor
-@Tag(name = "Data Quality")
+@Tag(name = "Data Quality", description = "Luồng DM-03: Thẩm định chất lượng Creator cho Data Manager")
 @SecurityRequirement(name = "BearerAuth")
 @PreAuthorize("hasAuthority('REVIEW_CREATOR_CLASSIFICATION')")
 public class DataQualityController {

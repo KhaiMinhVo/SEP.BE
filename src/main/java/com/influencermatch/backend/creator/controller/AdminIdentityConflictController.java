@@ -20,9 +20,9 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/admin/creator-conflicts")
+@RequestMapping({"/data/creator-conflicts", "/admin/creator-conflicts"})
 @RequiredArgsConstructor
-@Tag(name = "Admin Creator Identity Conflicts")
+@Tag(name = "Data Creator Identity Conflicts", description = "Luồng DM-03 / DM-04: Xử lý xung đột danh tính và trùng lặp KOC")
 @SecurityRequirement(name = "BearerAuth")
 public class AdminIdentityConflictController {
 

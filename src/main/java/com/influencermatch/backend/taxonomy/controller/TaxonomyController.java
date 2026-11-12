@@ -1,29 +1,22 @@
 package com.influencermatch.backend.taxonomy.controller;
 
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
+import com.influencermatch.backend.taxonomy.service.NicheService;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
-
 @RestController
 @RequestMapping("/taxonomies")
+@RequiredArgsConstructor
 public class TaxonomyController {
+  private final NicheService service;
 
-    @PersistenceContext
-    private EntityManager entityManager;
-
-    @GetMapping("/niches")
-    @SuppressWarnings("unchecked")
-    public ResponseEntity<List<String>> getNiches() {
-        // Lay danh sach cac Niche co thuc trong bang public_creator_metric (M2)
-        List<String> niches = entityManager.createQuery(
-                "SELECT DISTINCT p.niche FROM PublicCreatorMetric p WHERE p.niche IS NOT NULL ORDER BY p.niche ASC"
-        ).getResultList();
-        
-        return ResponseEntity.ok(niches);
-    }
+  // Preserve the existing string[] contract for discovery clients.
+  @GetMapping("/niches")
+  public ResponseEntity<List<String>> getNiches() {
+    return ResponseEntity.ok(service.activeNames());
+  }
 }

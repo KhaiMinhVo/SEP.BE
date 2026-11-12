@@ -32,7 +32,6 @@ import org.testcontainers.utility.DockerImageName;
       "application.bootstrap-admin.enabled=false",
       "application.oauth2.google.enabled=false",
       "application.auth.creator-mock.enabled=false",
-      "application.payment.mock.enabled=false",
       "application.claim-email.dispatch-enabled=false",
       "application.meta.cleanup-enabled=false",
       "application.tiktok.cleanup-enabled=false",

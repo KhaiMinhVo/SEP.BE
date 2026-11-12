@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class CorrelationIdFilter implements Filter {
   public static final String HEADER = "X-Correlation-ID";
-  private static final Pattern SAFE = Pattern.compile("[A-Za-z0-9._-]{1,128}");
+  private static final Pattern SAFE = Pattern.compile("^[A-Za-z0-9_-]{8,64}$");
 
   @Override
   public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)

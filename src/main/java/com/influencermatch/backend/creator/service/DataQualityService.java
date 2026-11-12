@@ -57,7 +57,7 @@ public class DataQualityService {
     metric.setQualityReviewedAt(LocalDateTime.now());
     metrics.flush();
     QualityItem after = item(metric);
-    audit.record("APPROVE_DATA_QUALITY", "PublicCreatorMetric", id, before, after, "Human reviewed KOC classification");
+    audit.record("APPROVE_DATA_QUALITY", "PublicCreatorMetric", id, before, after, "Phê duyệt thẩm định thủ công phân loại KOC");
     return after;
   }
 

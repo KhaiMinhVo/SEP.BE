@@ -58,6 +58,10 @@ public class Collaboration {
   private LocalDateTime completedAt;
   private String note;
 
+  @Column(name = "confirmation_source", length = 64, nullable = false)
+  @Builder.Default
+  private String confirmationSource = "BRAND_RECORDED_EXTERNAL";
+
   @Enumerated(EnumType.STRING)
   @Column(length = 32)
   private CollaborationPaymentStatus paymentStatus;

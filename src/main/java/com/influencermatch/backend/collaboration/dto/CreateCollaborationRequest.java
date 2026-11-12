@@ -8,7 +8,7 @@ import java.util.UUID;
 
 public record CreateCollaborationRequest(
     @NotNull UUID relationshipId,
-    @Positive @Digits(integer = 17, fraction = 2) BigDecimal agreedFee,
+    @PositiveOrZero @Digits(integer = 17, fraction = 2) BigDecimal agreedFee,
     @Pattern(regexp = "^[A-Z]{3}$") @Schema(example = "VND") String currency,
     @Size(max = 2000) String note,
     UUID dealId,

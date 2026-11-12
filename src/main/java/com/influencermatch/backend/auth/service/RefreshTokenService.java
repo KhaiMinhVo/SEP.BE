@@ -10,9 +10,11 @@ import java.security.*;
 import java.time.*;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class RefreshTokenService {
@@ -48,6 +50,10 @@ public class RefreshTokenService {
     var old = tokens.findByTokenHash(hash(raw)).orElseThrow(this::invalid);
     Instant now = sessions.now();
     if (old.getRevokedAt() != null) {
+      log.warn(
+          "SECURITY ALERT: Refresh token replay detected for userId='{}', revoked tokenId='{}'. Revoking all active user sessions.",
+          user.getId(),
+          old.getId());
       sessions.revokeAll(user.getId());
       user.setAuthVersion(user.getAuthVersion() + 1);
       throw new RefreshTokenReplayException();

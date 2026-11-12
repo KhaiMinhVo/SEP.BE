@@ -115,6 +115,7 @@ public class SecurityConfig {
                                         "/auth/refresh",
                                         "/auth/logout",
                                         "/auth/logout-all",
+                                        "/auth/change-password",
                                         "/auth/dev/creator-login")
                                     .contains(path));
                       });

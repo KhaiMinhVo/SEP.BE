@@ -1,0 +1,143 @@
+[
+  {
+    "id": "01-state-campaign",
+    "title": "Campaign Lifecycle",
+    "basis": "FE-02; UC17; Brand screens 9-11; FE-10.7",
+    "classification": "SRS state names | SDD transition and closure rules proposed",
+    "summary": "Vòng đời Campaign: nháp, hoạt động, hoàn tất, hủy và lưu trữ; tách việc chạy AI khỏi trạng thái chiến dịch.",
+    "extended": false,
+    "notes": [
+      "Archive is not deletion.\nArchiving M3 snapshots does not\nautomatically archive the Campaign."
+    ]
+  },
+  {
+    "id": "02-state-relationship",
+    "title": "Brand-Creator Relationship",
+    "basis": "FE-07.4; UC36; LI-19; LI-22",
+    "classification": "Core SRS relationship states | SDD transition guards proposed",
+    "summary": "CRM cơ bản theo FE-07: SHORTLISTED → CONTACTED → COLLABORATING → COMPLETED; có nhánh không hợp tác.",
+    "extended": false,
+    "notes": [
+      "The Brand records external interactions.\nThe system does not infer a reply,\nacceptance or agreement automatically.",
+      "This machine tracks one relationship\nwithin one campaign, not ShortlistItem membership.\nRemoving a shortlist item does not\nerase collaboration history or create M1."
+    ]
+  },
+  {
+    "id": "03-state-collaboration",
+    "title": "Collaboration and Outcome",
+    "basis": "FE-08; UC39, UC41-44; FE-10; Registration section 4",
+    "classification": "Core business lifecycle | State labels normalized for SDD; cancellation rules proposed",
+    "summary": "Vòng đời hợp tác cơ bản; hoàn tất hợp tác, gửi review và xác thực dữ liệu học là các việc khác nhau.",
+    "extended": false,
+    "notes": [
+      "Completion does not imply a review exists\nor that historical evidence is validated.\nLearning is requested separately after\nCampaign completion and evidence validation.\nMissing KPI or fee data remains unknown.",
+      "This is the basic recording workflow.\nContent submission / approval states\nare shown separately in appendix A1."
+    ]
+  },
+  {
+    "id": "04-state-user-account",
+    "title": "User Account Status",
+    "basis": "FE-11.1-3; Admin screens 6-7; Registration section 4.1",
+    "classification": "SRS account status names | Suspension and restoration rules proposed",
+    "summary": "ACTIVE, LOCKED, SUSPENDED theo phần màn hình quản trị; không trộn trạng thái đăng nhập vào vòng đời tài khoản.",
+    "extended": false,
+    "notes": [
+      "Account status is separate from role,\nemail verification and login session state.\nLocking or suspension should invalidate sessions\nand retain campaign and audit history."
+    ]
+  },
+  {
+    "id": "05-state-creator-claim",
+    "title": "Creator Ownership Claim",
+    "basis": "Registration section 4.3; CreatorClaimStatus; CreatorClaimService",
+    "classification": "Registration requires claiming | Manual review states refined from current Java code",
+    "summary": "Claim thủ công theo yêu cầu xác minh Creator của bản đăng ký; trạng thái và điều kiện được làm rõ bằng code hiện có.",
+    "extended": false,
+    "notes": [
+      "The claim remains approved until revoked.\nOwnership is not transferred by matching\nan email, display name or social handle.",
+      "This is a manual Claim request, not an OAuth session\nor an account-registration invitation.\nA rejected/revoked request remains historical;\na later claim is a new request."
+    ]
+  },
+  {
+    "id": "06-state-subscription",
+    "title": "Brand Subscription",
+    "basis": "UC47-49; Brand Plans / Upgrade; Registration section 4.1-2",
+    "classification": "Document-led subscription lifecycle | Expiry and cancellation policy proposed",
+    "summary": "Gói trả phí chỉ kích hoạt khi xác nhận thanh toán thành công; hết quota không đồng nghĩa hết hạn gói.",
+    "extended": false,
+    "notes": [
+      "Quota exhaustion does not change status.\nQuota and permissions are separate checks.\nThis design uses immediate cancellation;\nthe documents do not define the exact policy.",
+      "Renewal or upgrade creates a new subscription\nunder the applicable billing policy.\nThe old record is retained for history."
+    ]
+  },
+  {
+    "id": "07-state-payment",
+    "title": "Subscription Payment",
+    "basis": "UC47; Admin Transaction / Refund screens; Registration section 4.2",
+    "classification": "SRS names: PENDING / SUCCESS / FAILED / REFUNDED | Refund rules proposed",
+    "summary": "Thanh toán gói theo tên trạng thái trong SRS; retry tạo giao dịch mới, callback lặp không kích hoạt gói lần nữa.",
+    "extended": false,
+    "notes": [
+      "A browser redirect alone is not payment proof.\nVerify reference, amount and gateway authenticity.\nRetry after FAILED creates a new Payment;\nthe previous transaction is not reset.",
+      "This is payment for a subscription.\nCreator fees are recorded separately;\nthe platform does not perform Creator payouts."
+    ]
+  },
+  {
+    "id": "08-state-collection-job",
+    "title": "Creator Data Collection Job",
+    "basis": "FE-04.5, FE-04.12-13; UC71-73; Admin Collection Job screens",
+    "classification": "SDD job-state proposal | Retry, rate limiting and cancellation derived from document functions",
+    "summary": "Job thu thập dữ liệu có retry/rate limit; lỗi refresh giữ nguyên snapshot hợp lệ trước đó.",
+    "extended": false,
+    "notes": [
+      "A failed refresh must not erase or overwrite\nthe latest successfully collected Creator data.\nAttempt history and errors remain traceable.",
+      "Job status differs from data freshness.\nA successful snapshot can later become STALE;\nthe finished job remains SUCCEEDED."
+    ]
+  },
+  {
+    "id": "09-state-recommendation-run",
+    "title": "Recommendation Run",
+    "basis": "FE-05.1-11; LI-12, LI-15; Recommendation Run Persistence",
+    "classification": "Proposed execution lifecycle | No complete RecommendationRun implementation in this repository",
+    "summary": "Vòng đời một lần chạy recommendation; các bước lọc/chấm điểm là hoạt động bên trong RUNNING, không phải trạng thái Campaign.",
+    "extended": false,
+    "notes": [
+      "Missing M1 does not automatically reject a Creator.\nReflect missing evidence in confidence.\nNever invent metrics, fees or outcomes.\nNo eligible candidate is a valid empty result,\nnot necessarily a technical failure.",
+      "A retry or changed brief creates a new run.\nCompleted runs retain their original versions;\nlater Campaign changes do not rewrite them."
+    ]
+  },
+  {
+    "id": "10-state-post-campaign-learning",
+    "title": "Post-Campaign Learning Job",
+    "basis": "FE-09.6; FE-10.1-8; UC74-77; LI-20-21",
+    "classification": "Proposed learning-job lifecycle | Evidence policy and retry rules require SDD agreement",
+    "summary": "Job học sau chiến dịch: thiếu bằng chứng thì chờ, chỉ sử dụng dữ liệu đã xác thực; không ghi đè Brand Profile bằng suy luận.",
+    "extended": false,
+    "notes": [
+      "Missing evidence is not fabricated.\nDo not require every optional KPI or review:\nuse validated facts that are actually available.",
+      "Learned M4 must not overwrite explicit Brand Profile.\nCurrent M3 takes precedence over learned preferences.\nShortlisting or contacting alone never triggers learning."
+    ]
+  },
+  {
+    "id": "A1-state-content-collaboration",
+    "title": "Extended Collaboration: Content Approval",
+    "basis": "Brand screens 22-23; broader than FE-08 core workflow",
+    "classification": "OPTIONAL SRS SCREEN VARIANT | Not the implemented collaboration state machine",
+    "summary": "Phụ lục: vòng đời duyệt nội dung từ phần mô tả màn hình; chỉ dùng nếu nhóm chọn phạm vi mở rộng.",
+    "extended": true,
+    "notes": [
+      "Use this variant only if the team adopts\nCreator-side submissions and content approval.\nThe core scope and exclusions do not consistently\ninclude this workflow. It replaces diagram 03,\nrather than adding states silently to its enum."
+    ]
+  },
+  {
+    "id": "A2-state-collaboration-invitation",
+    "title": "Extended Collaboration Invitation",
+    "basis": "Brand screen 21; conflicts with EX-02 marketplace exclusion",
+    "classification": "OPTIONAL SRS SCREEN VARIANT | Distinct from Creator claim or registration invitations",
+    "summary": "Phụ lục: lời mời hợp tác theo màn hình; khác hoàn toàn lời mời claim kênh hay mời đăng ký Creator.",
+    "extended": true,
+    "notes": [
+      "This is an offer to join a Campaign.\nIt is not creator.model.CreatorInvitation\n(channel ownership claim) or\nauth.model.CreatorRegistrationInvitation.\nThe three invitation lifecycles are separate.",
+      "Do not use this variant in the basic external-contact MVP.\nThe documents must first agree on in-platform acceptance."
+    ]
+  }
+]

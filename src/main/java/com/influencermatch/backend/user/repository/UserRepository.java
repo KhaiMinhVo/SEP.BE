@@ -1,0 +1,37 @@
+package com.influencermatch.backend.user.repository;
+
+import com.influencermatch.backend.user.controller.*;
+import com.influencermatch.backend.user.enums.*;
+import com.influencermatch.backend.user.model.*;
+import com.influencermatch.backend.user.model.User;
+import com.influencermatch.backend.user.service.*;
+import java.util.Optional;
+import java.util.UUID;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface UserRepository extends JpaRepository<User, UUID>, org.springframework.data.jpa.repository.JpaSpecificationExecutor<User> {
+
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @org.springframework.data.jpa.repository.Query("select u from User u where u.id=:id")
+  Optional<User> findLockedById(@org.springframework.data.repository.query.Param("id") UUID id);
+
+  Optional<User> findByEmail(String email);
+
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @org.springframework.data.jpa.repository.Query("select u from User u where u.email=:email")
+  Optional<User> findLockedByEmail(@org.springframework.data.repository.query.Param("email") String email);
+
+  @org.springframework.data.jpa.repository.Query(value="select pg_advisory_xact_lock(hashtextextended(cast(:email as text), 391))", nativeQuery=true)
+  void lockRegistrationEmail(@org.springframework.data.repository.query.Param("email") String email);
+
+  boolean existsByEmail(String email);
+
+  long countByRoleAndStatus(Role role, com.influencermatch.backend.user.enums.UserStatus status);
+
+  @org.springframework.data.jpa.repository.Query(
+      value = "SELECT id FROM rbac_guard WHERE id=1 FOR UPDATE",
+      nativeQuery = true)
+  Integer lockRoleChanges();
+}

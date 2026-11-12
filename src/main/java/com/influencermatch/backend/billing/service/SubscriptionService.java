@@ -1,0 +1,230 @@
+package com.influencermatch.backend.billing.service;
+
+import com.influencermatch.backend.audit.service.AuditService;
+import com.influencermatch.backend.billing.dto.SubscriptionDTOs;
+import com.influencermatch.backend.billing.enums.*;
+import com.influencermatch.backend.billing.model.*;
+import com.influencermatch.backend.billing.repository.*;
+import com.influencermatch.backend.brand.model.BrandProfile;
+import com.influencermatch.backend.brand.repository.BrandProfileRepository;
+import com.influencermatch.backend.exception.*;
+import com.influencermatch.backend.security.permission.*;
+import java.time.LocalDate;
+import java.util.*;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class SubscriptionService {
+  private final SubscriptionRepository subscriptionRepository;
+  private final PlanService planService;
+  private final PlanRepository planRepository;
+  private final BrandProfileRepository brandProfileRepository;
+  private final AuditService audit;
+  private final jakarta.persistence.EntityManager entityManager;
+
+  @Transactional
+  public SubscriptionDTOs.SubscriptionResponse subscribeBrandToPlan(
+      SubscriptionDTOs.SubscriptionCreateRequest request) {
+    Permissions.require(Permission.MANAGE_OWN_SUBSCRIPTION, Permission.MANAGE_SUBSCRIPTION);
+    BrandProfile brand =
+        brandProfileRepository
+            .lockForBilling(request.getBrandId())
+            .orElseThrow(
+                () -> new ResourceNotFoundException("BrandProfile", "id", request.getBrandId()));
+    requireOwnerOrAdmin(brand);
+    Plan plan = planService.findPlanEntityById(request.getPlanId());
+    if (plan.getStatus() != PlanStatus.ACTIVE)
+      throw new ConflictException(ErrorCode.SUBSCRIPTION_CONFLICT, "Plan is inactive");
+    if (!Permissions.has(Permission.MANAGE_SUBSCRIPTION) && plan.getPrice().signum() > 0)
+      throw new ConflictException(
+          ErrorCode.PAID_PLAN_REQUIRES_PAYMENT, "Use /billing/subscribe for paid plans");
+    if (subscriptionRepository.existsByBrandProfileIdAndStatusAndExpirationDateGreaterThanEqual(
+        brand.getId(), SubscriptionStatus.ACTIVE, LocalDate.now()))
+      throw new ConflictException(
+          ErrorCode.SUBSCRIPTION_CONFLICT, "An active subscription already exists");
+
+    // Chỉ cho phép sử dụng gói Dùng thử (Trial/Free) đúng 1 lần duy nhất trong lịch sử Brand
+    boolean isTrialOrFree =
+        plan.getPrice().signum() == 0
+            || (plan.getPlanName() != null
+                && (plan.getPlanName().equalsIgnoreCase("FREE")
+                    || plan.getPlanName().toLowerCase().contains("trial")
+                    || plan.getPlanName().toLowerCase().contains("free")));
+
+    if (isTrialOrFree) {
+      List<Subscription> history = subscriptionRepository.findByBrandProfileId(brand.getId());
+      boolean alreadyUsedTrial =
+          history != null
+              && history.stream()
+                  .anyMatch(
+                      s ->
+                          s.getPlan() != null
+                              && (s.getPlan().getPrice().signum() == 0
+                                  || (s.getPlan().getPlanName() != null
+                                      && (s.getPlan().getPlanName().equalsIgnoreCase("FREE")
+                                          || s.getPlan().getPlanName().toLowerCase().contains("trial")
+                                          || s.getPlan().getPlanName().toLowerCase().contains("free")))));
+
+      if (alreadyUsedTrial) {
+        throw new ConflictException(
+            ErrorCode.SUBSCRIPTION_CONFLICT,
+            "Tài khoản của bạn đã từng sử dụng gói Dùng thử (Trial). Vui lòng nâng cấp lên gói trả phí.");
+      }
+    }
+    Subscription sub =
+        subscriptionRepository.save(
+            Subscription.builder()
+                .brandProfile(brand)
+                .plan(plan)
+                .startDate(LocalDate.now())
+                .expirationDate(LocalDate.now().plusDays(plan.getDurationDays()))
+                .status(SubscriptionStatus.ACTIVE)
+                .usedCampaignQuota(0)
+                .usedRecommendationQuota(0)
+                .usedRefreshQuota(0)
+                .build());
+    if (Permissions.has(Permission.MANAGE_SUBSCRIPTION))
+      audit.record(
+          "CREATE_SUBSCRIPTION",
+          "Subscription",
+          sub.getId(),
+          null,
+          toResponse(sub),
+          "Quản trị viên khởi tạo gói đăng ký dịch vụ");
+    return toResponse(sub);
+  }
+
+  @Transactional(readOnly = true)
+  public List<SubscriptionDTOs.SubscriptionResponse> getSubscriptionsForBrand(UUID brandId) {
+    Permissions.require(Permission.MANAGE_OWN_SUBSCRIPTION, Permission.MANAGE_SUBSCRIPTION);
+    var brand =
+        brandProfileRepository
+            .findById(brandId)
+            .orElseThrow(() -> new ResourceNotFoundException("BrandProfile", "id", brandId));
+    requireOwnerOrAdmin(brand);
+    return subscriptionRepository.findByBrandProfileId(brandId).stream()
+        .map(this::toResponse)
+        .toList();
+  }
+
+  @Transactional
+  public void cancelSubscription(UUID id) {
+    Permissions.require(Permission.MANAGE_OWN_SUBSCRIPTION, Permission.MANAGE_SUBSCRIPTION);
+    var sub =
+        subscriptionRepository
+            .findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Subscription", "id", id));
+    requireOwnerOrAdmin(sub.getBrandProfile());
+    brandProfileRepository.lockForBilling(sub.getBrandProfile().getId()).orElseThrow();
+    entityManager.refresh(sub);
+    var before = toResponse(sub);
+    if (sub.getStatus() == SubscriptionStatus.CANCELLED) return;
+    sub.setStatus(SubscriptionStatus.CANCELLED);
+    if (Permissions.has(Permission.MANAGE_SUBSCRIPTION))
+      audit.record(
+          "CANCEL_SUBSCRIPTION",
+          "Subscription",
+          id,
+          before,
+          toResponse(sub),
+          "Quản trị viên hủy gói đăng ký dịch vụ");
+  }
+
+  /**
+   * Quota Guard: Thẩm định hạn mức chiến dịch trước khi cho phép tạo mới.
+   */
+  @Transactional
+  public void checkAndDeductCampaignQuota(UUID brandProfileId) {
+    Subscription sub =
+        subscriptionRepository.findByBrandProfileId(brandProfileId).stream()
+            .filter(
+                s ->
+                    s.getStatus() == SubscriptionStatus.ACTIVE
+                        && !s.getExpirationDate().isBefore(LocalDate.now()))
+            .findFirst()
+            .orElse(null);
+
+    if (sub == null) {
+      if (planRepository.count() == 0) {
+        log.warn("No billing plans configured in system; bypassing quota guard for brand {}", brandProfileId);
+        return;
+      }
+      throw new ForbiddenException("No active subscription found. Please subscribe to create campaigns.");
+    }
+
+    if (subscriptionRepository.reserveCampaignQuotaAtomically(sub.getId(), LocalDate.now()) != 1)
+      throw new ConflictException(ErrorCode.QUOTA_EXCEEDED, "Campaign quota exhausted or subscription no longer active");
+    entityManager.refresh(sub);
+
+  }
+
+  /**
+   * Two-Phase Quota Guard: Đặt trước (reserve) 1 lượt đề xuất AI bằng câu lệnh Atomic UPDATE.
+   * Trả về subscriptionId để có thể rollback nếu luồng xử lý downstream gặp sự cố.
+   */
+  @Transactional
+  public UUID reserveRecommendationQuota(UUID brandProfileId) {
+    Subscription sub =
+        subscriptionRepository.findByBrandProfileId(brandProfileId).stream()
+            .filter(
+                s ->
+                    s.getStatus() == SubscriptionStatus.ACTIVE
+                        && !s.getExpirationDate().isBefore(LocalDate.now()))
+            .findFirst()
+            .orElse(null);
+
+    if (sub == null) {
+      if (planRepository.count() == 0) {
+        log.warn("No billing plans configured in system; bypassing recommendation quota guard for brand {}", brandProfileId);
+        return null;
+      }
+      throw new ForbiddenException("No active subscription found. Please subscribe to use AI recommendations.");
+    }
+
+    int updated = subscriptionRepository.reserveQuotaAtomically(sub.getId());
+    if (updated == 0) {
+      int quotaLimit = sub.getPlan().getRecommendationQuota();
+      throw new ConflictException(
+          ErrorCode.QUOTA_EXCEEDED,
+          "AI recommendation quota exceeded (" + sub.getUsedRecommendationQuota() + "/" + quotaLimit + "). Please upgrade your plan.");
+    }
+    return sub.getId();
+  }
+
+  /**
+   * Rollback hoàn trả lượt AI recommendation nếu downstream gặp sự cố (Network/Exception).
+   */
+  @Transactional
+  public void releaseRecommendationQuota(UUID subscriptionId) {
+    if (subscriptionId == null) {
+      return;
+    }
+    subscriptionRepository.releaseQuotaReservation(subscriptionId);
+    log.info("Rollback AI recommendation quota reservation for subscription {}", subscriptionId);
+  }
+
+  private void requireOwnerOrAdmin(BrandProfile brand) {
+    if (!Permissions.has(Permission.MANAGE_SUBSCRIPTION)
+        && !brand.getUser().getId().equals(Permissions.actor().getId()))
+      throw new ForbiddenException("Subscription belongs to another brand");
+  }
+
+  public SubscriptionDTOs.SubscriptionResponse toResponse(Subscription sub) {
+    return SubscriptionDTOs.SubscriptionResponse.builder()
+        .id(sub.getId())
+        .brandId(sub.getBrandProfile().getId())
+        .plan(planService.toResponse(sub.getPlan()))
+        .startDate(sub.getStartDate())
+        .expirationDate(sub.getExpirationDate())
+        .status(sub.getStatus())
+        .usedCampaignQuota(sub.getUsedCampaignQuota())
+        .usedRecommendationQuota(sub.getUsedRecommendationQuota())
+        .usedRefreshQuota(sub.getUsedRefreshQuota())
+        .build();
+  }
+}

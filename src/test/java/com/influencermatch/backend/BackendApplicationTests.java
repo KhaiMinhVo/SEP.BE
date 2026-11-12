@@ -1,35 +1,501 @@
 package com.influencermatch.backend;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.influencermatch.backend.campaign.repository.CampaignContextRepository;
+import com.influencermatch.backend.user.enums.Role;
+import com.influencermatch.backend.user.enums.UserStatus;
+import com.influencermatch.backend.user.model.User;
+import com.influencermatch.backend.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.TestPropertySource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Smoke test that verifies the Spring application context loads without errors.
  *
- * <p>Annotated with {@code @TestPropertySource} to override the datasource URL with
- * an in-memory H2 database (or a Testcontainers Postgres) to avoid requiring a live
- * PostgreSQL instance during CI. Replace the in-memory override with a Testcontainers
- * configuration as the test suite matures.
+ * <p>Integration suite backed by PostgreSQL Testcontainers so JSONB, arrays, Flyway, constraints
+ * and optimistic locking use the same database semantics as production.
  */
-@SpringBootTest
-@ActiveProfiles("test")
-@TestPropertySource(properties = {
-        "spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL",
-        "spring.datasource.driver-class-name=org.h2.Driver",
-        "spring.datasource.username=sa",
-        "spring.datasource.password=",
-        "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect",
-        "spring.jpa.hibernate.ddl-auto=create-drop",
-        "application.security.jwt.secret-key=404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970",
-        "application.security.jwt.expiration=86400000",
-        "application.security.jwt.refresh-token.expiration=604800000"
-})
-class BackendApplicationTests {
+@org.springframework.test.context.TestPropertySource(
+    properties =
+        "application.auth.email-verification.secret=test-email-otp-secret-at-least-32-characters")
+class BackendApplicationTests extends com.influencermatch.backend.support.PostgresApiTestSupport {
+  @org.springframework.boot.test.mock.mockito.MockBean
+  com.influencermatch.backend.auth.service.VerificationEmailSender sender;
 
-    @Test
-    void contextLoads() {
-        // Spring context must start without throwing exceptions.
-    }
+  private void verifyEmail(String email) throws Exception {
+    var otp = org.mockito.ArgumentCaptor.forClass(String.class);
+    org.mockito.Mockito.verify(sender, org.mockito.Mockito.atLeastOnce())
+        .send(org.mockito.ArgumentMatchers.eq(email), otp.capture());
+    mvc.perform(
+            post("/auth/verify-email")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    objectMapper.writeValueAsBytes(
+                        java.util.Map.of("email", email, "otp", otp.getValue()))))
+        .andExpect(status().isOk());
+  }
+
+  @Autowired MockMvc mvc;
+  @Autowired UserRepository users;
+  @Autowired ObjectMapper objectMapper;
+  @Autowired PasswordEncoder passwordEncoder;
+  @Autowired CampaignContextRepository campaignContexts;
+  @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+  @org.junit.jupiter.api.BeforeEach
+  void prepareRoleGuard() {
+    jdbc.execute("CREATE TABLE IF NOT EXISTS rbac_guard (id INTEGER PRIMARY KEY)");
+    jdbc.update(
+        "INSERT INTO rbac_guard(id) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM rbac_guard WHERE"
+            + " id=1)");
+  }
+
+  @Test
+  void contextLoads() {
+    // Spring context must start without throwing exceptions.
+  }
+
+  @Test
+  void unauthenticatedRequestUsesProblemDetailAndCorrelationId() throws Exception {
+    mvc.perform(get("/auth/me").header("X-Correlation-ID", "mvc-trace"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(header().string("X-Correlation-ID", "mvc-trace"))
+        .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+        .andExpect(jsonPath("$.traceId").value("mvc-trace"));
+  }
+
+  @Test
+  void publicRegistrationAlwaysCreatesBrand() throws Exception {
+    String email = "registered-brand@test.local";
+    mvc.perform(
+            post("/auth/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(registrationBody(email, "Registered Brand")))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.success").value(true));
+    User registered = users.findByEmail(email).orElseThrow();
+    assertThat(registered.getRole()).isEqualTo(Role.BRAND);
+    assertThat(registered.getPasswordHash()).isNotEqualTo("Password123!");
+    assertThat(passwordEncoder.matches("Password123!", registered.getPasswordHash())).isTrue();
+  }
+
+  @Test
+  void validationUsesProblemDetailWithFieldErrors() throws Exception {
+    mvc.perform(
+            post("/auth/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"not-an-email\",\"password\":\"short\",\"fullName\":\"\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+        .andExpect(jsonPath("$.fieldErrors.email").isArray())
+        .andExpect(jsonPath("$.fieldErrors.password").isArray());
+  }
+
+  @Test
+  void completeRegisterLoginAndRoleFlow() throws Exception {
+    String brandEmail = "poc-brand@test.local";
+    mvc.perform(
+            post("/auth/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(registrationBody(brandEmail, "PoC Brand")))
+        .andExpect(status().isCreated());
+    assertThat(users.findByEmail(brandEmail)).get().extracting("role").isEqualTo(Role.BRAND);
+
+    verifyEmail(brandEmail);
+    var brandLoginResult =
+        mvc.perform(
+                post("/auth/login")
+                    .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.user.lastLoginAt").isNotEmpty())
+            .andExpect(jsonPath("$.data.user.passwordHash").doesNotExist())
+            .andReturn()
+            .getResponse();
+    JsonNode brandLogin = json(brandLoginResult.getContentAsString());
+    assertThat(brandLogin.at("/data").has("refreshToken")).isFalse();
+    String brandAccess = brandLogin.at("/data/accessToken").asText();
+    String brandRefresh = brandLoginResult.getCookie("IM_REFRESH").getValue();
+
+    mvc.perform(get("/auth/me").header("Authorization", "Bearer " + brandAccess))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.role").value("BRAND"))
+        .andExpect(jsonPath("$.data.lastLoginAt").isNotEmpty())
+        .andExpect(jsonPath("$.data.passwordHash").doesNotExist());
+    mvc.perform(get("/admin/users").header("Authorization", "Bearer " + brandAccess))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+    String adminEmail = "poc-admin@test.local";
+    users.save(
+        User.builder()
+            .email(adminEmail)
+            .passwordHash(passwordEncoder.encode("AdminPassword123!"))
+            .fullName("PoC Admin")
+            .role(Role.ADMIN)
+            .status(UserStatus.ACTIVE)
+            .build());
+    JsonNode adminLogin =
+        json(
+            mvc.perform(
+                    post("/auth/login")
+                        .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(
+                            "{\"email\":\""
+                                + adminEmail
+                                + "\",\"password\":\"AdminPassword123!\"}"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString());
+    String adminAccess = adminLogin.at("/data/accessToken").asText();
+    mvc.perform(get("/admin/users").header("Authorization", "Bearer " + adminAccess))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.items").isArray());
+
+    var rotatedResult =
+        mvc.perform(
+                post("/auth/refresh")
+                    .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                    .cookie(new jakarta.servlet.http.Cookie("IM_REFRESH", brandRefresh))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"refreshToken\":\"" + brandRefresh + "\"}"))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse();
+    JsonNode rotated = json(rotatedResult.getContentAsString());
+    assertThat(rotated.at("/data").has("refreshToken")).isFalse();
+    String newAccess = rotated.at("/data/accessToken").asText();
+    String newRefresh = rotatedResult.getCookie("IM_REFRESH").getValue();
+    mvc.perform(
+            post("/auth/logout")
+                .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                .cookie(new jakarta.servlet.http.Cookie("IM_REFRESH", newRefresh))
+                .header("Authorization", "Bearer " + newAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"refreshToken\":\"" + newRefresh + "\"}"))
+        .andExpect(status().isNoContent());
+    mvc.perform(
+            post("/auth/refresh")
+                .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                .cookie(new jakarta.servlet.http.Cookie("IM_REFRESH", newRefresh))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"refreshToken\":\"" + newRefresh + "\"}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+  }
+
+  @Test
+  void adminCanLockUnlockAndDisableAccount() throws Exception {
+    String brandEmail = "status-brand@test.local";
+    String brandAccess = registerAndLogin(brandEmail, "Status Brand");
+    User brand = users.findByEmail(brandEmail).orElseThrow();
+    String adminAccess = createAdminAndLogin("status-admin@test.local");
+
+    mvc.perform(
+            patch("/admin/users/" + brand.getId() + "/status")
+                .header("Authorization", "Bearer " + adminAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"LOCKED\",\"reason\":\"Test status change\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("LOCKED"));
+    mvc.perform(get("/auth/me").header("Authorization", "Bearer " + brandAccess))
+        .andExpect(status().isUnauthorized());
+    mvc.perform(
+            post("/auth/login")
+                .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"));
+
+    mvc.perform(
+            patch("/admin/users/" + brand.getId() + "/status")
+                .header("Authorization", "Bearer " + adminAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"ACTIVE\",\"reason\":\"Test status change\"}"))
+        .andExpect(status().isOk());
+    mvc.perform(
+            post("/auth/login")
+                .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
+        .andExpect(status().isOk());
+
+    mvc.perform(
+            patch("/admin/users/" + brand.getId() + "/status")
+                .header("Authorization", "Bearer " + adminAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"DISABLED\",\"reason\":\"Test disable\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("DISABLED"));
+    mvc.perform(
+            post("/auth/login")
+                .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+  }
+
+  @Test
+  void brandAndCampaignDraftFlowEnforcesOwnershipAndArchive() throws Exception {
+    String ownerToken = registerAndLogin("flow-owner@test.local", "Flow Owner");
+    String otherToken = registerAndLogin("flow-other@test.local", "Flow Other");
+
+    String brandBody =
+        """
+{"businessName":"Glow Labs","industry":"Beauty","productCategories":["Skincare"],
+ "location":"HCMC","targetMarkets":["Vietnam"],"targetAudiences":["Gen Z"],
+ "brandTone":"Friendly","preferredPlatforms":["TIKTOK"],"description":"Vietnam skincare brand"}
+""";
+    var brandResult =
+        mvc.perform(
+                post("/brands")
+                    .header("Authorization", "Bearer " + ownerToken)
+                    .header("X-Correlation-ID", "brand-flow-trace")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(brandBody))
+            .andExpect(status().isCreated())
+            .andExpect(header().exists("Location"))
+            .andExpect(header().string("X-Correlation-ID", "brand-flow-trace"))
+            .andExpect(jsonPath("$.data.m4Version").value(1))
+            .andReturn();
+    String brandId = json(brandResult.getResponse().getContentAsString()).at("/data/id").asText();
+
+    mvc.perform(get("/brands/" + brandId).header("Authorization", "Bearer " + otherToken))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+    mvc.perform(
+            post("/brands")
+                .header("Authorization", "Bearer " + ownerToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(brandBody))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("BRAND_ALREADY_EXISTS"));
+
+    String updatedBrand = brandBody.replace("Friendly", "Expert");
+    mvc.perform(
+            put("/brands/" + brandId)
+                .with(com.influencermatch.backend.support.TestBrandHttp.revision(mvc))
+                .header("Authorization", "Bearer " + ownerToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(updatedBrand))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.m4Version").value(2));
+
+    String campaignBody =
+        """
+{"name":"Summer Awareness","productService":"Daily Serum","objective":"AWARENESS",
+ "targetAudiences":["Gen Z"],"contentType":"SHORT_VIDEO","startDate":"2026-10-01","endDate":"2026-10-31",
+ "platforms":["TIKTOK"],"niches":["skincare"],"locations":["HCMC"],
+ "followerMin":10000,"followerMax":50000,"totalBudget":5000000,"currency":"VND","brief":"Serum launch","creatorMode":"SINGLE","targetCreatorCount":1,"deliverables":[{"platform":"TIKTOK","contentType":"Review","quantity":1}]}
+""";
+    String invalidCampaignBody =
+        campaignBody.replace(
+            "\"followerMin\":10000,\"followerMax\":50000",
+            "\"followerMin\":60000,\"followerMax\":50000");
+    mvc.perform(
+            post("/brands/" + brandId + "/campaigns")
+                .header("Authorization", "Bearer " + ownerToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(invalidCampaignBody))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_CAMPAIGN_RANGE"));
+    var campaignResult =
+        mvc.perform(
+                post("/brands/" + brandId + "/campaigns")
+                    .header("Authorization", "Bearer " + ownerToken)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(campaignBody))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.status").value("DRAFT"))
+            .andExpect(jsonPath("$.data.platforms[0]").value("TIKTOK"))
+            .andReturn();
+    String campaignId =
+        json(campaignResult.getResponse().getContentAsString()).at("/data/id").asText();
+
+    mvc.perform(get("/campaigns/" + campaignId).header("Authorization", "Bearer " + otherToken))
+        .andExpect(status().isForbidden());
+    mvc.perform(
+            patch("/campaigns/" + campaignId + "/archive")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
+                .header("Authorization", "Bearer " + ownerToken))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("ARCHIVED"));
+    mvc.perform(
+            patch("/campaigns/" + campaignId + "/archive")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
+                .header("Authorization", "Bearer " + ownerToken))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("ARCHIVED"));
+    mvc.perform(
+            put("/campaigns/" + campaignId)
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
+                .header("Authorization", "Bearer " + ownerToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(campaignBody))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("CAMPAIGN_NOT_EDITABLE"));
+  }
+
+  @Test
+  void campaignWorkflowCreatesM3AndRejectsSkippedTransition() throws Exception {
+    String ownerToken = registerAndLogin("workflow-owner@test.local", "Workflow Owner");
+    String brandBody =
+        """
+{"businessName":"Workflow Brand","website":"https://example.com","preferredPlatforms":["TIKTOK"]}
+""";
+    String brandId =
+        json(mvc.perform(
+                    post("/brands")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(brandBody))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString())
+            .at("/data/id")
+            .asText();
+    String campaignBody =
+        """
+{"name":"Workflow Campaign","productService":"Serum","objective":"AWARENESS",
+ "platforms":["TIKTOK"],"niches":["skincare"],"locations":["HCMC"],"brief":"Workflow brief","startDate":"2026-11-01","endDate":"2026-12-01","totalBudget":1000000,"currency":"VND","creatorMode":"SINGLE","targetCreatorCount":1,"deliverables":[{"platform":"TIKTOK","contentType":"Review","quantity":1}]}
+""";
+    String campaignId =
+        json(mvc.perform(
+                    post("/brands/" + brandId + "/campaigns")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(campaignBody))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString())
+            .at("/data/id")
+            .asText();
+
+    mvc.perform(
+            patch("/campaigns/" + campaignId + "/status")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
+                .header("Authorization", "Bearer " + ownerToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"ACTIVE\",\"reason\":\"Test status change\"}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("INVALID_CAMPAIGN_TRANSITION"));
+    mvc.perform(
+            patch("/campaigns/" + campaignId + "/status")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
+                .header("Authorization", "Bearer " + ownerToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"READY_FOR_DISCOVERY\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("READY_FOR_DISCOVERY"));
+    assertThat(
+            campaignContexts.findByCampaignIdOrderByContextVersionDesc(
+                java.util.UUID.fromString(campaignId)))
+        .singleElement()
+        .satisfies(
+            context -> {
+              assertThat(context.getContextVersion()).isEqualTo(1);
+              assertThat(context.isActive()).isTrue();
+            });
+    mvc.perform(
+            patch("/campaigns/" + campaignId + "/status")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
+                .header("Authorization", "Bearer " + ownerToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"ACTIVE\",\"reason\":\"Test status change\"}"))
+        .andExpect(status().isOk());
+    mvc.perform(
+            patch("/campaigns/" + campaignId + "/status")
+                .with(com.influencermatch.backend.support.TestCampaignHttp.revision(mvc))
+                .header("Authorization", "Bearer " + ownerToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"COMPLETED\"}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("INVALID_COLLABORATION_STATE"));
+    assertThat(
+            jdbc.queryForObject(
+                "select status from campaign where id=?",
+                String.class,
+                java.util.UUID.fromString(campaignId)))
+        .isEqualTo("ACTIVE");
+  }
+
+  private String registerAndLogin(String email, String fullName) throws Exception {
+    users.saveAndFlush(
+        User.builder()
+            .email(email)
+            .fullName(fullName)
+            .passwordHash(passwordEncoder.encode("Password123!"))
+            .role(Role.BRAND)
+            .status(UserStatus.ACTIVE)
+            .emailVerified(true)
+            .build());
+    return call(
+            null,
+            post("/auth/login"),
+            java.util.Map.of("email", email, "password", "Password123!"),
+            200)
+        .path("data")
+        .path("accessToken")
+        .asText();
+  }
+
+  private byte[] registrationBody(String email, String name) throws Exception {
+    return objectMapper.writeValueAsBytes(
+        java.util.Map.of(
+            "email",
+            email,
+            "password",
+            "Password123!",
+            "fullName",
+            name,
+            "businessName",
+            "Brand",
+            "phoneNumber",
+            "0912345678",
+            "policyAcceptance",
+            com.influencermatch.backend.support.TestAuthHttp.acceptance()));
+  }
+
+  private String createAdminAndLogin(String email) throws Exception {
+    users.save(
+        User.builder()
+            .email(email)
+            .passwordHash(passwordEncoder.encode("AdminPassword123!"))
+            .fullName("Test Admin")
+            .role(Role.ADMIN)
+            .status(UserStatus.ACTIVE)
+            .build());
+    return json(mvc.perform(
+                post("/auth/login")
+                    .with(com.influencermatch.backend.support.TestAuthHttp.csrf())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"email\":\"" + email + "\",\"password\":\"AdminPassword123!\"}"))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString())
+        .at("/data/accessToken")
+        .asText();
+  }
+
+  private JsonNode json(String value) throws Exception {
+    return objectMapper.readTree(value);
+  }
 }

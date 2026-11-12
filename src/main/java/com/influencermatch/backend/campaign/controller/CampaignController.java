@@ -1,0 +1,157 @@
+package com.influencermatch.backend.campaign.controller;
+
+import com.influencermatch.backend.campaign.dto.*;
+import com.influencermatch.backend.campaign.enums.*;
+import com.influencermatch.backend.campaign.model.*;
+import com.influencermatch.backend.campaign.repository.*;
+import com.influencermatch.backend.campaign.service.*;
+import com.influencermatch.backend.common.dto.*;
+import com.influencermatch.backend.creator.dto.CreatorDiscoveryFilterRequest;
+import com.influencermatch.backend.creator.dto.CreatorDiscoveryResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import java.net.URI;
+import java.util.UUID;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.http.*;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+
+@RestController
+@RequiredArgsConstructor
+@Tag(name = "Campaigns", description = "Brand-owned campaign setup and lifecycle")
+@SecurityRequirement(name = "BearerAuth")
+public class CampaignController {
+  private final CampaignService service;
+  private final GeminiCampaignAutofillService autofillService;
+
+  @PostMapping("/brands/{brandId}/campaigns")
+  @Operation(summary = "Create a draft campaign")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CREATE_CAMPAIGN')")
+  public ResponseEntity<ApiResponse<CampaignResponse>> create(
+      @PathVariable UUID brandId,
+      @Valid @RequestBody CampaignRequest request,
+      Authentication auth) {
+    CampaignResponse result = service.create(brandId, request, auth);
+    URI location =
+        ServletUriComponentsBuilder.fromCurrentContextPath()
+            .path("/campaigns/{id}")
+            .buildAndExpand(result.id())
+            .toUri();
+    return ResponseEntity.created(location)
+        .eTag(
+            com.influencermatch.backend.campaign.service.CampaignRevision.tag(
+                result.id(), result.campaignRevision()))
+        .body(ApiResponse.ok(result));
+  }
+
+  @Operation(summary = "List campaigns owned by a brand profile")
+  @GetMapping("/brands/{brandId}/campaigns")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_OWN_CAMPAIGN') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
+  public ApiResponse<PageResponse<CampaignResponse>> list(
+      @PathVariable UUID brandId,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "20") int size,
+      Authentication auth) {
+    return ApiResponse.ok(
+        service.list(
+            brandId, PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)), auth));
+  }
+
+  @Operation(summary = "Get campaign details")
+  @GetMapping("/campaigns/{id}")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('VIEW_OWN_CAMPAIGN') or hasAuthority('VIEW_BRAND_SUPPORT_DATA')")
+  public ResponseEntity<ApiResponse<CampaignResponse>> get(
+      @PathVariable UUID id, Authentication auth) {
+    return ok(service.get(id, auth));
+  }
+
+  @Operation(summary = "Update a draft campaign")
+  @PutMapping("/campaigns/{id}")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
+  public ResponseEntity<ApiResponse<CampaignResponse>> update(
+      @PathVariable UUID id,
+      @Valid @RequestBody CampaignRequest request,
+      Authentication auth,
+      @RequestHeader(value = "If-Match", required = false) String revision) {
+    return ok(service.update(id, request, auth, revision));
+  }
+
+  @Operation(
+      summary = "Change campaign status",
+      description =
+          "Allowed: DRAFT -> READY_FOR_DISCOVERY -> ACTIVE -> COMPLETED; DRAFT -> ARCHIVED")
+  @PatchMapping("/campaigns/{id}/status")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('CHANGE_CAMPAIGN_STATUS')")
+  public ResponseEntity<ApiResponse<CampaignResponse>> status(
+      @PathVariable UUID id,
+      @Valid @RequestBody CampaignStatusRequest request,
+      Authentication auth,
+      @RequestHeader(value = "If-Match", required = false) String revision) {
+    return ok(service.changeStatus(id, request, auth, revision));
+  }
+
+  @Operation(summary = "Archive a draft campaign")
+  @PatchMapping("/campaigns/{id}/archive")
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('CHANGE_CAMPAIGN_STATUS')")
+  public ResponseEntity<ApiResponse<CampaignResponse>> archive(
+      @PathVariable UUID id,
+      Authentication auth,
+      @RequestHeader(value = "If-Match", required = false) String revision) {
+    return ok(service.archive(id, auth, revision));
+  }
+
+  private ResponseEntity<ApiResponse<CampaignResponse>> ok(CampaignResponse r) {
+    return ResponseEntity.ok()
+        .eTag(
+            com.influencermatch.backend.campaign.service.CampaignRevision.tag(
+                r.id(), r.campaignRevision()))
+        .body(ApiResponse.ok(r));
+  }
+
+  @PostMapping("/campaigns/{id}/context/embedding/retry")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_CAMPAIGN')")
+  @Operation(summary = "Retry FAILED M3 embedding of current Campaign context")
+  public ResponseEntity<ApiResponse<CampaignResponse>> retry(
+      @PathVariable UUID id, Authentication auth) {
+    return ok(service.retryEmbedding(id, auth));
+  }
+
+  @Operation(summary = "Discover creators for a campaign with flexible filters and sorting")
+  @GetMapping("/campaigns/{id}/discover")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SEARCH_CREATOR')")
+  public ApiResponse<PageResponse<CreatorDiscoveryResponse>> discover(
+      @PathVariable UUID id,
+      @ModelAttribute CreatorDiscoveryFilterRequest filter,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "20") int size,
+      Authentication auth) {
+    return ApiResponse.ok(
+        service.discoverCreators(
+            id,
+            filter,
+            PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)),
+            auth));
+  }
+
+  @Operation(
+      summary = "AI-assisted campaign form autofill",
+      description =
+          "Brand provides a short natural-language description of the campaign. Gemini AI parses it"
+              + " and returns suggested values for all campaign fields. The response is a"
+              + " non-binding suggestion; the brand should review and adjust before submitting.")
+  @PostMapping("/ai/campaign-autofill")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CREATE_CAMPAIGN')")
+  public ApiResponse<CampaignAutofillResponse> autofill(
+      @Valid @RequestBody CampaignAutofillRequest request) {
+    return ApiResponse.ok(autofillService.autofill(request));
+  }
+}

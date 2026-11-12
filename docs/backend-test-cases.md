@@ -1,0 +1,1041 @@
+# Google Brand Login — 2026-11-07
+
+This section supersedes the historical statement that all Google Login was removed. The old `/auth/google` redirect and `/auth/google/exchange` endpoints remain retired; new GIS endpoints are `/auth/google/start` and `/auth/google/login`. Creator invitation/OTP is unchanged. No frontend or real Google consent is included.
+
+- **GGL-001 · Unit · GoogleIdTokenVerifierTest:** generated RSA signature; accept valid Google issuer/audience/expiry/verified email/subject, reject wrong issuer/client/azp, multiple audiences without authorized party, expired token, missing subject, unverified/malformed email and foreign signature. Disabled configuration rejects without calling the decoder.
+- **GGL-002 · PostgreSQL/MockMvc · GoogleBrandLoginPostgresIntegrationTest#createsVerifiedBrandWithoutPasswordAndReplayCannotIssueAnotherSession:** browser-bound nonce → verified BRAND with Google identity and hashed nonce/browser data, normal JWT/refresh response; successful session replay returns 409 and cannot create another refresh token.
+- **GGL-003 · PostgreSQL/MockMvc · knownGoogleSubjectReusesBrandAndSupportsRefreshAndMe:** existing subject reuses User, `/auth/me` permissions match login, refresh remains available.
+- **GGL-004 · PostgreSQL/MockMvc · sameEmailNeverAutomaticallyLinksPasswordAccount; pendingOtpCannotBeActivatedByGoogle:** same-email password user receives 409 without identity/session creation; pending OTP remains unverified and returns 403.
+- **GGL-005 · PostgreSQL/MockMvc · onlyBrandCanUseKnownIdentity; blockedBrandCannotReceiveTokens:** CREATOR/ADMIN/DATA_MANAGER denied; LOCKED/DISABLED Brand denied without issuing tokens.
+- **GGL-006 · PostgreSQL/MockMvc · wrongBrowserAndNonceAndExpiredSessionCannotCreateUser; invalidProviderCredentialCannotCreateAccount:** wrong browser/nonce, expired session and invalid provider credential do not create a User.
+- **GGL-007 · PostgreSQL/MockMvc · simultaneousLoginConsumesSessionOnlyOnce:** latch-synchronized duplicate login yields 200/409, one identity/User/refresh issuance.
+- **GGL-008 · PostgreSQL/MockMvc · issuingSessionFailureRollsBackNewUserIdentityAndConsumption:** refresh issuance failure rolls back User, identity and session consumption.
+- **GGL-009 · PostgreSQL/MockMvc · disabledConfigurationReturns503WithoutCreatingSession; allowedFrontendCanPreflightGoogleLoginAndHttpsCookieIsSecure:** disabled config returns 503, allowed origin preflight permits credentials, foreign origin denied, HTTPS cookies Secure/HttpOnly/SameSite=Lax.
+
+Verified results (2026-11-07):
+- New Google tests: **26/26 passed** (11 signature/claim unit cases and 15 PostgreSQL/MockMvc cases).
+- Focused authentication regression: **58/58 passed**; focused PostgreSQL registration/OTP/session regression: **101/101 passed**.
+- Full regression executed **957 tests**. Initial run: 951 passed, 6 failures, zero errors/skips. Three failures were stale fresh-schema assertions expecting 22 migrations/V23 after V24 was added. Updated them to 23 migrations/V24, retained all historical-data assertions, and added the Google session table assertion. Reran all three affected suites: **53 tests, 52 passed, 1 existing Payment failure**.
+- Latest reports across all suites: **957 tests, 954 passed, 3 failures, 0 errors, 0 skipped**. The three remaining inherited financial-contract failures are `PaymentSettlementServiceTest#activeSubscriptionPreventsActivationWithoutMutatingPendingPayment` (replacement behavior), `ComparePaymentPostgresIntegrationTest#parallelPaymentsForSameBrandCannotActivateTwoSubscriptions` (200/200 instead of 200/409), and `RbacPostgresIntegrationTest#paidSubscriptionRequiresCheckoutAndGatewayVerification` (302 redirect instead of 400). No financial assertions were removed or disabled.
+- Initial PostgreSQL attempt was blocked because Docker was stopped; it was rerun after Docker became available. All database tests used disposable PostgreSQL Testcontainers. No shared database, real email or real Google consent was used. Actual `.env`/Bruno were not edited; BE was not restarted; no commit/push.
+
+# Backend Test Cases — Khải
+
+## TikTok crawler identity — current implementation (2026-11-05)
+
+Supersedes username-only ownership below. Historical migration tests remain unchanged.
+
+- **TTC-001 — Unit / contract:** strict author ID/type/platform/status, OAuth username, freshness
+  (inclusive 90-second/5-second boundaries), and sanitized optional fields. `TikTokIdentityResolverTest`.
+- **TTC-002 — Unit / HTTP:** read-only request without expected ID; sanitized HTTP, timeout and JSON
+  errors without retry. `TikTokIdentityResolverTest`.
+- **TTC-003 — PostgreSQL / creation:** minimal new channel, readable without metrics, later ingestion
+  updates same UUID/ownership. `TikTokCrawlerIdentityPostgresIntegrationTest.createsMinimalProfileAndLaterIngestionUpdatesSameUuid`.
+- **TTC-004 — PostgreSQL / rename:** crawler ID selects existing channel despite changed/duplicate
+  username; preserve history and Master. Both TikTok ownership integration suites.
+- **TTC-005 — PostgreSQL / denial:** target/invitation mismatch, unstable ID, permission/authVersion
+  changes, resolver errors, conflicting bindings and audit rollback preserve business data.
+  `TikTokCrawlerIdentityPostgresIntegrationTest` and `TikTokOwnershipPostgresIntegrationTest`.
+- **TTC-006 — PostgreSQL / concurrency:** callbacks, competing owners, two channels/one Master and
+  ingestion versus OAuth do not duplicate channels/bindings. HTTP runs outside transactions.
+  Both TikTok ownership integration suites.
+- **TTC-007 — Crawler / mocked SSR and API:** no username fallback, reject missing/invalid ID,
+  actual observed_at/id_type, each call fetches again, no staging update when false.
+  `tests/test_preflight_author_resolver.py` in creator-discovery.
+
+Validation on 2026-11-05:
+- TikTok suites: **121 passed / 0 failed / 0 errors / 0 skipped**, including 14 crawler-identity
+  PostgreSQL cases, 23 resolver unit cases and the retained OAuth/ownership/provider suites.
+- Full backend regression: **931 tests, 928 passed, 3 failed, 0 errors, 0 skipped**.
+- Crawler regression: **60 passed, 0 failed** (one harmless FastAPI test_app collection warning).
+- Legacy PostgreSQL suites rerun after crawler isolation: **117 tests, 115 passed, 2 failed**;
+  these are the same integration Payment/VNPay failures listed below, not additional failures.
+
+Known failures inherited from develop, left enabled without weakening assertions:
+1. `PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment`:
+   expected rejection with an existing active subscription; develop now activates the new one and
+   cancels the old subscription.
+2. `ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions`:
+   expected HTTP 200/409; develop returns 200/200 using replacement-subscription behavior.
+3. `RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification`:
+   expected HTTP 400 for invalid gateway return; develop now redirects HTTP 302 to frontend failure.
+
+The initial PostgreSQL attempt was blocked by pre-existing Brand/Campaign ListArrayType schema
+validation (ARRAY versus OTHER). With user approval, mappings now use Hibernate native ARRAY while
+retaining text[] columns and full schema validation. Brand/Campaign integration: **20/20 passed**.
+An initial fixture reused open_id across tests; it was corrected to unique per-test identities.
+
+Isolation correction: some standalone legacy tests initially reached the local crawler resolver and
+shortlist-trigger before complete client isolation. The local crawler was stopped and all six
+standalone PostgreSQL suites plus the shared support now mock CrawlerServiceClient; their isolated
+rerun made no crawler dispatch calls. Crawler backend URL remained localhost; shared database was
+not used or migrated. No real TikTok Sandbox OAuth consent was performed.
+
+No new migration; V1–V23 unchanged. Actual .env/Bruno untouched; no backend restart or commit/push.
+
+
+## Historical: username ownership — V23 (2026-10-27, superseded)
+
+The selected MVP policy compares the OAuth-returned username with stored TikTok usernames, without
+Bio Challenge or live crawler refresh. A unique existing channel can be linked automatically at
+callback; `externalId` remains unchanged. READY means no ownership grant, while AUTHORIZED returns
+linked IDs and persists a COMPLETED session. The badge is InfluencerMatch verification.
+
+- **TTO-001 — Unit / normalization.** Trim, remove exactly one leading `@`, lowercase independently
+  of server locale; null/blank is not an identity. `TikTokUsernamesTest` (parameterized cases).
+  PostgreSQL parity: `TikTokOwnershipPostgresIntegrationTest.sqlNormalizationMatchesJavaIncludingWhitespaceAndSingleAt`.
+- **TTO-002 — PostgreSQL / atomic grant and badge.** Unique username, optional valid invitation;
+  callback returns AUTHORIZED, existing externalId/User count preserved, Master linked, badge true,
+  invitation accepted, one token-free verification/binding, success audit and cleared profile.
+  `grantsMatchingChannelAndPreservesCrawlerIdAndInvitationAtomicity`.
+- **TTO-003 — PostgreSQL / matching failures.** Wrong platform or display name, missing channel,
+  duplicate normalized usernames or wrong requested target; READY with the correct matchStatus,
+  no channel creation or business writes. `differentPlatformOrDisplayNameNeverMatches`,
+  `ambiguousMissingAndWrongTargetRemainReadyWithoutBusinessWrites`.
+- **TTO-004 — PostgreSQL / ownership and bindings.** Another owner or conflicting scoped binding
+  returns 409 and commits rejection audit without overwrites. Different app bindings coexist;
+  mock/legacy identities cannot bypass username matching. `foreignOwnerReturns409AndCommitsRejectionAudit`,
+  `mismatchedBindingCannotBeOverwritten`, `anotherOpenIdCannotReplaceExistingChannelBinding`,
+  `bindingIsScopedToAppAndDoesNotTrustLegacyIdentity`, `legacyMockIdentityCannotBypassUsernameMatching`.
+- **TTO-005 — PostgreSQL / Master and reauthorization.** Same owner reuses one Master, binding and
+  active verification; existing Facebook row stays identical. Two concurrent channel connections
+  use one Master. `reusesExistingMasterAndRefreshesOneVerification`, `sameCreatorTwoChannelsShareOneMaster`.
+- **TTO-006 — PostgreSQL / concurrency.** Latch-coordinated callbacks yield one grant and replay;
+  two Creators racing for one channel yield one owner and a 409, no duplicate binding or success
+  audit. `concurrentCallbacksHaveOneGrantAndOneReplay`, `twoCreatorsRacingForOneChannelHaveOneOwner`.
+- **TTO-007 — PostgreSQL / ingestion.** Real ingestion renames a profile during OAuth or holds its
+  transaction concurrently; grant reads the final username under the shared gate and does not
+  authorize the old name. The test also checks PostgreSQL cannot acquire the held advisory gate.
+  `ingestionRenameDuringOAuthCannotGrantOldUsername`, `concurrentIngestionAndGrantShareTheUsernameGate`.
+- **TTO-008 — PostgreSQL / rollback and invitation.** Success audit trigger failure rolls back
+  Master, ownership, verification, binding and invitation; general Start cannot bypass another
+  email's invitation. `auditFailureRollsBackMasterBindingTickAndInvitation`,
+  `generalStartCannotBypassInvitationEmail`.
+- **TTO-009 — PostgreSQL / compatibility.** V22 READY proof is preserved by V23 and cannot grant
+  retroactively. Completed sessions keep only result metadata after expiry. `oldReadySessionCannotGrantOwnershipAfterUpgrade`,
+  `migrationV23PreservesV22ProofAndCreatorWithoutGranting`, `completedSessionKeepsOnlyResultAfterExpiry`.
+  Expiry during the cleanup worker/provider overlap: `TikTokOAuthPostgresIntegrationTest.cleanupDuringProviderRequestReturns400WithoutGrant`.
+- **TTO-010 — Regression.** Existing TikTok state/cookie/expiry, fresh role/status/email/authVersion/
+  permission/configuration checks remain active in `TikTokOAuthPostgresIntegrationTest`. Its V22
+  migration case explicitly targets V22; fresh-schema regression checks include V23. Existing
+  Facebook/Instagram, Claim, OTP, outbox, RBAC and business assertions remain in the full suite.
+
+Execution notes: the first focused run could not initialize PostgreSQL because Docker Desktop was
+stopped (47 initialization errors, no assertion failures). Docker was started for disposable test
+databases. A subsequent test compile found missing imports in the newly added ingestion fixture;
+those imports and the typed Boolean assertion were corrected without relaxing assertions.
+Focused verification passed **95/95** (`tiktok-ownership-focused.log`, BUILD SUCCESS). Two lifecycle
+edges were then strengthened: cleanup during provider HTTP returns expiry 400, and late replay
+cannot erase a COMPLETED session result. The final full regression passed **893/893 across 94
+suites**, zero failures, errors or skipped (`tiktok-ownership-full.log`, BUILD SUCCESS, 11m46s).
+This change adds **29 cases** to the previous 864 baseline: six normalization unit cases,
+22 PostgreSQL ownership cases, and one additional PostgreSQL expiry case. All existing assertions
+remain active.
+During environment teardown the pre-existing Claim email scheduler logged connection refusal to a
+stopped local Testcontainer, and Surefire reported taking over 30 seconds to terminate its fork.
+These warnings are separate from passing test results; Maven exited successfully. No production
+business failures were found in the final run.
+No actual `.env`, Bruno, V1–V22 migration or shared database was changed. No BE restart, commit or
+push occurred; pre-existing `docs/diagrams/` files remain untouched.
+Real TikTok Sandbox consent is a separate manual step and has not been performed in this change.
+
+## TikTok Sandbox proof-only OAuth (2026-10-26)
+
+Automated provider tests use mocked HTTP; PostgreSQL cases use a disposable pgvector/PostgreSQL
+Testcontainer, not a shared database. Real Sandbox consent is pending user app configuration.
+READY means OAuth succeeded, and every returned account remains UNMATCHED. No Confirm is exposed.
+
+- **TTS-001 — Unit / real adapter contract.** Given a valid token and matching User Info, exchange
+  code and read account; expect official openId/username, fixed endpoints, no access/refresh token
+  in proof and no fallback to expected crawler identity.
+  `TikTokLoginProviderTest.readsRealAccountWithoutLeakingTokensOrUsingExpectedCrawlerIdentity`.
+- **TTS-002 — Unit / fail closed.** Remove token fields, omit scopes/username/openId or contradict
+  provider IDs/error code; expect rejection without synthesized identity.
+  `rejectsMissingTokenFieldsWithoutFallback`, `requiresBothGrantedScopes`,
+  `rejectsIncompleteOrContradictoryProfile` in `TikTokLoginProviderTest`.
+- **TTS-003 — Unit / transport and configuration.** HTTP errors, timeout, denial, mock codes,
+  disabled configuration, HTTP redirect or extra requested scopes; expect sanitized 403/502/503,
+  no automatic code retry and no provider body/secret exposure. `sanitizesHttpErrorsWithoutRetry`,
+  `sanitizesTimeout`, `providerDenialDoesNotExposeRawResponse`, `mockCodesCannotEnterRealAdapter`,
+  `configurationRequiresExplicitEnableHttpsAndExactScopes`.
+- **TTS-004 — Unit / legacy isolation.** Official TikTok authorization/exchange through old
+  ownership callbacks is unavailable, including simulation codes; explicit dev MOCK_FALLBACK
+  remains permitted and YouTube authorization routing is unchanged.
+  `OAuthSandboxProviderTest.oAuthProofClientDelegatesToOfficialSandbox`,
+  `officialModeCannotEnableSimulationOrUnconfiguredFallbackInProduction`,
+  `oAuthProofClientFallsBackToSimulationInMockMode`.
+- **TTS-005 — PostgreSQL / proof only.** Start with an optional invitation/channel, callback and
+  view; expect secure browser cookie, hashed state, READY/UNMATCHED, private account data and no
+  changes to Users, Master, Creator, invitation, verification or provider identity. Confirm 404.
+  `TikTokOAuthPostgresIntegrationTest.successIsProofOnlyAndNeverChangesBusinessData`,
+  `sameMasterChannelIsStillUnmatchedAndNeverReverified`.
+- **TTS-006 — PostgreSQL / state and browser.** Invalid state, wrong cookie, denial, repeat or
+  simultaneous callbacks; expect 400/403/409 as appropriate, one provider exchange, committed
+  FAILED/EXPIRED status and no reuse. `invalidStateRejected`,
+  `wrongBrowserDoesNotConsumeState`, `denialConsumesStateAndReturns403`,
+  `replayDoesNotCallProviderOrChangeResult`, `concurrentCallbacksExchangeExactlyOnce`.
+- **TTS-007 — PostgreSQL / fresh guards.** Change role/status/email/authVersion/permission or
+  application key during HTTP; expect rejection and no profile saved. Wrong user view is 404,
+  anonymous 401, wrong role/disabled permission 403, missing config 503 before writes.
+  `changedAccountDuringProviderRequestCannotSaveProof`,
+  `callbackRejectsChangedConfigurationBeforeSavingProof`, `onlyCreatorWhoStartedCanView`,
+  `permissionDisabledBeforeStartIsRejected`,
+  `missingConfigurationReturns503WithoutCreatingOrConsumingSession`.
+- **TTS-008 — PostgreSQL / invitation and ownership.** Wrong platform, missing channel, wrong
+  email/expired/processed invitation, pending invitation bypass or another Master; expect
+  400/403/404/409 without consuming invitation or changing ownership. `startValidatesChannelAndInvitationWithoutConsumption`,
+  `pendingInvitationEmailCannotBeBypassedByGeneralStart`,
+  `callbackRevalidatesInvitationExpiryBeforeProvider`,
+  `invitationChangedDuringProviderRequestDoesNotBecomeProof`,
+  `anotherMastersChannelIsRejectedWithoutChangingOwnership`.
+- **TTS-009 — PostgreSQL / expiry and failures.** At exactly ten minutes or after a slow provider,
+  expire the session and remove profile; provider failure persists FAILED without replay.
+  Cleanup affects only expired sessions and never business data. `exactExpiryIsExpiredAndPurgesProfile`,
+  `expiredUnconsumedStateNeverCallsProvider`, `expiresDuringProviderRequestDoesNotSaveProfile`,
+  `providerErrorPersistsFailureAndCannotReplay`, `cleanupDoesNotChangeOtherSessionsOrBusinessData`.
+- **TTS-010 — PostgreSQL / V22.** Upgrade V21 to V22; expect only the new session migration,
+  preserved historical Creator row and no token columns. Fresh-schema assertions include V22.
+  `migrationV22AddsOnlyProofSessionAndPreservesExistingData`; existing Collaboration/RBAC/schema
+  regression checks count all migrations, while historical version targets remain unchanged.
+
+Initial targeted execution: 58 tests, 57 passed, one fixture error (foreign-owner test omitted the
+existing AUTHORIZED/authorizedAt constraint). The fixture was corrected without weakening assertions.
+Final verification: **173/173 passed** across the targeted TikTok/Meta/Instagram suites
+(`tiktok-related.log`, BUILD SUCCESS). The complete regression then passed **864/864 across
+92 suites**, zero failures, errors or skipped (`tiktok-full-regression.log`, BUILD SUCCESS,
+7m05s). This includes **56 new cases**: 27 HTTP/configuration unit cases and 29 PostgreSQL
+TikTok cases. Existing assertions were preserved; fresh-schema migration counts now include V22.
+During teardown the existing Claim email scheduler attempted to access a stopped local
+Testcontainer and logged connection refusal; Surefire again took over 30 seconds to terminate
+its fork. These are teardown warnings, separate from the 864 passing test results; Maven completed
+successfully. No test failed due to an environment or business error.
+
+Real TikTok Sandbox consent has **not** been performed. It requires the user's Sandbox client
+configuration/Target users and browser consent. No actual `.env`, Bruno or shared database was
+changed; no BE restart, commit or push occurred. Pre-existing `docs/diagrams/` files are untouched.
+
+## Current verification — be_vy merge (2026-10-26)
+
+- Incoming branch: `origin/be_vy` at `70453b2`. Integrated Recommendation/Four-Memory, Shortlist/CRM outreach, reach analytics, Collaboration evidence/outcome/review and provider sandbox code with the existing invitation/OTP, claim-email outbox and real Meta/direct Instagram flows.
+- Local V17 Meta sessions and V18 direct Instagram migration files remain byte-identical. Incoming Vy migrations are numbered V19 (recommendation/shortlist), V20 (collaboration evidence) and V21 (engagement metrics). No existing database history is repaired or rewritten. A database that already applied Vy's original V17–V19 needs a separate compatibility assessment before deployment.
+- Preserved the existing MVP restriction: ownership-transfer resolve is not an HTTP endpoint; another owner is rejected with 409. Existing incoming service/controller unit tests remain executable but do not demonstrate that a transfer endpoint is exposed.
+- Added `OAuthSandboxProviderTest.officialModeCannotEnableSimulationOrUnconfiguredFallbackInProduction` and `legacyProvidersCannotBypassRealFacebookOrInstagramSessions`: official mode cannot bypass dev-only mock restrictions, and Facebook/Instagram must use real session routes.
+- Extended `OAuthFlowCompatibilityPostgresIntegrationTest.v18PreservesV17ReadyPayloadOwnershipAndRejectsImpossibleFlowPlatformPairs` to upgrade V18→V21 and assert preservation of channel ownership and encrypted READY sessions, with the new recommendation, evidence and engagement schema present.
+- Compile succeeded. Initial full regression could not start PostgreSQL Testcontainers because Docker Desktop was stopped (695 reported invocations, zero assertion failures, 260 environment/initialization errors). Docker was started. The next run exposed an incoming Spring constructor-selection defect in CollaborationService (two constructors without a selected injection constructor); the generated full-dependency constructor is now explicitly autowired. The failed JVM was stopped after identifying this common startup failure. Targeted verification then passed **45/45 across three suites**, including real PostgreSQL V18→V21 preservation. The subsequent regression exposed positive Campaign fixtures without subscriptions, now required by the incoming quota guard; the run was stopped after identifying the fixture mismatch. Positive campaign helpers now provision an isolated subscription explicitly, and two PostgreSQL cases assert cancelled/missing-active subscription returns 403 and exhausted quota returns 409 without campaign/quota writes. The subsequent clean regression completed **808 tests: 806 passed, two failures, zero errors/skips**. One failure was a leaked unit-test SecurityContext affecting the next PostgreSQL fixture; base fixture setup now clears authentication before each case. The other reproduced loss of the existing shortlist user-id constraint in the incoming Specification query; list filtering and item/batch/readiness/outreach ownership guards are restored, with polluted-row rejection assertions retained and extended. The post-fix PostgreSQL Claim Invitation (31) and Compare/Payment (24) suites passed. Incoming Mockito readiness/outreach fixtures omitted the non-null owning User; those fixtures now specify their Brand owner, without changing assertions or relaxing production checks. The three affected Mockito suites passed 21/21 after fixture alignment. Full regression on the final production code then ran **808 tests: 807 passed, zero assertion failures, one error from a remaining Flow4 fixture missing its owning User, zero skipped**. Only that test fixture was corrected; the complete Flow4 suite reran **11/11 passed (BUILD SUCCESS)**. Consolidated latest Surefire XML reports: **808/808 passed across 90 suites; zero failures, errors or skipped**. This is the complete regression plus the focused fixture-only rerun, not a claim that the preceding full command exited successfully. The full run also reported Surefire taking over 30 seconds to terminate after tests; no tests were disabled.
+- No `.env` or Bruno edits, shared-database access/migrations, BE restart, commit or push during this merge. Local changes were backed up before integration; the backup/stash remains available.
+
+
+## Previous verification — Direct Instagram Login (2026-10-25)
+
+- Added an independent Instagram Login adapter and Start/callback endpoints, `oauthFlow` session routing, per-flow encryption and V18. Both Facebook-backed connection and direct Instagram connection remain supported. Direct Login requires only `instagram_business_basic`, not a Facebook account or Page.
+- Initial selected regression: **107/107 passed** across six suites (before the final expiry refinement). Final adapter-only check: **30/30 passed**, including two deterministic-clock cases proving HTTP latency cannot extend provider expiry. Full regression: **698/698 passed across 75 suites; 0 failures, 0 errors, 0 skipped** (Maven BUILD SUCCESS).
+- Added 53 invocations over the 645-test baseline: 30 adapter/config/cipher unit cases, 19 PostgreSQL direct-flow cases and four PostgreSQL cross-flow/migration cases. No assertions were disabled or weakened. Fresh migration-count assertions include V18; the V16→V17 historical test explicitly targets V17 and keeps its preservation assertions.
+- One intermediate adapter run stalled in a Mockito instrumentation helper before reporting results. Only that verified test process/helper was stopped; the timing fixture now uses a plain Java Clock. The final adapter rerun passed. This process/environment interruption is separate from test assertion results.
+- Direct Instagram real-app testing is **not performed yet**: the six new Instagram environment settings are absent in the actual `.env`. No Facebook credentials or historical token was reused. The earlier real `@iahkhnim_` verification below is specifically Facebook Login, not evidence of direct-login success.
+- Local runtime smoke check: packaged backend restarted only against `127.0.0.1:5433/influencermatch_meta_oauth_test`; Flyway applied V18, health is UP, Creator fixture login and both new Swagger routes work. Hashes of all six existing Facebook/Instagram channel, verification and provider-identity rows remained identical. Direct Start returns the expected HTTP 503 `INSTAGRAM_OAUTH_UNAVAILABLE` while separate Instagram credentials are absent. An initial smoke request used the wrong API-docs URL; the check passed at the configured `/api/v1/api-docs` path.
+- No `.env`/Bruno edits, shared-database access/migration, frontend changes, commit or push. V1–V17 are unchanged. Configuration/test instructions are in README and `.env.example`; deleted guides remain deleted.
+
+### Direct Instagram executable mappings
+
+- **IGD-001 — Unit / independent OAuth.** Business and Creator profile fixtures, flat/single wrapped token response, different app-scoped and canonical IDs; exchange and profile read; expect canonical `user_id`, no Page and only fixed Instagram hosts. `InstagramGraphClientTest.directLoginUsesCanonicalUserIdWithoutFacebookOrPage`.
+- **IGD-002 — Unit / validity window.** Missing/short provider expiry and simulated time spent in HTTP; exchange/confirm; expect maximum ten-minute local proof bound, provider expiry can only shorten it, and no extension during confirm. `InstagramGraphClientTest.providerExpiryCanShortenButNeverExtendTheLocalProofWindow`, `networkTimeNeverExtendsTheProviderExpiry`, `arrayPermissionsAndFreshVerificationRetainTheOriginalBound`, `expiredProofIsRejectedWithoutNetworkRequests`.
+- **IGD-003 — Unit / malformed or rejected proof.** Missing/denied permission, malformed token/subject/expiry, ambiguous response, personal/missing/mismatched account IDs, blank username and changed canonical ID; expect sanitized authorization rejection and no fallback. `InstagramGraphClientTest.malformedTokenResponsesFailClosedBeforeReadingAnyAccount`, `invalidOrNonProfessionalProfilesNeverBecomeProof`, `canonicalAccountChangesDuringConfirmAreRejected`.
+- **IGD-004 — Unit / transport and encryption.** Timeout, HTTP 400/401/403/500, invalid config or cross-flow decryption; expect no code retry, no provider-body/token/secret exposure, independent encryption with Facebook disabled. `InstagramGraphClientTest.timeoutIsSanitizedAndCodeExchangeIsNotRetried`, `httpFailuresNeverExposeTheProviderResponse`, `separateEncryptionWorksWithFacebookDisabledAndCannotDecryptAcrossFlows`, `invalidConfigurationFailsBeforeNetworkCalls`.
+- **IGD-005 — PostgreSQL / direct grant and replay.** Facebook disabled and a stable existing Instagram channel; complete direct callback/view/confirm; expect `INSTAGRAM_LOGIN`, no `pageId`, AUTHORIZED, INSTAGRAM_OAUTH evidence, no permanent token, payload deletion and replay 409 without duplicate evidence. `InstagramOAuthPostgresIntegrationTest.worksWithoutFacebookAndPurgesSecretsAfterGrantAndReplay`.
+- **IGD-006 — PostgreSQL / session and RBAC.** Wrong User/role, anonymous request, wrong cookie/state, expiry, callback replay, declined/revoked provider authorization; expect appropriate 400/401/403/404/409, cleared invalid proof where applicable and no grant. `InstagramOAuthPostgresIntegrationTest.ownerOnlyAndRoleGuardsBlockOtherUsers`, `wrongCookieInvalidStateExpiryAndCallbackReplayNeverReuseCode`, `providerDenialAndRevocationClearProofWithoutGrant`.
+- **IGD-007 — PostgreSQL / fresh guards and exact identity.** Missing/unstable/foreign ID or role/status/email/authVersion/permission changes during HTTP; confirm; expect rejection without new channels, ownership, identity or verification. `InstagramOAuthPostgresIntegrationTest.onlyExactStableIdsCanBeConfirmed`, `userAndPermissionChangesDuringHttpAreRechecked`.
+- **IGD-008 — PostgreSQL / invitations and ownership.** Other owner or wrong-email/expired/used invitation blocks grant; valid invitation is consumed atomically without User creation. `InstagramOAuthPostgresIntegrationTest.otherOwnerIsNeverTransferredAnd409AuditCommits`, `invitationsCannotBeBypassedOrConsumedWhenInvalid`, `validInvitationIsConsumedAtomicallyWithoutCreatingAnotherUser`.
+- **IGD-009 — PostgreSQL / concurrency and audit.** Two confirms synchronized by latches, no transaction during provider call; expect one 200 and one 409, one identity/verification/success audit. Audit trigger failure must roll back Master, ownership, identity and session completion. `InstagramOAuthPostgresIntegrationTest.twoConfirmsHaveOneWinnerAndOneEvidenceSet`, `auditFailureRollsBackOwnershipIdentityAndSessionCompletion`.
+- **IGD-010 — PostgreSQL / compatibility.** Both flows enabled; swapped callback routes cannot consume state. Direct login with matching canonical ID reuses a Facebook-verified Instagram channel/Master/identity/verification; a different ID never matches by handle or rewrites data. `OAuthFlowCompatibilityPostgresIntegrationTest.callbacksCannotConsumeSessionsFromTheOtherFlow`, `directLoginReusesTheInstagramIdentityAlreadyVerifiedThroughFacebook`, `differentCanonicalNamespaceNeverRewritesTheExistingChannelOrMatchesByHandle`.
+- **IGD-011 — PostgreSQL / migration.** Seed a V17 owned channel and READY encrypted legacy session, upgrade to V18; expect default FACEBOOK_LOGIN, identical ciphertext/ownership, readable old payload and constraint rejection for INSTAGRAM_LOGIN with platform FACEBOOK. `OAuthFlowCompatibilityPostgresIntegrationTest.v18PreservesV17ReadyPayloadOwnershipAndRejectsImpossibleFlowPlatformPairs`.
+
+## Previous verification — Instagram Professional follow-up (2026-10-25)
+
+- Extends the existing real Meta adapter; no API/schema changes, new migration, permanent provider token or mock fallback.
+- Added six unit invocations (Instagram pagination/deduplication, three missing/declined-scope cases, optional Business Management and no linked Professional node) and four PostgreSQL invocations (Page ID substitution, reuse of Facebook Master, Instagram ownership-race rejection and Instagram grant-audit rollback). Existing assertions remain active.
+- Targeted Meta regression: **56/56 passed** (21 unit, 35 PostgreSQL integration), zero failures/errors/skips. Full regression: **645/645 passed, 72 suites; 0 failures, 0 errors, 0 skipped**. Earlier 635-test results below are historical.
+- First targeted run exposed two test-fixture issues: the disabled-Meta test inherited enabled settings from the real local `.env`, and the pagination matcher compared decoded braces with an encoded query. The test now explicitly disables Meta and inspects the decoded query; all rejection and enumeration assertions remain. The rerun passed without production code changes.
+- Actual Meta verification on 2026-10-25: the user completed discovery and a fresh bound Instagram OAuth session in their browser. Meta returned `@iahkhnim_`, official Instagram ID `17841450386037138`, linked Page `1401052256422981`. A PUBLIC, stable local-only fixture was created from that ID; no production auto-create or crawler-ID rewrite was added. Confirm then returned `AUTHORIZED` and reused Facebook Master `4f54f1e6-f66b-48fe-ad5e-4b5c0539f675`.
+- Live local-database acceptance passed: one User Master, one active Instagram `META_OAUTH` verification, one Instagram provider identity with the correct Page metadata and one grant audit. Session is COMPLETED with null encrypted payload; no persistent access/refresh token is stored. Replay returned HTTP 409 `META_OAUTH_ALREADY_PROCESSED`. Hashes of complete Facebook channel, verification and identity rows were identical before/after Instagram confirmation. This is an actual Meta OAuth test, separate from the 645 mocked-provider automated test invocations.
+- Environment/process notes: Docker Desktop was initially stopped and was started for local containers. The first BE startup overlapped Maven class recompilation and failed with a missing-class DevTools error; an isolated packaged JAR was then started successfully (health UP, fixture login and permission verified). Full regression again reported the Surefire fork taking over 30 seconds to terminate after all assertions passed; Maven completed successfully. These startup/shutdown issues are separate from business test results.
+- The 2026-10-23 Facebook live test completed with `AUTHORIZED` after granting `business_management` and using the Page ID returned by Meta. This follow-up preserved that ownership and completed Instagram verification on the same local Master. No shared-database access or `.env`/Bruno edits were performed; no commit/push.
+
+### Instagram follow-up executable mappings
+
+- **IG-001 — Unit / Instagram enumeration.** Given paginated Pages containing duplicate Professional IDs, missing links and absent/empty tasks, read Instagram assets; expect unique official Instagram IDs with their Page IDs and fixed-origin cursor pagination. `MetaGraphClientTest.instagramPaginatesAndDeduplicatesOfficialIdsOnTheFixedGraphEndpoint`, `instagramDoesNotInventAnAccountWhenPagesHaveNoProfessionalLink`; retain `instagramUsesProfessionalIdNotItsPageIdAndSkipsUnlinkedPages`.
+- **IG-002 — Unit / Instagram authorization.** Missing `instagram_basic` in debug or live permissions, or declined live permission; verify; expect `META_AUTHORIZATION_REJECTED` before Page enumeration. Additional granted `business_management` is accepted and retained without becoming globally required. `MetaGraphClientTest.instagramBasicMustBeGrantedInBothDebugAndLivePermissions`, `instagramAcceptsAndRetainsOptionalBusinessManagementScope`.
+- **IG-003 — PostgreSQL / Page ID substitution.** An Instagram session exposes its Professional ID, while a separate database row uses the associated Page ID; confirm the Page ID; expect 409, no provider recheck or ownership/identity writes, unchanged row count and READY session. `MetaOAuthPostgresIntegrationTest.instagramCannotConfirmItsFacebookPageIdEvenIfThatIdExistsInTheDatabase`.
+- **IG-004 — PostgreSQL / multi-platform Master.** Complete Facebook OAuth first, then Instagram with additional Business Management scope; expect one Master for the User, unchanged complete Facebook channel/evidence/identity rows, one active Instagram verification and identity, actual scopes stored, correct Page metadata, cleared payload and 409 replay. `MetaOAuthPostgresIntegrationTest.instagramReusesFacebookMasterAndPreservesExistingFacebookEvidence`.
+- **IG-005 — PostgreSQL / ownership and transaction failures.** Repeat the existing race and audit-trigger rollback scenarios for both FACEBOOK and INSTAGRAM; another owner appearing during HTTP gets durable 409 rejection, and audit failure rolls back all grant writes and session consumption. `MetaOAuthPostgresIntegrationTest.ownershipAppearingDuringProviderCallReturns409WithDurableAudit`, `auditFailureRollsBackMasterOwnershipEvidenceAndSessionConsumption`.
+
+## Previous verification — Meta OAuth (2026-10-23)
+
+- Targeted suites: **65/65 passed**, five suites, zero failures/errors/skips. Final full regression: **635/635 passed, 72 suites; 0 failures, 0 errors, 0 skipped**, Java 21 and Maven `test`. Added 46 Meta invocations over the 589-test baseline (15 unit, 31 PostgreSQL integration).
+- Maven completed with `BUILD SUCCESS`. After all assertions passed, Surefire reported the fork JVM taking over 30 seconds to terminate and ended that fork; this is a test-process shutdown warning, not a failed assertion or skipped suite. No business test failures were found.
+- New Meta suites include adapter/cipher/config unit tests and PostgreSQL/pgvector API, migration, transaction and concurrency tests. Meta HTTP and time are mocked; no real Meta app/account or shared database is used.
+- V17 adds OAuth session storage only. Existing migration assertions now include V17; historical V15→V16 checks explicitly target V16. Generic simulated account-link coverage uses TikTok; dedicated cases assert Facebook/Instagram cannot use those mock routes.
+- Browser binding is enforced by an independent HttpOnly cookie, in addition to hashed one-time state. Start must run in browser Swagger/frontend; session inspection and confirm can use Bruno with JWT. README contains configuration and test steps.
+- `.env`/Bruno, V1–V16, shared database and running BE are unchanged. No commit/push. Previously deleted guides stay deleted; only README and this test-case document are updated.
+
+### Executable Meta test mappings
+
+All class names below are under `com.influencermatch.backend.creator.meta`. Parameterized methods run more than once. PostgreSQL cases use independent fixtures, fixed Clock and latches for concurrent operations; provider proof is mocked while actual row/advisory locks and commits run in Testcontainers.
+
+- **META-001 — Unit / adapter success and pagination.** Given valid User token/app/scopes and multiple Page result pages, exchange code once and fetch only fixed Graph endpoints using cursors; expect correct official IDs, no following `paging.next`, no token in proof text. `MetaGraphClientTest.exchangesOnceAndPagesUsingCursorOnFixedGraphOrigin`.
+- **META-002 — Unit / Instagram identity.** Given linked/unlinked Professional assets and Pages with/without management tasks, fetch Instagram choices; expect Professional ID distinct from Page ID and ineligible assets excluded. `MetaGraphClientTest.instagramUsesProfessionalIdNotItsPageIdAndSkipsUnlinkedPages`.
+- **META-003 — Unit / authorization rejection.** Invalid app/type/expiry/validity/scopes or declined live permission; verify token; expect sanitized rejection before account enumeration. `MetaGraphClientTest.rejectsInvalidTokensBeforeFetchingAnyPages`, `deniedPermissionIsRejectedEvenIfDebugScopesStillContainIt`.
+- **META-004 — Unit / provider failures and pagination guards.** Timeout or malformed paging cursor; exchange/read; expect safe error without retrying authorization code or leaking provider details. `MetaGraphClientTest.timeoutIsSanitizedAndAuthorizationCodeIsNotRetried`, `refusesRepeatedOrMissingPagingCursorsWithoutFollowingUrls`.
+- **META-005 — Unit + PostgreSQL / configuration and encryption.** Disabled/invalid config returns 503 before session creation; authenticated encryption uses a separate key and fresh nonce, rejects tampering. `MetaGraphClientTest.payloadUsesAuthenticatedEncryptionAndSeparateKey`, `missingOrUnsafeConfigurationReturns503`; `MetaConfigurationPostgresIntegrationTest`.
+- **META-006 — PostgreSQL / Facebook and Instagram success.** Existing exact stable ID; start/callback/view/confirm; expect one existing channel linked, Master reused/created, sanitized callback/view, verification and identity, sensitive payload/token discarded. `MetaOAuthPostgresIntegrationTest.actualProofConfirmsOnlyExistingIdAndPurgesSensitivePayload`.
+- **META-007 — PostgreSQL / session RBAC.** Other user/non-Creator/anonymous/malformed platform; start/view/confirm; expect 400/401/403/404 as appropriate and no ownership mutation. `MetaOAuthPostgresIntegrationTest.onlySessionOwnerMayViewAndConfirmAndNonCreatorsCannotStart`.
+- **META-008 — PostgreSQL / callback security and expiry.** Invalid/replayed state, expired session, missing/foreign browser cookie; callback; expect rejection without provider reuse; cleanup removes expired proof. `MetaOAuthPostgresIntegrationTest.stateReplayAndExpiredSessionsNeverReuseAuthorizationCode`, `callbackRequiresTheOriginalBrowserAndCannotUseAForwardedAuthorizationUrl`.
+- **META-009 — PostgreSQL / failed proof.** Denied/provider-error callback or revoked authorization at confirm; expect failed state, cleared proof and unchanged ownership. Short provider lifetime bounds session expiry. `MetaOAuthPostgresIntegrationTest.declinedOrFailedCallbackConsumesStateAndKeepsOwnershipUnchanged`, `providerRevocationPurgesProofAndShortTokenLifeBoundsSessionExpiry`.
+- **META-010 — PostgreSQL / exact matching only.** Missing/unstable/wrong-platform ID or selection outside session; confirm; expect 409 and no new channel or username match. `MetaOAuthPostgresIntegrationTest.neverCreatesChannelsOrMatchesByUsername`.
+- **META-011 — PostgreSQL / state changes during HTTP.** Role/status/verification/authVersion/effective permission changes after proof request begins; confirm; expect fresh guards reject and no Master/ownership. `MetaOAuthPostgresIntegrationTest.stateChangesDuringProviderVerificationAreRecheckedBeforeCommit`.
+- **META-012 — PostgreSQL / invitations.** General connect cannot bypass another email; explicitly bound invitation must target correct channel/email and stay pending/unexpired. Successful confirm consumes it atomically. `MetaOAuthPostgresIntegrationTest.generalConnectCannotBypassAnInvitationToAnotherEmail`, `explicitInvitationIsBoundToTargetEmailAndConsumedWithOwnership`, `explicitInvitationIsRecheckedAfterOAuth`.
+- **META-013 — PostgreSQL / ownership and durable audit.** Owner appears while Meta is queried; confirm returns 409, persists rejection audit and leaves owner's data unchanged. `MetaOAuthPostgresIntegrationTest.ownershipAppearingDuringProviderCallReturns409WithDurableAudit`.
+- **META-014 — PostgreSQL / callback and confirm races.** Concurrent callbacks exchange once with no DB transaction across HTTP. Concurrent same-session confirms have one winner; two users competing for a channel have one owner/evidence set and one conflict. `MetaOAuthPostgresIntegrationTest.simultaneousCallbacksExchangeCodeOnceAndDoNotHoldLocksDuringHttp`, `concurrentConfirmOnOneSessionHasOneWinnerAndNoDuplicateEvidence`, `twoDifferentCreatorsCompetingForOneChannelHaveOneOwner`.
+- **META-015 — PostgreSQL / multi-channel and refresh.** Two channels confirmed concurrently for one User reuse one Master; a second session refreshing the same owner reuses verification/provider identity. `MetaOAuthPostgresIntegrationTest.twoDifferentChannelsConfirmedConcurrentlyReuseOneMaster`, `secondSessionForSameOwnerUpdatesEvidenceInsteadOfCreatingDuplicateRows`.
+- **META-016 — PostgreSQL / atomic grant audit.** Database trigger rejects audit; confirm fails and rolls back Master/ownership/evidence/session consumption; removing trigger allows retry. `MetaOAuthPostgresIntegrationTest.auditFailureRollsBackMasterOwnershipEvidenceAndSessionConsumption`.
+- **META-017 — PostgreSQL / legacy mock bypass.** Enabled dev mock cannot verify Facebook/Instagram through old callback; expect 503 without proof/ownership. `MetaOAuthPostgresIntegrationTest.oldMockRoutesCannotVerifyMetaEvenWithMockClientEnabled`.
+- **META-018 — PostgreSQL / V17 upgrade.** Seed V16 User/Master/owned Creator and migrate to V17; expect preserved ownership/data, empty new session table. `MetaOAuthPostgresIntegrationTest.v16UpgradePreservesExistingAccountOwnershipAndDoesNotInventSessions`. Fresh schema and historical migration regressions remain in existing schema suites.
+
+## Previous verification — Claim Email Outbox + Async (2026-10-23)
+
+- New outbox suites: **23/23 passed** across five suites. Migration/schema/SMTP follow-up: **58/58 passed** across four distinct suites.
+- Final full regression: **589/589 passed, 69 suites; 0 failures, 0 errors, 0 skipped**, Java 21, Maven `test` with `-Dlogging.level.org.hibernate.SQL=OFF` to suppress SQL debug output only.
+- Added 23 invocations over the 566-test baseline: 14 PostgreSQL outbox cases, one PostgreSQL after-commit case, one PostgreSQL missing-key case, four cipher unit cases and three async/logging cases.
+- SMTP/provider remain mocked; PostgreSQL/pgvector Testcontainers exercise actual transaction, lease, unique constraint, migration and lock behavior. No real Gmail delivery was attempted. Production code uses existing JavaMailSender.
+- Initial targeted checks exposed two test-fixture problems (mock EntityManagerFactory missing in the standalone async context and an AUTHORIZED fixture without its required Master/time); fixtures were corrected. First full run identified 13 stale migration-count assertions: V14→V15 tests now pin V15, fresh-schema counts/version include V16. All preservation assertions remain active, and no tests were disabled or skipped.
+- V16 adds only claim email outbox/retry tables. No `.env`/Bruno edits, shared database access/migration, BE restart, commit or push. Registration invitation and OTP SMTP behavior is unchanged.
+- Executable mappings: MAIL-001–MAIL-013 below. Earlier results are historical.
+
+## Previous verification — Creator Claim Concurrency (2026-10-23)
+
+- Targeted regression: **69/69 passed**, five suites, zero failures/errors/skips.
+- Full regression: **566/566 passed, 64 suites; 0 failures, 0 errors, 0 skipped**, Java 21, Maven `test`.
+- Added 11 test invocations: four PostgreSQL cases (two-channel concurrent claims, two expiry boundaries, used invitation) and seven unit cases for state refreshed under locks. Existing race/replay and audit rollback assertions were strengthened, not removed.
+- The invitation/conflict PostgreSQL suite now has **31 passing invocations**. Clock, SMTP and provider are mocked; transaction, row locks and rollback run on disposable PostgreSQL/pgvector Testcontainers. Mockito unit cases verify ordering and guards only.
+- Initial sandbox execution could not access the Docker named pipe; rerun with local Docker access completed successfully. Final targeted/full results above contain no environment errors or skipped tests.
+- No API/schema changes, `.env`/Bruno edits, shared database access, real mail, BE restart, commit or push. Executable mappings: CONC-001–CONC-006 below.
+
+## Previous verification — Claim Invitation & Conflict MVP (2026-10-23)
+
+- Final full regression: **555/555 passed, 64 suites; 0 failures, 0 errors, 0 skipped**, Java 21 and `mvn -q test`.
+- Added **27 PostgreSQL invitation/conflict invocations** and one SMTP message unit case. Provider, email and Clock are mocked; locks and rollback use real disposable pgvector/PostgreSQL containers.
+- Checks include global pending blocks, ownership/campaign/RBAC checks, concurrent invitations/callbacks, replay/expiry, durable 409 audits, SMTP/audit rollback, manual Claim matching email and retired transfer API 404.
+- Earlier runs identified expired-status/fixture expectations and an incomplete mocked Clock zone; fixtures were aligned with the read-only verify contract and configured JPA UTC behavior. No assertions were disabled or tests skipped.
+- V1–V15 unchanged, no new schema migration. No real mail, shared database access/migration, `.env`/Bruno edits, BE restart, commit or push. Earlier results below are historical.
+- Executable mappings: INV-001–INV-016 below.
+
+
+## Previous verification — schema cleanup V15 (2026-10-23)
+
+- Targeted regression: **100/100 tests passed**.
+- Final full regression: **527/527 passed, 63 suites, 0 failures, 0 errors, 0 skipped**, Java 21 and `mvn -q test`.
+- Added 12 PostgreSQL integration invocations for V15: nine backfill parameter sets, retained-data upgrade, fresh schema and ingestion/filter/Discovery/profile/Compare behavior.
+- New migration V15 drops the retired tables/columns; prior V1–V14 migration files remain unchanged. Historical V12/V14 tests are pinned to their historical schema versions.
+- Only disposable PostgreSQL/pgvector containers were migrated. No real email, shared database migration, backend restart, .env/Bruno changes, commit or push.
+- SCHEMA-001–SCHEMA-005 map the current checks below; earlier test counts are historical.
+
+
+## Previous verification — invitation registration and OTP (2026-10-23)
+
+- Final full regression: **515 tests / 62 suites; 515 passed, 0 failures, 0 errors, 0 skipped** (`mvn -q test`, Java 21).
+- PostgreSQL/pgvector Testcontainers covered V13/V14, rollback, persisted wrong attempts, invitation concurrency, verification concurrency and legacy password setup. SMTP/clock were mocked; no real mail or shared database was used.
+- Google Login-only suites were retired; their replacement checks assert removed endpoints and legacy password setup. Existing session, permission, Claim/ownership, Compare, Billing and Collaboration assertions remain, with fixtures adapted to Vy's persisted CreatorMaster and migration numbering.
+- Regression caught and fixed verification being overwritten by concurrent Admin role changes (`User` dynamic updates), transient Master assignment in manual Claim approval, and catalog entries incorrectly marked editable when unimplemented.
+- V1–V12 were not modified. New migration files were tested only in containers. No `.env`/Bruno edits, shared database migrations, BE restart, commit or push were performed.
+- REG-001–REG-025 below map the added/updated behavior to executable tests. Older results below are historical.
+
+
+## Kết quả thực thi ngày 22/10/2026 — gỡ Creator Rate Card
+
+- Clean full regression: **362 test / 47 suite; 362 đạt, 0 thất bại, 0 lỗi thực thi, 0 bỏ qua**.
+- Danh sách bên dưới ánh xạ **114 nhóm test case**; một nhóm có thể chạy nhiều bộ tham số.
+- Đã gỡ test thuần nghiệp vụ giá, giữ assertion Claim/ownership/ingestion/Compare và phân quyền.
+- Thêm 12 lượt integration test cho endpoint cũ 404, response không có `rateCard`, permission
+  đã gỡ và nâng cấp Vy V10 → V12 có/không có override cũ. Khôi phục riêng test claim kênh đã có owner.
+- Migration test giữ nguyên giá/audit lịch sử, quyền khác và version của role không bị ảnh hưởng.
+- Lượt chọn lọc ban đầu gặp lỗi Docker engine chưa chạy (33 lượt: 18 đạt, 15 lỗi khởi tạo,
+  không có assertion thất bại). Sau khi Docker hoạt động, đã chạy lại bằng clean full regression
+  trên PostgreSQL/pgvector Testcontainers riêng và đạt kết quả trên.
+- V9 không đổi; không chạy migration lên database dùng chung. Không sửa `.env`, Bruno hoặc frontend.
+- Các kết quả 357 test dưới đây là lịch sử trước khi gỡ chức năng; chưa commit/push đợt này.
+
+## Kết quả thực thi ngày 21/10/2026
+
+- Sau bổ sung test và sửa replay: thêm **123 lượt kiểm thử** so với baseline 234;
+  tổng **357 test / 46 suite**.
+- Full regression sau bản sửa: **357 đạt, 0 thất bại, 0 execution error, 0 bỏ qua**.
+- BUG-AUTH-001 đã sửa và test tái hiện đã đạt. Không có lỗi Docker/PostgreSQL
+  hoặc test bị tắt để che lỗi. Các test có trước vẫn được giữ và đạt.
+- Regression Auth/RBAC chọn lọc sau bản sửa: **51/51 đạt**.
+- Trước khi sửa, full regression 354/355 đạt và integration chọn lọc 87/88 đạt;
+  lỗi duy nhất ở cả hai lần là BUG-AUTH-001, còn 2 refresh token chưa bị thu hồi.
+- Đợt đầu chỉ thêm test/tài liệu; theo yêu cầu tiếp theo đã sửa transaction Auth
+  và thêm exception riêng cho replay. Kết quả được ghi nhận trước khi commit/push. Không thay migration,
+  `.env`, Bruno, cấu hình máy hoặc database dùng chung.
+- Full regression được chạy bằng JDK 21/Maven với `-DforkCount=0` và Byte Buddy
+  agent nạp trước cho Mockito trên Windows. Không đo hoặc tuyên bố tỷ lệ coverage
+  JaCoCo trong lần chạy này.
+- Regression sau rebase lên `develop` tại `385ace3`: **357/357 đạt**, không lỗi
+  hoặc bỏ qua; đã kiểm tra cùng các cập nhật campaign autofill/ingestion mới merge.
+
+## Phạm vi và cách đọc
+
+Danh sách ánh xạ test tự động cho các module backend Khải phụ trách. Giữ bộ 234 test
+trước đợt này; bổ sung unit và integration test theo domain. Đây là tài liệu trong
+repo, chưa phải nội dung đã điền vào Report của nhóm. Không cam kết coverage 100%.
+
+- **Unit**: JUnit 5/Mockito, kiểm tra logic và tương tác repository/service; không
+  chứng minh được commit/rollback thực tế hoặc Spring filter/method security.
+- **Integration**: MockMvc + PostgreSQL/pgvector Testcontainers, chạy Flyway và
+  Hibernate validate; kiểm tra HTTP, quyền, database, constraint và transaction.
+- Một dòng có thể là parameterized test với nhiều bộ dữ liệu. Số lượt thực thi
+  trong Surefire vì vậy lớn hơn số dòng test case.
+- Fixture dùng UUID/owner riêng, không phụ thuộc thứ tự. Các suite integration mới
+  dùng database Docker riêng qua `PostgresApiTestSupport`; container dùng chung
+  trong JVM và được Testcontainers dọn khi JVM kết thúc. Không dùng database chung,
+  tài khoản thật, Google Cloud, VNPay thật hoặc Bruno.
+- Các kiểm thử rollback tạo trigger gây lỗi có chủ đích trên database test và
+  xóa trigger trong `finally`; không chạy những lệnh này vào database nghiệp vụ.
+
+## Chạy kiểm thử
+
+Yêu cầu Java 21, Maven và Docker Desktop chạy Linux containers cho integration.
+Không cần chạy BE riêng hoặc chỉnh `.env`.
+
+```powershell
+# Unit theo domain
+mvn '-Dtest=BrandServiceTest,CampaignServiceTest,DataQualityServiceTest,ShortlistCompareServiceTest,PaymentSettlementServiceTest,PaymentCallbackServiceTest,MockPaymentServiceTest,SubscriptionServiceTest,AuditServiceTest,AdminRoleGuardTest,AuthServiceTest,RefreshTokenServiceTest,CreatorClaimServiceTest' test
+
+# Integration mới và các suite đã mở rộng
+mvn '-Dtest=BrandPostgresIntegrationTest,CampaignPostgresIntegrationTest,AuditLogPostgresIntegrationTest,AuthSessionPostgresIntegrationTest,SubscriptionPostgresIntegrationTest,CreatorClaimPostgresIntegrationTest,RolePermissionPostgresIntegrationTest' test
+
+# Toàn bộ regression
+mvn test
+
+# Tái hiện riêng BUG-AUTH-001
+mvn '-Dtest=AuthSessionPostgresIntegrationTest#replayedRotatedTokenRevokesAllOtherSessionsEvenWhenRequestIsRejected' test
+```
+
+Xem kết quả từng class/method trong `target/surefire-reports/TEST-*.xml` hoặc file
+`.txt` cùng thư mục. Trước bản sửa, test BUG-AUTH-001 làm Maven trả exit 1; sau bản
+sửa test đó phải đạt. Không bỏ qua test hoặc đổi kỳ vọng để làm xanh suite.
+
+## Lỗi nghiệp vụ phát hiện và bản sửa
+
+### BUG-AUTH-001 — Thu hồi session khi replay refresh token bị rollback
+
+- Test: `AuthSessionPostgresIntegrationTest#replayedRotatedTokenRevokesAllOtherSessionsEvenWhenRequestIsRejected`.
+- Điều kiện: cùng một tài khoản đăng nhập hai lần, sau đó rotate refresh token
+  của session thứ nhất. Còn hai refresh token hoạt động: session thứ hai và token
+  thay thế của session thứ nhất.
+- Thao tác: gửi lại refresh token cũ của session thứ nhất.
+- Mong đợi: HTTP 401 và tất cả refresh token còn hoạt động của tài khoản được thu hồi,
+  đúng với nhánh xử lý replay và unit test `rotate_FailsWhenRevokedAndRevokesAll` hiện có.
+- Trước khi sửa đã tái hiện: HTTP 401 nhưng database vẫn còn **2 token chưa bị thu hồi**.
+- Nguyên nhân: `RefreshTokenService.rotate()` gọi `revokeAll()` rồi ném
+  `BusinessException` trong transaction; `AuthServiceImpl.refresh()` cũng có
+  transaction bao ngoài. Exception dẫn tới rollback cả thao tác thu hồi. Mockito
+  chỉ xác nhận lời gọi `revokeAll()`, không phát hiện rollback này.
+- Ảnh hưởng: các refresh token khác vẫn có thể được dùng để lấy access token;
+  cơ chế thu hồi toàn bộ session khi phát hiện replay chưa có hiệu lực bền vững.
+- Bản sửa theo yêu cầu tiếp theo: thêm `RefreshTokenReplayException`, giữ nguyên
+  HTTP 401/code UNAUTHENTICATED. Cả `RefreshTokenService.rotate()` và transaction
+  bao ngoài `AuthServiceImpl.refresh()` dùng `noRollbackFor` chỉ với exception này,
+  để commit việc thu hồi trong nhánh replay trước khi trả lỗi. Lỗi khác vẫn rollback.
+- Giữ cùng transaction và khóa `rbac_guard`; không dùng REQUIRES_NEW khi transaction
+  ngoài còn giữ khóa, tránh tự chặn nhau. Rotate thành công vẫn tham gia transaction
+  của caller, không commit token mới độc lập.
+- Test gốc giữ nguyên kỳ vọng và thêm kiểm tra token của người khác không bị ảnh
+  hưởng, token bị thu hồi thực sự không refresh được; bổ sung test refresh đồng thời
+  và rollback rotate thành công khi caller thất bại.
+- Trạng thái: **Resolved**, đã qua test tái hiện và full regression 357/357.
+
+Regression Auth/RBAC chọn lọc sau bản sửa: **51/51 đạt**, gồm test gốc và hai test
+bổ sung về transaction/concurrency. HTTP contract và schema database không đổi.
+
+## Danh sách test case
+
+Tên chức năng và mô tả case dùng tiếng Anh để tiện ánh xạ code và báo cáo nhóm.
+Mỗi case bên dưới chỉ rõ class/method; dữ liệu parameterized nằm ngay trong source.
+
+### Authentication & Session Management
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-001 | Unit | Register padded mixed-case email/name | Save trimmed lowercase email, trimmed name, BRAND and encoded password | [AuthServiceTest](../src/test/java/com/influencermatch/backend/auth/service/AuthServiceTest.java)`#registerTrimsEmailAndNameAndNeverPersistsPlainPassword` |
+| BE-002 | Unit | AuthenticationManager rejects password | Reject without tokens or user save | [AuthServiceTest](../src/test/java/com/influencermatch/backend/auth/service/AuthServiceTest.java)`#invalidPasswordDoesNotGenerateAnyTokens` |
+| BE-003 | Unit | Rotate token expired at fixed past timestamp | Reject; no new token or revocation of other sessions | [RefreshTokenServiceTest](../src/test/java/com/influencermatch/backend/auth/service/RefreshTokenServiceTest.java)`#expiredTokenDoesNotCreateOrRevokeOtherSessions` |
+| BE-004 | Unit | Rotate/revoke unknown token; revoke already revoked token | Reject rotation; revoke is idempotent and preserves timestamp | [RefreshTokenServiceTest](../src/test/java/com/influencermatch/backend/auth/service/RefreshTokenServiceTest.java)`#unknownTokenAndIdempotentRevokeDoNotWrite` |
+| BE-005 | Unit | Principal role differs from database role | Reject before refresh-token write | [RefreshTokenServiceTest](../src/test/java/com/influencermatch/backend/auth/service/RefreshTokenServiceTest.java)`#changedRoleCannotIssueTokenFromStalePrincipal` |
+| BE-008 | Integration | Register mixed-case email with injected ADMIN role; repeat | Injected role 400; valid request creates unverified BRAND with encoded password and trimmed name; duplicate 409; no Brand Profile | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#registrationNormalizesCaseAndRejectsInjectedRole` |
+| BE-009 | Integration | Wrong password, then uppercase email with valid password | 401 creates no session; valid login token can call /auth/me | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#wrongPasswordDoesNotIssueSessionAndLoginNormalizesEmail` |
+| BE-010 | Integration | Login then mark user LOCKED/DISABLED | Login, refresh and old access token rejected; no extra refresh row | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#inactiveAccountsCannotLoginOrRefresh` |
+| BE-011 | Integration | Expire stored token at fixed past time; also use unknown token | 401 UNAUTHENTICATED; no new refresh rows | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#expiredAndUnknownRefreshTokensCannotCreateSessions` |
+| BE-012 | Integration | Rotate valid token, inspect DB, logout replacement, retry | Old revoked and linked to new token; logout 204; refresh 401 | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#rotationLinksOldTokenAndLogoutRevokesReplacement` |
+| BE-013 | Integration | Two sessions; rotate first; replay first token | 401 and zero active refresh tokens for that account; other account unaffected | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#replayedRotatedTokenRevokesAllOtherSessionsEvenWhenRequestIsRejected` |
+| BE-014 | Integration | Malformed Authorization header or Bearer JWT | 401 | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#invalidAuthorizationIs401` |
+| BE-108 | Integration | Rotate successfully inside caller transaction, then force caller failure | Original token remains active/unreplaced; no replacement row; original can refresh afterward | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#successfulRotationStillRollsBackWithItsCallerTransaction` |
+| BE-109 | Integration | Two concurrent refresh requests use the same token | One 200, one 401; all refresh tokens of that account revoked durably; completes without deadlock | [AuthSessionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/auth/AuthSessionPostgresIntegrationTest.java)`#concurrentRefreshReplayCommitsRevocationWithoutDeadlock` |
+
+### Access Control & User Management
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-015 | Unit | Assign CREATOR to existing CREATOR with version 5 | Version unchanged; no refresh revocation/audit | [AdminRoleGuardTest](../src/test/java/com/influencermatch/backend/user/service/AdminRoleGuardTest.java)`#sameRoleDoesNotRevokeOrAudit` |
+| BE-016 | Unit | CREATOR owns channel or has pending claim | CREATOR_ROLE_CHANGE_CONFLICT; role/version preserved; no revocation/audit | [AdminRoleGuardTest](../src/test/java/com/influencermatch/backend/user/service/AdminRoleGuardTest.java)`#creatorOwnershipOrPendingClaimPreventsRoleChange` |
+| BE-104 | Integration | Admin changes logged-in account role | Old tokens rejected; new permissions; Manager denied private APIs | [RbacPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RbacPostgresIntegrationTest.java)`#roleChangeRevokesAccessAndRefreshAndManagerCannotAccessPrivateApis` |
+| BE-105 | Integration | Lock/unlock then repeat no-op | Old token never revived; no-op does not revoke valid token | [RbacPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RbacPostgresIntegrationTest.java)`#lockUnlockNeverRestoresOldTokenAndNoOpDoesNotInvalidate` |
+| BE-106 | Integration | Concurrent Admin removal | At least one active Admin remains | [RbacPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RbacPostgresIntegrationTest.java)`#concurrentChangesCannotRemoveLastActiveAdministrator` |
+
+### Role Permission Management
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-017 | Integration | Disable two BRAND permissions; inspect same token/CREATOR; send mixed valid-invalid patch | One version/audit; other role/permissions unchanged; invalid batch writes nothing | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#multiPermissionPatchIsAtomicAndIndependentAcrossRoles` |
+| BE-018 | Integration | Disable permission then reuse token for collaboration/outcome/review/claim/claim-review/checkout | 403 before resource mutation; no new audit | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#toggledBusinessOperationsAreForbiddenBeforeAnyResourceMutation` |
+| BE-019 | Integration | Change permission, repeat no-op, submit stale version | Correct version/audit; no-op unchanged; stale update 409 | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#versionAuditAndNoopAreConsistent` |
+| BE-020 | Integration | Database rejects permission-change audit | Override/version/audit rollback together | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#auditFailureRollsBackOverridesAndVersion` |
+| BE-021 | Integration | Two Admins update with same version | One success and one 409 | [RolePermissionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/security/RolePermissionPostgresIntegrationTest.java)`#concurrentAdminsCannotOverwriteEachOther` |
+
+### Brand Profile Management
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-022 | Unit | Create with padded/duplicate categories/platforms | Normalized values; initial M4 context version 1 | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#createNormalizesListsAndCreatesInitialContext` |
+| BE-023 | Unit | Owner already has profile | BRAND_ALREADY_EXISTS; no profile/context writes | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#duplicateProfileDoesNotWriteContext` |
+| BE-024 | Unit | BRAND requests another owner ID | Forbidden; no profile/context writes | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#cannotCreateForAnotherUser` |
+| BE-025 | Unit | Update profile with existing learning/evidence | M4 increments and profile JSON changes; learning/evidence preserved | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#updateRefreshesContextAndPreservesLearnedEvidence` |
+| BE-026 | Unit | Read/update foreign profile | Forbidden; original name preserved; no context access | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#foreignBrandCannotReadOrUpdate` |
+| BE-027 | Unit | Get unknown profile ID | BRAND_NOT_FOUND | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#missingProfileReturnsSpecificError` |
+| BE-028 | Unit | Page 1 when owner has one profile | Empty items, total 1; no unrestricted findAll | [BrandServiceTest](../src/test/java/com/influencermatch/backend/brand/BrandServiceTest.java)`#laterListPageContainsNoForeignRows` |
+| BE-029 | Integration | Create, update and list own profile with another owner present | 201/200; m4Version 1 then 2; DB JSON matches profile; no foreign rows | [BrandPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/brand/BrandPostgresIntegrationTest.java)`#createUpdateAndListKeepProfileAndContextConsistent` |
+| BE-030 | Integration | Duplicate create and foreign read/update/create-for-owner | 409/403; original name/context version unchanged | [BrandPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/brand/BrandPostgresIntegrationTest.java)`#duplicateAndForeignAccessNeverChangeProfileOrContext` |
+| BE-031 | Integration | Blank/overlong name, bad website or blank category | 400; no profile row for fixture owner | [BrandPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/brand/BrandPostgresIntegrationTest.java)`#invalidProfileDoesNotCreateAnyRows` |
+| BE-032 | Integration | Admin reads/writes; other roles/anonymous read; unknown ID | Admin read 200/write 403; others 403/401; missing 404 | [BrandPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/brand/BrandPostgresIntegrationTest.java)`#adminHasReadOnlySupportAndOtherRolesAreDenied` |
+| BE-033 | Integration | Trigger rejects context insert/update for fixture marker | 500; create leaves no profile; update preserves name/version | [BrandPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/brand/BrandPostgresIntegrationTest.java)`#contextFailureRollsBackProfileCreationAndUpdate` |
+
+### Campaign Management
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-034 | Unit | Create with padded/duplicate lists | DRAFT with normalized values; no premature M3 | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#createsDraftWithNormalizedListsAndNoPrematureContext` |
+| BE-035 | Unit | End before start, follower max below min, budget max below min | INVALID_CAMPAIGN_RANGE; no campaign/context writes | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#invalidRangesDoNotPersist` |
+| BE-036 | Unit | Update READY_FOR_DISCOVERY/ACTIVE/COMPLETED/ARCHIVED | CAMPAIGN_NOT_EDITABLE; name/status unchanged | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#onlyDraftCanBeEdited` |
+| BE-037 | Unit | DRAFT to READY then ACTIVE | One M3 version 1 with campaign criteria | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#readyTransitionCreatesOneContextAndSequentialActivationDoesNotRecreateIt` |
+| BE-038 | Unit | DRAFT without platforms requests READY | CAMPAIGN_CONTEXT_NOT_READY; DRAFT preserved; no M3 | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#missingPlatformsCannotCreateDiscoveryContext` |
+| BE-039 | Unit | Archive already archived; read unknown ID | ARCHIVED unchanged; CAMPAIGN_NOT_FOUND | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#archiveIsIdempotentAndMissingCampaignIs404` |
+| BE-040 | Unit | Brand access service rejects ownership | Forbidden before name/status/context mutation | [CampaignServiceTest](../src/test/java/com/influencermatch/backend/campaign/CampaignServiceTest.java)`#ownershipFailureHappensBeforeMutation` |
+| BE-041 | Integration | Create/update DRAFT then READY to ACTIVE to COMPLETED; list | Correct states/normalization; one M3; Brand Context unchanged | [CampaignPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/campaign/CampaignPostgresIntegrationTest.java)`#fullLifecycleCreatesOneContextAndPreservesProfile` |
+| BE-042 | Integration | Invalid ranges, negative budget, missing platforms, blank name | 400 and range error code when applicable; no campaign rows | [CampaignPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/campaign/CampaignPostgresIntegrationTest.java)`#invalidCreateDoesNotWriteCampaignOrContext` |
+| BE-043 | Integration | Foreign Brand, Admin read/write, anonymous, unknown ID | 403 foreign/admin write; 200 Admin read; 401 anonymous; 404 missing | [CampaignPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/campaign/CampaignPostgresIntegrationTest.java)`#ownershipAndReadOnlyAdminAreEnforced` |
+| BE-044 | Integration | Skip DRAFT to ACTIVE; archive twice; edit archived | Skip/edit 409; archive 200 twice; no M3 | [CampaignPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/campaign/CampaignPostgresIntegrationTest.java)`#archiveIsIdempotentAndRejectedTransitionsDoNotWrite` |
+| BE-045 | Integration | Trigger rejects initial M3 insert | 500; remain DRAFT with no context | [CampaignPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/campaign/CampaignPostgresIntegrationTest.java)`#contextInsertFailureRollsBackReadyTransition` |
+
+### Creator Ownership Verification
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-046 | Unit | Verified Creator claims missing channel | NotFound; no claim/audit writes | [CreatorClaimServiceTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimServiceTest.java)`#missingChannelNeverCreatesClaim` |
+| BE-047 | Unit | Reviewer reads missing claim | NotFound; no audit or claim save | [CreatorClaimServiceTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimServiceTest.java)`#missingReviewTargetNeverAudits` |
+| BE-048 | Integration | Claim for missing channel; reviewer reads/revokes missing claim | Three 404 responses; no new audit/claim rows | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#missingChannelAndClaimReturn404WithoutAudits` |
+| BE-049 | Integration | Competing claims, approval, ingestion, revoke | One owner; ingestion preserves ownership; revoke clears ownership and verification | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#completeFlowCompetingClaimsIngestionAndRevocation` |
+| BE-050 | Integration | Another Creator/profile reader requests evidence | Evidence remains private | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#claimEvidenceIsPrivateAcrossCreatorsAndPublicProfile` |
+| BE-051 | Integration | Concurrent competing claim approvals | Exactly one approved owner | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#concurrentReviewsHaveOneWinner` |
+
+### Data Quality Review
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-052 | Unit | Approve low-confidence KOC with padded new Niche | Trim Niche; preserve confidence; reviewer/time saved; creator lock precedes metric; flush then audit | [DataQualityServiceTest](../src/test/java/com/influencermatch/backend/creator/DataQualityServiceTest.java)`#approvalKeepsConfidenceAndLocksCreatorBeforeSnapshot` |
+| BE-053 | Unit | KOL, null/0.7 confidence, reviewed or stale snapshot | DATA_QUALITY_REVIEW_CONFLICT; no mutation/flush/audit | [DataQualityServiceTest](../src/test/java/com/influencermatch/backend/creator/DataQualityServiceTest.java)`#ineligibleSnapshotDoesNotChangeOrAudit` |
+| BE-054 | Unit | Whitespace Niche, then unknown metric with valid body | Validation before lookup; NotFound for missing metric; no audit | [DataQualityServiceTest](../src/test/java/com/influencermatch/backend/creator/DataQualityServiceTest.java)`#invalidNicheFailsBeforeLookupAndMissingMetricIs404` |
+| BE-055 | Unit | Negative page and size 1000 | Repository receives page 0 and size 100 | [DataQualityServiceTest](../src/test/java/com/influencermatch/backend/creator/DataQualityServiceTest.java)`#pendingClampsPageAndSize` |
+| BE-056 | Integration | Historical/latest snapshots, confidence boundary and timestamp ties | Only eligible latest KOC; stable UUID tie-break | [DataQualityPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/DataQualityPostgresIntegrationTest.java)`#filtersLatestBeforeApplyingThresholdAndUsesUuidTieBreak` |
+| BE-057 | Integration | Concurrent review of same metric | One approval and one conflict | [DataQualityPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/DataQualityPostgresIntegrationTest.java)`#concurrentApprovalHasOneWinner` |
+| BE-058 | Integration | Ingestion overlaps review | Recheck latest snapshot under creator lock | [DataQualityPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/DataQualityPostgresIntegrationTest.java)`#ingestionLockForcesApprovalToRecheckLatestSnapshot` |
+| BE-059 | Integration | Audit insert fails during approval | Review fields and Niche rollback | [DataQualityPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/DataQualityPostgresIntegrationTest.java)`#auditFailureRollsBackApprovalAndNiche` |
+
+### Shortlist Comparison / Creator Relationships
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-060 | Unit | Repository order differs; metrics missing; no valid ownership | Request order preserved; null metrics; verification false; one batch read; no saves | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#batchesReadsPreservesOrderAndMissingMetricsRemainNull` |
+| BE-061 | Unit | Compare another owner's campaign | NotFound before membership/metrics queries | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#foreignCampaignIsHiddenBeforeReadingMembership` |
+| BE-062 | Unit | Duplicate IDs, then non-shortlisted IDs | Validation errors; no metrics queries or saves | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#duplicateAndMissingMembersNeverReadMetrics` |
+| BE-063 | Unit | Empty comparison selection | Constraint violation before any repository call | [ShortlistCompareServiceTest](../src/test/java/com/influencermatch/backend/relationship/ShortlistCompareServiceTest.java)`#invalidSelectionFailsBeforeAnyRepositoryAccess` |
+| BE-100 | Integration | Compare shortlist with snapshots and verification | Request order/latest snapshot; verification only for authorized owner; no rateCard field | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#comparePreservesOrderLatestMetricsAndVerification` |
+| BE-101 | Integration | Cross-Brand item/relationship access | Ownership enforced without mutation | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#anotherBrandCannotReadOrMutateShortlistAndRelationships` |
+| BE-102 | Integration | Reference other campaign or Creator's item | Invalid linkage rejected | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#relationshipCannotAttachForeignOrMismatchedShortlistItem` |
+| BE-103 | Integration | Repeated/conflicting mock callbacks | Stable terminal dates/quota; one transition audit | [ComparePaymentPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/ComparePaymentPostgresIntegrationTest.java)`#terminalPaymentOutcomePreservesDatesQuotasAndSingleAudit` |
+
+### Payment & Subscription Management
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-064 | Unit | Lock existing payment | Brand lock before Payment lock and refresh | [PaymentSettlementServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentSettlementServiceTest.java)`#locksBrandBeforePaymentAndRefreshesLockedEntity` |
+| BE-065 | Unit | Settle PENDING successfully | PAID/ACTIVE; activation dates/duration correct; quotas preserved | [PaymentSettlementServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentSettlementServiceTest.java)`#successUsesActivationDateAndPreservesQuota` |
+| BE-066 | Unit | Settle PENDING as failed | FAILED/CANCELLED with reason; dates/quota preserved | [PaymentSettlementServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentSettlementServiceTest.java)`#failureCancelsWithoutChangingDatesOrQuota` |
+| BE-067 | Unit | PAID/FAILED/REFUNDED with success/failure outcome | Compatible repeat only; terminal state/data unchanged; no writes | [PaymentSettlementServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentSettlementServiceTest.java)`#terminalStatesNeverRewriteDatesOrQuota` |
+| BE-068 | Unit | Another ACTIVE subscription exists | Reject activation; PENDING state unchanged | [PaymentSettlementServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentSettlementServiceTest.java)`#activeSubscriptionPreventsActivationWithoutMutatingPendingPayment` |
+| BE-069 | Unit | Payment pending but subscription CANCELLED | Reject without persistence | [PaymentSettlementServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentSettlementServiceTest.java)`#nonPendingSubscriptionCannotBeActivated` |
+| BE-070 | Unit | Transaction belongs to another Brand | NotFound before settlement/audit | [MockPaymentServiceTest](../src/test/java/com/influencermatch/backend/billing/MockPaymentServiceTest.java)`#foreignPaymentIsHiddenBeforeAcquiringLocks` |
+| BE-071 | Unit | Blank or unknown transaction | Validation/NotFound; no settlement/audit | [MockPaymentServiceTest](../src/test/java/com/influencermatch/backend/billing/MockPaymentServiceTest.java)`#missingAndInvalidRequestsDoNotSettle` |
+| BE-072 | Unit | Shared settlement rejects outcome | SUBSCRIPTION_CONFLICT; no audit | [MockPaymentServiceTest](../src/test/java/com/influencermatch/backend/billing/MockPaymentServiceTest.java)`#conflictingOutcomeDoesNotAudit` |
+| BE-073 | Unit | Successful transition then repeated SUCCESS | PAID response; exactly one audit | [MockPaymentServiceTest](../src/test/java/com/influencermatch/backend/billing/MockPaymentServiceTest.java)`#successfulStateChangeAuditsOnceAndRepeatedOutcomeDoesNotAuditAgain` |
+| BE-074 | Unit | Missing/short signature, tampered amount or signed wrong merchant | Reject before payment lookup/lock | [PaymentCallbackServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentCallbackServiceTest.java)`#invalidSignatureOrMerchantNeverLocksPayment` |
+| BE-075 | Unit | Valid signature/merchant; DB amount mismatch | Reject without settlement apply | [PaymentCallbackServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentCallbackServiceTest.java)`#signedWrongAmountDoesNotSettle` |
+| BE-076 | Unit | Unknown signed transaction then signed gateway failure | Unknown rejected; failure delegates exact code to settlement | [PaymentCallbackServiceTest](../src/test/java/com/influencermatch/backend/billing/PaymentCallbackServiceTest.java)`#signedGatewayFailureUsesSharedSettlementAndUnknownTransactionIsRejected` |
+| BE-077 | Unit | Owner subscribes free active plan | ACTIVE, correct duration, zero quota usage; no Admin audit | [SubscriptionServiceTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionServiceTest.java)`#freePlanInitializesDatesAndZeroQuota` |
+| BE-078 | Unit | Brand subscribes paid plan directly | PAID_PLAN_REQUIRES_PAYMENT; no save/audit | [SubscriptionServiceTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionServiceTest.java)`#paidPlanCannotBeActivatedDirectlyByBrand` |
+| BE-079 | Unit | Inactive plan then existing active subscription | Conflict without subscription save/audit | [SubscriptionServiceTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionServiceTest.java)`#inactivePlanAndExistingActiveSubscriptionAreConflicts` |
+| BE-080 | Unit | Read foreign Brand subscription list | Forbidden before subscription query | [SubscriptionServiceTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionServiceTest.java)`#foreignBrandCannotReadSubscriptions` |
+| BE-081 | Unit | Admin cancels twice | CANCELLED; dates/quota preserved; one audit | [SubscriptionServiceTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionServiceTest.java)`#cancellationPreservesQuotaAndAdminNoopDoesNotAudit` |
+| BE-082 | Integration | Free subscribe, duplicate, foreign read/cancel, cancel twice | ACTIVE; duplicate 409; foreign 403; one CANCELLED row | [SubscriptionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionPostgresIntegrationTest.java)`#freeSubscriptionOwnershipDuplicateAndCancellation` |
+| BE-083 | Integration | Brand direct paid subscribe; Admin grant/cancel twice | Brand 409; Admin succeeds; one create and one cancel audit | [SubscriptionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionPostgresIntegrationTest.java)`#paidPlanRequiresCheckoutButAdminCanGrantAndCancelWithAudit` |
+| BE-084 | Integration | Deactivate plan; Brand/Admin read; Brand subscribes | Brand read 404; Admin read 200; subscribe 409 with no new row | [SubscriptionPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/billing/SubscriptionPostgresIntegrationTest.java)`#inactivePlanHiddenFromBrandAndCannotBeSubscribed` |
+
+### Audit Log
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-085 | Unit | Authenticated Admin records change with request IP | Actor/action/entity, JSON before/after, reason, IP and timestamp persisted | [AuditServiceTest](../src/test/java/com/influencermatch/backend/audit/AuditServiceTest.java)`#recordsActorEntityPayloadAndRequestAddress` |
+| BE-086 | Unit | No request bound; authenticated actor; null payloads | Null IP and JSON null payloads | [AuditServiceTest](../src/test/java/com/influencermatch/backend/audit/AuditServiceTest.java)`#backgroundInvocationHasNoRequestIpAndAcceptsNullPayloads` |
+| BE-087 | Unit | No User authentication | Reject without save | [AuditServiceTest](../src/test/java/com/influencermatch/backend/audit/AuditServiceTest.java)`#unauthenticatedActorCannotCreateAudit` |
+| BE-088 | Integration | Fixtures vary actor/action/entity/time; combine filters with equal from/to | Exactly matching event; inclusive boundary and correct JSON | [AuditLogPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/audit/AuditLogPostgresIntegrationTest.java)`#combinesAllFiltersAndIncludesTimeBoundaries` |
+| BE-089 | Integration | Distinct timestamps, size 2 and invalid page/size bounds | Newest first; correct totals; page minimum 0, size 1-100 | [AuditLogPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/audit/AuditLogPostgresIntegrationTest.java)`#paginationOrdersLatestFirstAndCapsSize` |
+| BE-090 | Integration | Reversed dates, malformed date/UUID | 400; no new audit | [AuditLogPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/audit/AuditLogPostgresIntegrationTest.java)`#invalidFiltersAre400AndDoNotCreateAudit` |
+| BE-091 | Integration | BRAND/CREATOR/DATA_MANAGER requests logs | 403 | [AuditLogPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/audit/AuditLogPostgresIntegrationTest.java)`#nonAdminCannotReadAudit` |
+| BE-092 | Integration | Anonymous requests logs | 401 | [AuditLogPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/audit/AuditLogPostgresIntegrationTest.java)`#anonymousCannotReadAudit` |
+| BE-093 | Integration | Trigger rejects status audit after account login | 500; ACTIVE/version/refresh preserved; old access token works; no audit | [AuditLogPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/audit/AuditLogPostgresIntegrationTest.java)`#auditFailureRollsBackUserStatusVersionAndRefreshRevocation` |
+
+### Collaboration Management / Campaign Outcome Tracking / Creator Reviews
+
+| ID | Type | Preconditions / Action | Expected result | Automated test |
+|---|---|---|---|---|
+| BE-094 | Unit | Owner closes eligible relationship | Agreed fee persisted; relationship stage synchronized | [CollaborationServiceTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationServiceTest.java)`#createsAndSynchronizesFeeAndStage` |
+| BE-095 | Unit | Valid outcome views/clicks/post URL | Collaboration completed; payment unchanged | [CollaborationServiceTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationServiceTest.java)`#outcomeCompletesOnlyCollaborationAndPreservesPayment` |
+| BE-096 | Unit | Review completed collaboration | Review links authenticated owner and actual outcome | [CollaborationServiceTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationServiceTest.java)`#reviewUsesAuthenticatedOwnerAndActualOutcome` |
+| BE-097 | Integration | Invalid fees, metrics, URL or review input | Reject without persisted result | [CollaborationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationPostgresIntegrationTest.java)`#validatesMoneyMetricsUrlStarsAndRequiredBoolean` |
+| BE-098 | Integration | Collaboration transaction fails | Relationship/collaboration rollback together | [CollaborationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationPostgresIntegrationTest.java)`#transactionRollbackRestoresRelationshipAndCollaboration` |
+| BE-099 | Integration | Concurrent duplicate create/outcome/review | Exactly one resource of each type | [CollaborationPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/collaboration/CollaborationPostgresIntegrationTest.java)`#concurrentRequestsCreateExactlyOneOfEachResource` |
+
+### Retired Creator Rate Card Regression
+
+| ID | Level | Condition / action | Expected | Automated test |
+| --- | --- | --- | --- | --- |
+| BE-110 | Integration | All roles call removed GET/PUT endpoints | 404; no business writes | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#retiredEndpointsAre404WithoutBusinessWrites` |
+| BE-111 | Integration | Claim, approve, compare and revoke without Rate Card storage | Verification works; no rateCard JSON; retired table absent | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#claimRevokeAndCompareWorkWithoutRateCardStorage` |
+| BE-112 | Integration | Read permission catalog/auth and submit retired permission | Permission absent; update rejected | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#retiredPermissionIsAbsentAndCannotBeConfigured` |
+| BE-113 | Integration | Upgrade Vy V10 to V12 with/without retired override | Prices/audits retained; override removed; only affected role version increases | [RetiredRateCardPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/RetiredRateCardPostgresIntegrationTest.java)`#upgradePreservesLegacyDataAndOnlyBumpsAffectedConfiguration` |
+| BE-114 | Integration | Claim already authorized channel | 409; existing owner retained | [CreatorClaimPostgresIntegrationTest](../src/test/java/com/influencermatch/backend/creator/CreatorClaimPostgresIntegrationTest.java)`#authorizedChannelRejectsNewClaims` |
+
+
+## Registration invitations and OTP — current implementation
+
+BE-006, BE-007 and BE-107 were retired with Google Login. Historical counts above describe previous revisions, not a new execution. Tests named `CreatorClaimOAuthIntegrationTest` use Mockito; actual database integration is in the Postgres suites.
+
+Each entry below specifies a condition/action, expected result, and executable mapping. SMTP and time are mocked; PostgreSQL suites use disposable pgvector containers.
+
+- **REG-001 · Registration · Unit:** valid Brand request → unverified BRAND, BCrypt hash, initial verification call; `AuthServiceTest#registerTrimsEmailAndNameAndNeverPersistsPlainPassword`.
+- **REG-002 · OTP · Unit:** issue `000042` → retain six digits, store keyed hash with ten-minute expiry; `EmailVerificationServiceTest#initialDeliveryKeepsLeadingZerosAndOnlyStoresKeyedHash`.
+- **REG-003 · OTP · Unit:** incorrect code at attempts 0–4 → increment counter, fifth returns rate limit; `EmailVerificationServiceTest#wrongAttemptIsCountedAndFifthLocksCode`.
+- **REG-004 · OTP policy · Unit:** expiry, consumed code, cooldown and purpose separation → reject without granting verification; `OtpChallengePolicyTest`, `EmailVerificationServiceTest`.
+- **REG-005 · Invitation · Unit:** eligible email → 48-hour link sent, token omitted from response/audit; `CreatorRegistrationInvitationServiceTest#invitationNormalizesEmailStoresHashAndAuditsOnlyMetadata`.
+- **REG-006 · Invitation · Unit:** existing account, exhausted budget or invalid token → no account creation or replacement; `CreatorRegistrationInvitationServiceTest#existingAccountIsNeverConvertedOrEmailed`, `#rateLimitNeverReplacesToken`, `#invalidInvitationNeverCreatesAccount`.
+- **REG-007 · SMTP · Unit:** missing settings or JavaMailSender failure → 503; invitation/OTP messages use mocked transport; `SmtpVerificationEmailSenderTest`.
+- **REG-008 · Brand registration · PostgreSQL integration:** register, attempt login/JWT before verification, verify and login → 403/401 before OTP, successful session afterward, no tokens in registration; `EmailVerificationPostgresIntegrationTest#registrationMustBeVerifiedBeforeLoginAndTokensAreNeverLeaked`.
+- **REG-009 · OTP · PostgreSQL integration:** wrong code repeatedly → persisted attempts even on HTTP error, correct code blocked after five failures; `EmailVerificationPostgresIntegrationTest#failedAttemptsCommitAndFifthAttemptLocksEvenTheCorrectCode`.
+- **REG-010 · OTP resend · PostgreSQL integration:** cooldown, resend replacement, rolling hour budget and exact expiry → enforce boundaries without sleeps; `EmailVerificationPostgresIntegrationTest#resendCooldownAndReplacementInvalidateOldCode`, `#fiveEmailsPerRollingHourIncludesRegistration`, `#codeExpiresAtTenMinutesAndCanBeReplacedWithoutSleep`.
+- **REG-011 · Email rollback · PostgreSQL integration:** configuration/send/database failure → account or replacement OTP rolled back; `EmailVerificationPostgresIntegrationTest#registrationFailureRollsBackAccountAndCode`, `#smtpFailureDuringResendRollsBackHashCountersAndDelivery`, `#verificationDatabaseFailureRollsBackConsumptionAndAccountFlag`.
+- **REG-012 · Verification concurrency · PostgreSQL integration:** two verifies → one consumes code; concurrent Admin role change → verification and role both retained; `EmailVerificationPostgresIntegrationTest#concurrentVerificationConsumesCodeOnlyOnce`, `#concurrentAdminRoleChangeCannotOverwriteSuccessfulVerification`.
+- **REG-013 · Access control · PostgreSQL integration:** Admin role/status changes and crafted refresh cannot bypass pending email verification; `EmailVerificationPostgresIntegrationTest#pendingAccountCannotBeActivatedByAdminStatusOrRole`, `#existingAccountsRemainVerifiedButRefreshCannotBypassVerification`.
+- **REG-014 · Creator registration · PostgreSQL integration:** invite → resolve → register → OTP → login → manual Claim → approve; no ownership before approval and no Google identity required; `CreatorRegistrationPostgresIntegrationTest#creatorInvitationRegistrationOtpLoginAndClaimCompleteWithoutGoogle`.
+- **REG-015 · Invitation RBAC · PostgreSQL integration:** ADMIN/DATA_MANAGER allowed, BRAND/CREATOR denied; disabled dynamic permission denied; `CreatorRegistrationPostgresIntegrationTest#adminsAndDataManagersCanInviteWithoutTokensInResponse`, `#otherRolesCannotInvite` and invitation permission regression in the same suite.
+- **REG-016 · Invitation lifecycle · PostgreSQL integration:** bad, expired, consumed or replaced tokens and client email/role injection → reject without account mutation; `CreatorRegistrationPostgresIntegrationTest` token/payload parameterized cases.
+- **REG-017 · Invitation rollback/concurrency · PostgreSQL integration:** audit/SMTP failure leaves token usable; simultaneous registration creates one account; `CreatorRegistrationPostgresIntegrationTest#registrationSmtpFailureLeavesInvitationUsableAndNoAccount`, `#concurrentRegistrationConsumesInvitationOnce` and invitation audit rollback case.
+- **REG-018 · Password setup · PostgreSQL integration:** eligible historical Google account sets first password → authVersion increments, refresh revoked, no new session; other accounts receive generic request response; `CreatorRegistrationPostgresIntegrationTest#legacyGoogleAccountSetsPasswordAndRevokesOldSessions`, `#ineligiblePasswordSetupIsGenericAndDoesNotSend`.
+- **REG-019 · Password setup · PostgreSQL integration:** wrong attempts persist, purpose/expiry/budget enforced, DB failure rolls back password/token updates; `CreatorRegistrationPostgresIntegrationTest#passwordWrongAttemptsPersistAndResendResetsWithNewPurposeBoundCode`, `#passwordCodeCannotBeUsedForRegistrationAndExpiresAtTenMinutes`, `#passwordSetupSharesHourlyDeliveryBudget` and password rollback case.
+- **REG-020 · Migration · PostgreSQL integration:** V12→V13 retains old verified accounts; V13→V14 retains identity, Master ownership and OTP; `EmailVerificationPostgresIntegrationTest#v13UpgradeGrandfathersExistingAccountsAndAddsVerificationStorage`, `CreatorRegistrationPostgresIntegrationTest#v14UpgradePreservesAccountsIdentitiesOwnershipAndExistingOtp`.
+- **REG-021 · Google retirement · MockMvc/PostgreSQL integration:** authenticated old login/exchange paths → 404; `AuthControllerTest#googleLoginAndExchangeAreRemoved`, `CreatorRegistrationPostgresIntegrationTest#removedGoogleEndpointsAre404ForAuthenticatedUsers`.
+- **REG-022 · Claim security · Unit:** anonymous, unverified or wrong invitation email → reject without creating users/Masters or consuming the invitation; `CreatorClaimResolutionServiceTest#anonymousCallbackCannotCreateAnAccount`, `#unverifiedCreatorCannotUseCallback`, `#callbackCannotConsumeInvitationSentToAnotherEmail`.
+- **REG-023 · Provider simulation · Unit:** disabled flag, prod, dev+prod, test or no active profile → 503; explicit dev only → simulation available; `OAuthProofClientConfigurationTest`.
+- **REG-024 · Claim boundary · PostgreSQL integration:** callback without JWT → 401; Brand → 403; Creator start with mock disabled → 503 and no Master created; `CreatorRegistrationPostgresIntegrationTest#claimCallbackRequiresSessionAndCannotBootstrapAccount`.
+- **REG-025 · Regression fixtures · PostgreSQL integration:** retain manual review/revoke, compare, retired Rate Card preservation, RBAC, Collaboration and session assertions using persisted CreatorMaster; associated existing domain suites.
+
+## Schema cleanup V15
+
+- **SCHEMA-001 · PostgreSQL integration:** V14 upgrade with null/whitespace, existing values, independent latest values, UUID ties, no snapshots, blank history or only one missing field → backfill only the missing Creator fields and retain all remaining metric data/search_vector; `RetiredSchemaPostgresIntegrationTest#backfillOnlyMissingFieldsFromLatestNonblankSnapshot`.
+- **SCHEMA-002 · PostgreSQL integration:** populated V14 auth, OTP, identities, both invitations, Master/Claim, audits and monetary agreements → V15 removes only retired data; retained rows match exactly; `RetiredSchemaPostgresIntegrationTest#upgradeRemovesOnlyRetiredDataAndPreservesAuthOwnershipInvitationsAuditAndFees`.
+- **SCHEMA-003 · PostgreSQL integration:** empty schema migrates to V15 → retired tables/columns absent and current auth/ownership tables present; `RetiredSchemaPostgresIntegrationTest#freshSchemaHasOnlyTheCurrentTablesAndColumns`.
+- **SCHEMA-004 · PostgreSQL API integration:** ingest/update current profile fields, filter old/new location, read profile, Campaign Discovery and Compare → unchanged wire names and current Creator values; `RetiredSchemaPostgresIntegrationTest#ingestionAndProfileComparisonUseCreatorFieldsAndLocationFilterJoinsCreator`.
+- **SCHEMA-005 · Regression:** Rate Card endpoint/profile/Compare tests use current schema; V12 preservation tests stop at V12, V14 identity/exchange preservation tests stop at V14. V14→V15 cleanup/backfill tests explicitly stop at V15; fresh schema tests include V16 and both outbox tables. Auth, OTP, Claim, Billing, ownership and collaboration suites remain active.
+
+
+## Claim Invitation & Conflict MVP
+
+The claim invitation domain is distinct from Creator registration invitations. Real SMTP transport is exercised only through mocks; provider verification remains dev simulation. No new migration is required.
+
+- **INV-001 · PostgreSQL API:** Brand with own profile/campaign sends seven-day link; HTTP 200 omits rawToken, stores only hash, verify returns public channel data without mutation. `ClaimInvitationPostgresIntegrationTest#sendsRealTransportContractWithoutTokenOrRegistrationSideEffects`.
+- **INV-002 · PostgreSQL API:** unknown email receives claim invitation but cannot register using that token. `ClaimInvitationPostgresIntegrationTest#unknownRecipientGetsClaimInvitationButCannotRegisterFromIt`.
+- **INV-003 · PostgreSQL API:** both invite endpoints reject owned account with 409 and persisted audit; no invitation/email writes or other-owner disclosure. `ClaimInvitationPostgresIntegrationTest#ownedChannelReturns409AndDurableAudit`.
+- **INV-004 · PostgreSQL API:** pending invitation from any Brand/email blocks replacement and keeps original token usable. `ClaimInvitationPostgresIntegrationTest#duplicatePendingIsGlobalAndDoesNotReplaceOrSend`.
+- **INV-005 · PostgreSQL API:** exact expiration or earlier rejects verify but permits a new send, using JPA timestamps and deterministic Clock. `ClaimInvitationPostgresIntegrationTest#expiredAtBoundaryDoesNotBlockNewInvitation`.
+- **INV-006 · PostgreSQL API:** role, campaign/profile ownership and disabled dynamic permission deny before SMTP. `ClaimInvitationPostgresIntegrationTest#onlyBrandMayInvite`, `#brandMustOwnProfileCampaignAndEffectivePermission`.
+- **INV-007 · PostgreSQL concurrency:** simultaneous Brands → one invitation/send, one 409 and rejection audit. `ClaimInvitationPostgresIntegrationTest#simultaneousInvitationsOnlySendOnce`.
+- **INV-008 · PostgreSQL transaction:** missing SMTP configuration → 503 and rollback; SMTP failure after commit → invitation remains PENDING and outbox schedules retry. `ClaimInvitationPostgresIntegrationTest#configurationFailureRollsBackButSmtpFailureAfterCommitKeepsInvitation`.
+- **INV-009 · PostgreSQL concurrency:** two callbacks and later replay → one accepted claim/Master/verification/success audit; other attempts 409 without provider re-exchange. `ClaimInvitationPostgresIntegrationTest#twoCallbacksConsumeInvitationAndCreateMasterOnce`.
+- **INV-010 · PostgreSQL API:** wrong email, expired/used token or newly owned account cannot claim and do not reach provider/write tokens. `ClaimInvitationPostgresIntegrationTest#wrongEmailExpiredAndUsedInvitationNeverReachProvider`, `#ownershipAppearingAfterInviteBlocksCallbackAndManualClaimWithAudit`.
+- **INV-011 · PostgreSQL API:** link channel owned by another Master → 409 + durable rejection audit, no conflict queue; same-owner link still refreshes proof. `ClaimInvitationPostgresIntegrationTest#linkingOtherOwnersChannelReturns409WithoutConflictQueueOrTokens`, `#repeatedSameOwnerLinkRetainsOwnershipAndDoesNotCreateConflict`.
+- **INV-012 · PostgreSQL API:** active invitation restricts manual evidence to matching email; review consumes invitation and revoke remains functional. `ClaimInvitationPostgresIntegrationTest#invitationEmailIsEnforcedForManualEvidenceAndReviewConsumesMatchingInvitation`.
+- **INV-013 · PostgreSQL rollback:** rejection audit failure → 500 and no business writes; successful callback audit failure rolls back Master/owner/verification/invitation consumption. `ClaimInvitationPostgresIntegrationTest#auditFailureRollsBackRejectionWithoutChangingBusinessData`, `#callbackAuditFailureRollsBackInvitationOwnerVerificationAndMaster`.
+- **INV-014 · PostgreSQL API:** all authenticated roles get 404 on retired transfer endpoint; historical conflict data is retained. `ClaimInvitationPostgresIntegrationTest#retiredTransferEndpointIs404ForAuthenticatedAccounts`.
+- **INV-015 · Log/SMTP contract:** invitation link/token absent from invitation service logs; seven-day email explains separate registration. `ClaimInvitationPostgresIntegrationTest#invitationTokenIsNotWrittenToApplicationLogs`, `SmtpVerificationEmailSenderTest#claimInvitationHasSevenDayLimitAndDoesNotImplyRegistration`.
+- **INV-016 · Unit regression:** keep creator/account/proof/SMTP assertions, adapt invitation transport and pre-lock fixtures; verify expiry read does not mutate status. `CreatorInvitationServiceTest`, `CreatorClaimResolutionServiceTest`, `CreatorClaimOAuthIntegrationTest`, `CreatorAccountLinkServiceTest`, `CreatorAccountLinkIntegrationTest`, `CreatorClaimServiceTest`.
+
+Mockito suites named Integration above do not validate database locks; INV-007/009 use actual concurrent HTTP requests and PostgreSQL locks. Historical direct-service tests of conflict resolution do not expose a transfer HTTP endpoint in MVP.
+
+## Creator Claim Concurrency hardening
+
+- **CONC-001 · PostgreSQL concurrency:** two callbacks on one invitation return one 200 and one 409 `INVITATION_ALREADY_PROCESSED`, with one Master/verification/success audit and one provider exchange; subsequent replay preserves full persisted claim rows, including encrypted tokens and timestamps. `ClaimInvitationPostgresIntegrationTest#twoCallbacksConsumeInvitationAndCreateMasterOnce`.
+- **CONC-002 · PostgreSQL concurrency:** same Creator claims two different channels simultaneously; both return 200, share exactly one Master, and each has one accepted invitation/verification/success audit. `ClaimInvitationPostgresIntegrationTest#simultaneousDifferentChannelsReuseOneMasterForSameCreator`.
+- **CONC-003 · PostgreSQL API, parameterized:** expiration at the fixed Clock or one second earlier returns 409 `INVITATION_EXPIRED`; all claim state is unchanged and provider is never called. `ClaimInvitationPostgresIntegrationTest#expiredCallbackPreservesAllClaimData`.
+- **CONC-004 · PostgreSQL API:** previously used invitation returns 409 `INVITATION_ALREADY_PROCESSED`, without provider calls or persisted changes. `ClaimInvitationPostgresIntegrationTest#usedInvitationPreservesAllClaimDataWithoutReachingProvider`.
+- **CONC-005 · PostgreSQL rollback:** audit failure preserves full pre-callback state, including absent Master/verification/provider identity, and leaves invitation reusable after the failure is removed. `ClaimInvitationPostgresIntegrationTest#callbackAuditFailureRollsBackInvitationOwnerVerificationAndMaster`.
+- **CONC-006 · Mockito unit, parameterized:** refreshed User role/status/email verification or invitation email/platform/status/expiry must be rechecked before writes; verifies User → Account → Invitation lock/refresh ordering. This is a logic test, not proof of database concurrency. `CreatorClaimResolutionServiceTest#rechecksRefreshedStateUnderLocksBeforeAnyBusinessWrites`.
+
+Concurrent PostgreSQL cases synchronize request workers with ready/start latches and bounded timeouts, without sleep. Email/provider remain mocked and no shared database is used.
+
+## Claim Email Outbox + Async
+
+- **MAIL-001 · Unit:** AES-GCM roundtrip, random nonce, tampered payload/wrong key rejection, strict Base64 32-byte key and safe 503; `ClaimEmailCipherTest#authenticatedEncryptionUsesFreshNonceAndPreservesPayload`, `#invalidKeyReturns503WithoutSensitiveDetails`.
+- **MAIL-002 · Unit/Spring async:** actual dedicated 2-thread/100-capacity executor, no SMTP transaction, queue rejection recovered by later sweep, safe failure logging; `ClaimEmailAsyncTest#workerRunsOnDedicatedBoundedExecutorAndDoesNotHoldTransaction`, `#rejectedExecutorLeavesPersistedJobsForLaterSweep`, `#smtpFailureLogsOnlyJobIdAndRecordsRetryWithoutSensitiveDetails`.
+- **MAIL-003 · PostgreSQL transaction:** listener submits only AFTER_COMMIT, not while creating records; rollback discards job/event. Worker mocked at the dispatch boundary. `ClaimEmailAfterCommitPostgresIntegrationTest#dispatchOccursOnlyAfterCommitAndRollbackDiscardsJobAndEvent`.
+- **MAIL-004 · PostgreSQL configuration/API:** missing key returns 503 before invitation creation; `ClaimEmailConfigurationPostgresIntegrationTest#missingEncryptionKeyReturns503BeforeAnyInvitationIsCreated`.
+- **MAIL-005 · PostgreSQL worker:** committed queued job recoverable by due query; encrypted recipient/link hash match; SMTP outside transaction; success erases payload, repeat worker does not resend, status omits secrets. `ClaimEmailOutboxPostgresIntegrationTest#queuedJobHasOnlyCiphertextAndSendsWithoutTransactionThenClearsPayload`.
+- **MAIL-006 · PostgreSQL retry:** exact 15/30/60/120 backoff, no premature sends, FAILED keeps PENDING invitation, duplicate invite remains blocked; manual retry respects cooldown and preserves token/email/expiry, eventual success erases payload. `ClaimEmailOutboxPostgresIntegrationTest#failureBackoffAndManualRetryPreserveTokenAndExpiry`.
+- **MAIL-007 · PostgreSQL concurrency:** two retry requests enqueue once; two workers while one SMTP send is in flight perform one attempt. `ClaimEmailOutboxPostgresIntegrationTest#concurrentWorkersSendOnceAndConcurrentManualRetriesEnqueueOnce`.
+- **MAIL-008 · PostgreSQL recovery:** expired lease replaces token, old worker cannot finalize replacement, five crashed reservations exhaust the cycle. `ClaimEmailOutboxPostgresIntegrationTest#expiredLeaseCanBeRecoveredAndOldWorkerCannotCompleteNewLease`, `#fiveCrashedReservationsExhaustCycleWithoutUnboundedRecoveryAttempts`.
+- **MAIL-009 · PostgreSQL guards, parameterized:** expired/consumed/replaced invitation, owned channel and expired FAILED job cause cancellation/expiry without SMTP and erase payload. `ClaimEmailOutboxPostgresIntegrationTest#invalidJobsAreCancelledWithoutSmtpAndPayloadIsErased`.
+- **MAIL-010 · PostgreSQL constraint/rollback:** outbox insertion failure rolls back invitation; duplicate job for same invitation violates unique constraint. `ClaimEmailOutboxPostgresIntegrationTest#duplicateOutboxIsRejectedAndInsertFailureRollsBackInvitation`.
+- **MAIL-011 · PostgreSQL RBAC/API:** anonymous, non-Brand, foreign Brand, missing invitation and disabled permission denied; historical invitation NOT_TRACKED and not retryable. `ClaimEmailOutboxPostgresIntegrationTest#statusAndRetryRequireOwningBrandAndPermissionAndHistoricalRowsAreNotTracked`.
+- **MAIL-012 · PostgreSQL rolling rate limit:** five manual retries in preceding hour block the sixth; expired entry frees a slot without resetting total attempts. `ClaimEmailOutboxPostgresIntegrationTest#manualRetryUsesRollingHourAndDoesNotChangeInvitation`.
+- **MAIL-013 · PostgreSQL migration:** V15 historical invitation/account survives V16 byte-for-byte, no historical jobs are invented. Fresh schema is migrated/validated by all current PostgreSQL suites. `ClaimEmailOutboxPostgresIntegrationTest#upgradeFromV15PreservesHistoricalInvitationsWithoutInventingEmailJobs`.
+
+Migration fixtures retain all preservation assertions: cleanup tests pin V15 rather than inadvertently executing V16; fresh-schema tests expect 15 migration files through V16 (V11 is absent) and current version 16. SMTP message regression also confirms a resend does not extend invitation expiry.
+
+SMTP/provider stay mocked. PostgreSQL locks, lease persistence, constraints and transaction boundaries are real. Clocks and latches replace sleeps; tests do not send Gmail or use the shared database. Registration and OTP retain synchronous SMTP rollback regression.
+
+
+## Authentication target contract V25 (2026-11-07)
+
+Scope: backend only. Unit tests use Mockito; PostgreSQL tests use real Flyway/constraints/transactions with disposable pgvector Testcontainers. SMTP and Google/Meta/TikTok HTTP providers are mocked; none of these checks is a real external OAuth consent or email delivery test.
+
+- **AUTH25-01 · Unit · phone and consent validation:** Vietnamese/E.164 normalization; null/invalid numbers rejected; consent required and policy version mismatch rejected. `RegistrationSupportTest` (parameterized methods).
+- **AUTH25-02 · PostgreSQL · registration transaction:** valid full form creates unverified User, real initial Profile/Context1 and two consent rows, without login session; invalid/missing consent, changed policy or invalid phone leaves no User; SMTP error rolls back. `AuthTargetPostgresIntegrationTest#registrationCreatesProfileContextAndTwoConsentsWithoutSession`, `#invalidConsentAndVersionAndPhoneLeaveNoData`, `#smtpFailureRollsBackProfileConsentAndUser`.
+- **AUTH25-03 · PostgreSQL · CSRF:** POST auth without token returns 403; GET csrf produces a real cookie/masked token, then request succeeds with both. `AuthTargetPostgresIntegrationTest#missingCsrfIs403AndRealCsrfEndpointAllowsAuth`. Other API fixtures send real cookie/header CSRF without replacing the production repository.
+- **AUTH25-04 · Unit/PostgreSQL · fixed session/refresh:** token is hashed, bound to session, cookie-only and rotated to the same absolute expiry; JSON-only refresh returns 401; revoked/expired token denied. `RefreshTokenServiceTest`, `RefreshTokenTest`, `AuthTargetPostgresIntegrationTest#refreshReadsOnlyCookieAndCannotExtendSession`, `#expiredSessionRejectsAccessAndRefresh`.
+- **AUTH25-05 · PostgreSQL · two devices/logout:** logout current session rejects its JWT from the next request, preserves another device, repeated logout is harmless; valid refresh cookie supports logout with a genuinely expired signed JWT. `AuthTargetPostgresIntegrationTest#logoutCurrentSessionImmediatelyRejectsItsJwtButKeepsOtherDevice`, `#logoutWorksWithExpiredAccessTokenAndDeletesCookie`.
+- **AUTH25-06 · PostgreSQL · global invalidation:** logout-all increments version and rejects both devices; replay revokes all sessions of the affected user, committed despite HTTP 401; another user's session survives. `AuthTargetPostgresIntegrationTest#logoutAllInvalidatesBothDevicesAndIncrementsVersion`, `#replayCommitsUserWideRevocationAndDoesNotAffectOtherUser`. Admin/password-setup regressions remain in `RbacPostgresIntegrationTest`, `EmailVerificationPostgresIntegrationTest`, `CreatorRegistrationPostgresIntegrationTest`.
+- **AUTH25-07 · PostgreSQL · onboarding:** missing context fields return 400/fieldErrors; complete valid profile then call completion twice, preserving timestamp; clearing required completed-profile data fails without changing completion. Login/me report navigation state. `AuthTargetPostgresIntegrationTest#completeOnboardingRequiresContextAndCannotBeClearedAfterCompletion`.
+- **AUTH25-08 · PostgreSQL · Google deferred registration:** new Google proof requires form, creates no account/session early; completion creates account/profile/consent/identity/session atomically; SMTP is not used for Google's verified email. Replays, browser/nonce/expiry, role/status, provider failure, race completion and issuance rollback covered by `GoogleBrandLoginPostgresIntegrationTest`.
+- **AUTH25-09 · PostgreSQL · Google explicit link:** reauthenticate existing password, match verified Google email and original login session; wrong password, other session/email and replay rejected; no auto-link by matching email. Audit failure rolls back identity and challenge consumption. `GoogleBrandLoginPostgresIntegrationTest#linkingRequiresReauthenticationAndSameEmailAndDoesNotCreateUser`, `#linkCannotBeConfirmedFromDifferentAuthSession`, `#wrongPasswordCannotStartLink`, `#auditFailureRollsBackIdentityAndLeavesLinkChallengeUsable`.
+- **AUTH25-10 · PostgreSQL · migration compatibility:** upgrade V24 to V25 keeps User, Master, identity/profile; old refresh revoked/authVersion increased, PENDING assigned, no historical telephone/consent invented. `AuthTargetPostgresIntegrationTest#v25PreservesHistoricalAccountsAndOwnershipButInvalidatesOldSessions`. Fresh schema tests validate V25; targeted older migration tests remain pinned to their historical target.
+- **AUTH25-11 · Unit/PostgreSQL · channel callbacks:** missing sid legacy JWT rejected; Meta callback after initiating-session revocation does not call provider or assign owner; TikTok logout while provider executes prevents grant and leaves business rows unchanged. `JwtAuthVersionTest`, `MetaOAuthPostgresIntegrationTest#revokedLoginSessionCannotCompleteProviderCallback`, `TikTokOAuthPostgresIntegrationTest#logoutDuringProviderRequestCannotGrantOwnership`.
+- **AUTH25-12 · PostgreSQL · existing Creator and business regressions:** invited registration supplies real consent while email stays invitation-bound, OTP remains mandatory; historical-account role conversion fixture deliberately has no Brand Profile. Business profile creation smoke scenarios use historical users, while new-registration profile creation is checked separately. Existing Claim, outbox, RBAC, Facebook/Instagram, campaign and ownership assertions remain active.
+
+Validation completed 2026-11-08:
+
+- Full backend regression: **988 tests, 985 passed, 3 failures, 0 errors, 0 skipped**. Log: `.local-worktrees/backups/auth-v2-regression-final.log` (local ignored artifact).
+- Final `RefreshTokenServiceTest` rerun after adding the stale-role regression: **12 passed, 0 failures/errors/skipped**; one of these cases was added after the full run, so this is recorded separately rather than claimed as a single 989-test run. Log: `.local-worktrees/backups/auth-v2-refresh-final.log`.
+- All AuthTarget (12), Google Brand (19), Creator registration (53), Email verification (22), Meta (35), direct Instagram (19) and TikTok OAuth (31) PostgreSQL cases passed during the full run. These are real database checks with mock providers, not real external consent.
+- The three inherited failures remain unchanged: `PaymentSettlementServiceTest#activeSubscriptionPreventsActivationWithoutMutatingPendingPayment` (activation flag true instead of false); `ComparePaymentPostgresIntegrationTest#parallelPaymentsForSameBrandCannotActivateTwoSubscriptions` (two 200 responses instead of one 409); `RbacPostgresIntegrationTest#paidSubscriptionRequiresCheckoutAndGatewayVerification` (302 redirect instead of expected 400). No Payment production logic or assertion was altered.
+- Environment-only shutdown diagnostics: cached scheduled workers logged closed disposable-database connections and Surefire terminated the fork after its 30-second shutdown timeout. No PostgreSQL test was skipped or failed due to an unavailable Docker/database service; the suite's three assertion failures above are reported separately.
+- `git diff --check` passed for edited backend/configuration/README/testcase files. No actual `.env`, Bruno, shared database, running backend or diagram/SDD document was modified; no commit/push.
+
+
+## Brand Profile, immutable Context and M4 ? V26
+
+Scope: backend only. PostgreSQL cases below use disposable pgvector Testcontainers; AI responses are mocked. No real model, shared database or provider consent is exercised.
+
+- **M426-01 ? Unit ? ETag and canonical context:** missing If-Match returns 428, malformed header 400, stale revision 409; trim/deduplicate/sort context lists; exclude contact data from embedding input. `BrandM4RulesTest#revisionRequiresSpecificCurrentEtag`, `#semanticContextCanonicalizationExcludesPrivateFields`.
+- **M426-02 ? PostgreSQL ? partial updates:** omitted fields remain, explicit null clears optional fields, semantic edits append immutable context, contact changes only advance profile revision. `BrandM4PostgresIntegrationTest#patchPreservesOmittedFieldsAndOnlySemanticChangesAppendContext`.
+- **M426-03 ? PostgreSQL ? no-op and validation:** equivalent canonical lists do not create revision/context/job; unsupported fields/types and invalid clears leave data unchanged. Completion checks revision, preserves completion timestamp on repeat and cannot erase required completed-profile data. `BrandM4PostgresIntegrationTest#canonicalNoOpDoesNotChangeRevisionOrCreateJob`, `#revisionValidationUnknownFieldsAndInvalidClearsNeverWrite`; existing `AuthTargetPostgresIntegrationTest#completeOnboardingRequiresContextAndCannotBeClearedAfterCompletion`.
+- **M426-04 ? PostgreSQL ? concurrent update:** requests synchronized with a latch submit the same ETag; exactly one succeeds and the other returns 409. `BrandM4PostgresIntegrationTest#concurrentPatchOnlyOneRevisionWins`.
+- **M426-05 ? PostgreSQL ? transaction and migration:** enqueue failure rolls back profile/revision/context. V25 upgrade preserves context ID/version and legacy learned JSON, creates no invented history, and rejects UPDATE of immutable context. `BrandM4PostgresIntegrationTest#enqueueFailureRollsBackProfileRevisionAndContext`, `#v25UpgradePreservesExistingContextAndDoesNotInventHistory`. Existing fresh-schema suites validate V26.
+- **M426-06 ? Unit ? AI contract:** success requires matching model, dimensions 768, finite numeric nonzero vector; wrong model/dimension, zero/string/missing vector, HTTP failure and timeout are rejected. `BrandEmbeddingClientTest` (parameterized HTTP mock).
+- **M426-07 ? PostgreSQL ? durable worker:** exclusive lease, lease expiry, processing-token fencing, five attempts and 15/30/60/120-second retry schedule; retry endpoint only accepts current FAILED job. Old context result does not mark new context ready. `BrandM4PostgresIntegrationTest#workerRetriesAndOldLeaseCannotOverwriteNewWorker`, `#retryScheduleFailedJobAndCurrentContextOnly`, `#smtpIndependentWorkerCallsAiOutsideTransactionAndDoesNotChangeProfile`.
+- **M426-08 ? PostgreSQL ? after-commit delivery:** only committed enqueue dispatches outside transaction; rolled-back transaction does not dispatch. Executor has two threads and queue capacity 100. Provider failure keeps committed profile unchanged and schedules retry. `BrandEmbeddingAfterCommitPostgresIntegrationTest#commitDispatchesOnBoundedExecutorAndRollbackDoesNotDispatch`, `BrandM4PostgresIntegrationTest#providerFailurePreservesProfileAndSchedulesDurableRetry`.
+- **M426-09 ? Unit ? evidence and cohort:** five distinct reviews and coverage confidence >= 0.75 required; positive and negative ratings contribute; prefer eligible platform+niche then same-platform aggregate; unrelated platform and duplicate review do not qualify. `BrandM4RulesTest#learnedRequiresFiveDistinctReviewsAndIgnoresUnrelatedPlatform`, `#cohortPrefersExactAndFallsBackToSamePlatformOnly`.
+- **M426-10 ? PostgreSQL ? authoritative aggregate:** read completed Collaboration with Outcome and Brand-owned review, recompute current ratings, preserve aggregate ID/time on repeated unchanged calculation. `BrandM4PostgresIntegrationTest#learnedAggregatesAreIdempotentAndRecomputeFromCurrentReviews`.
+- **M426-11 ? Unit ? scoring:** unavailable M1/M4 stay null; insufficient evidence is reported; only VERIFIED M1 enters existing formula; available weights normalize from 0.50/0.30/0.20. Campaign preferences override Brand fallback. `BrandM4ScoringTest` (four tests).
+- **M426-12 ? PostgreSQL ? recommendation history:** one Brand Context snapshot per run; persisted score decomposition/evidence/policy; insufficient reviews and legacy pattern do not produce M4; later profile edits create new run snapshot without altering old result. `BrandM4PostgresIntegrationTest#recommendationUsesOneContextAndPersistsWeightsWithoutRewritingHistory`.
+
+Integration contract: GET/create/update/complete returns ETag; PUT/PATCH/complete must send If-Match. Nullable M1/M4 require frontend handling. Embedding worker is disabled by default until deployment config enables it; modelVersion identifies operator deployment revision, not a provider checkpoint. Stored Brand vector is not yet used for semantic comparison against unversioned Creator vectors. See README for request examples and configuration.
+
+
+Validation completed 2026-11-08 for V26:
+
+- Full backend regression: **1,018 tests, 1,015 passed, 3 failures, 0 errors, 0 skipped**. Local ignored log: `.local-worktrees/backups/m4-regression-final.log`.
+- All **29 new Brand/M4 tests passed**: BrandM4RulesTest (4), BrandEmbeddingClientTest (8), BrandM4ScoringTest (4), BrandM4PostgresIntegrationTest (12), BrandEmbeddingAfterCommitPostgresIntegrationTest (1). PostgreSQL concurrency/migration/transaction tests used a real disposable database; provider/AI HTTP interactions were mocked.
+- The same three pre-existing Payment failures remain: `PaymentSettlementServiceTest#activeSubscriptionPreventsActivationWithoutMutatingPendingPayment` (true instead of false), `ComparePaymentPostgresIntegrationTest#parallelPaymentsForSameBrandCannotActivateTwoSubscriptions` ([200,200] instead of [200,409]), `RbacPostgresIntegrationTest#paidSubscriptionRequiresCheckoutAndGatewayVerification` (302 instead of 400). No Payment business code or assertions were changed. Consequently the full Maven build reports failure; this is not a fully green regression.
+- Environment diagnostics remain separate: cached background schedulers attempted to access already stopped disposable PostgreSQL containers; Surefire reported its fork shutdown timeout. These diagnostics did not skip tests or add test errors. The Brand async test closes its context after verification; base API fixtures mock the unrelated periodic auth cleanup to prevent mock-clock reset races without bypassing request authentication/session-expiry checks.
+- Scoped `git diff --check` passed. V1?V25 unchanged. No real `.env`, Bruno, shared database, running backend, diagram/SDD document, commit or push was part of this implementation.
+
+
+## Campaign Brief, budget and durable M3 ? V27
+
+These cases use backend-only fixtures; PostgreSQL tests run in disposable pgvector Testcontainers, AI is mocked and no real provider/model/shared database is contacted.
+
+- **M327-01 ? Unit/PostgreSQL ? form and readiness:** name-only DRAFT saves; READY reports missing fields without context/job; supplied malformed values rejected. SINGLE/MULTI counts, per-Creator deliverables, platform membership, VND and fee range validated. Total budget and fee stay distinct. `CampaignBriefRulesTest`, `CampaignM3PostgresIntegrationTest#partialDraftAndReadyValidationAreSeparate`, `#budgetFeeAndDeliverableValidationNeverCreatesUnexpectedData`.
+- **M327-02 ? PostgreSQL ? legacy budget:** explicit old request keys, even null, rejected; historical amounts preserved on PUT, never interpreted as new total/fee. `CampaignM3PostgresIntegrationTest#explicitlyNullLegacyBudgetIsRejectedAndOldAmountsRemainOnPut`.
+- **M327-03 ? Unit/PostgreSQL ? revision:** ETag syntax/current revision, missing 428/malformed 400/stale 409, no-op revision unchanged and brief frozen after READY; two writers synchronized by latch yield one 200/one 409. `CampaignBriefRulesTest#campaignRevisionRejectsMissingMalformedAndStale`, `CampaignM3PostgresIntegrationTest#revisionsNoOpAndFrozenBrief`, `#concurrentRevisionAllowsOnlyOneWriter`.
+- **M327-04 ? PostgreSQL ? snapshot and enqueue:** READY creates immutable context plus job atomically; database rejects context-content update; later Brand update does not rewrite Campaign context. Enqueue failure rolls back READY and revision. `CampaignM3PostgresIntegrationTest#readyCreatesFrozenContextAndJobInOneTransaction`, `#enqueueFailureRollsBackReadyAndRevision`.
+- **M327-05 ? Unit/PostgreSQL ? privacy and worker:** fixed semantic field whitelist, explicit Campaign precedence over frozen Brand, no private feedback/contact fields; provider called outside transaction. Timeout retries five attempts with 15/30/60/120-second delays, leaves Campaign revision unchanged, retry only from FAILED. Exclusive lease and stale token fence old worker. `CampaignBriefRulesTest#embeddingUsesFrozenWhitelistedContextAndCampaignPrecedence`, `CampaignM3PostgresIntegrationTest#staleWorkerAndRetryScheduleDoNotOverwriteResults`, `#providerFailureLeavesCampaignAndSupportsBoundedRetry`. Strict provider model/dimension/nonzero contract is shared with the eight `BrandEmbeddingClientTest` scenarios.
+- **M327-06 ? PostgreSQL ? async boundary:** commit dispatches outside transaction using two threads/queue 100; rollback never dispatches. `CampaignEmbeddingAfterCommitPostgresIntegrationTest#commitDispatchesOnBoundedExecutorAndRollbackDoesNotDispatch`.
+- **M327-07 ? PostgreSQL ? recommendation gate/source/quota:** PENDING returns 409 plus embeddingStatus; empty SHORTLIST returns RECOMMENDATION_NO_CANDIDATES; neither reserves quota/creates Run nor broadens to Discovery. READY uses stored vector without synchronous embedding. Explicit DISCOVERY invokes Discovery query. `CampaignM3PostgresIntegrationTest#pendingAndEmptySourcesNeverReserveQuotaOrCallEmbedding`, `#explicitDiscoveryAndShortlistPersistProvenanceAndReuseFeedbackVector`.
+- **M327-08 ? PostgreSQL ? feedback/provenance:** new context retains brief/Brand/embedding-source identity, no new vector job for feedback-only changes; old Run snapshot unchanged. Two simultaneous feedback requests produce distinct increasing versions and exactly one active context without losing exclusions. `CampaignM3PostgresIntegrationTest#explicitDiscoveryAndShortlistPersistProvenanceAndReuseFeedbackVector`, `#concurrentFeedbackKeepsOneActiveContextAndOneEmbeddingSource`.
+- **M327-09 ? PostgreSQL ? compatibility:** V26->V27 preserves legacy budgets/context version/run and adds no fabricated embedding history. First legacy Recommendation commits one compatibility snapshot/job despite waiting 409; repeated attempt creates no duplicate and invents no total budget. `CampaignM3PostgresIntegrationTest#v26UpgradePreservesLegacyBudgetsContextAndRun`, `#legacyPreparationCommitsOnceWithoutFabricatingMissingFields`. Existing fresh-schema suites validate V27.
+- **M327-10 ? Unit ? Autofill:** new output fields parsed as editable suggestions, total budget is not divided into per-Creator fee. `CampaignBriefRulesTest#autofillParsesNewFieldsWithoutInventingPerCreatorFee`.
+
+Existing Campaign ownership/Admin-read-only/lifecycle/range/rollback assertions remain in CampaignPostgresIntegrationTest/CampaignServiceTest. Existing Recommendation grouping, verified M1, M4 evidence and quota rollback assertions remain active. Their client fixtures explicitly select DISCOVERY when testing Discovery results, and the downstream-error fixture now fails after quota reservation rather than through the removed synchronous embedding call. No production compatibility bypass for If-Match/readiness/legacy fields was added.
+
+
+Validation completed 2026-11-08 for V27:
+
+- Full backend regression: **1,036 tests, 1,033 passed, 3 failures, 0 errors, 0 skipped**. Local ignored artifact: `.local-worktrees/backups/m3-regression-final.log`.
+- All **18 new Campaign/M3 cases passed**: CampaignBriefRulesTest (3), CampaignEmbeddingAfterCommitPostgresIntegrationTest (1), CampaignM3PostgresIntegrationTest (14). Existing CampaignPostgresIntegrationTest (12), CampaignServiceTest (12), BackendApplicationTests (8) and Brand/M4 suites also passed. PostgreSQL migration/transaction/concurrency checks use real disposable databases; AI/provider behavior is mocked.
+- The three known Payment failures persist unchanged: PaymentSettlementServiceTest#activeSubscriptionPreventsActivationWithoutMutatingPendingPayment (true rather than false); ComparePaymentPostgresIntegrationTest#parallelPaymentsForSameBrandCannotActivateTwoSubscriptions ([200,200] rather than [200,409]); RbacPostgresIntegrationTest#paidSubscriptionRequiresCheckoutAndGatewayVerification (302 rather than 400). No Payment business code/assertion was changed. Maven therefore reports BUILD FAILURE, not a fully green regression.
+- Environment diagnostics: existing cached schedulers logged attempts to reach disposed local PostgreSQL containers, and Surefire terminated its fork after the 30-second shutdown timeout. These diagnostics produced no extra test errors or skipped cases and are distinct from the three business assertions above. No real AI, shared DB or provider was used.
+- Scoped git diff --check passed. V1-V26 migration content preserved; V27 added. Actual .env/Bruno, diagrams/SDD, shared database and running backend were not changed; no commit/push.
+
+
+## Shortlist batch, Compare and after-commit refresh
+
+Scope: backend only; no migration. PostgreSQL fixtures use isolated pgvector Testcontainers and crawler/invitation mocks. Tests do not call a real crawler, send real mail or access the shared DB.
+
+- **SLB-01 - PostgreSQL - partial batch:** valid/unknown/valid channels return ordered ADDED/INVALID/ADDED, commit both valid items, accurate action counts. `ShortlistBatchPostgresIntegrationTest#batchPreservesOrderAndCommitsValidItemsAroundInvalidOne`.
+- **SLB-02 - PostgreSQL - validation:** empty/duplicate/null IDs and conflicting creatorId/creatorAccountId rejected before writes. `#duplicateNullAndAliasMismatchNeverWrite`.
+- **SLB-03 - Unit/PostgreSQL - idempotency and restore:** Add does not overwrite active-item priority/note/source; REMOVED restores SAVED with same item ID/addedAt; supplied restore fields apply. No duplicate crawl on ALREADY_EXISTS. `#duplicateAddDoesNotOverwriteMetadataAndRestorePreservesIdentity`, `ShortlistCartPhase1Test`, `Flow3ComprehensiveAcceptancePhase6Test#test06_addToShortlistIdempotency_returnsAlreadyExistsWithout409`.
+- **SLB-04 - PostgreSQL - concurrency:** latch-synchronized Add requests yield one ADDED/one ALREADY_EXISTS and one row; concurrent remove/add retains one consistent item and can be restored. `#simultaneousAddsOnlyCreateOneItem`, `#concurrentRemoveAndAddStayConsistentAndUnique`.
+- **SLB-05 - PostgreSQL - per-item rollback:** a trigger rejects one item, which returns FAILED without internal message; preceding/following valid items commit. `#failedItemRollsBackWithoutLosingOtherBatchItems`.
+- **SLB-06 - PostgreSQL - Recommendation provenance:** missing or foreign-Campaign Run rejected instead of ignored; no Shortlist row saved. `#invalidRecommendationRunIsNotSilentlyIgnored`.
+- **SLB-07 - PostgreSQL - snapshot and Compare:** latest metric selected with collectedAt/id tie-break, list and Compare agree, missing metric stays null, REMOVED excluded, no contacts/rateCard/price exposure. `#compareExcludesRemovedAndReadsLatestSnapshotWithTieBreaker`; existing ShortlistCompareServiceTest retains ordering/validation/read-only assertions.
+- **SLB-08 - PostgreSQL - multi-channel identity:** two authorized channels of one Master remain separate and share current masterId; no Relationship/Collaboration created and SINGLE Campaign does not limit Shortlist. `#multipleChannelsOfOneMasterRemainSeparateWithoutBooking`.
+- **SLB-09 - PostgreSQL - RBAC/ownership:** cross-Brand batch/SSE/Compare rejected; disabling MANAGE_OWN_SHORTLIST blocks the next request using the same access token. `#crossBrandSseBatchAndCompareAreRejected`, `#permissionDisabledBlocksAddCompareAndSseWithSameToken`.
+- **SLB-10 - PostgreSQL - latest contact reads:** multiple snapshots do not cause single-result failures; Readiness/Outreach use the latest public booking contact, not the old snapshot. Invitation delivery is mocked. `#readinessAndOutreachUseLatestContactSnapshot`.
+- **SLB-11 - PostgreSQL - crawler boundary:** transport runs outside transaction only after commit; rollback never sends. Provider failure produces safe CRAWL_REQUEST_FAILED, keeps saved item, repeated Add does not resend. `#refreshDispatchOnlyRunsAfterCommitAndRollbackDoesNotDispatch`, `#crawlAcceptanceAndFailureNeverRollBackSavedShortlist`.
+- **SLB-12 - PostgreSQL - ingestion completion:** actual ingestion wrapped in rollback emits no COMPLETED; committed ingestion emits persisted metric ID/collection time, no private contact. `#ingestionCompletionOnlyPublishesCommittedMetric`.
+- **SLB-13 - Unit/HTTP mock - crawler adapter:** fixed endpoint/request payload, HTTP 200/202 accepted, HTTP 500 and timeout propagate for safe dispatch failure reporting. `ShortlistCrawlerClientTest#acceptedResponseAndFailuresUseFixedEndpoint` (four parameterized cases).
+
+Compatibility notes: existing unit fixtures now inject the real item writer/projection with mocked transaction collaborators; actual lock/commit behavior is verified separately on PostgreSQL. Assertions expecting duplicate Add to overwrite priority now require unchanged priority, and restore expects RESTORED, as specified by the new contract. Compare continues to be read-only, fee UNAVAILABLE; CRITIC/Rate Card are not reintroduced. Batch is partial-success and crawl/SSE are non-durable best effort; missed events require a GET refresh.
+
+
+Validation completed 2026-11-08 for Shortlist/Compare:
+
+- Full backend regression after Docker recovery: **1,055 tests, 1,052 passed, 3 failures, 0 errors, 0 skipped**. Local ignored log: `.local-worktrees/backups/shortlist-regression-final.log`.
+- All **19 new cases passed** in that regression: ShortlistBatchPostgresIntegrationTest (15), ShortlistCrawlerClientTest (4). Existing Shortlist unit/Compare/Readiness/Outreach, Brand/M4, Campaign/M3, Auth and ownership tests ran with their assertions active.
+- The three unchanged Payment failures are PaymentSettlementServiceTest#activeSubscriptionPreventsActivationWithoutMutatingPendingPayment (true instead of false); ComparePaymentPostgresIntegrationTest#parallelPaymentsForSameBrandCannotActivateTwoSubscriptions ([200,200] instead of [200,409]); RbacPostgresIntegrationTest#paidSubscriptionRequiresCheckoutAndGatewayVerification (302 instead of 400). Payment production code/assertions were not changed; the full Maven build remains failed for these known assertions.
+- An earlier regression attempt could not initialize Docker/Testcontainers: raw summary 944 tests, 1 failure, 403 errors, 0 skipped, log `.local-worktrees/backups/shortlist-regression.log`. Those initialization errors are environment failures, not the final business result. Docker Desktop was started and Engine availability verified before the successful database-enabled rerun above.
+- Existing cached background workers logged connection attempts to already disposed test databases and Surefire used its fork shutdown timeout. These diagnostics added no errors/skipped tests in the database-enabled regression.
+- A final targeted rerun verifies the last timestamp compatibility adjustment and new addedAt ordering assertion. Its separate result is recorded below; it is not counted again as new tests.
+
+- Final targeted verification after the timestamp adjustment: **59 tests, 59 passed, 0 failures, 0 errors, 0 skipped**, BUILD SUCCESS (2026-11-08 14:44 +07). Includes all 19 new cases and existing Shortlist/Flow3/Flow4 regressions. Local ignored log: `.local-worktrees/backups/shortlist-final-check.log`.
+- Final `git diff --check -- src README.md docs/backend-test-cases.md` passed. No new Shortlist migration was added.
+
+
+## Cooperation CRM and grouped deals (V28)
+
+Automated HTTP/provider/email calls use mocks; transaction, locking and migration checks use disposable PostgreSQL/pgvector Testcontainers. No test sends real SMTP or touches the shared database.
+
+- COOP-01: grouped verified channels create one PLANNED Collaboration, two channel links and one budget commitment; public single-channel confirmation creates no User/Master/ownership.
+- COOP-02: reject different Masters, invalid/null/duplicate IDs, wrong currency/fee/deliverables and invalid evidence; no partial confirmation writes.
+- COOP-03: create/proposal/confirm idempotency preserves original result; changed key content and stale revision return 409.
+- COOP-04: Portal acceptance is bound to the current Brand OFFER; new proposals invalidate it, and counteroffers cannot self-accept. History preserves prior fees; database rejects proposal mutation.
+- COOP-05: another Brand/Creator, disabled permission and transferred ownership cannot read or act on private resources; old Collaboration access is revoked across all channels.
+- COOP-06: audit insertion failure rolls back confirmation/Collaboration/commitment. Concurrent confirmations of one Deal yield one success; different Deals cannot jointly exceed Campaign budget.
+- COOP-07: SINGLE rejects another recipient; MULTI above target warns. PLANNED cancellation releases commitment, start requires ACTIVE, IN_PROGRESS cancellation fails, and rebooking preserves the cancelled history.
+- COOP-08: legacy VND budget initialization requires If-Match, is one-time and does not alter stored M3 Context. Missing/non-VND legacy fees make commitment unavailable and block new confirmations.
+- COOP-09: manual link is encrypted at rest; public preview contains no fee, email, private terms or identity. Creator notifications persist unread and only the recipient marks them read.
+- COOP-10: email queue insertion/SMTP configuration failures roll back invitation and notification. Rollback publishes no after-commit dispatch; committed jobs reach the listener, and SMTP executes outside a database transaction.
+- COOP-11: expired/replaced invitations do not send and erase payload; SMTP failure keeps invitation, uses exact 15/30/60/120 backoff, FAILED can retry without changing token/expiry, and worker lease fencing prevents stale completion.
+- COOP-12: queue rejection leaves persisted jobs recoverable; safe worker errors never expose provider details. Unit tests cover dispatch/worker boundaries, not database concurrency.
+- COOP-13: batch Relationship commits valid/invalid/valid independently. Outreach uses newest public booking email, creates actual Portal notification, groups by Master, returns manual link when needed, and never calls the Claim invitation sender.
+- COOP-14: legacy Collaboration endpoint cannot bypass Deal/consent/budget; CRM stage/details cannot directly write agreedFee or CONFIRMED. Outcome/Review regression explicitly confirms and starts through real APIs.
+- COOP-15: upgrade/fresh schema retains legacy Collaboration IDs, fees/status and one-channel membership; LEGACY consent remains absent. Historical V12-V27 migration tests retain explicit historical targets.
+
+Coverage: CooperationPostgresIntegrationTest (HTTP + PostgreSQL), CooperationWorkerTest (Mockito boundary tests), ShortlistOutreachPhase4Test (now real PostgreSQL, despite its historical class name), CollaborationPostgresIntegrationTest and existing Collaboration/Flow5 unit suites. The obsolete Flow4 Mockito assertions for sending Claim via Outreach and direct COLLABORATING/agreedFee updates were moved to PostgreSQL Outreach/CRM scenarios with the new contract; Claim/ownership assertions remain active. No production bypass was introduced for tests.
+
+Validation results are recorded after the final runs below.
+
+
+Validation completed 2026-11-08 for Cooperation CRM/V28:
+
+- **Final full backend regression: 1,090 tests; 1,087 passed; 3 failures; 0 errors; 0 skipped.** Local ignored log: `.local-worktrees/backups/cooperation-regression-final.log`.
+- All **35 new Cooperation cases passed**: CooperationPostgresIntegrationTest (32 actual PostgreSQL/HTTP cases), CooperationWorkerTest (3 Mockito boundary cases). ShortlistOutreachPhase4Test now runs 7 PostgreSQL scenarios, including the two Outreach/CRM scenarios migrated from Flow4; these are not counted again as 35 new cases.
+- The only remaining failures are the unchanged Payment baseline: PaymentSettlementServiceTest#activeSubscriptionPreventsActivationWithoutMutatingPendingPayment (true instead of false); ComparePaymentPostgresIntegrationTest#parallelPaymentsForSameBrandCannotActivateTwoSubscriptions ([200,200] instead of [200,409]); RbacPostgresIntegrationTest#paidSubscriptionRequiresCheckoutAndGatewayVerification (302 instead of 400). The full Maven build is therefore not green. Payment production code and Payment assertions were not changed; the ComparePayment suite only updates CRM test stage input to NEGOTIATING.
+- Before the final run, a focused compatibility run recorded **102 tests, 101 passed, 1 known Payment failure, 0 errors/skipped**, log `.local-worktrees/backups/cooperation-final-focused.log`. The final regression additionally covers the last legacy-request idempotency case and consistent UUID lock ordering.
+- An earlier full run recorded 1,087 tests/8 failures/0 errors/0 skipped. Five non-Payment failures were corrected: legacy-budget If-Match fixture, positive-fee validation fixture, preserved foreign-Campaign 404 behavior, the renamed CRM stage input and the expanded 48-permission matrix. Their assertions remain active and pass in the final run; no production bypass was introduced.
+- Schema creation and upgrade were tested only in disposable PostgreSQL Testcontainers. V1-V27 have no edits. V28 preserves historical Collaboration rows/fees/status, creates one-channel LEGACY membership without consent and retains active-only uniqueness for later rebooking.
+- Cached test-context schedulers may log refused connections after their disposable database is stopped; Surefire may use its fork shutdown timeout. These diagnostics are distinct from the 0 test errors/skips above and do not indicate a shared database was accessed.
+- Final source/docs whitespace check passed. Real `.env`, Bruno, diagrams/SDD and the shared database were not edited; no serving BE restart, commit or push was performed.
+
+
+## Collaboration execution / Content Review / Outcome — V29
+
+Automated tests use HTTP MockMvc plus real disposable PostgreSQL, fake network boundaries and latch-based concurrency (no sleep). No public provider, SMTP or shared database is used.
+
+- `ExecutionPostgresIntegrationTest`: explicit acceptance/final review lifecycle; immutable source proposal; review rounds/checklist; publication exceptions; outcome revision/reopen; Creator finance rejection and revoked ownership; idempotency/body conflict; concurrent submissions; audit rollback; legacy plan quantity expansion; duplicate measurements and missing prerequisites.
+- `ExecutionContractPostgresIntegrationTest`: migrated original Collaboration HTTP acceptance scenarios, now exercising explicit acceptance instead of auto-completion. Covers source/null metrics, finance projections, Campaign/payment preservation, ownership/RBAC/related IDs, strict metric/rating/URL boundary cases, invalid lifecycles, transaction rollback, concurrent final reviews, database uniqueness/history immutability, Swagger and explicit Campaign closing; includes legacy completed reviews without fabricated acceptance.
+- `CollaborationPostgresIntegrationTest`: retains historical V7 upgrade/fresh database assertions through V29, preserving legacy KPI/null metrics, account data, channel membership and missing historical consent; no execution/acceptance history is synthesized.
+- `CooperationPostgresIntegrationTest`: existing Deal/budget/Portal/Outbox coverage retained; valid proposal fixtures now state negotiated deadline/checklist/rounds. Multi-channel confirmation also asserts execution units on the same single Collaboration.
+- `OutcomeFinanceTest` (unit): independent ROI/ROAS/CPM/CPE, nullable inputs, zero denominators, inconsistent periods, numeric validation and post URL deduplication. No database/HTTP is involved.
+- `CollaborationServiceTest`, `Flow5CollaborationAcceptanceTest` (Mockito): historical service compatibility, evidence/read authorization, preserving payment/CRM, outcome no-auto-completion and persisted-review event semantics. These are not PostgreSQL concurrency tests.
+- `CollaborationCompletedEventListenerTest` (Mockito): persisted low rating wins over forged event values; replay does not duplicate evidence/increment legacy patterns; synchronization failure propagates for rollback.
+
+Boundary expectations changed intentionally: saving Outcome stays IN_PROGRESS; acceptance moves to AWAITING_REVIEW; final Review alone completes. SELF_REPORTED stays SELF_REPORTED; missing data stays null; M1 returns unavailable instead of a fabricated constant. Original validation/security/rollback/concurrency acceptance coverage is migrated to the new public contract, not disabled.
+
+Verified results (2026-11-08):
+
+- Related contract/migration/RBAC check: 132 passed, 0 failures/errors/skipped.
+- Full backend regression: **1,120 run; 1,117 passed; 3 failures; 0 errors; 0 skipped** (`execution-regression-final.log`, 11:24). The three failures are the same baseline Payment cases below; no Payment behavior/assertions were changed for this feature.
+- After the full run, normalized equivalent UTC/UTC+7 financial periods and added explicit missing-metric/legacy-fee boundary cases. Final rerun of the affected suites: **69 passed; 0 failures/errors/skipped** (`execution-boundaries-final.log`, 03:06): ExecutionContractPostgresIntegrationTest 43, ExecutionPostgresIntegrationTest 15, OutcomeFinanceTest 11. This final affected-suite run includes 58 PostgreSQL cases and 11 pure unit cases. It is reported separately rather than presented as another whole-backend run.
+- Existing migration tests verify preservation and fresh schema V29. No migration was run on a shared database. MockMvc/Spring test contexts are not restarts of the serving backend.
+- Full-suite shutdown emitted the existing scheduler/closed-container warnings and Surefire fork shutdown timeout after tests completed; Surefire reported zero test errors. These warnings do not represent access to the shared database.
+
+Unchanged Payment failures:
+
+1. PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment — activation returns true instead of false.
+2. ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions — statuses [200,200] instead of [200,409].
+3. RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification — 302 instead of 400.
+
+Build output/logs remain local under ignored directories. Nothing was committed/pushed; serving backend, real environment variables, Bruno and shared database were untouched.
+
+
+## Luồng 10 — Campaign History / Duplicate Brief (V30)
+
+Scope: owner-only Brand history, repeatable read snapshots, conservative completed-only report, reviewed Duplicate Brief and shared atomic campaign quota. No crawler/model/email provider is called by these tests; no shared database is used. Execution fixtures run the actual consent/confirmation/submission/acceptance/final-review APIs, rather than treating a raw legacy outcome as accepted evidence.
+
+New pure unit suite `CampaignHistoryCalculatorTest`:
+
+- Separate explicit actualCost and commitment; single-scope ROAS/ROI/CPM/CPE from totals.
+- Repeated public post key counted once; conflicting measurements invalidate only affected metrics.
+- Incompatible periods, absent metric inputs, invalid denominator and foreign currency remain unavailable.
+- Multiple completed Collaborations cannot sum GMV/revenue without attribution; individual outcomes are retained.
+- Legacy/unaccepted evidence is excluded; unfinished/cancelled work is not counted as success.
+- Brief whitelist removes execution data, recipient IDs, feedback, embeddings and legacy budget; missing fields remain null.
+
+`CampaignHistoryPostgresIntegrationTest` uses a disposable PostgreSQL database and HTTP/MockMvc:
+
+- Only the Brand owner with both History/Campaign read permissions can read; other Brand 404, Creator/Admin 403; revoked read permission 403. Child membership checked independently.
+- Read-only detail/contexts/collaborations/preview do not change Context, embedding jobs, learning evidence, recommendation runs, receipts or audit counts.
+- Current names remain labelled CURRENT_PROFILE. Later profile/Context updates cannot rewrite confirmed terms or accepted Outcome revisions.
+- Completed main report requires final Review referencing active accepted Outcome; accepted-but-unreviewed/reopened/legacy records are excluded.
+- Pagination bounds, inclusive createdAt filters, platform/status/name search and explicit context ownership are validated.
+- Selected historical Context does not fill its absent budget from the current Campaign; legacy budget is not interpreted as new money fields.
+- Duplicate starts DRAFT with dates absent, without copied Context, M3, CRM, Deal or Collaboration. Stored source reference is available on the new Campaign.
+- Source revision/kind changes return 409. Missing/fractional revision rejected; revision 0 and values above the boxed-integer cache range work.
+- Same key/body sequential or concurrent returns the same persisted response, including numeric representation; no duplicate target/receipt/quota. Changed body returns 409.
+- Audit failure rolls back Campaign, receipt and campaign quota.
+- Preview uses only read permissions; CREATE_CAMPAIGN is required for confirmation.
+- Latches interrupt a History request between reads while another connection commits a Campaign/Context change; the original request retains one repeatable-read snapshot.
+
+`HistoryQuotaPostgresIntegrationTest` owns a **separate PostgreSQL container/database** so its plan/quota fixtures cannot contaminate other modules:
+
+- Normal create competes with Duplicate for the last campaign quota: one 201, one 409; exactly one target and one increment.
+- Concurrent same-key duplicates reserve once; replay succeeds even after quota becomes full.
+- Preview does not reserve quota; audit and receipt-insert failures roll back both quota and target.
+- V29→V30 preserves raw Campaign/Context/Deal/Relationship/Collaboration/Outcome revision data; V30 receipts start empty and have four source/actor/target foreign keys. Fresh test databases migrate through V30.
+
+Existing migration assertions for latest schema now expect V30 (29 migrations after baseline), retaining historical target-version suites unchanged. SubscriptionService unit assertions validate the atomic update and exhausted-quota branch; Payment activation/settlement assertions remain unchanged.
+
+Verified results (2026-11-09):
+
+- Related run: **105 passed, 0 failures/errors/skipped** (`history-focused-final.log`).
+- Whole-backend run: **1,155 run; 1,152 passed; 3 failures; 0 errors; 0 skipped** (`history-regression.log`, 12:16). The only failures are PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment, ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions, and RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification. Payment behavior/assertions were not changed.
+- Following that full run, shared negotiation-event reads were extracted for History and existing Deal APIs. Final companion suites passed: CampaignHistoryCalculatorTest 8, HistoryQuotaPostgresIntegrationTest 5, CooperationPostgresIntegrationTest 32, ExecutionContractPostgresIntegrationTest 43, ExecutionPostgresIntegrationTest 15 (103 cases). The additional two-channel History fixture needed its authorization metadata and complete publication request aligned with the existing contract; no assertion or production ownership constraint was relaxed.
+- Final corrected History invocation: **16 passed, 0 failures/errors/skipped** (`history-publish-last.log`, 01:45). This includes the new end-to-end multi-channel agreement: two execution units, one accepted Collaboration, commitment 10,000 VND and actualCost 1,000 VND counted once, with 2,000 total views. It also includes the latch-based consistent-read and preview-without-create-permission cases. The companion and final History checks are separate invocations, not another whole-backend run.
+- A rerun while Docker Engine was stopped could not initialize Testcontainers. After Docker was restored, the final PostgreSQL run above passed; it was not marked skipped or represented as a success.
+
+These tests do not independently verify SELF_REPORTED metrics or establish production rollout readiness. Build/log artifacts stay ignored. History implementation itself did not restart the serving BE, touch the real environment/Bruno or apply migrations to a shared database.
+
+
+## Creator Portal, sharing and verification — V31
+
+New pure unit suites: PortalDataTest (PATCH validation/normalization, omitted/null/list, portfolio IDs/HTTPS, contact visibility, availability), CreatorVerificationProjectionTest (official/manual/legacy/mock/revoked/wrong-owner evidence and independent token expiry), PortalHttpProjectionTest (batch enrichment of identical cards, missing channels cannot retain old verified flags, private/other-module responses are untouched).
+
+CreatorPortalProfilePostgresIntegrationTest uses real PostgreSQL/Flyway/JWT sessions and HTTP MockMvc. Provider verification rows are explicit test fixtures; manual-claim tests go through the real submission/review/revoke API. There are no real provider, SMTP or crawler calls.
+
+Cases include:
+
+- GET and empty PATCH create no Master/profile/portfolio/audit; initial meaningful PATCH creates one shared profile without changing crawler location or metric count.
+- If-Match missing/malformed/stale and two concurrent first updates (latch, no sleep): only one succeeds; audit error rolls back Master/profile/portfolio.
+- Optional fields, sorted lists and complete portfolio resend are no-op when semantically unchanged; meaningful updates preserve omitted fields.
+- Basic sharing defaults on and availability off; owned channels without evidence are LEGACY_UNVERIFIED and their declarations are not exposed. Valid proof enables the projection; changing sharing applies on the next request.
+- Contact defaults PRIVATE. BRANDS and CONFIRMED_PARTNERS enforce role/permission, Campaign Brand, same Master, current member ownership and noncancelled agreement; COMPLETED Collaboration can still qualify.
+- Changing channel owner cannot expose the former profile or give the new owner an old confirmed partnership.
+- Contact Readiness uses a separate Campaign with no existing CRM relation so it exercises IN_APP_PORTAL, not an early ALREADY_CONTACTED branch. Neither account email, private booking address nor crawler fallback is returned.
+- Profile/contact access is denied to foreign roles and when dynamic permissions are disabled; audit contains no contact values and connection options contain no secrets.
+- Actual manual approval projects MANUAL_REVIEW and actual reviewedAt; revoke removes the badge without inventing an OAuth verification.
+- V30→V31 preserves original creator/owner rows and creates no declared profile/portfolio or inferred consent.
+
+Legacy fixture changes reflect the public contract, not weaker validation: Contact Readiness asserts a null target and absence of account email; unit repository adapters model latest-snapshot reads; permission matrix strictly includes the two new permissions; fresh-schema migration assertions expect V31 and historical V29→V30 tests stay pinned to V30. No production bypass is added.
+
+Verified results (2026-11-09):
+
+- Related suites: **49 passed, 0 failures/errors/skipped** (`portal-related-final.log`).
+- Whole-backend regression: **1,188 run; 1,184 passed; 4 failures; 0 errors; 0 skipped** (`portal-regression.log`, 11:38). Three reproduce the pre-existing Payment failures: PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment, ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions, and RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification.
+- The fourth was the old Compare fixture: an APPROVED Claim lacked reviewer/reviewedAt. The fixture now explicitly provides a verified owner and manual-review provenance. The VERIFIED assertion is retained and additionally asserts MANUAL_REVIEW; no production badge validation was weakened.
+- Final affected rerun: **33 passed, 0 failures/errors/skipped** (`portal-final-fixture.log`, 02:07), including the corrected PostgreSQL Compare case, all 16 Portal PostgreSQL cases and all 16 new unit cases. This is a separate targeted run after the full regression, not another whole-backend run. The three Payment failures remain unresolved and their assertions/behavior are unchanged.
+
+These tests distinguish application ownership evidence from independent verification of self-reported profile/financial claims. PostgreSQL runs use disposable Testcontainers; no shared database or serving backend was changed. V31 was tested only on disposable databases. No real provider calls, environment edits, commits or pushes were performed for this implementation.
+
+## Data Manager Master Catalog and Claim review — V32
+
+CreatorCatalogPostgresIntegrationTest uses real PostgreSQL/Flyway, persisted authentication sessions and HTTP endpoints. Master/channel/Claim fixtures are unique per case. Tests cover empty Masters, literal `%`/`_` search, unclaimed channels, same-member platform/verification filters, pagination/enum validation, separate dynamic read permissions, Admin/DM access and Brand/Creator denial. Catalog/event DTOs are checked for absence of login email, private contacts, raw audit JSON, proof URLs and tokens. GET is checked for no audit mutations.
+
+Claim tests submit through the actual API, bind a live invitation, change that invitation before review and verify wrong email/expiry/processed denials without business writes. Expiry fixtures use the same Clock and JPA timestamp mapping as production; ManualClaimGuardTest fixes Clock precisely at expiresAt=now and expects INVITATION_EXPIRED. This avoids interpreting a raw JDBC timestamp fixture as a successful expiry check.
+
+Additional cases cover manual revocation with independent valid OAuth, latest-method OAuth revocation suppressing older ACTIVE rows, mock proof not preserving ownership, approval/revoke audit rollback, actor authVersion changed while waiting, two concurrent reviewers, and two channels sharing a single Master. Latch-based MetaOAuthPostgresIntegrationTest.manualReviewAndMetaConfirmationCannotAssignDifferentOwners races real HTTP manual approval against Meta confirmation with the provider mocked: one owner wins and the losing ownership conflict is audited. Provider calls remain outside locked transactions as asserted by existing Meta tests.
+
+Approval/revoke synchronizes current Shortlist/Relationship Master references without creating Collaboration. Historical Deal/Collaboration members remain outside the mutation. New audit snapshots record the actual Master on approval/revoke; submission and legacy events without that reference remain unknown. Current channel ownership changes do not rewrite event snapshots. V31→V32 is tested in an isolated schema with original Creator/Claim rows preserved and no inferred invitation/Master rows.
+
+Legacy service tests now assert transfer is denied and no owner, current references or transfer audit is mutated; the HTTP transfer URL is still tested as 404. Exact RBAC matrix assertions now include 52 permissions (Admin 26, Data Manager 16, Brand 26; Creator unchanged). Latest-schema tests expect V32; the Portal V30→V31 boundary remains explicitly targeted to V31. No production bypass or weaker badge assertion was introduced.
+
+Verified results (2026-11-09):
+
+- Related final check: **85 passed, 0 failures/errors/skipped** (`catalog-final-check.log`, 03:09): 18 Catalog PostgreSQL, 16 Portal PostgreSQL, 36 Meta OAuth PostgreSQL, 8 Claim service, 6 verification projection and 1 fixed-Clock guard case.
+- Whole-backend regression: **1,209 run; 1,206 passed; 3 failures; 0 errors; 0 skipped** (`catalog-regression.log`, 12:29). All failures reproduce the existing Payment baseline: PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment, ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions, and RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification. No Payment behavior or assertion was changed.
+- Final contract rerun after the small UUID case-insensitivity and post-lock session checks: **55 passed, 0 failures/errors/skipped** (`catalog-contract-final.log`, 02:03). Includes all 18 Catalog PostgreSQL cases, Claim/guard/projection/RBAC suites and the legacy transfer-denial tests. This is a separate targeted run after full regression, not a second full regression. Legacy test names now describe denial rather than the removed transfer behavior.
+
+Mockito/Clock tests exercise policy and validation; PostgreSQL tests exercise migration, transaction rollback and concurrency. No real Meta, crawler, SMTP or shared database is used. Serving BE/environment/Bruno/diagrams were not changed; no commit or push was performed. Build/log artifacts remain ignored.
+
+## AD-01 / AD-05 — Account administration and Permission Matrix
+
+AdminAccountContractTest uses Bean Validation and pure input checks for reason normalization/requiredness, literal search bounds and strict pagination/order. AdminUserServiceTest, AdminRoleGuardTest and AdminUserControllerTest retain role/status, no-op, last-admin, Creator ownership/Claim and DTO assertions while adapting the repository call to filtered search and audit to explicit actor attribution. Positive legacy HTTP fixtures now supply the required status reason. RolePermissionServiceTest and its PostgreSQL companion retain version, no-op, audit rollback, multi-change atomicity and concurrent-update assertions; their unsupported-capability fixture now uses REQUEST_CREATOR_REFRESH because notifications have implemented endpoints.
+
+AdminConsolePostgresIntegrationTest has its own disposable PostgreSQL container. Last-admin counts cannot see or alter fixtures from another module. Its fixed Clock, real JWT/session rows, HTTP endpoints, actual role-matrix changes and latch-based requests cover:
+
+- Role/status/email/name/UUID filters, literal `%`/`_`/`!`, upper-case UUID, deterministic ordering, strict bounds and private/no-store DTOs without credential/contact fields.
+- Missing/blank/overlong reasons, including no-op; normalized reason audit; unchanged authVersion/audit/session on no-op.
+- LOCKED/DISABLED revoking two sessions and refresh credentials; unlock not restoring them; fresh login remains possible. Role changes also invalidate old sessions.
+- Self-lock, self-disable and self-demotion with another Admin; rejection when the actor is the last ACTIVE Admin. Two Admins locking each other or themselves simultaneously retain one ACTIVE Admin (latches, no sleep).
+- Actor status, role, logout or exact session expiry changed after authentication but before the write lock: account and matrix writes return 403/401 without target/config mutation.
+- Audit failure and failure after actual session revocation roll back User status/authVersion, session rows and audit. Existing Brand profile, current ownership and PENDING Claim prevent incompatible role changes without deleting their records.
+- Ten newly registered capability entries are exercised through the real matrix API: toggle off, reuse the same actor JWT and observe 403 at the actual endpoint; toggle on and regain authorized access. For absent-resource probes, expected 404 proves authorization passed; Creator profile/notifications, Campaign History and Catalog probes use successful reads. No direct role-override SQL substitutes for these toggle tests.
+- ADMIN edit and unsupported scoring/provider/collection/duplicate operations remain rejected; no out-of-role grants are introduced. Default role/permission counts are unchanged.
+
+Related final run: **96 passed, 0 failures/errors/skipped** (`admin-related-final.log`, 01:29): 42 new Admin PostgreSQL cases, 30 existing RBAC PostgreSQL cases, and 24 contract/service/controller unit cases. Initial fixture failures were the old repository verification signature and the read-Recommendation path missing `/runs`; both were corrected with assertions retained. Whole-backend regression: **1,254 run; 1,249 passed; 5 failures; 0 errors; 0 skipped** (`admin-regression.log`, 08:25). Three are the unchanged Payment baseline: PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment, ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions, and RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification. The other two were legacy Admin fixtures: a DISABLED request missing the now-required reason, and a concurrent-admin assertion missing post-lock 403. Both fixtures were corrected; the concurrency case additionally asserts exactly one successful mutation and still requires one ACTIVE Admin. These corrections do not bypass authorization or weaken last-admin protection. Final affected rerun: **105 passed, 0 failures/errors/skipped** (`admin-verification-final.log`, 01:56), comprising the 96 related cases plus all 8 BackendApplicationTests and the corrected last-admin concurrency case. This is a separate targeted run after the full regression, not a second whole-backend run. The three Payment failures remain unresolved; their assertions and behavior are unchanged.
+
+No migration is added and V1–V32 are unchanged. The server environment, Bruno, serving backend and shared databases remain untouched. The three pre-existing Payment failures are tracked separately; their behavior/assertions are outside this implementation.
+
+## Subsystem integration into develop
+
+Includes completed Auth, Brand/onboarding, Campaign/M3, Shortlist, Deal/Outreach, Collaboration/Outcome, History, Creator Portal, Catalog/Claim and Admin/RBAC through V32. The new v3 Bayesian M1/M4 policy, KPI targets and V33 are excluded. Develop TOPSIS/CRITIC and its scoring/presentation rules remain active; older implementation notes about scoring are historical, not a change to that algorithm.
+
+Migration chronology on develop: existing V1–V19 are preserved unchanged. New Meta OAuth sessions and Instagram login are V20/V21, followed by V22–V32. This numbering follows develop, and is not interchangeable with a database migrated using khai’s different V17–V21 history; no shared database is migrated by this integration. V33 is excluded.
+
+Validation for develop subsystem integration (2026-11-10): full regression executed 1,361 tests; after updating migration-count and legacy unit fixtures to the new subsystem contracts, the affected Meta/Recommendation/engine suites passed 162/162 including the new Run DTO privacy test. Consolidated Surefire results: 1,362 tests, 1,359 passed, 3 failures, 0 errors, 0 skipped. Remaining failures are the known Payment tests: PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment, ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions, and RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification. Payment behavior/assertions were not changed to hide these failures. PostgreSQL tests used disposable Testcontainers; no shared database or live backend was restarted.

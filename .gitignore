@@ -46,6 +46,7 @@ spring-shell.log
 .env.*
 !.env.example
 secrets/
+docs/bruno/
 application-prod.yml
 application-staging.yml
 

@@ -1,0 +1,146 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam roundcorner 0
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam classAttributeIconSize 0
+skinparam packageStyle folder
+skinparam classBackgroundColor white
+skinparam classBorderColor #444444
+skinparam classHeaderBackgroundColor #F2F2F2
+skinparam packageBackgroundColor white
+skinparam packageBorderColor #666666
+skinparam ArrowColor #555555
+skinparam nodesep 40
+skinparam ranksep 65
+hide circle
+title Brand, Campaign and Discovery | Class Diagram
+abstract class BaseEntity <<mapped superclass>> {
+- id: UUID
+- createdAt: LocalDateTime
+- updatedAt: LocalDateTime
+}
+
+class BrandProfile <<entity>> {
+- businessName: String
+- industry: String
+- targetAudiences: List<String>
+- preferredPlatforms: List<String>
+}
+
+class BrandContext <<entity>> {
+- contextVersion: int
+- profileContext: JsonNode
+- learnedPatterns: JsonNode
+- evidenceRefs: JsonNode
+--
++ updateProfileContext(JsonNode): void
+}
+
+class Campaign <<entity>> {
+- name: String
+- objective: CampaignObjective
+- platforms: List<String>
+- niches: List<String>
+- followerMin: Long
+- followerMax: Long
+- budgetMin: BigDecimal
+- budgetMax: BigDecimal
+- status: CampaignStatus
+}
+
+class CampaignContext <<entity>> {
+- contextVersion: int
+- contextData: JsonNode
+- active: boolean
+- archivedAt: LocalDateTime
+}
+
+class BrandService <<service>> {
+--
++ create(BrandRequest, Authentication): BrandResponse
++ update(UUID, BrandRequest, Authentication): BrandResponse
+}
+
+class CampaignService <<service>> {
+--
++ create(UUID, CampaignRequest, Authentication): CampaignResponse
++ changeStatus(UUID, CampaignStatusRequest, Authentication): CampaignResponse
++ discoverCreators(UUID, Pageable, Authentication): PageResponse<CreatorDiscoveryResponse>
+}
+
+class GeminiCampaignAutofillService <<service>> {
+--
++ autofill(CampaignAutofillRequest): CampaignAutofillResponse
+}
+
+class CreatorDiscoveryService <<service>> {
+--
++ discoverCreators(UUID, DiscoverySearchRequest): Page<HybridDiscoveryCreatorProjection>
+}
+
+class AiServiceClient {
+--
++ getEmbedding(String): List<Float>
+}
+
+interface CampaignRepository <<repository>> {
+}
+
+interface PublicCreatorMetricRepository <<repository>> {
+}
+
+class Creator <<entity>> {
+- id: UUID
+- platform: String
+- externalId: String
+- displayName: String
+}
+
+class PublicCreatorMetric <<entity>> {
+- id: UUID
+- followers: Long
+- engagementRate: BigDecimal
+- niche: String
+- dataConfidence: BigDecimal
+}
+
+enum CampaignStatus {
+DRAFT
+READY_FOR_DISCOVERY
+ACTIVE
+COMPLETED
+ARCHIVED
+}
+
+enum CampaignObjective {
+AWARENESS
+ENGAGEMENT
+TRAFFIC
+CONVERSION
+}
+
+BrandContext "0..1" --> "1" BrandProfile : brandProfile
+Campaign "0..*" --> "1" BrandProfile : brandProfile
+CampaignContext "0..*" --> "1" Campaign : campaign
+PublicCreatorMetric "0..*" --> "1" Creator : creator
+BrandProfile --|> BaseEntity
+BrandContext --|> BaseEntity
+Campaign --|> BaseEntity
+Campaign ..> CampaignObjective : objective
+Campaign ..> CampaignStatus : status
+CampaignContext --|> BaseEntity
+CampaignService ..> CampaignRepository
+CampaignService ..> BrandService
+CampaignService ..> PublicCreatorMetricRepository
+CreatorDiscoveryService ..> CampaignRepository
+CreatorDiscoveryService ..> PublicCreatorMetricRepository
+CreatorDiscoveryService ..> AiServiceClient
+BrandService ..> BrandProfile : manages
+BrandService ..> BrandContext : updates
+CampaignRepository ..> Campaign : persists
+CampaignService ..> CampaignContext : versions
+PublicCreatorMetricRepository ..> PublicCreatorMetric : queries
+
+@enduml

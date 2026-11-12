@@ -1,0 +1,29 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam ArrowFontSize 13
+skinparam stateFontSize 16
+skinparam stateBackgroundColor #FFFFFF
+skinparam stateBorderColor #404040
+skinparam ArrowColor #505050
+skinparam roundcorner 12
+skinparam nodesep 55
+skinparam ranksep 65
+hide empty description
+title InfluencerMatch | Extended Collaboration: Content Approval
+[*] --> ACCEPTED : collaborationInvitationAccepted
+ACCEPTED --> CONTENT_IN_PROGRESS : Creator.startContent
+CONTENT_IN_PROGRESS --> CONTENT_REVIEW : Creator.submitContent\n[deliverables supplied]
+CONTENT_REVIEW -[norank]-> CONTENT_IN_PROGRESS : Brand.requestRevision / record comments
+CONTENT_REVIEW --> APPROVED : Brand.approveContent\n[requirements satisfied]
+APPROVED --> POSTED : publishedUrlConfirmed
+POSTED --> COMPLETED : Brand.complete\n[required outcome information processed]
+ACCEPTED --> CANCELLED : cancellationApproved [obligations resolved]
+CONTENT_IN_PROGRESS --> CANCELLED : cancellationApproved [obligations resolved]
+CONTENT_REVIEW --> CANCELLED : cancellationApproved [obligations resolved]
+APPROVED --> CANCELLED : cancellationApproved [obligations resolved]
+COMPLETED --> [*]
+CANCELLED --> [*]
+@enduml

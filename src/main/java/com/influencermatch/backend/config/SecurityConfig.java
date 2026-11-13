@@ -148,8 +148,10 @@ public class SecurityConfig {
                     .permitAll()
                     .requestMatchers("/data/quality/**", "/data/data-quality/**", "/admin/data-quality/**")
                     .hasAuthority("REVIEW_CREATOR_CLASSIFICATION")
-                    .requestMatchers("/data/crawler/**", "/admin/crawler/**")
-                    .hasAnyRole("DATA_MANAGER", "ADMIN")
+                    .requestMatchers("/admin/crawler/**")
+                    .denyAll()
+                    .requestMatchers("/data/crawler/**")
+                    .hasRole("DATA_MANAGER")
                     .requestMatchers(
                         org.springframework.http.HttpMethod.GET, "/admin/recommendation-config")
                     .hasRole("DATA_MANAGER")

@@ -10,6 +10,8 @@ import org.springframework.data.domain.*;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface CampaignRepository extends JpaRepository<Campaign, UUID> {
+  long countByStatus(CampaignStatus status);
+
   @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_READ)
   @org.springframework.data.jpa.repository.Query("select c from Campaign c where c.id = :id")
   java.util.Optional<Campaign> findLockedForCollaborationById(

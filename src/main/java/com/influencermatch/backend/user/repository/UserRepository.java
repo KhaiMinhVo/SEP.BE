@@ -28,6 +28,9 @@ public interface UserRepository extends JpaRepository<User, UUID>, org.springfra
 
   boolean existsByEmail(String email);
 
+  long countByCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+      java.time.LocalDateTime from, java.time.LocalDateTime to);
+
   long countByRoleAndStatus(Role role, com.influencermatch.backend.user.enums.UserStatus status);
 
   @org.springframework.data.jpa.repository.Query(

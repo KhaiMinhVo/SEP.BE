@@ -16,6 +16,8 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
 
   List<Subscription> findByBrandProfileIdAndStatus(UUID brandProfileId, SubscriptionStatus status);
 
+  long countByStatus(SubscriptionStatus status);
+
   @org.springframework.data.jpa.repository.Modifying
   @org.springframework.data.jpa.repository.Query(
       "UPDATE Subscription s SET s.usedCampaignQuota = s.usedCampaignQuota + 1 "

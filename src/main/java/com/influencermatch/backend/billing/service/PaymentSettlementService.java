@@ -19,6 +19,8 @@ public class PaymentSettlementService {
   private final PaymentRepository payments;
   private final SubscriptionRepository subscriptions;
   private final EntityManager em;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.notification.service.NotificationService notificationService;
 
   public Payment lock(Payment existing) {
     brands.lockForBilling(existing.getBrandProfile().getId()).orElseThrow();
@@ -47,6 +49,24 @@ public class PaymentSettlementService {
       sub.setStatus(SubscriptionStatus.ACTIVE);
       sub.setStartDate(LocalDate.now());
       sub.setExpirationDate(LocalDate.now().plusDays(sub.getPlan().getDurationDays()));
+      if (notificationService != null
+          && payment.getBrandProfile() != null
+          && payment.getBrandProfile().getUser() != null) {
+        String planName = sub.getPlan() != null ? sub.getPlan().getPlanName() : "dịch vụ";
+        notificationService.createAndDispatch(
+            payment.getBrandProfile().getUser().getId(),
+            com.influencermatch.backend.notification.enums.NotificationType.PAYMENT_SUCCESS,
+            com.influencermatch.backend.notification.enums.NotificationType.PAYMENT_SUCCESS.getDefaultTitle(),
+            "Giao dịch thanh toán gói "
+                + planName
+                + " ("
+                + payment.getAmount()
+                + " "
+                + payment.getCurrency()
+                + ") đã hoàn tất thành công.",
+            "PAYMENT",
+            payment.getId());
+      }
     } else {
       payment.setStatus(PaymentStatus.FAILED);
       payment.setFailureReason(failureReason);

@@ -66,6 +66,41 @@ public class CreatorCatalogService {
     return new PageResponse<>(items, page, size, count, (int) ((count + size - 1) / size));
   }
 
+  public java.util.Map<String, Object> summary() {
+    guard(Permission.VIEW_CREATOR_MASTER_CATALOG);
+
+    long totalMasters = Optional.ofNullable(
+        db.queryForObject("SELECT COUNT(*) FROM creator_master", Long.class)
+    ).orElse(0L);
+
+    long claimedChannels = Optional.ofNullable(
+        db.queryForObject("SELECT COUNT(*) FROM creator WHERE master_id IS NOT NULL", Long.class)
+    ).orElse(0L);
+
+    long unclaimedChannels = Optional.ofNullable(
+        db.queryForObject("SELECT COUNT(*) FROM creator WHERE master_id IS NULL", Long.class)
+    ).orElse(0L);
+
+    long duplicateCandidates = 0L;
+    try {
+      duplicateCandidates = Optional.ofNullable(
+          db.queryForObject("SELECT COUNT(*) FROM creator_identity_conflict WHERE status = 'PENDING_MANAGER'", Long.class)
+      ).orElse(0L);
+    } catch (Exception ignored) {
+    }
+
+    java.util.Map<String, Object> res = new java.util.LinkedHashMap<>();
+    res.put("total_masters", totalMasters);
+    res.put("totalMasters", totalMasters);
+    res.put("claimed_channels_count", claimedChannels);
+    res.put("claimedChannelsCount", claimedChannels);
+    res.put("unclaimed_channels_count", unclaimedChannels);
+    res.put("unclaimedChannelsCount", unclaimedChannels);
+    res.put("duplicate_candidates_count", duplicateCandidates);
+    res.put("duplicateCandidatesCount", duplicateCandidates);
+    return res;
+  }
+
   public PageResponse<Master> masters(
       String q, String status, String platform, String verification, int page, int size) {
     guard(Permission.VIEW_CREATOR_MASTER_CATALOG);

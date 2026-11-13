@@ -41,6 +41,13 @@ public class CreatorCatalogController {
     return read(service.masters(q, status, platform, verificationStatus, page, size));
   }
 
+  @GetMapping("/creator-masters/summary")
+  @PreAuthorize("hasAuthority('VIEW_CREATOR_MASTER_CATALOG')")
+  @Operation(summary = "Tổng hợp số liệu kênh đã liên kết vs chưa nhận (DM-01 Summary)")
+  public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> summary() {
+    return read(service.summary());
+  }
+
   @GetMapping("/creator-masters/{id}")
   @PreAuthorize("hasAuthority('VIEW_CREATOR_MASTER_CATALOG')")
   public ResponseEntity<ApiResponse<CatalogDtos.Master>> master(@PathVariable UUID id) {

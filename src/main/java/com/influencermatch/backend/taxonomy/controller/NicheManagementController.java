@@ -4,6 +4,7 @@ import com.influencermatch.backend.common.dto.ApiResponse;
 import com.influencermatch.backend.taxonomy.dto.NicheRequest;
 import com.influencermatch.backend.taxonomy.model.Niche;
 import com.influencermatch.backend.taxonomy.service.NicheService;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -13,7 +14,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/data/crawl-fields")
+@RequestMapping({"/data/crawl-fields", "/data/niches"})
 @RequiredArgsConstructor
 @PreAuthorize("hasAnyRole('DATA_MANAGER', 'ADMIN')")
 @Tag(name = "Quản lý ngành hàng")
@@ -22,6 +23,12 @@ public class NicheManagementController {
 
   @GetMapping
   public ApiResponse<List<Niche>> list() { return ApiResponse.ok(service.list()); }
+
+  @GetMapping("/stats")
+  @Operation(summary = "Phân bổ số lượng Creator theo từng ngành hàng (DM-06 Stats)")
+  public ApiResponse<List<java.util.Map<String, Object>>> stats() {
+    return ApiResponse.ok(service.getStats());
+  }
 
   @PostMapping
   public ApiResponse<Niche> create(@Valid @RequestBody NicheRequest request) {

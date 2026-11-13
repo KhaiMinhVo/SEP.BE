@@ -61,6 +61,14 @@ public class AdminCrawlerController {
     return ApiResponse.ok(metrics);
   }
 
+  @GetMapping("/trends")
+  @Operation(summary = "Biểu đồ chuỗi thời gian cào theo ngày (7 ngày / 30 ngày) cho Data Manager DM-05")
+  public ApiResponse<List<Map<String, Object>>> getTrends(
+      @RequestParam(value = "days", defaultValue = "7") int days) {
+    List<Map<String, Object>> trends = crawlerServiceClient.getTrends(days);
+    return ApiResponse.ok(trends);
+  }
+
   @GetMapping("/overview")
   @Operation(summary = "Lấy tổng quan giám sát: Thống kê + Hoạt động đang cào + Dữ liệu đã cào")
   public ApiResponse<Map<String, Object>> getOverview(

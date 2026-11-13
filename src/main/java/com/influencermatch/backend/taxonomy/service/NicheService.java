@@ -17,7 +17,47 @@ import org.springframework.transaction.annotation.Transactional;
 public class NicheService {
   private final NicheRepository repository;
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
   public List<Niche> list() { return repository.findAllByOrderByNameAsc(); }
+
+  public List<java.util.Map<String, Object>> getStats() {
+    if (jdbc == null) {
+      return List.of();
+    }
+    String sql = """
+        SELECT 
+            BTRIM(part) AS niche,
+            COUNT(DISTINCT metric.creator_id) AS creator_count
+        FROM public_creator_metric metric
+        CROSS JOIN LATERAL unnest(string_to_array(metric.niche, ',')) AS part
+        WHERE BTRIM(part) <> '' AND UPPER(BTRIM(part)) NOT IN ('UNKNOWN', 'GENERAL')
+        GROUP BY BTRIM(part)
+        ORDER BY creator_count DESC
+        """;
+    try {
+      List<java.util.Map<String, Object>> list = jdbc.query(sql, (rs, rowNum) -> {
+        java.util.Map<String, Object> map = new java.util.LinkedHashMap<>();
+        String name = rs.getString("niche");
+        long count = rs.getLong("creator_count");
+        map.put("niche", name);
+        map.put("name", name);
+        map.put("creatorCount", count);
+        map.put("creator_count", count);
+        return map;
+      });
+      long total = list.stream().mapToLong(m -> ((Number) m.get("creatorCount")).longValue()).sum();
+      for (var item : list) {
+        long count = ((Number) item.get("creatorCount")).longValue();
+        double pct = total > 0 ? Math.round((count * 100.0 / total) * 10.0) / 10.0 : 0.0;
+        item.put("percentage", pct);
+      }
+      return list;
+    } catch (Exception e) {
+      return List.of();
+    }
+  }
 
   @Transactional
   public Niche create(NicheRequest request) {

@@ -115,6 +115,7 @@ public class SecurityConfig {
                                         "/auth/refresh",
                                         "/auth/logout",
                                         "/auth/logout-all",
+                                        "/auth/change-password",
                                         "/auth/dev/creator-login")
                                     .contains(path));
                       });
@@ -139,13 +140,19 @@ public class SecurityConfig {
                 if (devCreatorLogin.getIfAvailable() != null) {
                   auth.requestMatchers(org.springframework.http.HttpMethod.POST, "/auth/dev/creator-login").permitAll();
                 }
-                auth.requestMatchers(org.springframework.http.HttpMethod.POST,"/admin/creator-conflicts/*/resolve").authenticated();
+                auth.requestMatchers(org.springframework.http.HttpMethod.POST,
+                    "/data/creator-conflicts/*/resolve",
+                    "/admin/creator-conflicts/*/resolve"
+                ).authenticated();
                 auth.requestMatchers(PUBLIC_ENDPOINTS)
                     .permitAll()
-                    .requestMatchers("/admin/data-quality/**")
+                    .requestMatchers("/data/quality/**", "/data/data-quality/**", "/admin/data-quality/**")
                     .hasAuthority("REVIEW_CREATOR_CLASSIFICATION")
                     .requestMatchers("/data/crawler/**", "/admin/crawler/**")
                     .hasAnyRole("DATA_MANAGER", "ADMIN")
+                    .requestMatchers(
+                        org.springframework.http.HttpMethod.GET, "/admin/recommendation-config")
+                    .hasRole("DATA_MANAGER")
                     .requestMatchers("/admin/**")
                     .hasRole("ADMIN")
                     .requestMatchers("/auth/me", "/auth/logout")

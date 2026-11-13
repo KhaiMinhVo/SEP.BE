@@ -18,13 +18,6 @@ public class AdminCrawlerController {
 
   private final CrawlerServiceClient crawlerServiceClient;
 
-  @GetMapping("/categories")
-  @Operation(summary = "Lấy danh mục ngành hàng hỗ trợ (Taxonomy) cho Batch Crawl")
-  public ApiResponse<List<Map<String, Object>>> getCategories() {
-    List<Map<String, Object>> categories = crawlerServiceClient.getSupportedCategories();
-    return ApiResponse.ok(categories);
-  }
-
   @PostMapping("/test-scrape")
   @Operation(summary = "Cào thử nghiệm 1 KOC thời gian thực (Test Scrape)")
   public ResponseEntity<Map<String, Object>> testScrape(
@@ -66,6 +59,14 @@ public class AdminCrawlerController {
   public ApiResponse<Map<String, Object>> getMetrics() {
     Map<String, Object> metrics = crawlerServiceClient.getPerformanceMetrics();
     return ApiResponse.ok(metrics);
+  }
+
+  @GetMapping("/trends")
+  @Operation(summary = "Biểu đồ chuỗi thời gian cào theo ngày (7 ngày / 30 ngày) cho Data Manager DM-05")
+  public ApiResponse<List<Map<String, Object>>> getTrends(
+      @RequestParam(value = "days", defaultValue = "7") int days) {
+    List<Map<String, Object>> trends = crawlerServiceClient.getTrends(days);
+    return ApiResponse.ok(trends);
   }
 
   @GetMapping("/overview")

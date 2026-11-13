@@ -1033,3 +1033,18 @@ Includes completed Auth, Brand/onboarding, Campaign/M3, Shortlist, Deal/Outreach
 Migration chronology on develop: existing V1–V19 are preserved unchanged. New Meta OAuth sessions and Instagram login are V20/V21, followed by V22–V32. This numbering follows develop, and is not interchangeable with a database migrated using khai’s different V17–V21 history; no shared database is migrated by this integration. V33 is excluded.
 
 Validation for develop subsystem integration (2026-11-10): full regression executed 1,361 tests; after updating migration-count and legacy unit fixtures to the new subsystem contracts, the affected Meta/Recommendation/engine suites passed 162/162 including the new Run DTO privacy test. Consolidated Surefire results: 1,362 tests, 1,359 passed, 3 failures, 0 errors, 0 skipped. Remaining failures are the known Payment tests: PaymentSettlementServiceTest.activeSubscriptionPreventsActivationWithoutMutatingPendingPayment, ComparePaymentPostgresIntegrationTest.parallelPaymentsForSameBrandCannotActivateTwoSubscriptions, and RbacPostgresIntegrationTest.paidSubscriptionRequiresCheckoutAndGatewayVerification. Payment behavior/assertions were not changed to hide these failures. PostgreSQL tests used disposable Testcontainers; no shared database or live backend was restarted.
+
+
+### Authenticated password change
+
+`POST /api/v1/auth/change-password` requires a live Bearer JWT and the CSRF cookie/header from `GET /api/v1/auth/csrf`.
+Body: `{"currentPassword":"...","newPassword":"..."}`. No email or user ID is accepted: only the authenticated account is changed.
+The new password must contain 8–72 characters, fit within 72 UTF-8 bytes for BCrypt, and differ from the old password.
+On success: `204 No Content`, BCrypt password update, authVersion increment, all sessions/refresh tokens revoked, and refresh cookie cleared atomically. Log in again on every device.
+Incorrect current password or invalid new password returns 400; unauthenticated/revoked sessions return 401; missing/invalid CSRF returns 403. Passwordless Google accounts must first use the existing password-setup flow.
+This source change does not deploy the endpoint or change any account password by itself.
+
+### Managed niche migration after merging develop
+
+The managed niche catalogue migration is V35__managed_niche_catalog.sql. Develop owns V33 (collaboration confirmation source) and V34 (creator fee/discovery keywords); their SQL is unchanged. Fresh databases apply each version once. If a database has already applied this branch's former V33__managed_niche_catalog.sql, reconcile its Flyway history with the deployment owner before upgrading; this source rename does not rewrite any existing database history.
+V36 adds the three nullable follower-growth columns already mapped by PublicCreatorMetric. Historical growth remains NULL; existing metric values are preserved.

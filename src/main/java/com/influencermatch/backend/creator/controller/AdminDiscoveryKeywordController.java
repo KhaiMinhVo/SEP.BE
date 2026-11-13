@@ -15,7 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping({"/data/crawler/keywords", "/admin/crawler/keywords"})
+@RequestMapping("/data/crawler/keywords")
 @RequiredArgsConstructor
 @Tag(name = "Data Manager Keyword Discovery Management", description = "Quản lý từ khóa săn KOC mục tiêu (Target) và từ khóa rác (Blacklist)")
 public class AdminDiscoveryKeywordController {
@@ -45,12 +45,6 @@ public class AdminDiscoveryKeywordController {
       @PathVariable UUID id,
       @Valid @RequestBody UpdateDiscoveryKeywordRequest request) {
     return ApiResponse.ok("Cập nhật từ khóa thành công", keywordService.updateKeyword(id, request));
-  }
-
-  @PatchMapping("/{id}/toggle")
-  @Operation(summary = "Công tắc 1-click Bật / Tắt trạng thái kích hoạt từ khóa")
-  public ApiResponse<DiscoveryKeywordDto> toggleKeyword(@PathVariable UUID id) {
-    return ApiResponse.ok("Đã chuyển đổi trạng thái từ khóa", keywordService.toggleKeyword(id));
   }
 
   @DeleteMapping("/{id}")

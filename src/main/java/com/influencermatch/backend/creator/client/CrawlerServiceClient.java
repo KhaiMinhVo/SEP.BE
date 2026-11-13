@@ -21,6 +21,9 @@ public class CrawlerServiceClient {
   private final RestClient restClient;
   private final RestClient monitorRestClient;
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
   @org.springframework.beans.factory.annotation.Autowired
   public CrawlerServiceClient(
       @Value("${crawler.service.url:http://localhost:8000/api/v1/crawl}")
@@ -197,23 +200,6 @@ public class CrawlerServiceClient {
   }
 
   /**
-   * Lấy danh mục ngành hàng hỗ trợ Taxonomy.
-   */
-  public List<Map<String, Object>> getSupportedCategories() {
-    try {
-      @SuppressWarnings("unchecked")
-      List<Map<String, Object>> list = restClient.get()
-          .uri("/categories")
-          .retrieve()
-          .body(List.class);
-      return list != null ? list : List.of();
-    } catch (Exception e) {
-      log.warn("Failed to fetch crawl categories: {}", e.getMessage());
-      return List.of();
-    }
-  }
-
-  /**
    * Lấy chỉ số hiệu suất thời gian thực của Crawler (Performance Metrics - Vy Nguyên).
    */
   public Map<String, Object> getPerformanceMetrics() {
@@ -295,6 +281,64 @@ public class CrawlerServiceClient {
     } catch (Exception e) {
       log.warn("Failed to retry crawl for @{} ({}): {}", cleanUser, plat, e.getMessage());
       return Optional.empty();
+    }
+  }
+
+  /**
+   * Biểu đồ chuỗi thời gian cào theo ngày (7 ngày / 30 ngày) cho DM-05 Trends.
+   */
+  public List<Map<String, Object>> getTrends(int days) {
+    int safeDays = (days > 0 && days <= 90) ? days : 7;
+    try {
+      @SuppressWarnings("unchecked")
+      List<Map<String, Object>> remoteTrends = monitorRestClient.get()
+          .uri(uriBuilder -> uriBuilder.path("/trends").queryParam("days", safeDays).build())
+          .retrieve()
+          .body(List.class);
+      if (remoteTrends != null && !remoteTrends.isEmpty()) {
+        return remoteTrends;
+      }
+    } catch (Exception e) {
+      log.debug("Remote crawler monitor /trends not available: {}", e.getMessage());
+    }
+
+    if (jdbc == null) {
+      return List.of();
+    }
+    try {
+      String sql = """
+          SELECT 
+              TO_CHAR(d.day, 'YYYY-MM-DD') AS date_str,
+              COALESCE(COUNT(m.id), 0) AS ingested_count,
+              COALESCE(COUNT(m.id) FILTER (WHERE m.data_confidence >= 0.7), 0) AS success_count,
+              COALESCE(COUNT(m.id) FILTER (WHERE m.data_confidence < 0.7 OR m.freshness_status = 'REFRESH_FAILED'), 0) AS failed_count
+          FROM generate_series(
+              CURRENT_DATE - (INTERVAL '1 day' * (? - 1)),
+              CURRENT_DATE,
+              INTERVAL '1 day'
+          ) d(day)
+          LEFT JOIN public_creator_metric m ON DATE(m.collected_at) = DATE(d.day)
+          GROUP BY d.day
+          ORDER BY d.day ASC
+          """;
+      return jdbc.query(sql, (rs, rowNum) -> {
+        Map<String, Object> map = new HashMap<>();
+        String d = rs.getString("date_str");
+        long ingested = rs.getLong("ingested_count");
+        long success = rs.getLong("success_count");
+        long failed = rs.getLong("failed_count");
+        map.put("date", d);
+        map.put("ingestedCount", ingested);
+        map.put("ingested_count", ingested);
+        map.put("successCount", success);
+        map.put("success_count", success);
+        map.put("failedCount", failed);
+        map.put("failed_count", failed);
+        return map;
+      }, safeDays);
+    } catch (Exception e) {
+      log.warn("Failed to query database crawler trends: {}", e.getMessage());
+      return List.of();
     }
   }
 

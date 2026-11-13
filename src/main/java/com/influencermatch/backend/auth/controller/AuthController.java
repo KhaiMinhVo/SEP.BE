@@ -134,6 +134,20 @@ public class AuthController {
     return ResponseEntity.noContent().build();
   }
 
+  private final ChangePasswordService changePasswords;
+
+  @PostMapping("/change-password")
+  @Operation(summary = "Change own password and invalidate all sessions; current password and CSRF required",
+      security = @SecurityRequirement(name = "BearerAuth"))
+  public ResponseEntity<Void> changePassword(
+      @AuthenticationPrincipal User user,
+      @Valid @RequestBody ChangePasswordRequest request,
+      jakarta.servlet.http.HttpServletResponse response) {
+    changePasswords.change(user, request);
+    cookies.clear(response);
+    return ResponseEntity.noContent().build();
+  }
+
   @PostMapping("/logout-all")
   @Operation(summary = "Invalidate every session, including this one")
   public ResponseEntity<Void> logoutAll(

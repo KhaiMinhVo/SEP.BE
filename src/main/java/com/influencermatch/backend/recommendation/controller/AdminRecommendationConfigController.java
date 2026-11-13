@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Luồng DM-04: Tra cứu Cấu hình Thuật toán Four-Memory (View Recommendation Configuration).
- * Dedicated for ADMIN and DATA_MANAGER roles to inspect active calibration & hyperparameters.
+ * Dedicated for DATA_MANAGER role to inspect active calibration & hyperparameters.
  */
 @RestController
 @RequestMapping("/admin/recommendation-config")
@@ -27,7 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminRecommendationConfigController {
 
   @GetMapping
-  @PreAuthorize("hasAuthority('MANAGE_RECOMMENDATION_CONFIG')")
+  @PreAuthorize("hasRole('DATA_MANAGER') and hasAuthority('MANAGE_RECOMMENDATION_CONFIG')")
   @Operation(
       summary = "Get active Four-Memory recommendation engine configuration",
       description = "Inspect calibration version, half-saturation constants, stability floor, dynamic weights lambda, and MMR hyperparameter.",

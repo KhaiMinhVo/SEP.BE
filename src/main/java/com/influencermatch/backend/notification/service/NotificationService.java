@@ -45,7 +45,14 @@ public class NotificationService {
       String message,
       String entityType,
       UUID entityId) {
-    return createAndDispatch(userId, type, title, message, entityType, entityId, true);
+    return createAndDispatch(
+        userId,
+        type,
+        title,
+        message,
+        entityType,
+        entityId,
+        type.getOccurrencePolicy() == com.influencermatch.backend.notification.enums.OccurrencePolicy.SINGLE_PER_ENTITY);
   }
 
   /**
@@ -69,7 +76,11 @@ public class NotificationService {
     }
 
     // 2. Idempotency / Deduplication Guard
-    if (deduplicate
+    boolean shouldDedup =
+        deduplicate
+            && (type.getOccurrencePolicy()
+                == com.influencermatch.backend.notification.enums.OccurrencePolicy.SINGLE_PER_ENTITY);
+    if (shouldDedup
         && entityId != null
         && notificationRepository.existsByUserIdAndTypeAndEntityTypeAndEntityId(
             userId, type.name(), entityType, entityId)) {

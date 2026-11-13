@@ -150,6 +150,9 @@ public class SecurityConfig {
                     .hasAuthority("REVIEW_CREATOR_CLASSIFICATION")
                     .requestMatchers("/data/crawler/**", "/admin/crawler/**")
                     .hasAnyRole("DATA_MANAGER", "ADMIN")
+                    .requestMatchers(
+                        org.springframework.http.HttpMethod.GET, "/admin/recommendation-config")
+                    .hasRole("DATA_MANAGER")
                     .requestMatchers("/admin/**")
                     .hasRole("ADMIN")
                     .requestMatchers("/auth/me", "/auth/logout")

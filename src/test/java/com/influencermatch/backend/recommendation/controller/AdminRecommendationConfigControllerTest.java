@@ -27,10 +27,11 @@ class AdminRecommendationConfigControllerTest {
   }
 
   @Test
-  void adminCanAccessConfigurationWithExactFrozenMetadata() {
-    TestActors.authenticate(TestActors.user(Role.ADMIN));
+  void dataManagerCanAccessConfigurationWithExactFrozenMetadata() {
+    TestActors.authenticate(TestActors.user(Role.DATA_MANAGER));
 
-    ResponseEntity<ApiResponse<RecommendationConfigResponseDto>> response = controller.getConfiguration();
+    ResponseEntity<ApiResponse<RecommendationConfigResponseDto>> response =
+        controller.getConfiguration();
 
     assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
     RecommendationConfigResponseDto dto = response.getBody().data();
@@ -58,7 +59,8 @@ class AdminRecommendationConfigControllerTest {
         .containsExactly(0.20, 0.35, 0.30, 0.15);
     assertThat(dto.getDynamicWeighting().getCanonicalObjectiveWeights().get("CONVERSION"))
         .containsExactly(0.40, 0.15, 0.30, 0.15);
-    assertThat(dto.getDynamicWeighting().getInterpretationPolicy()).contains("Business Objective Weights");
+    assertThat(dto.getDynamicWeighting().getInterpretationPolicy())
+        .contains("Business Objective Weights");
 
     // Verify MMR diversity lambda is 0.70 and intra-bucket status is frozen
     assertThat(dto.getDiversityReranking().getDefaultMmrLambda())
@@ -69,16 +71,6 @@ class AdminRecommendationConfigControllerTest {
     // Verify Half-saturation K constants
     assertThat(dto.getHalfSaturation().getErViewsK().get("TIKTOK"))
         .isEqualTo(ScoringPolicyConfig.K_ER_VIEWS_TIKTOK);
-  }
-
-  @Test
-  void dataManagerCanAccessConfiguration() {
-    TestActors.authenticate(TestActors.user(Role.DATA_MANAGER));
-
-    ResponseEntity<ApiResponse<RecommendationConfigResponseDto>> response = controller.getConfiguration();
-
-    assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
-    assertThat(response.getBody().data().getEngineVersion()).isEqualTo("Four-Memory TOPSIS Engine v1.0");
   }
 
   @Test

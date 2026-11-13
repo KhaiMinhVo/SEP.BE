@@ -30,6 +30,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.*;
 import org.springframework.test.web.servlet.MockMvc;
@@ -173,6 +174,30 @@ class RolePermissionPostgresIntegrationTest {
   void anonymousIsRejected() throws Exception {
     call(null, get("/admin/role-permissions"), null, 401);
     call(null, patch("/admin/role-permissions/BRAND"), update(0, "CREATE_CAMPAIGN", false), 401);
+  }
+
+  @Test
+  void recommendationConfigRequiresDataManagerRoleAndPermission() throws Exception {
+    User dataManager = user(Role.DATA_MANAGER);
+    call(token(dataManager), get("/admin/recommendation-config"), null, 200);
+
+    for (Role role : List.of(Role.ADMIN, Role.BRAND, Role.CREATOR)) {
+      mvc.perform(
+              get("/admin/recommendation-config")
+                  .with(
+                      org.springframework.security.test.web.servlet.request
+                          .SecurityMockMvcRequestPostProcessors.user("role-test")
+                          .authorities(
+                              new SimpleGrantedAuthority("ROLE_" + role.name()),
+                              new SimpleGrantedAuthority(
+                                  Permission.MANAGE_RECOMMENDATION_CONFIG.name()))))
+          .andExpect(status().isForbidden());
+    }
+
+    setPermission(Role.DATA_MANAGER, 0, Permission.MANAGE_RECOMMENDATION_CONFIG, false);
+    call(token(dataManager), get("/admin/recommendation-config"), null, 403);
+    call(null, get("/admin/recommendation-config"), null, 401);
+    call("not-a-valid-token", get("/admin/recommendation-config"), null, 401);
   }
 
   @ParameterizedTest

@@ -19,10 +19,6 @@ public class NicheService {
 
   public List<Niche> list() { return repository.findAllByOrderByNameAsc(); }
 
-  public List<String> activeNames() {
-    return repository.findByActiveTrueOrderByNameAsc().stream().map(Niche::getName).toList();
-  }
-
   @Transactional
   public Niche create(NicheRequest request) {
     String name = request.name().strip();
@@ -55,6 +51,9 @@ public class NicheService {
     niche.setName(name);
     niche.setDescription(request.description() == null ? "" : request.description().strip());
     niche.setActive(Boolean.TRUE.equals(request.active()));
+    niche.setKeywords(request.keywords() == null ? List.of() : request.keywords().stream()
+        .map(keyword -> keyword.strip().replaceFirst("^#+", "").strip())
+        .filter(keyword -> !keyword.isBlank()).distinct().toList());
     return niche;
   }
 }

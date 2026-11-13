@@ -52,18 +52,17 @@ class NicheServiceTest {
     verify(repository, never()).delete(any());
   }
 
-  @Test void readsOptionsOnlyFromActiveCatalogueEntries() {
-    Niche row = new Niche(); row.setName("Travel");
-    when(repository.findByActiveTrueOrderByNameAsc()).thenReturn(List.of(row));
-    assertThat(service.activeNames()).containsExactly("Travel");
-    verify(repository, never()).findAllByOrderByNameAsc();
-  }
-
   @Test void deletesOnlyTheSelectedCatalogueEntry() {
     UUID id = UUID.randomUUID();
     Niche row = new Niche(); row.setId(id);
     when(repository.findById(id)).thenReturn(Optional.of(row));
     service.delete(id);
     verify(repository).delete(row);
+  }
+  @Test void savesManagedHuntKeywordsWithoutHashtagsOrDuplicates() {
+    when(repository.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
+    Niche saved = service.create(new NicheRequest("Gaming", "", true,
+        List.of(" #gaming ", "gaming", " review games ")));
+    assertThat(saved.getKeywords()).containsExactly("gaming", "review games");
   }
 }

@@ -19,6 +19,16 @@ import org.springframework.stereotype.Repository;
 public interface PublicCreatorMetricRepository
     extends JpaRepository<PublicCreatorMetric, UUID>, JpaSpecificationExecutor<PublicCreatorMetric> {
 
+  // Creator discovery uses observed AI/crawl labels, not the crawl configuration.
+  @Query(value = """
+      SELECT DISTINCT BTRIM(part) AS name
+      FROM public_creator_metric metric
+      CROSS JOIN LATERAL unnest(string_to_array(metric.niche, ',')) AS part
+      WHERE BTRIM(part) <> '' AND UPPER(BTRIM(part)) NOT IN ('UNKNOWN', 'GENERAL')
+      ORDER BY name
+      """, nativeQuery = true)
+  List<String> findDistinctNicheNames();
+
   Optional<PublicCreatorMetric> findByCreatorId(UUID creatorId);
 
   boolean existsByCreatorIdAndCrawlRunId(UUID creatorId, String crawlRunId);

@@ -13,7 +13,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/data/niches")
+@RequestMapping("/data/crawl-fields")
 @RequiredArgsConstructor
 @PreAuthorize("hasAnyRole('DATA_MANAGER', 'ADMIN')")
 @Tag(name = "Quản lý ngành hàng")

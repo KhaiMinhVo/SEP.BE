@@ -18,13 +18,6 @@ public class AdminCrawlerController {
 
   private final CrawlerServiceClient crawlerServiceClient;
 
-  @GetMapping("/categories")
-  @Operation(summary = "Lấy danh mục ngành hàng hỗ trợ (Taxonomy) cho Batch Crawl")
-  public ApiResponse<List<Map<String, Object>>> getCategories() {
-    List<Map<String, Object>> categories = crawlerServiceClient.getSupportedCategories();
-    return ApiResponse.ok(categories);
-  }
-
   @PostMapping("/test-scrape")
   @Operation(summary = "Cào thử nghiệm 1 KOC thời gian thực (Test Scrape)")
   public ResponseEntity<Map<String, Object>> testScrape(

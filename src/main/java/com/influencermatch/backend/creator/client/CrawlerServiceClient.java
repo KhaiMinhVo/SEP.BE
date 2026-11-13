@@ -197,23 +197,6 @@ public class CrawlerServiceClient {
   }
 
   /**
-   * Lấy danh mục ngành hàng hỗ trợ Taxonomy.
-   */
-  public List<Map<String, Object>> getSupportedCategories() {
-    try {
-      @SuppressWarnings("unchecked")
-      List<Map<String, Object>> list = restClient.get()
-          .uri("/categories")
-          .retrieve()
-          .body(List.class);
-      return list != null ? list : List.of();
-    } catch (Exception e) {
-      log.warn("Failed to fetch crawl categories: {}", e.getMessage());
-      return List.of();
-    }
-  }
-
-  /**
    * Lấy chỉ số hiệu suất thời gian thực của Crawler (Performance Metrics - Vy Nguyên).
    */
   public Map<String, Object> getPerformanceMetrics() {

@@ -1,6 +1,6 @@
 package com.influencermatch.backend.taxonomy.controller;
 
-import com.influencermatch.backend.taxonomy.service.NicheService;
+import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -12,11 +12,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/taxonomies")
 @RequiredArgsConstructor
 public class TaxonomyController {
-  private final NicheService service;
+  private final PublicCreatorMetricRepository metrics;
 
   // Preserve the existing string[] contract for discovery clients.
   @GetMapping("/niches")
   public ResponseEntity<List<String>> getNiches() {
-    return ResponseEntity.ok(service.activeNames());
+    return ResponseEntity.ok(metrics.findDistinctNicheNames());
   }
 }

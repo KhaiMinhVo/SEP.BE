@@ -14,6 +14,7 @@ import com.influencermatch.backend.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -104,12 +105,13 @@ public class CreatorDiscoveryService {
             }
         }
 
-        int safePageSize = (req.getSize() != null && req.getSize() > 0 && req.getSize() <= 30) ? req.getSize() : 30;
+        int safePageSize = req.getSize() == null || req.getSize() < 1 ? 50 : Math.min(req.getSize(), 50);
         int safePage = (req.getPage() != null && req.getPage() >= 0) ? req.getPage() : 0;
         Pageable pageable = PageRequest.of(safePage, safePageSize);
+        Pageable candidateWindow = PageRequest.of(0, 50);
 
         // BƯỚC 3: TRỘN ĐIỂM XẾP HẠNG (Chạy Native Hybrid Query)
-        Page<HybridDiscoveryCreatorProjection> pool = executeHybridSearch(ctx, req, isStrictSearch, hasKeyword, formattedKeyword, hasVector, queryVectorStr, pageable);
+        Page<HybridDiscoveryCreatorProjection> pool = executeHybridSearch(ctx, req, isStrictSearch, hasKeyword, formattedKeyword, hasVector, queryVectorStr, candidateWindow);
 
         // BƯỚC 4: TỰ CHỮA LÀNH (FALLBACK - Nới lỏng ràng buộc nếu < 5 ứng viên)
         if (req.getPage() == 0 && pool.getContent().size() < 5) {
@@ -117,12 +119,17 @@ public class CreatorDiscoveryService {
             while (pool.getContent().size() < 5 && attempt <= 2) {
                 log.info("Discovery Fallback triggered: Attempt {}", attempt);
                 relaxConstraints(ctx, req, attempt);
-                pool = executeHybridSearch(ctx, req, isStrictSearch, hasKeyword, formattedKeyword, hasVector, queryVectorStr, pageable);
+                pool = executeHybridSearch(ctx, req, isStrictSearch, hasKeyword, formattedKeyword, hasVector, queryVectorStr, candidateWindow);
                 attempt++;
             }
         }
 
-        return pool;
+        // A campaign recommendation list is a ranked Top 50 window, not the entire catalog.
+        List<HybridDiscoveryCreatorProjection> top = pool.getContent().stream().limit(50).toList();
+        long offset = pageable.getOffset();
+        List<HybridDiscoveryCreatorProjection> content = offset >= top.size() ? List.of()
+            : top.subList((int) offset, Math.min((int) offset + safePageSize, top.size()));
+        return new PageImpl<>(content, pageable, top.size());
     }
 
     private Page<HybridDiscoveryCreatorProjection> executeHybridSearch(

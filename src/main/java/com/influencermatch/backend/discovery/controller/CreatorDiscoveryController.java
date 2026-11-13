@@ -35,7 +35,7 @@ public class CreatorDiscoveryController {
             
         // Validate page size to prevent Spring Data JPA IllegalArgumentException
         if (searchRequest.getSize() == null || searchRequest.getSize() < 1) {
-            searchRequest.setSize(30);
+            searchRequest.setSize(50);
         }
         if (searchRequest.getPage() == null || searchRequest.getPage() < 0) {
             searchRequest.setPage(0);

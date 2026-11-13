@@ -21,13 +21,13 @@ public class CollaborationExecutionController {
   private final CollaborationExecution execution;
 
   @GetMapping("/deliverables")
-  @PreAuthorize("hasAnyAuthority('MANAGE_OWN_COLLABORATION','RESPOND_OWN_COOPERATION')")
+  @PreAuthorize("(hasRole('BRAND') and hasAuthority('MANAGE_OWN_COLLABORATION')) or (hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION'))")
   public ApiResponse<JsonNode> read(@PathVariable UUID id) {
     return ApiResponse.ok(execution.read(id));
   }
 
   @PostMapping("/execution-plan")
-  @PreAuthorize("hasAuthority('MANAGE_OWN_COLLABORATION')")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('MANAGE_OWN_COLLABORATION')")
   @Operation(summary = "Record explicit execution terms for an unfinished legacy collaboration")
   public ApiResponse<JsonNode> setup(
       @PathVariable UUID id,
@@ -37,7 +37,7 @@ public class CollaborationExecutionController {
   }
 
   @PostMapping("/deliverables/{deliverableId}/submissions")
-  @PreAuthorize("hasAnyAuthority('MANAGE_OWN_COLLABORATION','RESPOND_OWN_COOPERATION')")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION')")
   public ApiResponse<JsonNode> submit(
       @PathVariable UUID id,
       @PathVariable UUID deliverableId,
@@ -47,7 +47,7 @@ public class CollaborationExecutionController {
   }
 
   @PostMapping("/deliverables/{deliverableId}/review")
-  @PreAuthorize("hasAuthority('MANAGE_OWN_COLLABORATION')")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('MANAGE_OWN_COLLABORATION')")
   public ApiResponse<JsonNode> decide(
       @PathVariable UUID id,
       @PathVariable UUID deliverableId,
@@ -57,7 +57,7 @@ public class CollaborationExecutionController {
   }
 
   @PostMapping("/deliverables/{deliverableId}/publication")
-  @PreAuthorize("hasAnyAuthority('MANAGE_OWN_COLLABORATION','RESPOND_OWN_COOPERATION')")
+  @PreAuthorize("(hasRole('BRAND') and hasAuthority('MANAGE_OWN_COLLABORATION')) or (hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION'))")
   public ApiResponse<JsonNode> publication(
       @PathVariable UUID id,
       @PathVariable UUID deliverableId,
@@ -67,14 +67,13 @@ public class CollaborationExecutionController {
   }
 
   @PostMapping("/outcome")
-  @PreAuthorize("hasAnyAuthority('RECORD_OWN_OUTCOME','RESPOND_OWN_COOPERATION')")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION')")
   @Operation(
-      summary = "Append an outcome revision without completing collaboration",
+      summary = "Record Creator KPI for current publications",
       description =
-          "expectedRevision, reason,"
-              + " posts[{deliverableId,submissionRevision,periodStart,periodEnd,views?,clicks?,likes?,comments?,shares?,evidenceUrl?}]."
-              + " Brand additionally supplies costs[{description,amount}], currency=VND, gmv?,"
-              + " revenue?, periodStart, periodEnd, financialEvidence?, financialConfirmed.")
+          "Send expectedRevision and posts with deliverableId, submissionRevision, periodStart and periodEnd."
+              + " Each of views, clicks, likes, comments and shares must be a nonnegative integer or listed"
+              + " in unavailableMetrics. Reason is required when updating a saved measurement.")
   public ApiResponse<JsonNode> outcome(
       @PathVariable UUID id,
       @RequestBody JsonNode body,
@@ -82,8 +81,37 @@ public class CollaborationExecutionController {
     return ApiResponse.ok(execution.outcome(id, body, key));
   }
 
+  @PostMapping("/deliverables/{deliverableId}/outcome")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION')")
+  @Operation(
+      summary = "Record one approved deliverable's publication and Creator KPI",
+      description = "Send expectedRevision, submissionRevision, periodStart and periodEnd. Include the HTTPS url"
+          + " for a new publication. Declare each of views, clicks, likes, comments and shares as a nonnegative"
+          + " integer or by name in unavailableMetrics. evidenceUrl is optional. Include reason when editing"
+          + " this submission's saved result. The publication and result are saved together.")
+  public ApiResponse<JsonNode> deliverableOutcome(
+      @PathVariable UUID id,
+      @PathVariable UUID deliverableId,
+      @RequestBody JsonNode body,
+      @RequestHeader("Idempotency-Key") String key) {
+    return ApiResponse.ok(execution.deliverableOutcome(id, deliverableId, body, key));
+  }
+
+  @PostMapping("/outcome/finance")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('RECORD_OWN_OUTCOME')")
+  @Operation(summary = "Record Brand finances using the current Creator KPI revision",
+      description = "expectedRevision, costs[{description,amount}], currency=VND, gmv?,"
+          + " revenue?, periodStart?, periodEnd?, financialEvidence?, financialConfirmed."
+          + " Reason is required when editing previously saved finances.")
+  public ApiResponse<JsonNode> finance(
+      @PathVariable UUID id,
+      @RequestBody JsonNode body,
+      @RequestHeader("Idempotency-Key") String key) {
+    return ApiResponse.ok(execution.finance(id, body, key));
+  }
+
   @PostMapping("/outcome/accept")
-  @PreAuthorize("hasAuthority('RECORD_OWN_OUTCOME')")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('RECORD_OWN_OUTCOME')")
   public ApiResponse<JsonNode> accept(
       @PathVariable UUID id,
       @Valid @RequestBody ExecutionDtos.Accept body,
@@ -92,7 +120,7 @@ public class CollaborationExecutionController {
   }
 
   @PostMapping("/outcome/reopen")
-  @PreAuthorize("hasAuthority('RECORD_OWN_OUTCOME')")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('RECORD_OWN_OUTCOME')")
   public ApiResponse<JsonNode> reopen(
       @PathVariable UUID id,
       @Valid @RequestBody ExecutionDtos.Reopen body,
@@ -101,7 +129,7 @@ public class CollaborationExecutionController {
   }
 
   @PostMapping("/review")
-  @PreAuthorize("hasAuthority('RECORD_OWN_CREATOR_REVIEW')")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('RECORD_OWN_CREATOR_REVIEW')")
   public ApiResponse<JsonNode> review(
       @PathVariable UUID id,
       @Valid @RequestBody ExecutionDtos.FinalReview body,
@@ -110,7 +138,7 @@ public class CollaborationExecutionController {
   }
 
   @PostMapping("/review/legacy")
-  @PreAuthorize("hasAuthority('RECORD_OWN_CREATOR_REVIEW')")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('RECORD_OWN_CREATOR_REVIEW')")
   @Operation(
       summary =
           "Review a historical completed collaboration without fabricating content acceptance")

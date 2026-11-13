@@ -19,7 +19,8 @@ import lombok.Setter;
 @AllArgsConstructor
 @Builder
 public class RegisterRequest {
-  @NotBlank
+  @io.swagger.v3.oas.annotations.media.Schema(
+      description = "Optional for password registration. Enter the brand name during onboarding if omitted.")
   @Size(max = 200)
   private String businessName;
 

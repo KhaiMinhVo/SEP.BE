@@ -67,13 +67,14 @@ public class RegistrationSupport {
   @Transactional(propagation = Propagation.MANDATORY)
   public void brand(User user, String name, String phone) {
     String normalized = phone(phone);
-    if (name == null || name.isBlank() || name.trim().length() > 200)
-      throw new BusinessException(ErrorCode.VALIDATION_ERROR, "businessName is required (max 200)");
+    if (name != null && (name.isBlank() || name.trim().length() > 200))
+      throw new BusinessException(
+          ErrorCode.VALIDATION_ERROR, "businessName must be non-blank and at most 200 characters when supplied");
     var p =
         profiles.save(
             BrandProfile.builder()
                 .user(user)
-                .businessName(name.trim())
+                .businessName(name == null ? "" : name.trim())
                 .phoneNumber(normalized)
                 .build());
     lifecycle.initial(p);

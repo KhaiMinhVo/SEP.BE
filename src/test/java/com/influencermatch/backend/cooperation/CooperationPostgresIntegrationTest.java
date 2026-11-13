@@ -81,7 +81,13 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
       c.master(master)
           .sourceType(com.influencermatch.backend.creator.enums.CreatorSourceType.AUTHORIZED)
           .authorizedAt(LocalDateTime.now());
-    return creators.saveAndFlush(c.build());
+    var channel = creators.saveAndFlush(c.build());
+    if (owned)
+      jdbc.update(
+          "insert into creator_account_verification(id,creator_id,verified_by_user_id,verification_method,status,verified_at,created_at,updated_at)"
+              + " values(gen_random_uuid(),?,?,'TIKTOK_OAUTH_SANDBOX','ACTIVE',now(),now(),now())",
+          channel.getId(), creator.getId());
+    return channel;
   }
 
   UUID relationship(Creator c) throws Exception {
@@ -182,6 +188,72 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
   long count(String table) {
     return jdbc.queryForObject(
         "select count(*) from " + table + " where campaign_id=?", Long.class, campaign);
+  }
+
+  @Test
+  void verifiedCreatorCanTakeSamePlannedAgreementOnce() throws Exception {
+    var channel = channel(false);
+    var deal = prepared(List.of(channel), 25000);
+    var agreement = confirm(deal, 200);
+    String collaboration = agreement.path("collaborationId").asText();
+    String detail = "/collaborations/" + collaboration + "/deliverables";
+    String pending = "/creators/portal/collaborations/pending-assignments";
+    String accept = "/creators/portal/collaborations/" + collaboration + "/accept-assignment";
+    String start = root() + "/" + deal + "/start";
+    jdbc.update("update campaign set status='ACTIVE' where id=?", campaign);
+    assertThat(call(brand, get(detail), null, 200).path("data").path("assignmentStatus").asText())
+        .isEqualTo("WAITING_FOR_VERIFICATION");
+    call(brand, post(start), Map.of("expectedRevision", 3), 409);
+    jdbc.update("update creator set master_id=?,source_type='AUTHORIZED',authorized_at=now() where id=?",
+        master.getId(), channel.getId());
+    assertThat(call(creator, get(pending), null, 200).path("data").isEmpty()).isTrue();
+    jdbc.update(
+        "insert into creator_account_verification(id,creator_id,verified_by_user_id,verification_method,status,verified_at,created_at,updated_at)"
+            + " values(gen_random_uuid(),?,?,'TIKTOK_OAUTH_SANDBOX','ACTIVE',now(),now(),now())",
+        channel.getId(), creator.getId());
+    var preview = call(creator, get(pending), null, 200).path("data").get(0);
+    assertThat(preview.path("collaborationId").asText()).isEqualTo(collaboration);
+    assertThat(preview.path("terms").asText()).isEqualTo("Agreed review deliverables");
+    assertThat(preview.toString()).doesNotContain("\"evidenceUrl\"", "\"review\"", "\"actualCost\"", "\"masterId\"");
+    call(creator, get(detail), null, 403);
+    assertThat(call(brand, get(detail), null, 200).path("data").path("assignmentStatus").asText())
+        .isEqualTo("WAITING_FOR_ACCEPTANCE");
+    var body = Map.of("expectedRevision", 3, "proposalRevision", preview.path("proposalRevision").asInt());
+    call(account(Role.CREATOR), post(accept).header("Idempotency-Key", "assignment"), body, 403);
+    String token = jwt.generateToken(creator);
+    var gate = new CountDownLatch(1);
+    var pool = Executors.newFixedThreadPool(2);
+    JsonNode saved;
+    try {
+      var attempts = new ArrayList<Future<JsonNode>>();
+      for (int i = 0; i < 2; i++) {
+        attempts.add(pool.submit(() -> {
+          gate.await();
+          return callToken(token, post(accept).header("Idempotency-Key", "assignment"), body, 200)
+              .path("data");
+        }));
+      }
+      gate.countDown();
+      saved = attempts.get(0).get(20, TimeUnit.SECONDS);
+      assertThat(attempts.get(1).get(20, TimeUnit.SECONDS)).isEqualTo(saved);
+    } finally {
+      pool.shutdownNow();
+    }
+    assertThat(call(creator, post(accept).header("Idempotency-Key", "assignment"), body, 200).path("data"))
+        .isEqualTo(saved);
+    call(creator, post(accept).header("Idempotency-Key", "new-attempt"), body, 409);
+    assertThat(jdbc.queryForObject(
+        "select count(*) from cooperation_history where deal_id=? and action='CREATOR_ASSIGNMENT_ACCEPTED'",
+        Integer.class, deal)).isEqualTo(1);
+    assertThat(call(creator, get(pending), null, 200).path("data").isEmpty()).isTrue();
+    call(creator, get(detail), null, 200);
+    jdbc.update("update creator_account_verification set status='REVOKED' where creator_id=?", channel.getId());
+    call(creator, get(detail), null, 403);
+    call(brand, post(start), Map.of("expectedRevision", 4), 409);
+    jdbc.update("update creator_account_verification set status='ACTIVE' where creator_id=?", channel.getId());
+    call(brand, post(start), Map.of("expectedRevision", 4), 200);
+    assertThat(call(creator, get(detail), null, 200).path("data").path("status").asText())
+        .isEqualTo("IN_PROGRESS");
   }
 
   @Test
@@ -431,7 +503,7 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
                 .path("committedBudget")
                 .decimalValue())
         .isEqualByComparingTo("0");
-    UUID second = prepared(List.of(channel(false)), 100000);
+    UUID second = prepared(List.of(channel(true)), 100000);
     confirm(second, 200);
     jdbc.update("update campaign set status='ACTIVE' where id=?", campaign);
     call(brand, post(root() + "/" + second + "/start"), Map.of("expectedRevision", 3), 200);

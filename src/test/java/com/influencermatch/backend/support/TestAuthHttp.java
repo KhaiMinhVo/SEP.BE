@@ -58,9 +58,9 @@ public final class TestAuthHttp {
   public static JsonNode read(MockHttpServletResponse response, ObjectMapper mapper)
       throws Exception {
     JsonNode node =
-        response.getContentAsString().isEmpty()
+        response.getContentAsByteArray().length == 0
             ? mapper.nullNode()
-            : mapper.readTree(response.getContentAsString());
+            : mapper.readTree(response.getContentAsByteArray());
     var cookie = response.getCookie("IM_REFRESH");
     if (cookie != null
         && !cookie.getValue().isBlank()

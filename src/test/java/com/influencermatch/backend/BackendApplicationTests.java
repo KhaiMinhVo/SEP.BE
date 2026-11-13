@@ -104,10 +104,13 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
   @Test
   void completeRegisterLoginAndRoleFlow() throws Exception {
     String brandEmail = "poc-brand@test.local";
+    var signup = (com.fasterxml.jackson.databind.node.ObjectNode)
+        objectMapper.readTree(registrationBody(brandEmail, "PoC Brand"));
+    signup.remove("businessName");
     mvc.perform(
             post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(registrationBody(brandEmail, "PoC Brand")))
+                .content(objectMapper.writeValueAsBytes(signup)))
         .andExpect(status().isCreated());
     assertThat(users.findByEmail(brandEmail)).get().extracting("role").isEqualTo(Role.BRAND);
 
@@ -119,6 +122,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"email\":\"" + brandEmail + "\",\"password\":\"Password123!\"}"))
             .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.user.onboardingStatus").value("PENDING"))
             .andExpect(jsonPath("$.data.user.lastLoginAt").isNotEmpty())
             .andExpect(jsonPath("$.data.user.passwordHash").doesNotExist())
             .andReturn()
@@ -127,6 +131,19 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
     assertThat(brandLogin.at("/data").has("refreshToken")).isFalse();
     String brandAccess = brandLogin.at("/data/accessToken").asText();
     String brandRefresh = brandLoginResult.getCookie("IM_REFRESH").getValue();
+
+    var pendingBrand = mvc.perform(get("/brands/me").header("Authorization", "Bearer " + brandAccess))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.businessName").value(""))
+        .andExpect(jsonPath("$.data.phoneNumber").value("+84912345678"))
+        .andReturn().getResponse();
+    mvc.perform(patch("/brands/me")
+            .header("Authorization", "Bearer " + brandAccess)
+            .header("If-Match", pendingBrand.getHeader("ETag"))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"businessName\":\"PoC Brand\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.businessName").value("PoC Brand"));
 
     mvc.perform(get("/auth/me").header("Authorization", "Bearer " + brandAccess))
         .andExpect(status().isOk())

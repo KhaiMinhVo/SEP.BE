@@ -168,7 +168,7 @@ class CollaborationNotificationIntegrationTest {
 
     User brandUser = user(Role.BRAND);
     BrandProfile brandProfile = BrandProfile.builder().user(brandUser).businessName("Aura Cosmetics").build();
-    Campaign campaign = Campaign.builder().brandProfile(brandProfile).name("Summer Launch 2026").build();
+    Campaign campaign = Campaign.builder().brandProfile(brandProfile).status(CampaignStatus.ACTIVE).name("Summer Launch 2026").build();
 
     CreatorMaster master = CreatorMaster.builder().user(creatorUser).build();
     Creator creator = Creator.builder().master(master).build();
@@ -176,7 +176,7 @@ class CollaborationNotificationIntegrationTest {
     UUID collabId = UUID.randomUUID();
     Collaboration collaboration =
         Collaboration.builder()
-            .id(collabId)
+            .id(collabId).status(com.influencermatch.backend.collaboration.enums.CollaborationStatus.IN_PROGRESS)
             .campaign(campaign)
             .creator(creator)
             .master(master)
@@ -256,7 +256,7 @@ class CollaborationNotificationIntegrationTest {
 
     User brandUser = user(Role.BRAND);
     BrandProfile brandProfile = BrandProfile.builder().user(brandUser).businessName("Aura Cosmetics").build();
-    Campaign campaign = Campaign.builder().brandProfile(brandProfile).name("Summer Launch 2026").build();
+    Campaign campaign = Campaign.builder().brandProfile(brandProfile).status(CampaignStatus.ACTIVE).name("Summer Launch 2026").build();
 
     CreatorMaster master = CreatorMaster.builder().user(creatorUser).build();
     Creator creator = Creator.builder().master(master).build();
@@ -264,7 +264,7 @@ class CollaborationNotificationIntegrationTest {
     UUID collabId = UUID.randomUUID();
     Collaboration collaboration =
         Collaboration.builder()
-            .id(collabId)
+            .id(collabId).status(com.influencermatch.backend.collaboration.enums.CollaborationStatus.IN_PROGRESS)
             .campaign(campaign)
             .creator(creator)
             .master(master)
@@ -322,7 +322,7 @@ class CollaborationNotificationIntegrationTest {
 
     User brandUser = user(Role.BRAND);
     BrandProfile brandProfile = BrandProfile.builder().user(brandUser).businessName("Aura Cosmetics").build();
-    Campaign campaign = Campaign.builder().brandProfile(brandProfile).name("Summer Launch 2026").build();
+    Campaign campaign = Campaign.builder().brandProfile(brandProfile).status(CampaignStatus.ACTIVE).name("Summer Launch 2026").build();
 
     CreatorMaster master = CreatorMaster.builder().user(creatorUser).build();
     Creator creator = Creator.builder().master(master).build();
@@ -330,7 +330,7 @@ class CollaborationNotificationIntegrationTest {
     UUID collabId = UUID.randomUUID();
     Collaboration collaboration =
         Collaboration.builder()
-            .id(collabId)
+            .id(collabId).status(com.influencermatch.backend.collaboration.enums.CollaborationStatus.IN_PROGRESS)
             .campaign(campaign)
             .creator(creator)
             .master(master)

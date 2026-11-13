@@ -53,6 +53,7 @@ abstract class ExecutionScenarioSupport extends PostgresApiTestSupport {
                     .authorizedAt(LocalDateTime.now())
                     .build())
             .getId();
+    verifyChannel(channel, owner.getId(), "TIKTOK_OAUTH_SANDBOX");
     var rel =
         call(
                 brand,
@@ -214,6 +215,8 @@ abstract class ExecutionScenarioSupport extends PostgresApiTestSupport {
         "2026-11-02T00:00:00Z",
         "views",
         1000,
+        "unavailableMetrics",
+        List.of("clicks"),
         "likes",
         80,
         "comments",
@@ -222,17 +225,30 @@ abstract class ExecutionScenarioSupport extends PostgresApiTestSupport {
         10);
   }
 
+  void verifyChannel(UUID id, UUID user, String method) {
+    jdbc.update(
+        "insert into creator_account_verification(id,creator_id,verified_by_user_id,verification_method,status,verified_at,created_at,updated_at)"
+            + " values(gen_random_uuid(),?,?,?,'ACTIVE',now(),now(),now())",
+        id, user, method);
+  }
+
+  long latestOutcome() throws Exception {
+    var revisions = state().path("outcomeRevisions");
+    return revisions.get(revisions.size() - 1).path("revision").asLong();
+  }
+
   JsonNode outcome() throws Exception {
+    request(owner, root + "/outcome",
+        Map.of("expectedRevision", revision(), "reason", "Measured outcome", "posts", List.of(measurement())),
+        200);
     return request(
         brand,
-        root + "/outcome",
+        root + "/outcome/finance",
         Map.of(
             "expectedRevision",
             revision(),
             "reason",
             "Measured outcome",
-            "posts",
-            List.of(measurement()),
             "costs",
             List.of(Map.of("description", "Production", "amount", 1000)),
             "currency",
@@ -261,7 +277,7 @@ abstract class ExecutionScenarioSupport extends PostgresApiTestSupport {
     request(
         brand,
         root + "/outcome/accept",
-        Map.of("expectedRevision", revision(), "outcomeRevision", 1),
+        Map.of("expectedRevision", revision(), "outcomeRevision", latestOutcome()),
         200);
   }
 
@@ -270,7 +286,7 @@ abstract class ExecutionScenarioSupport extends PostgresApiTestSupport {
         "expectedRevision",
         revision(),
         "outcomeRevision",
-        1,
+        latestOutcome(),
         "overallRating",
         2,
         "brandFitRating",

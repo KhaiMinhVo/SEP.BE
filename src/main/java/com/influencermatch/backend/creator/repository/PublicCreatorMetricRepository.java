@@ -50,7 +50,7 @@ public interface PublicCreatorMetricRepository
                  m.engagement_rate AS engagementRate, m.content_summary AS contentSummary,
                  CASE WHEN c.master_id IS NOT NULL THEN 'LINKED_PROFILE' ELSE 'PUBLIC_PROFILE' END AS claimStatus,
                  COALESCE('MASTER:' || c.master_id::text, 'ACCOUNT:' || c.id::text) AS groupKey,
-                 ts_rank(m.search_vector || to_tsvector('simple', COALESCE(c.display_name, '') || ' ' || c.user_name),
+                 ts_rank(m.search_vector || post_evidence.search_vector || to_tsvector('simple', COALESCE(c.display_name, '') || ' ' || c.user_name),
                      websearch_to_tsquery('simple', :keyword), 32) AS ftsScore,
                  m.actual_fee AS actualFee,
                  COALESCE(m.actual_fee, (
@@ -65,6 +65,10 @@ public interface PublicCreatorMetricRepository
           FROM public_creator_metric m
           JOIN creator c ON m.creator_id = c.id
           LEFT JOIN creator_master cm ON c.master_id = cm.id
+          LEFT JOIN LATERAL (
+              SELECT to_tsvector('simple', COALESCE(string_agg(p.caption, ' '), '')) AS search_vector
+              FROM post p WHERE p.creator_id = c.id
+          ) post_evidence ON true
           WHERE m.creator_type IN ('KOL', 'KOC') AND m.freshness_status = 'FRESH'
             AND m.id = (SELECT latest.id FROM public_creator_metric latest
                         WHERE latest.creator_id = c.id
@@ -92,12 +96,12 @@ public interface PublicCreatorMetricRepository
             AND (CAST(:#{#filters.maxEr} AS numeric) IS NULL OR m.engagement_rate <= :#{#filters.maxEr})
             AND (CAST(:#{#filters.isClaimed} AS boolean) IS NULL
                  OR :#{#filters.isClaimed} = (c.source_type = 'AUTHORIZED' OR c.authorized_at IS NOT NULL))
-            AND (:topicQuery = '' OR m.search_vector @@ websearch_to_tsquery('simple', :topicQuery)
+            AND (:topicQuery = '' OR (m.search_vector || post_evidence.search_vector) @@ websearch_to_tsquery('simple', :topicQuery)
                  OR LOWER(BTRIM(m.category)) IN (:topicNiches)
                  OR EXISTS (SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS topic_part
                             WHERE LOWER(BTRIM(topic_part)) IN (:topicNiches)))
             AND (COALESCE(BTRIM(CAST(:#{#filters.keyword} AS text)), '') = ''
-                 OR (m.search_vector || to_tsvector('simple', COALESCE(c.display_name, '') || ' ' || c.user_name))
+                 OR (m.search_vector || post_evidence.search_vector || to_tsvector('simple', COALESCE(c.display_name, '') || ' ' || c.user_name))
                      @@ websearch_to_tsquery('simple', CAST(:#{#filters.keyword} AS text)))
       ), filtered AS MATERIALIZED (
           SELECT * FROM eligible

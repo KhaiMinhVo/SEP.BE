@@ -49,9 +49,12 @@ public class CreatorDiscoveryService {
             || (DiscoveryNiches.onlyBroadCategories(campaign.getNiches()) && hasText(campaign.getProductService()));
         String topic = requiresProductEvidence
             ? firstText(campaign.getProductService(), campaign.getName(), campaign.getBrief()) : "";
+        String productEvidenceQuery = DiscoveryNiches.productEvidenceQuery(campaign.getProductService(), campaign.getName());
+        if (requiresProductEvidence && !productEvidenceQuery.isBlank()) topic = productEvidenceQuery;
         if (!hasNiches && topic.isBlank()) return Page.empty(pageable);
         String keyword = firstText(req.getKeyword(), campaign.getProductService(),
             String.join(" ", niches), campaign.getName(), campaign.getBrief());
+        if (!hasText(req.getKeyword()) && !productEvidenceQuery.isBlank()) keyword = productEvidenceQuery;
         Long min = maximum(campaign.getFollowerMin(), req.getMinFollowers());
         Long max = minimum(campaign.getFollowerMax(), req.getMaxFollowers());
         if (min != null && max != null && min > max) return Page.empty(pageable);

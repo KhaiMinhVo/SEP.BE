@@ -131,6 +131,28 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
     }
   }
 
+  @Test void postEvidenceRecoversSparseBackupProfilesAndFillsTop50WithoutUnrelatedCreators() throws Exception {
+    jdbc.update("update campaign set product_service=?,name=?,niches=array['BEAUTY'] where id=?",
+        "Kem chống nắng nâng tone kiềm dầu cho học sinh sinh viên giá dưới 200k", "Sunscreen launch", campaign);
+    var expected = new HashSet<String>();
+    for (int i = 0; i < 52; i++) {
+      var candidate = creator("Post skincare " + i, "UNKNOWN", "Creator", "KOC");
+      jdbc.update("update public_creator_metric set category='BEAUTY' where creator_id=?", candidate.getId());
+      posts.saveAndFlush(Post.builder().creator(candidate).platformPostId(UUID.randomUUID().toString())
+          .caption("Review kem chống nắng dùng hằng ngày cho da dầu").build());
+      expected.add(candidate.getId().toString());
+    }
+    var unrelated = creator("Salon", "Chăm sóc tóc", "Creator", "KOC");
+    jdbc.update("update public_creator_metric set category='BEAUTY' where creator_id=?", unrelated.getId());
+    posts.saveAndFlush(Post.builder().creator(unrelated).platformPostId(UUID.randomUUID().toString())
+        .caption("Hướng dẫn cắt tóc và uốn tóc").build());
+    for (var route : List.of("discover", "discovery")) {
+      var data = call(owner, get("/campaigns/" + campaign + "/" + route).param("size", "50"), null, 200).path("data");
+      assertThat(ids(data)).as(route).hasSize(50).doesNotHaveDuplicates()
+          .isSubsetOf(expected).doesNotContain(unrelated.getId().toString());
+    }
+  }
+
   @Test void keywordFallbackKeepsContextAndTop50WhenEmbeddingUnavailable() throws Exception {
     for (int i = 0; i < 51; i++) {
       var candidate = creator("Other" + i, "BEAUTY", topic, "KOC");

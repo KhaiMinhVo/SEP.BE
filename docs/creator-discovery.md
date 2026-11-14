@@ -38,7 +38,12 @@ this filtering policy as discoveryPolicyVersion=context-db-v2; clients must not
 substitute legacy broad/AI fallback responses for that policy.
 
 Keyword search uses PostgreSQL websearch_to_tsquery across channel name/username
-and public content. Ordinary multiword queries require all words. Context/UI eligibility is materialized before cosine similarity is computed. Default retrieval rank combines 60% nonnegative cosine similarity and 40% lexical rank. Missing/invalid query embeddings fall back to lexical rank without relaxing filters. Stable follower/UUID tie breakers apply. Collapse linked
+and public content, including stored post captions. Sparse imported summaries such
+as "Creator" do not prevent real post evidence from qualifying a profile. Supported
+product subtopics use explicit concept phrases and synonyms for eligibility and
+default lexical ranking; they do not require every marketing qualifier in a long
+product description. User-entered multiword searches still require all words.
+Context/UI eligibility is materialized before cosine similarity is computed. Default retrieval rank combines 60% nonnegative cosine similarity and 40% lexical rank. Missing/invalid query embeddings fall back to lexical rank without relaxing filters. Stable follower/UUID tie breakers apply. Collapse linked
 channels by CreatorMaster before taking Top 50, then paginate the same window.
 
 Vector retrieval rank is not a Four-Memory/TOPSIS match percentage. The /discovery response reports

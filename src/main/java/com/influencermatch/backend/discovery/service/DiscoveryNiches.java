@@ -28,9 +28,22 @@ public final class DiscoveryNiches {
         return List.of();
     }
 
+    /** Match supported product concepts, not every word of a long marketing brief. */
+    public static String productEvidenceQuery(String product, String campaignName) {
+        var niches = productNiches(product, campaignName);
+        if (niches.isEmpty()) return "";
+        var terms = new LinkedHashSet<String>();
+        for (var topic : PRODUCT_TOPICS)
+            if (topic.niches().stream().anyMatch(niche -> niches.contains(niche.toLowerCase(Locale.ROOT))))
+                terms.addAll(topic.terms());
+        return terms.stream().map(term -> "\"" + term + "\"")
+            .collect(java.util.stream.Collectors.joining(" OR "));
+    }
+
     public static boolean onlyBroadCategories(List<String> niches) {
         return niches != null && !niches.isEmpty() && niches.stream().allMatch(value ->
-            List.of("beauty", "lam dep", "lam dep & my pham", "my pham & lam dep", "fashion", "lifestyle")
+            List.of("beauty", "lam dep", "lam dep & my pham", "my pham & lam dep", "fashion", "lifestyle",
+                "thoi trang & phu kien", "am thuc", "du lich", "cong nghe", "giai tri", "doi song & gia dinh")
                 .contains(normalize(value)));
     }
 
@@ -42,7 +55,12 @@ public final class DiscoveryNiches {
     private static final List<List<String>> ALIASES = List.of(
         List.of("BEAUTY", "Beauty", "Làm đẹp", "Làm đẹp & Mỹ phẩm", "Mỹ phẩm & Làm đẹp"),
         List.of("SKINCARE", "Chăm sóc da", "Chăm sóc da & Skincare"),
-        List.of("FASHION", "Fashion", "Thời trang", "Thời trang & Phong cách", "Thời trang & Phụ kiện")
+        List.of("FASHION", "Fashion", "Thời trang", "Thời trang & Phong cách", "Thời trang & Phụ kiện"),
+        List.of("Ẩm thực", "FOOD", "Ẩm thực và ăn uống", "Ẩm thực và Đồ ăn vặt", "Ẩm thực & Nhà hàng"),
+        List.of("Du lịch", "TRAVEL", "Du lịch & Trải nghiệm"),
+        List.of("Công nghệ", "TECHNOLOGY", "Công nghệ & Điện thoại / PC"),
+        List.of("Giải trí", "ENTERTAINMENT", "Truyền thông & Giải trí"),
+        List.of("Đời sống & Gia đình", "LIFESTYLE", "Phong cách sống", "Lối sống & Sáng tạo", "Đời sống, Sức khỏe & Gia đình")
     );
     public static List<String> expand(List<String> niches) {
         var result = new LinkedHashSet<String>();

@@ -35,8 +35,13 @@ public class OpenApiConfig {
   @Value("${server.port:8080}")
   private String serverPort;
 
+  @Value("${APP_GIT_COMMIT:local}")
+  private String buildCommit;
+
   @Bean
   public OpenAPI influencerMatchOpenAPI() {
+    var info = apiInfo();
+    info.addExtension("x-build-commit", buildCommit);
     return new OpenAPI()
         .servers(
             List.of(
@@ -46,7 +51,7 @@ public class OpenApiConfig {
                 new Server()
                     .url("https://api.influencermatch.site/api/v1")
                     .description("HTTPS Production Server")))
-        .info(apiInfo())
+        .info(info)
         .addSecurityItem(new SecurityRequirement().addList(SECURITY_SCHEME_NAME))
         .components(
             new Components()

@@ -28,7 +28,7 @@ public class CreatorDiscoveryController {
     @GetMapping("/{campaignId}/discovery")
     @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SEARCH_CREATOR')")
     @Transactional(readOnly = true)
-    @Operation(summary = "Discover creators for campaign", description = "Filters existing creator records by campaign context and keyword. AI scoring runs separately on the campaign shortlist.")
+    @Operation(summary = "Discover creators for campaign", description = "Filters creator records by campaign context, then retrieves by stored vector similarity and keyword relevance. Four-Memory/TOPSIS scoring runs separately on the shortlist.")
     public ResponseEntity<ApiResponse<Page<Map<String, Object>>>> discoverCreators(
             @PathVariable UUID campaignId,
             @ParameterObject @ModelAttribute DiscoverySearchRequest searchRequest) {
@@ -63,8 +63,11 @@ public class CreatorDiscoveryController {
             map.put("contentSummary", p.getContentSummary());
             
             // Điểm số xếp hạng Hybrid
-            map.put("searchRank", p.getFtsScore());
+            map.put("searchRank", p.getHybridScore());
+            map.put("retrievalMethod", p.getRetrievalMethod());
+            map.put("retrievalSimilarity", p.getSemanticScore());
             map.put("aiScoreAvailable", false);
+            map.put("discoveryPolicyVersion", "context-db-v2");
             map.put("semanticScore", null);
             map.put("ftsScore", p.getFtsScore());
             map.put("hybridScore", null);

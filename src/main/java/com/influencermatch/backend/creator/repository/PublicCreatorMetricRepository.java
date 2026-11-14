@@ -50,8 +50,6 @@ public interface PublicCreatorMetricRepository
                  m.engagement_rate AS engagementRate, m.content_summary AS contentSummary,
                  CASE WHEN c.master_id IS NOT NULL THEN 'LINKED_PROFILE' ELSE 'PUBLIC_PROFILE' END AS claimStatus,
                  COALESCE('MASTER:' || c.master_id::text, 'ACCOUNT:' || c.id::text) AS groupKey,
-                 CAST(NULL AS double precision) AS semanticScore,
-                 CAST(NULL AS double precision) AS hybridScore,
                  ts_rank(m.search_vector || to_tsvector('simple', COALESCE(c.display_name, '') || ' ' || c.user_name),
                      websearch_to_tsquery('simple', :keyword), 32) AS ftsScore,
                  m.actual_fee AS actualFee,
@@ -94,17 +92,32 @@ public interface PublicCreatorMetricRepository
             AND (CAST(:#{#filters.maxEr} AS numeric) IS NULL OR m.engagement_rate <= :#{#filters.maxEr})
             AND (CAST(:#{#filters.isClaimed} AS boolean) IS NULL
                  OR :#{#filters.isClaimed} = (c.source_type = 'AUTHORIZED' OR c.authorized_at IS NOT NULL))
-            AND (:topicQuery = '' OR m.search_vector @@ websearch_to_tsquery('simple', :topicQuery))
+            AND (:topicQuery = '' OR m.search_vector @@ websearch_to_tsquery('simple', :topicQuery)
+                 OR LOWER(BTRIM(m.category)) IN (:topicNiches)
+                 OR EXISTS (SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS topic_part
+                            WHERE LOWER(BTRIM(topic_part)) IN (:topicNiches)))
             AND (COALESCE(BTRIM(CAST(:#{#filters.keyword} AS text)), '') = ''
                  OR (m.search_vector || to_tsvector('simple', COALESCE(c.display_name, '') || ' ' || c.user_name))
                      @@ websearch_to_tsquery('simple', CAST(:#{#filters.keyword} AS text)))
-      ), filtered AS (
+      ), filtered AS MATERIALIZED (
           SELECT * FROM eligible
           WHERE (CAST(:#{#filters.minFee} AS numeric) IS NULL OR comparableFee >= :#{#filters.minFee})
             AND (CAST(:#{#filters.maxFee} AS numeric) IS NULL OR comparableFee <= :#{#filters.maxFee})
+      ), retrieved AS (
+          SELECT f.*,
+                 CASE WHEN CAST(:queryVector AS text) IS NOT NULL AND c.embedding IS NOT NULL
+                           AND vector_norm(c.embedding) > 0
+                      THEN 1.0 - (c.embedding <=> CAST(CAST(:queryVector AS text) AS vector))
+                      ELSE NULL END AS semanticScore,
+                 CASE WHEN CAST(:queryVector AS text) IS NULL THEN 'LEXICAL' ELSE 'VECTOR_HYBRID' END AS retrievalMethod
+          FROM filtered f JOIN creator c ON c.id = f.creatorId
+      ), ranked AS (
+          SELECT *, CASE WHEN CAST(:queryVector AS text) IS NULL THEN ftsScore
+                         ELSE 0.6 * COALESCE(GREATEST(0.0, semanticScore), 0.0) + 0.4 * ftsScore END AS hybridScore
+          FROM retrieved
       ), grouped AS (
-          SELECT DISTINCT ON (groupKey) * FROM filtered
-          ORDER BY groupKey, ftsScore DESC, followers DESC NULLS LAST, creatorId
+          SELECT DISTINCT ON (groupKey) * FROM ranked
+          ORDER BY groupKey, hybridScore DESC, followers DESC NULLS LAST, creatorId
       )
       """;
 
@@ -115,17 +128,19 @@ public interface PublicCreatorMetricRepository
              THEN CASE WHEN actualFee IS NULL THEN 1 ELSE 0 END END,
         CASE WHEN UPPER(COALESCE(CAST(:#{#filters.sortBy} AS text), '')) = 'LOWEST_COMPARABLE_FEE'
              THEN comparableFee END,
-        ftsScore DESC, followers DESC NULLS LAST, creatorId
+        hybridScore DESC, followers DESC NULLS LAST, creatorId
       """,
-      countQuery = DISCOVERY_CTES + "SELECT count(*) FROM grouped", nativeQuery = true)
+      countQuery = DISCOVERY_CTES + "SELECT count(DISTINCT groupKey) FROM filtered", nativeQuery = true)
   Page<HybridDiscoveryCreatorProjection> searchDiscoveryCreators(
       @Param("hasPlatforms") boolean hasPlatforms, @Param("platforms") List<String> platforms,
       @Param("hasNiches") boolean hasNiches, @Param("niches") List<String> niches,
       @Param("followerMin") Long followerMin, @Param("followerMax") Long followerMax,
       @Param("keyword") String keyword, @Param("topicQuery") String topicQuery,
+      @Param("queryVector") String queryVector,
       @Param("filters") com.influencermatch.backend.discovery.dto.DiscoverySearchRequest filters,
       @Param("hasLocations") boolean hasLocations, @Param("locations") List<String> locations,
       @Param("uiNiches") List<String> uiNiches,
+      @Param("topicNiches") List<String> topicNiches,
       Pageable pageable);
 
   @Query(

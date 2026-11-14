@@ -230,7 +230,7 @@ public class CampaignService {
             return fee.subtract(targetBudgetMid).abs();
           });
     } else {
-      // Preserve database keyword relevance; AI scores are computed after shortlisting.
+      // Preserve context-filtered vector retrieval order; recommendation scores come after shortlisting.
       comparator = Comparator.comparingInt(r -> candidateOrder.get(r.creatorId()));
     }
 

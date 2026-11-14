@@ -41,6 +41,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VCS_REF: ${DEPLOY_COMMIT:-unknown}
     container_name: influencermatch_api
     restart: unless-stopped
     env_file:

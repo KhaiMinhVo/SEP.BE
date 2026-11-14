@@ -40,13 +40,14 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
     var brand = createBrand(owner);
     campaign = createCampaign(owner, brand);
     topic = "sunblock" + UUID.randomUUID().toString().replace("-", "");
-    jdbc.update("update campaign set name=?,product_service=?,niches='{}' where id=?",
-        "Campaign " + topic, topic, campaign);
+    jdbc.update("update campaign set name=?,product_service=?,niches='{}',locations=array[?]::text[] where id=?",
+        "Campaign " + topic, topic, "fixture-" + campaign, campaign);
     when(ai.getEmbedding(anyString())).thenReturn(List.of());
   }
 
   Creator creator(String name, String niche, String summary, String type) {
     var c = creators.saveAndFlush(Creator.builder().platform("TIKTOK")
+        .location("fixture-" + campaign)
         .externalId(UUID.randomUUID().toString()).userName(name + UUID.randomUUID().toString().replace("-", ""))
         .displayName(name).build());
     snapshot(c, niche, summary, type, LocalDateTime.now(), MetricDataStatus.FRESH);
@@ -112,7 +113,25 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
     }
   }
 
-  @Test void databaseKeywordRankingSelectsTop50WithoutCallingAi() throws Exception {
+  @Test void sunscreenProductNarrowsBroadBeautyCategoryToSkincare() throws Exception {
+    jdbc.update("update campaign set product_service=?,name=? where id=?",
+        "Kem chống nắng nâng tone kiềm dầu HSSV", "Sunscreen launch " + topic, campaign);
+    var skincare = creator("Skincare " + topic, "Chăm sóc da", "Đánh giá sản phẩm dưỡng da", "KOC");
+    var salon = creator("Salon " + topic, "Chăm sóc và tạo mẫu tóc", "Kỹ thuật cắt tỉa và nhuộm tóc", "KOC");
+    var home = creator("Home " + topic, "Đánh giá đồ gia dụng", "Review đồ dùng thông minh", "KOC");
+    var personal = creator("Personal " + topic, "Chăm sóc cá nhân", "Trải nghiệm du lịch và trekking", "KOC");
+    for (var c : List.of(skincare, salon, home, personal))
+      jdbc.update("update public_creator_metric set category='BEAUTY' where creator_id=?", c.getId());
+    for (var niche : List.of("BEAUTY", "Làm đẹp & Mỹ phẩm")) {
+      jdbc.update("update campaign set niches=array[?]::text[] where id=?", niche, campaign);
+      for (var route : List.of("discover", "discovery")) {
+        var data = call(owner, get("/campaigns/" + campaign + "/" + route), null, 200).path("data");
+        assertThat(ids(data)).as(route + ": " + niche).containsExactly(skincare.getId().toString());
+      }
+    }
+  }
+
+  @Test void keywordFallbackKeepsContextAndTop50WhenEmbeddingUnavailable() throws Exception {
     for (int i = 0; i < 51; i++) {
       var candidate = creator("Other" + i, "BEAUTY", topic, "KOC");
       jdbc.update("update public_creator_metric set engagement_rate=20 where creator_id=?", candidate.getId());
@@ -126,10 +145,49 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
       if (route.equals("discovery")) {
         var card = data.path("content").get(0);
         assertThat(card.path("aiScoreAvailable").asBoolean()).isFalse();
+        assertThat(card.path("discoveryPolicyVersion").asText()).isEqualTo("context-db-v2");
         assertThat(card.path("finalScore").isNull() || card.path("finalScore").isMissingNode()).isTrue();
       }
     }
-    verifyNoInteractions(ai);
+    verify(ai, never()).getExplanation(any());
+  }
+
+  @Test void vectorRanksOnlyContextEligibleProfilesBeforeTakingTop50() throws Exception {
+    var query = new ArrayList<>(Collections.nCopies(768, 0.0f));
+    query.set(0, 1.0f);
+    var unrelatedVector = new ArrayList<>(Collections.nCopies(768, 0.0f));
+    unrelatedVector.set(1, 1.0f);
+    when(ai.getEmbedding(anyString())).thenReturn(query);
+    jdbc.update("update campaign set product_service=?,niches=array['BEAUTY'] where id=?",
+        "kem chống nắng", campaign);
+    for (int i = 0; i < 51; i++) {
+      var candidate = creator("Skincare" + i, "Chăm sóc da", "Review dưỡng da", "KOC");
+      jdbc.update("update public_creator_metric set category='BEAUTY',followers=500000 where creator_id=?", candidate.getId());
+      jdbc.update("update creator set embedding=cast(? as vector) where id=?",
+          (i == 0 ? Collections.nCopies(768, 0.0f) : unrelatedVector).toString(), candidate.getId());
+    }
+    var best = creator("Best skincare", "Chăm sóc da", "Review dưỡng da", "KOC");
+    var salon = creator("Salon", "Chăm sóc và tạo mẫu tóc", "Kỹ thuật nhuộm tóc", "KOC");
+    var home = creator("Home", "Đánh giá đồ gia dụng", "Review đồ dùng nhà bếp", "KOC");
+    for (var c : List.of(best, salon, home)) {
+      jdbc.update("update creator set embedding=cast(? as vector) where id=?", query.toString(), c.getId());
+      jdbc.update("update public_creator_metric set category='BEAUTY' where creator_id=?", c.getId());
+    }
+    for (var route : List.of("discover", "discovery")) {
+      var data = call(owner, get("/campaigns/" + campaign + "/" + route).param("size", "50"), null, 200).path("data");
+      assertThat(ids(data).getFirst()).as(route).isEqualTo(best.getId().toString());
+      assertThat(ids(data)).doesNotContain(salon.getId().toString(), home.getId().toString());
+      assertThat(data.path("totalElements").asInt()).isEqualTo(50);
+      if (route.equals("discovery")) {
+        var card = data.path("content").get(0);
+        assertThat(card.path("retrievalMethod").asText()).isEqualTo("VECTOR_HYBRID");
+        assertThat(card.path("retrievalSimilarity").asDouble()).isCloseTo(1.0, within(0.00001));
+        assertThat(card.path("aiScoreAvailable").asBoolean()).isFalse();
+        assertThat(card.hasNonNull("finalScore")).isFalse();
+      }
+    }
+    verify(ai, times(2)).getEmbedding(anyString());
+    verify(ai, never()).getExplanation(any());
   }
 
   @Test void databaseSelectionThenShortlistThenAiScoresOnlySelectedCreator() throws Exception {
@@ -148,7 +206,7 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
     assertThat(ids(data)).contains(selected.getId().toString(), outsider.getId().toString());
     call(owner, post("/campaigns/" + campaign + "/shortlist"),
         Map.of("creatorId", selected.getId(), "priority", "HIGH"), 200);
-    verifyNoInteractions(ai);
+    verify(ai, never()).getExplanation(any());
     call(owner, patch("/campaigns/" + campaign + "/status"),
         Map.of("status", "READY_FOR_DISCOVERY"), 200);
     var job = jdbc.queryForObject("select id from campaign_embedding_job where context_id="
@@ -197,6 +255,17 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
         Integer.class, campaign)).isZero();
     assertThat(jdbc.queryForObject("select sum(used_ai_quota) from subscription where brand_profile_id="
         + "(select brand_profile_id from campaign where id=?)", Long.class, campaign)).isZero();
+  }
+
+  @Test void publicOpenApiReportsBuildRevisionAndCurrentDiscoveryContract() throws Exception {
+    var spec = call(null, get("/api-docs"), null, 200);
+    var expectedCommit = System.getenv("APP_GIT_COMMIT");
+    assertThat(spec.path("info").path("x-build-commit").asText())
+        .isEqualTo(expectedCommit == null ? "local" : expectedCommit);
+    var parameters = new ArrayList<String>();
+    spec.path("paths").path("/campaigns/{campaignId}/discovery").path("get").path("parameters")
+        .forEach(parameter -> parameters.add(parameter.path("name").asText()));
+    assertThat(parameters).contains("platform", "sortBy", "minEr", "isClaimed");
   }
 
   @Test void claimedFeeAndPlatformFiltersRemainEffectiveOnBothEndpoints() throws Exception {

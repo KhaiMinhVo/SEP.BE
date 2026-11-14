@@ -3,7 +3,8 @@
 ```mermaid
 flowchart LR
     A[Campaign context] --> B[Filter existing DB records]
-    B --> C[Brand selects creators]
+    B --> V[Vector retrieval within eligible records]
+    V --> C[Brand selects creators]
     C --> D[Campaign shortlist]
     D --> E[Explicit AI scoring request]
     E --> F[Four-Memory features and TOPSIS]
@@ -14,7 +15,7 @@ flowchart LR
 
 `GET /campaigns/{id}/discover` and `GET /campaigns/{id}/discovery` share
 `CreatorDiscoveryService`. Their response shapes remain `data.items` and
-`data.content`. Neither endpoint calls the AI service or consumes scoring quota.
+`data.content`. Discovery may generate a query embedding and compare it with stored Creator vectors. It does not run Four-Memory/TOPSIS, explanations, or consume recommendation quota.
 
 Filter the latest ingested snapshot (`collected_at`, then UUID) to FRESH KOL/KOC.
 An older accepted snapshot cannot override a newer rejection or stale snapshot.
@@ -27,16 +28,23 @@ content, using productService, then the name/brief for incomplete drafts. This i
 conservative and can miss synonyms; it must not dump the catalogue. Empty topic
 means empty results. No unrelated profiles are added to fill 50 slots.
 
+Broad categories alone are insufficient for a known product subtopic. Sunscreen,
+skincare, haircare and makeup terms impose their corresponding observed niche or
+product-content constraint in addition to campaign filters. For example, BEAUTY
+plus sunscreen does not admit a hair salon, household reviewer or personal-care
+account solely because its coarse category is BEAUTY. Product text takes priority
+over the campaign title when identifying a supported subtopic. Responses identify
+this filtering policy as discoveryPolicyVersion=context-db-v2; clients must not
+substitute legacy broad/AI fallback responses for that policy.
+
 Keyword search uses PostgreSQL websearch_to_tsquery across channel name/username
-and public content. Ordinary multiword queries require all words. Default ordering
-is database keyword rank with stable follower/UUID tie breakers. Collapse linked
+and public content. Ordinary multiword queries require all words. Context/UI eligibility is materialized before cosine similarity is computed. Default retrieval rank combines 60% nonnegative cosine similarity and 40% lexical rank. Missing/invalid query embeddings fall back to lexical rank without relaxing filters. Stable follower/UUID tie breakers apply. Collapse linked
 channels by CreatorMaster before taking Top 50, then paginate the same window.
 
-Database rank is not an AI match percentage. The /discovery response reports
+Vector retrieval rank is not a Four-Memory/TOPSIS match percentage. The /discovery response reports
 aiScoreAvailable=false and unavailable semanticScore/hybridScore/matchScore/score/finalScore
 (null fields may be omitted by serialization). /discover returns public metrics without AI score fields.
-searchRank/ftsScore are lexical DB relevance only. Legacy SEMANTIC_RELEVANCE sorting
-is treated as a compatibility alias for DATABASE_RELEVANCE, with no AI call.
+retrievalMethod identifies VECTOR_HYBRID or LEXICAL; retrievalSimilarity is the raw cosine value when available. searchRank is the retrieval ranking value, while ftsScore is lexical relevance only. Legacy SEMANTIC_RELEVANCE sorting preserves retrieval order.
 The frontend should label this stage as filtering/search relevance, not AI scoring.
 
 ## 2. Shortlist records the Brand's selection
@@ -66,7 +74,7 @@ new runs always record candidateSource=SHORTLIST. Historical runs are not rewrit
 DiscoveryPostgresIntegrationTest exercises real HTTP handlers and disposable
 PostgreSQL/pgvector: sunscreen versus pets/school supplies, missing niches, Vietnamese
 aliases, rejected/stale latest snapshots, keywords, UI filters, master grouping,
-Top 50 ordering, no discovery AI calls, and empty-shortlist/source rejection with
+Top 50 vector ordering within context filters, no discovery recommendation scoring, and empty-shortlist/source rejection with
 no scoring quota or run created. Existing recommendation unit suites verify the
 scoring formulas against explicit shortlist fixtures. CampaignM3 and BrandM4
 integration suites verify context/embedding provenance and quota behavior.

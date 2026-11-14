@@ -23,4 +23,5 @@ public interface HybridDiscoveryCreatorProjection {
     Double getSemanticScore();
     Double getFtsScore();
     Double getHybridScore();
+    String getRetrievalMethod();
 }

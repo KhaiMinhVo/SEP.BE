@@ -86,11 +86,12 @@ public interface PublicCreatorMetricRepository
                       :hasNiches = false 
                       OR m.niche IN (:niches) 
                       OR m.category IN (:niches)
-                      OR (:hasVector = true AND :queryVector IS NOT NULL AND c.embedding IS NOT NULL
-                          AND (1 - (c.embedding <=> cast(NULLIF(:queryVector, '') as vector))) > 0.2)
-                      OR (:hasKeyword = true AND :formattedKeyword IS NOT NULL
-                          AND :formattedKeyword != ''
-                          AND m.search_vector @@ to_tsquery('simple', :formattedKeyword))
+                      OR (m.category = 'BEAUTY' AND (
+                          'Chăm sóc da' IN (:niches) OR 'Làm đẹp & Mỹ phẩm' IN (:niches)
+                          OR 'Làm đẹp' IN (:niches) OR 'M? ph?m & Làm đẹp' IN (:niches)))
+                      OR (m.category = 'FASHION' AND (
+                          'Thời trang & Phong cách' IN (:niches) OR 'Thời trang' IN (:niches)
+                          OR 'Fashion' IN (:niches) OR 'Streetwear' IN (:niches)))
                       OR EXISTS (
                           SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part_niche 
                           WHERE trim(part_niche) IN (:niches)
@@ -136,11 +137,12 @@ public interface PublicCreatorMetricRepository
                   :hasNiches = false 
                   OR m.niche IN (:niches) 
                   OR m.category IN (:niches)
-                      OR (:hasVector = true AND :queryVector IS NOT NULL AND c.embedding IS NOT NULL
-                          AND (1 - (c.embedding <=> cast(NULLIF(:queryVector, '') as vector))) > 0.2)
-                      OR (:hasKeyword = true AND :formattedKeyword IS NOT NULL
-                          AND :formattedKeyword != ''
-                          AND m.search_vector @@ to_tsquery('simple', :formattedKeyword))
+                      OR (m.category = 'BEAUTY' AND (
+                          'Chăm sóc da' IN (:niches) OR 'Làm đẹp & Mỹ phẩm' IN (:niches)
+                          OR 'Làm đẹp' IN (:niches) OR 'M? ph?m & Làm đẹp' IN (:niches)))
+                      OR (m.category = 'FASHION' AND (
+                          'Thời trang & Phong cách' IN (:niches) OR 'Thời trang' IN (:niches)
+                          OR 'Fashion' IN (:niches) OR 'Streetwear' IN (:niches)))
                   OR EXISTS (
                       SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part_niche 
                       WHERE trim(part_niche) IN (:niches)

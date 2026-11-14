@@ -64,7 +64,7 @@ class CampaignHistoryPostgresIntegrationTest extends ExecutionScenarioSupport {
     assertThat(detail.path("agreedProposal").path("fee").decimalValue())
         .isEqualByComparingTo("10000");
     assertThat(detail.path("execution").path("review").path("acceptedOutcomeRevision").asInt())
-        .isEqualTo(1);
+        .isEqualTo(2);
     assertThat(detail.toString())
         .doesNotContain("rawToken", "token_hash", "encrypted_payload", "privateContact");
   }
@@ -419,6 +419,7 @@ class CampaignHistoryPostgresIntegrationTest extends ExecutionScenarioSupport {
                     .master(masters.findById(masterId).orElseThrow())
                     .build())
             .getId();
+    verifyChannel(second, owner.getId(), "INSTAGRAM_OAUTH");
     var relationshipIds = new ArrayList<String>();
     for (UUID creator : List.of(channel, second))
       relationshipIds.add(
@@ -553,6 +554,8 @@ class CampaignHistoryPostgresIntegrationTest extends ExecutionScenarioSupport {
               "2026-11-02T00:00:00Z",
               "views",
               1000,
+              "unavailableMetrics",
+              List.of("clicks"),
               "likes",
               20,
               "comments",
@@ -564,13 +567,16 @@ class CampaignHistoryPostgresIntegrationTest extends ExecutionScenarioSupport {
     data.put(
         "expectedRevision", read(execution + "/deliverables").path("executionRevision").asLong());
     data.put("reason", "Full multi-channel result");
-    data.put("posts", posts);
+    var kpi = new HashMap<>(data);
+    kpi.put("posts", posts);
+    request(owner, execution + "/outcome", kpi, 200);
+    data.put("expectedRevision", read(execution + "/deliverables").path("executionRevision").asLong());
     data.put("costs", List.of(Map.of("description", "Total actual cost", "amount", 1000)));
     data.put("currency", "VND");
     data.put("financialConfirmed", true);
     data.put("periodStart", "2026-11-01T00:00:00Z");
     data.put("periodEnd", "2026-11-02T00:00:00Z");
-    request(brand, execution + "/outcome", data, 200);
+    request(brand, execution + "/outcome/finance", data, 200);
     request(
         brand,
         execution + "/outcome/accept",
@@ -578,7 +584,7 @@ class CampaignHistoryPostgresIntegrationTest extends ExecutionScenarioSupport {
             "expectedRevision",
             read(execution + "/deliverables").path("executionRevision").asLong(),
             "outcomeRevision",
-            1),
+            2),
         200);
     request(
         brand,
@@ -587,7 +593,7 @@ class CampaignHistoryPostgresIntegrationTest extends ExecutionScenarioSupport {
             "expectedRevision",
             read(execution + "/deliverables").path("executionRevision").asLong(),
             "outcomeRevision",
-            1,
+            2,
             "overallRating",
             5,
             "brandFitRating",

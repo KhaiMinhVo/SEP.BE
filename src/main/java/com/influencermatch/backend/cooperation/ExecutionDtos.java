@@ -6,6 +6,14 @@ import java.util.*;
 public final class ExecutionDtos {
   private ExecutionDtos() {}
 
+  public record Assignment(
+      @Min(1) @com.fasterxml.jackson.databind.annotation.JsonDeserialize(
+          using = com.influencermatch.backend.collaboration.dto.StrictNumbers.LongValue.class)
+      long expectedRevision,
+      @Min(1) @com.fasterxml.jackson.databind.annotation.JsonDeserialize(
+          using = com.influencermatch.backend.collaboration.dto.StrictNumbers.LongValue.class)
+      long proposalRevision) {}
+
   public record Submission(
       @Min(1)
           @com.fasterxml.jackson.databind.annotation.JsonDeserialize(

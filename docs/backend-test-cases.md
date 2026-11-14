@@ -886,6 +886,9 @@ Validation completed 2026-11-08 for Cooperation CRM/V28:
 
 ## Collaboration execution / Content Review / Outcome — V29
 
+- Per-publication KPI: Creator saves a new HTTPS publication and one approved deliverable's measurements together. Missing declarations or an invalid period leave both tables unchanged. Zero stays numeric, explicit `unavailableMetrics` stay missing in calculations, and retrying the same key creates one revision. The first entry gets an automatic reason. Edits require a reason. Brand cannot use the Creator endpoint. `ExecutionPostgresIntegrationTest#savesEachPublicationAndKpiAtomicallyAndRequiresCompleteDeclarations`.
+- Historical KPI remain readable. A still-open collaboration with old undeclared metrics cannot be accepted until Creator completes the declarations. A completed collaboration keeps the accepted historical revision.
+
 Automated tests use HTTP MockMvc plus real disposable PostgreSQL, fake network boundaries and latch-based concurrency (no sleep). No public provider, SMTP or shared database is used.
 
 - `ExecutionPostgresIntegrationTest`: explicit acceptance/final review lifecycle; immutable source proposal; review rounds/checklist; publication exceptions; outcome revision/reopen; Creator finance rejection and revoked ownership; idempotency/body conflict; concurrent submissions; audit rollback; legacy plan quantity expansion; duplicate measurements and missing prerequisites.
@@ -897,6 +900,12 @@ Automated tests use HTTP MockMvc plus real disposable PostgreSQL, fake network b
 - `CollaborationCompletedEventListenerTest` (Mockito): persisted low rating wins over forged event values; replay does not duplicate evidence/increment legacy patterns; synchronization failure propagates for rollback.
 
 Boundary expectations changed intentionally: saving Outcome stays IN_PROGRESS; acceptance moves to AWAITING_REVIEW; final Review alone completes. SELF_REPORTED stays SELF_REPORTED; missing data stays null; M1 returns unavailable instead of a fabricated constant. Original validation/security/rollback/concurrency acceptance coverage is migrated to the new public contract, not disabled.
+
+Role-specific execution checks:
+- Creator with verified ownership of all channels submits drafts, records publications and saves KPI. Brand-only actions are review, early-publication acknowledgement, finance, acceptance, reopening and final review.
+- Brand finance copies the latest current Creator measurements and requires positive actual cost for confirmation. Creator measurement updates preserve finance, and Creator reads and cached replies omit finance and the internal review.
+- A confirmed unassigned deal waits for channel verification and Creator consent. Preview and acceptance preserve the original agreement. Retry and concurrent acceptance record consent once. Revocation blocks access and start, and Brand may cancel while planned.
+
 
 Verified results (2026-11-08):
 

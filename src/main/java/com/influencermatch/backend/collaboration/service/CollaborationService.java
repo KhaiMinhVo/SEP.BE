@@ -51,6 +51,8 @@ public class CollaborationService {
 
   @org.springframework.beans.factory.annotation.Autowired
   private com.influencermatch.backend.cooperation.DealService deals;
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.cooperation.CollaborationExecution execution;
 
   public CollaborationService(
       CampaignRepository campaigns,
@@ -113,7 +115,7 @@ public class CollaborationService {
     Permissions.require(Permission.MANAGE_OWN_COLLABORATION);
     validate(request);
 
-    if (deals != null && request.dealId() != null) {
+    if (deals != null) {
       var result = deals.confirmLegacy(campaignId, request, key);
       UUID id = UUID.fromString(result.path("collaborationId").asText());
       var c =
@@ -410,7 +412,10 @@ public class CollaborationService {
   @PreAuthorize("hasAuthority('MANAGE_OWN_COLLABORATION')")
   public PageResponse<CollaborationSummaryDto> getCampaignCollaborations(
       UUID campaignId, CollaborationStatus status, Pageable pageable) {
+    if (Permissions.actor().getRole() != Role.BRAND)
+      throw new ForbiddenException("Brand required");
     Permissions.require(Permission.MANAGE_OWN_COLLABORATION);
+    if (deals != null) deals.fresh(Permission.MANAGE_OWN_COLLABORATION);
     Campaign campaign =
         campaigns
             .findById(campaignId)
@@ -467,21 +472,7 @@ public class CollaborationService {
         collaborations
             .findById(collaborationId)
             .orElseThrow(() -> new NotFoundException("Collaboration not found"));
-    User actor = Permissions.actor();
-
-    boolean isBrandOwner =
-        c.getCampaign().getBrandProfile().getUser().getId().equals(actor.getId());
-    boolean isCreatorOwner =
-        deals != null
-            ? deals.canAccessCollaboration(actor.getId(), c.getId())
-            : (c.getCreator() != null
-                && c.getCreator().getOwner() != null
-                && c.getCreator().getOwner().getId().equals(actor.getId()));
-    boolean isStaff = actor.getRole() == Role.ADMIN || actor.getRole() == Role.DATA_MANAGER;
-
-    if (!isBrandOwner && !isCreatorOwner && !isStaff) {
-      throw new ForbiddenException("Access denied to collaboration");
-    }
+    boolean brand = requireCollaborationAccess(c);
 
     OutcomeResponse outcomeDto =
         outcomes
@@ -497,14 +488,14 @@ public class CollaborationService {
                         o.getComments(),
                         o.getShares(),
                         c.getPublishedContentUrl(),
-                        o.getResultNote(),
+                        brand ? o.getResultNote() : null,
                         o.getEvidenceQuality(),
                         o.getRecordedAt(),
                         o.getCompletedAt()))
             .orElse(null);
 
     CreatorReviewResponse reviewDto =
-        reviews
+        !brand ? null : reviews
             .findByCollaborationId(collaborationId)
             .map(
                 r ->
@@ -520,19 +511,7 @@ public class CollaborationService {
                         r.getReviewedAt()))
             .orElse(null);
 
-    List<EvidenceAssetResponse> evidenceList =
-        evidenceAssets.findByCollaborationIdOrderByUploadedAtDesc(collaborationId).stream()
-            .map(
-                a ->
-                    new EvidenceAssetResponse(
-                        a.getId(),
-                        collaborationId,
-                        a.getOutcome() != null ? a.getOutcome().getId() : null,
-                        a.getAssetType(),
-                        a.getStorageUrl(),
-                        a.getSource(),
-                        a.getUploadedAt()))
-            .toList();
+    List<EvidenceAssetResponse> evidenceList = evidenceFor(c, brand);
 
     String creatorName =
         c.getCreator().getDisplayName() != null && !c.getCreator().getDisplayName().isBlank()
@@ -554,7 +533,7 @@ public class CollaborationService {
         c.getCurrency(),
         c.getStatus(),
         c.getPublishedContentUrl(),
-        c.getNote(),
+        brand ? c.getNote() : null,
         c.getStartAt(),
         c.getCompletedAt(),
         c.getUpdatedAt(),
@@ -567,38 +546,21 @@ public class CollaborationService {
   @Transactional
   public EvidenceAssetResponse submitEvidence(UUID collaborationId, SubmitEvidenceRequest request) {
     validate(request);
+    if (Permissions.actor().getRole() != Role.CREATOR)
+      throw new ForbiddenException("Only Creator may attach collaboration evidence");
+    if (execution != null)
+      execution.progress(execution.lock(collaborationId, false, Permission.RESPOND_OWN_COOPERATION));
     Collaboration collaboration =
         collaborations
             .findById(collaborationId)
             .orElseThrow(() -> new NotFoundException("Collaboration not found"));
 
-    User actor = Permissions.actor();
-    boolean isBrandOwner =
-        collaboration.getCampaign().getBrandProfile().getUser().getId().equals(actor.getId());
-    boolean isCreatorOwner =
-        deals != null
-            ? deals.canAccessCollaboration(actor.getId(), collaboration.getId())
-            : (collaboration.getCreator() != null
-                && collaboration.getCreator().getOwner() != null
-                && collaboration.getCreator().getOwner().getId().equals(actor.getId()));
-    boolean isStaff = actor.getRole() == Role.ADMIN || actor.getRole() == Role.DATA_MANAGER;
-
-    if (!isBrandOwner && !isCreatorOwner && !isStaff) {
-      throw new ForbiddenException("Access denied to submit evidence for this collaboration");
-    }
-
-    String source = isCreatorOwner ? "CREATOR_SUBMITTED" : "BRAND_UPLOAD";
+    requireCollaborationAccess(collaboration);
+    if (collaboration.getStatus() != CollaborationStatus.IN_PROGRESS
+        || collaboration.getCampaign().getStatus() != CampaignStatus.ACTIVE)
+      throw new BusinessException(ErrorCode.DEAL_STATE_CONFLICT, "An active collaboration is required");
+    String source = "CREATOR_SUBMITTED";
     LocalDateTime now = LocalDateTime.now();
-
-    if (request.publishedContentUrl() != null && !request.publishedContentUrl().isBlank()) {
-      collaboration.setPublishedContentUrl(request.publishedContentUrl());
-      collaboration.setUpdatedAt(now);
-    } else if ("POST_LINK".equalsIgnoreCase(request.assetType())
-        && (collaboration.getPublishedContentUrl() == null
-            || collaboration.getPublishedContentUrl().isBlank())) {
-      collaboration.setPublishedContentUrl(request.storageUrl());
-      collaboration.setUpdatedAt(now);
-    }
 
     CampaignOutcome outcome = outcomes.findByCollaborationId(collaborationId).orElse(null);
 
@@ -607,6 +569,8 @@ public class CollaborationService {
             .findFirstByCollaborationIdAndAssetTypeAndStorageUrl(
                 collaborationId, request.assetType(), request.storageUrl())
             .orElse(null);
+    if (asset != null && !source.equals(asset.getSource()))
+      throw new BusinessException(ErrorCode.DEAL_STATE_CONFLICT, "Evidence link is already registered");
 
     boolean isNewAsset = (asset == null);
     if (isNewAsset) {
@@ -624,7 +588,6 @@ public class CollaborationService {
 
     if (isNewAsset
         && notificationService != null
-        && isCreatorOwner
         && collaboration.getCampaign() != null
         && collaboration.getCampaign().getBrandProfile() != null
         && collaboration.getCampaign().getBrandProfile().getUser() != null) {
@@ -656,22 +619,31 @@ public class CollaborationService {
             .findById(collaborationId)
             .orElseThrow(() -> new NotFoundException("Collaboration not found"));
 
+    return evidenceFor(collaboration, requireCollaborationAccess(collaboration));
+  }
+
+  private boolean requireCollaborationAccess(Collaboration collaboration) {
     User actor = Permissions.actor();
-    boolean isBrandOwner =
-        collaboration.getCampaign().getBrandProfile().getUser().getId().equals(actor.getId());
-    boolean isCreatorOwner =
-        deals != null
+    boolean brand = actor.getRole() == Role.BRAND;
+    Permission permission = brand ? Permission.MANAGE_OWN_COLLABORATION : Permission.RESPOND_OWN_COOPERATION;
+    if (!brand && actor.getRole() != Role.CREATOR)
+      throw new ForbiddenException("Collaboration role required");
+    Permissions.require(permission);
+    if (deals != null) deals.fresh(permission);
+    boolean allowed = brand
+        ? collaboration.getCampaign().getBrandProfile().getUser().getId().equals(actor.getId())
+        : deals != null
             ? deals.canAccessCollaboration(actor.getId(), collaboration.getId())
-            : (collaboration.getCreator() != null
-                && collaboration.getCreator().getOwner() != null
-                && collaboration.getCreator().getOwner().getId().equals(actor.getId()));
-    boolean isStaff = actor.getRole() == Role.ADMIN || actor.getRole() == Role.DATA_MANAGER;
+            : collaboration.getCreator() != null && collaboration.getCreator().getOwner() != null
+                && collaboration.getCreator().getOwner().getId().equals(actor.getId());
+    if (!allowed) throw new ForbiddenException("Collaboration ownership required");
+    return brand;
+  }
 
-    if (!isBrandOwner && !isCreatorOwner && !isStaff) {
-      throw new ForbiddenException("Access denied to view evidence for this collaboration");
-    }
-
+  private List<EvidenceAssetResponse> evidenceFor(Collaboration collaboration, boolean brand) {
+    UUID collaborationId = collaboration.getId();
     return evidenceAssets.findByCollaborationIdOrderByUploadedAtDesc(collaborationId).stream()
+        .filter(asset -> brand || "CREATOR_SUBMITTED".equals(asset.getSource()))
         .map(
             a ->
                 new EvidenceAssetResponse(
@@ -686,12 +658,15 @@ public class CollaborationService {
   }
 
   @Transactional(readOnly = true)
-  @PreAuthorize("hasRole('CREATOR')")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION')")
   public List<CreatorCollaborationDto> getCreatorPortalCollaborations(CollaborationStatus status) {
     User actor = Permissions.actor();
     if (actor.getRole() != Role.CREATOR) {
       throw new ForbiddenException("Only creators can access creator portal collaborations");
     }
+
+    Permissions.require(Permission.RESPOND_OWN_COOPERATION);
+    if (deals != null) deals.fresh(Permission.RESPOND_OWN_COOPERATION);
 
     CreatorMaster master = creatorMasters.findByUserId(actor.getId()).orElse(null);
     if (master == null) {
@@ -714,7 +689,6 @@ public class CollaborationService {
         .map(
             c -> {
               boolean hasOutcome = hasRecordedOutcome(c);
-              boolean hasReview = reviews.existsByCollaborationId(c.getId());
               return new CreatorCollaborationDto(
                   c.getId(),
                   c.getCampaign().getId(),
@@ -727,13 +701,13 @@ public class CollaborationService {
                   c.getCurrency(),
                   c.getStatus(),
                   c.getPublishedContentUrl(),
-                  c.getNote(),
+                  null,
                   c.getStartAt(),
                   c.getCompletedAt(),
                   c.getUpdatedAt(),
                   hasOutcome,
-                  hasReview,
-                  deals.channels(c.getId()));
+                  false,
+                  deals != null ? deals.channels(c.getId()) : Collections.emptyList());
             })
         .toList();
   }

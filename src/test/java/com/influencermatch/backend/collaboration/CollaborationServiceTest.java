@@ -550,26 +550,12 @@ class CollaborationServiceTest {
   }
 
   @Test
-  void submitEvidenceByBrandUpdatesPostUrlAndPersistsAsset() {
-    when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
-    when(evidenceAssets.save(any()))
-        .thenAnswer(
-            i -> {
-              EvidenceAsset a = i.getArgument(0);
-              a.setId(UUID.randomUUID());
-              return a;
-            });
-
-    SubmitEvidenceRequest req =
-        new SubmitEvidenceRequest(
-            "POST_LINK", "https://tiktok.com/@koc/video/999", null, "Published link");
-
-    EvidenceAssetResponse response = service.submitEvidence(collaboration.getId(), req);
-    assertThat(response.assetType()).isEqualTo("POST_LINK");
-    assertThat(response.source()).isEqualTo("BRAND_UPLOAD");
-    assertThat(response.storageUrl()).isEqualTo("https://tiktok.com/@koc/video/999");
-    assertThat(collaboration.getPublishedContentUrl())
-        .isEqualTo("https://tiktok.com/@koc/video/999");
+  void brandCannotAttachEvidenceOrSetPublication() {
+    var request = new SubmitEvidenceRequest(
+        "POST_LINK", "https://tiktok.com/@koc/video/999", null, "Published link");
+    assertCode(() -> service.submitEvidence(collaboration.getId(), request), ErrorCode.ACCESS_DENIED);
+    verify(evidenceAssets, never()).save(any());
+    assertThat(collaboration.getPublishedContentUrl()).isNull();
   }
 
   @Test
@@ -595,12 +581,13 @@ class CollaborationServiceTest {
         new SubmitEvidenceRequest(
             "INSIGHTS_SCREENSHOT",
             "https://s3.amazonaws.com/evidence/insights.png",
-            null,
+            "https://tiktok.com/@koc/video/999",
             "Insights proof");
 
     EvidenceAssetResponse response = service.submitEvidence(collaboration.getId(), req);
     assertThat(response.assetType()).isEqualTo("INSIGHTS_SCREENSHOT");
     assertThat(response.source()).isEqualTo("CREATOR_SUBMITTED");
+    assertThat(collaboration.getPublishedContentUrl()).isNull();
   }
 
   @Test

@@ -32,7 +32,7 @@ public class PlanService {
         Permission.MANAGE_PLAN);
     Plan plan =
         Plan.builder()
-            .planName(request.getPlanName())
+            .planName(request.getPlanName().strip())
             .price(request.getPrice())
             .currency(request.getCurrency())
             .durationDays(request.getDurationDays())
@@ -87,7 +87,7 @@ public class PlanService {
     Plan plan = findPlanEntityById(id);
 
     var before = toResponse(plan);
-    if (request.getPlanName() != null) plan.setPlanName(request.getPlanName());
+    if (request.getPlanName() != null) plan.setPlanName(request.getPlanName().strip());
     if (request.getPrice() != null) plan.setPrice(request.getPrice());
     if (request.getCurrency() != null) plan.setCurrency(request.getCurrency());
     if (request.getDurationDays() != null) plan.setDurationDays(request.getDurationDays());

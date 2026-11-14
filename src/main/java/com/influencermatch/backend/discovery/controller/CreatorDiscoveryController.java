@@ -28,14 +28,14 @@ public class CreatorDiscoveryController {
     @GetMapping("/{campaignId}/discovery")
     @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SEARCH_CREATOR')")
     @Transactional(readOnly = true)
-    @Operation(summary = "Discover creators for campaign", description = "Executes the 4-Stage Hybrid Discovery Pipeline (Hard Filters + Semantic & FTS Search + Rank Fusion + Fallback) to find creators.")
+    @Operation(summary = "Discover creators for campaign", description = "Filters existing creator records by campaign context and keyword. AI scoring runs separately on the campaign shortlist.")
     public ResponseEntity<ApiResponse<Page<Map<String, Object>>>> discoverCreators(
             @PathVariable UUID campaignId,
             @ParameterObject @ModelAttribute DiscoverySearchRequest searchRequest) {
             
         // Validate page size to prevent Spring Data JPA IllegalArgumentException
         if (searchRequest.getSize() == null || searchRequest.getSize() < 1) {
-            searchRequest.setSize(30);
+            searchRequest.setSize(50);
         }
         if (searchRequest.getPage() == null || searchRequest.getPage() < 0) {
             searchRequest.setPage(0);
@@ -47,6 +47,8 @@ public class CreatorDiscoveryController {
             Map<String, Object> map = new HashMap<>();
             map.put("id", p.getId());
             map.put("creatorId", p.getCreatorId());
+            map.put("masterId", p.getMasterId());
+            map.put("claimStatus", p.getClaimStatus());
             map.put("userName", p.getUserName());
             map.put("displayName", p.getDisplayName());
             map.put("platform", p.getPlatform());
@@ -61,15 +63,14 @@ public class CreatorDiscoveryController {
             map.put("contentSummary", p.getContentSummary());
             
             // Điểm số xếp hạng Hybrid
-            map.put("semanticScore", p.getSemanticScore());
+            map.put("searchRank", p.getFtsScore());
+            map.put("aiScoreAvailable", false);
+            map.put("semanticScore", null);
             map.put("ftsScore", p.getFtsScore());
-            map.put("hybridScore", p.getHybridScore());
-            int calculatedScore = p.getHybridScore() != null && p.getHybridScore() > 0.0
-                ? (int) Math.round(p.getHybridScore() <= 1.0 ? p.getHybridScore() * 100.0 : p.getHybridScore())
-                : Math.min(96, Math.max(70, (int) Math.round(75 + (p.getEngagementRate() != null ? p.getEngagementRate().doubleValue() * 2.5 : 8.0))));
-            map.put("matchScore", calculatedScore);
-            map.put("score", calculatedScore);
-            map.put("finalScore", calculatedScore);
+            map.put("hybridScore", null);
+            map.put("matchScore", null);
+            map.put("score", null);
+            map.put("finalScore", null);
             return map;
         });
         

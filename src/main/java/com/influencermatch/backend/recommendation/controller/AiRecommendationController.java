@@ -30,7 +30,8 @@ public class AiRecommendationController {
   @PostMapping
   @PreAuthorize("hasAuthority('RUN_RECOMMENDATION')")
   @Operation(
-      summary = "Run AI KOC Recommendation using Four-Memory Framework",
+      summary = "Score campaign shortlist using Four-Memory Framework",
+      description = "Select creators from database discovery and save them to the campaign shortlist first. Only SHORTLIST is accepted; DISCOVERY is rejected.",
       security = @SecurityRequirement(name = "BearerAuth"))
   public ResponseEntity<ApiResponse<RecommendationResponseDto>> recommendKocs(
       @PathVariable UUID campaignId,

@@ -65,6 +65,7 @@ class AiRecommendationServicePhase2Test {
     historicalCampaignRepository = mock(HistoricalCampaignRepository.class);
     brandPatternRepository = mock(BrandPatternRepository.class);
     shortlistItemRepository = mock(ShortlistItemRepository.class);
+    when(shortlistItemRepository.countByCampaignIdAndStatusNot(any(), any())).thenReturn(1L);
     recommendationRunRepository = mock(RecommendationRunRepository.class);
     aiServiceClient = mock(AiServiceClient.class);
 
@@ -230,8 +231,8 @@ class AiRecommendationServicePhase2Test {
             "Lifestyle",
             0.75);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(tiktokCand, igCand, otherCand));
 
     RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
@@ -320,8 +321,8 @@ class AiRecommendationServicePhase2Test {
             "Skincare",
             0.65);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(cand));
 
     // Giả lập Python service timeout / crash trả về fallback
@@ -426,8 +427,8 @@ class AiRecommendationServicePhase2Test {
 
     service.setPostRepository(mockPostRepo);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(readyCand, provCand));
 
     RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
@@ -578,8 +579,8 @@ class AiRecommendationServicePhase2Test {
     when(mockPostRepo.findByCreatorIdIn(any())).thenReturn(allPosts);
     service.setPostRepository(mockPostRepo);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(readyCand, provCand, notScorableCand, invalidDataCand));
 
     // Thực thi Recommendation Run
@@ -658,8 +659,8 @@ class AiRecommendationServicePhase2Test {
     when(mockPostRepo.findByCreatorIdIn(any())).thenReturn(List.of(p1));
     service.setPostRepository(mockPostRepo);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(provCand));
 
     RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
@@ -771,8 +772,8 @@ class AiRecommendationServicePhase2Test {
                     .build()));
     service.setPostRepository(mockPostRepo);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(readyCand, provCand, indepCand));
 
     RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
@@ -897,8 +898,8 @@ class AiRecommendationServicePhase2Test {
                     .build()));
     service.setPostRepository(mockPostRepo);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(c1, c2, c3, c4));
 
     // Yêu cầu limit = 2
@@ -975,8 +976,8 @@ class AiRecommendationServicePhase2Test {
     when(historicalCampaignRepository.findByCreatorId(creatorId))
         .thenReturn(Collections.emptyList());
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(cand));
 
     // AI microservice trả về explanation thành công
@@ -1064,8 +1065,8 @@ class AiRecommendationServicePhase2Test {
     when(historicalCampaignRepository.findByCreatorId(creatorId))
         .thenReturn(Collections.emptyList());
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(cand));
 
     // AI response có explanationAvailable = false và summary rỗng
@@ -1147,8 +1148,8 @@ class AiRecommendationServicePhase2Test {
                     .build()));
     service.setPostRepository(mockPostRepo);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(cand));
 
     // Kiểm tra chạy thành công cả 3 DisplayMode

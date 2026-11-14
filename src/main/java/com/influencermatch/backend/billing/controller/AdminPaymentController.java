@@ -11,6 +11,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import com.influencermatch.backend.billing.service.PaymentReportService;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -30,6 +32,7 @@ import org.springframework.web.bind.annotation.*;
 public class AdminPaymentController {
 
   private final AdminPaymentService service;
+  private final PaymentReportService reports;
 
   @Operation(
       summary = "List payment transactions with filters and pagination",
@@ -47,6 +50,7 @@ public class AdminPaymentController {
       @RequestParam(defaultValue = "20") int size,
       @RequestParam(defaultValue = "desc") String sortDir) {
 
+    PaymentReportService.validateRange(from, to);
     Sort.Direction direction =
         "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
     PageRequest pageRequest =
@@ -60,8 +64,19 @@ public class AdminPaymentController {
 
   @Operation(summary = "Get transaction financial statistics")
   @GetMapping("/stats")
-  public ApiResponse<PaymentStatsResponse> stats() {
-    return ApiResponse.ok(service.getStats());
+  public ApiResponse<PaymentStatsResponse> stats(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+    return ApiResponse.ok(reports.stats(from, to));
+  }
+
+  @GetMapping("/revenue")
+  @Operation(summary = "Revenue by payment date, grouped by day or month (VND)")
+  public ApiResponse<PaymentReportService.RevenueReport> revenue(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(defaultValue = "day") String groupBy) {
+    return ApiResponse.ok(reports.revenue(from, to, groupBy));
   }
 
   @Operation(summary = "Get transaction detail by ID")

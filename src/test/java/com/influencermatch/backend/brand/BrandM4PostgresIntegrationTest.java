@@ -256,7 +256,7 @@ class BrandM4PostgresIntegrationTest extends PostgresApiTestSupport {
     m3Store.finish(m3Lease, Collections.nCopies(768, 0.1f));
     for (int i = 0; i < 4; i++) review(campaign, 5);
     var c = mock(com.influencermatch.backend.creator.dto.RecommendationCandidateProjection.class);
-    when(c.getCreatorId()).thenReturn(UUID.randomUUID());
+    when(c.getCreatorId()).thenReturn(shortlistedCreator(campaign, owner));
     when(c.getPlatform()).thenReturn("TIKTOK");
     when(c.getNiche()).thenReturn("Beauty");
     when(c.getFollowers()).thenReturn(25000L);

@@ -58,11 +58,11 @@ public class AdminPaymentService {
           }
 
           if (from != null) {
-            predicates.add(cb.greaterThanOrEqualTo(root.get("createdAt"), from));
+            predicates.add(cb.greaterThanOrEqualTo(cb.<LocalDateTime>coalesce(root.get("paidAt"), root.get("createdAt")), from));
           }
 
           if (to != null) {
-            predicates.add(cb.lessThanOrEqualTo(root.get("createdAt"), to));
+            predicates.add(cb.lessThanOrEqualTo(cb.<LocalDateTime>coalesce(root.get("paidAt"), root.get("createdAt")), to));
           }
 
           if (search != null && !search.isBlank()) {
@@ -76,7 +76,7 @@ public class AdminPaymentService {
             Predicate pBrand = cb.like(cb.lower(brandJoin.get("businessName")), pattern);
             Predicate pUser = cb.like(cb.lower(userJoin.get("fullName")), pattern);
             Predicate pEmail = cb.like(cb.lower(userJoin.get("email")), pattern);
-            Predicate pPlan = cb.like(cb.lower(planJoin.get("name")), pattern);
+            Predicate pPlan = cb.like(cb.lower(planJoin.get("planName")), pattern);
 
             predicates.add(cb.or(pTxn, pBrand, pUser, pEmail, pPlan));
           }

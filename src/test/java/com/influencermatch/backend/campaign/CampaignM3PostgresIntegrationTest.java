@@ -91,7 +91,7 @@ class CampaignM3PostgresIntegrationTest extends PostgresApiTestSupport {
 
   void candidates() {
     var candidate = mock(RecommendationCandidateProjection.class);
-    when(candidate.getCreatorId()).thenReturn(UUID.randomUUID());
+    when(candidate.getCreatorId()).thenReturn(shortlistedCreator(campaign, owner));
     when(candidate.getPlatform()).thenReturn("TIKTOK");
     when(candidate.getFollowers()).thenReturn(20000L);
     when(candidate.getNiche()).thenReturn("Beauty");
@@ -250,12 +250,17 @@ class CampaignM3PostgresIntegrationTest extends PostgresApiTestSupport {
   @Test
   void pendingAndEmptySourcesNeverReserveQuotaOrCallEmbedding() throws Exception {
     ready();
+    var missing = call(owner, post("/campaigns/" + campaign + "/ai-recommendations"), null, 409);
+    assertThat(missing.path("code").asText()).isEqualTo("RECOMMENDATION_NO_CANDIDATES");
+    candidates();
     var pending = call(owner, post("/campaigns/" + campaign + "/ai-recommendations"), null, 409);
     assertThat(pending.path("embeddingStatus").asText()).isEqualTo("PENDING");
     assertThat(used()).isZero();
     verify(ai, never()).getEmbedding(anyString());
     worker.process(job());
     clearInvocations(ai);
+    when(metrics.findCandidatesByShortlist(any(), anyString(), anyBoolean(), anyCollection()))
+        .thenReturn(List.of());
     var empty = call(owner, post("/campaigns/" + campaign + "/ai-recommendations"), null, 409);
     assertThat(empty.path("code").asText()).isEqualTo("RECOMMENDATION_NO_CANDIDATES");
     assertThat(used()).isZero();
@@ -266,7 +271,7 @@ class CampaignM3PostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
-  void explicitDiscoveryAndShortlistPersistProvenanceAndReuseFeedbackVector() throws Exception {
+  void shortlistScoringPersistsProvenanceAndRejectsDiscoverySource() throws Exception {
     ready();
     worker.process(job());
     candidates();
@@ -298,8 +303,8 @@ class CampaignM3PostgresIntegrationTest extends PostgresApiTestSupport {
         owner,
         post("/campaigns/" + campaign + "/ai-recommendations?candidateSource=DISCOVERY"),
         null,
-        200);
-    verify(metrics)
+        400);
+    verify(metrics, never())
         .findTopCandidatesByEmbedding(
             anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt());
     assertThat(
@@ -354,6 +359,7 @@ class CampaignM3PostgresIntegrationTest extends PostgresApiTestSupport {
 
   @Test
   void legacyPreparationCommitsOnceWithoutFabricatingMissingFields() throws Exception {
+    shortlistedCreator(campaign, owner);
     jdbc.update(
         "update campaign set"
             + " status='ACTIVE',brief=null,total_budget=null,creator_mode=null,target_creator_count=null,budget_min=123"

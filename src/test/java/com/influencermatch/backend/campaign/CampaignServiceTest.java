@@ -83,6 +83,26 @@ class CampaignServiceTest {
     org.springframework.test.util.ReflectionTestUtils.setField(service, "objectMapper", mapper);
   }
 
+  @Test
+  void discoveryDelegatesFiltersToSharedEngine() {
+    var campaign = Campaign.builder().id(UUID.randomUUID()).brandProfile(brand)
+        .platforms(List.of("TIKTOK")).niches(List.of("BEAUTY")).build();
+    when(campaigns.findById(campaign.getId())).thenReturn(Optional.of(campaign));
+    var engine = mock(com.influencermatch.backend.discovery.service.CreatorDiscoveryService.class);
+    org.springframework.test.util.ReflectionTestUtils.setField(service, "discovery", engine);
+    when(engine.discoverCreators(eq(campaign.getId()), any()))
+        .thenReturn(org.springframework.data.domain.Page.empty());
+    var filter = new com.influencermatch.backend.creator.dto.CreatorDiscoveryFilterRequest();
+    filter.setKeyword("sunscreen"); filter.setNiche("BEAUTY"); filter.setIsClaimed(true);
+    service.discoverCreators(campaign.getId(), filter,
+        org.springframework.data.domain.PageRequest.of(0, 20), auth);
+    var request = ArgumentCaptor.forClass(com.influencermatch.backend.discovery.dto.DiscoverySearchRequest.class);
+    verify(engine).discoverCreators(eq(campaign.getId()), request.capture());
+    assertThat(request.getValue().getKeyword()).isEqualTo("sunscreen");
+    assertThat(request.getValue().getNiche()).isEqualTo("BEAUTY");
+    assertThat(request.getValue().getIsClaimed()).isTrue();
+  }
+
   @AfterEach
   void clear() {
     SecurityContextHolder.clearContext();

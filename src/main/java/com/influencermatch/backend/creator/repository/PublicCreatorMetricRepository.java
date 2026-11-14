@@ -39,135 +39,94 @@ public interface PublicCreatorMetricRepository
       """, nativeQuery=true)
   List<PublicCreatorMetric> latestForCreators(@Param("ids") java.util.Collection<UUID> ids);
 
-  @Query(
-      value = """
-          SELECT * FROM (
-              SELECT DISTINCT ON (COALESCE('MASTER:' || c.master_id::text, 'ACCOUNT:' || c.id::text))
-                  m.id AS id,
-                  c.id AS creatorId,
-                  c.master_id AS masterId,
-                  COALESCE(cm.canonical_name, c.display_name, c.user_name) AS displayName,
-                  c.platform AS platform,
-                  c.user_name AS userName,
-                  c.avatar_url AS avatarUrl,
-                  c.profile_url AS profileUrl,
-                  m.followers AS followers,
-                  m.avg_views AS avgViews,
-                  m.avg_likes AS avgLikes,
-                  m.niche AS niche,
-                  m.category AS category,
-                  m.engagement_rate AS engagementRate,
-                  m.content_summary AS contentSummary,
-                  CASE WHEN c.master_id IS NOT NULL THEN 'LINKED_PROFILE' ELSE 'PUBLIC_PROFILE' END AS claimStatus,
-                  CASE 
-                      WHEN :hasVector = true AND :queryVector IS NOT NULL AND c.embedding IS NOT NULL 
-                      THEN (1 - (c.embedding <=> cast(NULLIF(:queryVector, '') as vector)))
-                      ELSE 0.0 
-                  END AS semanticScore,
-                  CASE 
-                      WHEN :hasKeyword = true AND :formattedKeyword IS NOT NULL AND :formattedKeyword != ''
-                      THEN ts_rank(m.search_vector, to_tsquery('simple', :formattedKeyword))
-                      ELSE 0.0 
-                  END AS ftsScore,
-                  CASE 
-                      WHEN :hasKeyword = true THEN (
-                          (CASE WHEN :hasVector = true AND :queryVector IS NOT NULL AND c.embedding IS NOT NULL THEN (0.6 * (1 - (c.embedding <=> cast(NULLIF(:queryVector, '') as vector)))) ELSE 0.0 END)
-                        + (CASE WHEN :formattedKeyword IS NOT NULL AND :formattedKeyword != '' THEN (0.4 * ts_rank(m.search_vector, to_tsquery('simple', :formattedKeyword))) ELSE 0.0 END)
-                      )
-                      ELSE 0.0 
-                  END AS hybridScore
-              FROM public_creator_metric m
-              JOIN creator c ON m.creator_id = c.id
-              LEFT JOIN creator_master cm ON c.master_id = cm.id
-              WHERE 
-                  m.creator_type IN ('KOL', 'KOC')
-                  AND (:hasPlatforms = false OR c.platform IN (:platforms))
-                  AND (
-                      :hasNiches = false 
-                      OR m.niche IN (:niches) 
-                      OR m.category IN (:niches)
-                      OR EXISTS (
-                          SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part_niche 
-                          WHERE trim(part_niche) IN (:niches)
-                      )
-                  )
-                  AND (
-                      :uiNiche IS NULL 
-                      OR m.niche = :uiNiche 
-                      OR m.category = :uiNiche
-                      OR m.niche ILIKE '%' || :uiNiche || '%'
-                      OR m.category ILIKE '%' || :uiNiche || '%'
-                  )
-                  AND (:followerMin IS NULL OR m.followers >= :followerMin)
-                  AND (:followerMax IS NULL OR m.followers <= :followerMax)
-                  AND (
-                      :isStrictSearch = false 
-                      OR (:hasVector = true AND :queryVector IS NOT NULL AND c.embedding IS NOT NULL AND (1 - (c.embedding <=> cast(NULLIF(:queryVector, '') as vector))) > 0.2)
-                      OR (:formattedKeyword IS NOT NULL AND :formattedKeyword != '' AND m.search_vector @@ to_tsquery('simple', :formattedKeyword))
-                  )
-              ORDER BY 
-                  COALESCE('MASTER:' || c.master_id::text, 'ACCOUNT:' || c.id::text),
-                  CASE 
-                      WHEN :hasKeyword = true THEN (
-                          (CASE WHEN :hasVector = true AND :queryVector IS NOT NULL AND c.embedding IS NOT NULL THEN (0.6 * (1 - (c.embedding <=> cast(NULLIF(:queryVector, '') as vector)))) ELSE 0.0 END)
-                        + (CASE WHEN :formattedKeyword IS NOT NULL AND :formattedKeyword != '' THEN (0.4 * ts_rank(m.search_vector, to_tsquery('simple', :formattedKeyword))) ELSE 0.0 END)
-                      )
-                      ELSE 0.0 
-                  END DESC,
-                  m.followers DESC
-          ) ranked_creators
-          ORDER BY 
-              ranked_creators.hybridScore DESC,
-              ranked_creators.followers DESC
-          """,
-      countQuery = """
-          SELECT count(DISTINCT COALESCE('MASTER:' || c.master_id::text, 'ACCOUNT:' || c.id::text))
+  // Both endpoints use the same eligibility, latest snapshot, ranking and master grouping.
+  String DISCOVERY_CTES = """
+      WITH eligible AS (
+          SELECT m.id, c.id AS creatorId, c.master_id AS masterId,
+                 COALESCE(cm.canonical_name, c.display_name, c.user_name) AS displayName,
+                 c.platform, c.user_name AS userName, c.avatar_url AS avatarUrl,
+                 c.profile_url AS profileUrl, m.followers, m.avg_views AS avgViews,
+                 m.avg_likes AS avgLikes, m.niche, m.category,
+                 m.engagement_rate AS engagementRate, m.content_summary AS contentSummary,
+                 CASE WHEN c.master_id IS NOT NULL THEN 'LINKED_PROFILE' ELSE 'PUBLIC_PROFILE' END AS claimStatus,
+                 COALESCE('MASTER:' || c.master_id::text, 'ACCOUNT:' || c.id::text) AS groupKey,
+                 CAST(NULL AS double precision) AS semanticScore,
+                 CAST(NULL AS double precision) AS hybridScore,
+                 ts_rank(m.search_vector || to_tsvector('simple', COALESCE(c.display_name, '') || ' ' || c.user_name),
+                     websearch_to_tsquery('simple', :keyword), 32) AS ftsScore,
+                 m.actual_fee AS actualFee,
+                 COALESCE(m.actual_fee, (
+                   COALESCE(m.estimated_fee_min, CASE
+                     WHEN COALESCE(m.followers, 0) < 10000 THEN 200000 WHEN COALESCE(m.followers, 0) < 50000 THEN 1000000
+                     WHEN COALESCE(m.followers, 0) < 100000 THEN 2500000 WHEN COALESCE(m.followers, 0) < 500000 THEN 5000000
+                     WHEN COALESCE(m.followers, 0) < 1000000 THEN 15000000 ELSE 30000000 END)
+                   + COALESCE(m.estimated_fee_max, CASE
+                     WHEN COALESCE(m.followers, 0) < 10000 THEN 500000 WHEN COALESCE(m.followers, 0) < 50000 THEN 2500000
+                     WHEN COALESCE(m.followers, 0) < 100000 THEN 5000000 WHEN COALESCE(m.followers, 0) < 500000 THEN 15000000
+                     WHEN COALESCE(m.followers, 0) < 1000000 THEN 30000000 ELSE 60000000 END)) / 2.0) AS comparableFee
           FROM public_creator_metric m
           JOIN creator c ON m.creator_id = c.id
-          WHERE 
-              m.creator_type IN ('KOL', 'KOC')
-              AND (:hasPlatforms = false OR c.platform IN (:platforms))
-              AND (
-                  :hasNiches = false 
-                  OR m.niche IN (:niches) 
-                  OR m.category IN (:niches)
-                  OR EXISTS (
-                      SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part_niche 
-                      WHERE trim(part_niche) IN (:niches)
-                  )
-              )
-              AND (
-                  :uiNiche IS NULL 
-                  OR m.niche = :uiNiche 
-                  OR m.category = :uiNiche
-                  OR m.niche ILIKE '%' || :uiNiche || '%'
-                  OR m.category ILIKE '%' || :uiNiche || '%'
-              )
-              AND (:followerMin IS NULL OR m.followers >= :followerMin)
-              AND (:followerMax IS NULL OR m.followers <= :followerMax)
-              AND (
-                  :isStrictSearch = false 
-                  OR (:hasVector = true AND :queryVector IS NOT NULL AND c.embedding IS NOT NULL AND (1 - (c.embedding <=> cast(NULLIF(:queryVector, '') as vector))) > 0.2)
-                  OR (:formattedKeyword IS NOT NULL AND :formattedKeyword != '' AND m.search_vector @@ to_tsquery('simple', :formattedKeyword))
-              )
-          """,
-      nativeQuery = true
-  )
-    Page<HybridDiscoveryCreatorProjection> searchHybridCreators(
-        @Param("hasPlatforms") boolean hasPlatforms,
-        @Param("platforms") List<String> platforms,
-        @Param("hasNiches") boolean hasNiches,
-        @Param("niches") List<String> niches,
-        @Param("uiNiche") String uiNiche,
-        @Param("followerMin") Long followerMin,
-        @Param("followerMax") Long followerMax,
-        @Param("isStrictSearch") boolean isStrictSearch,
-        @Param("hasKeyword") boolean hasKeyword,
-        @Param("formattedKeyword") String formattedKeyword,
-        @Param("hasVector") boolean hasVector,
-        @Param("queryVector") String queryVector,
-        Pageable pageable
-    );
+          LEFT JOIN creator_master cm ON c.master_id = cm.id
+          WHERE m.creator_type IN ('KOL', 'KOC') AND m.freshness_status = 'FRESH'
+            AND m.id = (SELECT latest.id FROM public_creator_metric latest
+                        WHERE latest.creator_id = c.id
+                        ORDER BY latest.collected_at DESC, latest.id DESC LIMIT 1)
+            AND (:hasPlatforms = false OR c.platform IN (:platforms))
+            AND (COALESCE(BTRIM(CAST(:#{#filters.platform} AS text)), '') = ''
+                 OR UPPER(c.platform) = UPPER(BTRIM(CAST(:#{#filters.platform} AS text))))
+            AND (:hasLocations = false OR c.location IN (:locations))
+            AND (:hasNiches = false OR LOWER(BTRIM(m.category)) IN (:niches)
+                 OR EXISTS (SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part
+                            WHERE LOWER(BTRIM(part)) IN (:niches)))
+            AND (COALESCE(BTRIM(CAST(:#{#filters.niche} AS text)), '') = ''
+                 OR LOWER(BTRIM(m.category)) IN (:uiNiches)
+                 OR EXISTS (SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part
+                            WHERE LOWER(BTRIM(part)) IN (:uiNiches)))
+            AND (CAST(:followerMin AS bigint) IS NULL OR m.followers >= :followerMin)
+            AND (CAST(:followerMax AS bigint) IS NULL OR m.followers <= :followerMax)
+            AND (COALESCE(BTRIM(CAST(:#{#filters.tier} AS text)), '') = ''
+                 OR CASE UPPER(BTRIM(CAST(:#{#filters.tier} AS text)))
+                     WHEN 'NANO' THEN m.followers < 10000
+                     WHEN 'MICRO' THEN m.followers BETWEEN 10000 AND 99999
+                     WHEN 'MACRO' THEN m.followers BETWEEN 100000 AND 999999
+                     WHEN 'MEGA' THEN m.followers >= 1000000 ELSE false END)
+            AND (CAST(:#{#filters.minEr} AS numeric) IS NULL OR m.engagement_rate >= :#{#filters.minEr})
+            AND (CAST(:#{#filters.maxEr} AS numeric) IS NULL OR m.engagement_rate <= :#{#filters.maxEr})
+            AND (CAST(:#{#filters.isClaimed} AS boolean) IS NULL
+                 OR :#{#filters.isClaimed} = (c.source_type = 'AUTHORIZED' OR c.authorized_at IS NOT NULL))
+            AND (:topicQuery = '' OR m.search_vector @@ websearch_to_tsquery('simple', :topicQuery))
+            AND (COALESCE(BTRIM(CAST(:#{#filters.keyword} AS text)), '') = ''
+                 OR (m.search_vector || to_tsvector('simple', COALESCE(c.display_name, '') || ' ' || c.user_name))
+                     @@ websearch_to_tsquery('simple', CAST(:#{#filters.keyword} AS text)))
+      ), filtered AS (
+          SELECT * FROM eligible
+          WHERE (CAST(:#{#filters.minFee} AS numeric) IS NULL OR comparableFee >= :#{#filters.minFee})
+            AND (CAST(:#{#filters.maxFee} AS numeric) IS NULL OR comparableFee <= :#{#filters.maxFee})
+      ), grouped AS (
+          SELECT DISTINCT ON (groupKey) * FROM filtered
+          ORDER BY groupKey, ftsScore DESC, followers DESC NULLS LAST, creatorId
+      )
+      """;
+
+  @Query(value = DISCOVERY_CTES + """
+      SELECT * FROM grouped
+      ORDER BY
+        CASE WHEN UPPER(COALESCE(CAST(:#{#filters.sortBy} AS text), '')) = 'LOWEST_COMPARABLE_FEE'
+             THEN CASE WHEN actualFee IS NULL THEN 1 ELSE 0 END END,
+        CASE WHEN UPPER(COALESCE(CAST(:#{#filters.sortBy} AS text), '')) = 'LOWEST_COMPARABLE_FEE'
+             THEN comparableFee END,
+        ftsScore DESC, followers DESC NULLS LAST, creatorId
+      """,
+      countQuery = DISCOVERY_CTES + "SELECT count(*) FROM grouped", nativeQuery = true)
+  Page<HybridDiscoveryCreatorProjection> searchDiscoveryCreators(
+      @Param("hasPlatforms") boolean hasPlatforms, @Param("platforms") List<String> platforms,
+      @Param("hasNiches") boolean hasNiches, @Param("niches") List<String> niches,
+      @Param("followerMin") Long followerMin, @Param("followerMax") Long followerMax,
+      @Param("keyword") String keyword, @Param("topicQuery") String topicQuery,
+      @Param("filters") com.influencermatch.backend.discovery.dto.DiscoverySearchRequest filters,
+      @Param("hasLocations") boolean hasLocations, @Param("locations") List<String> locations,
+      @Param("uiNiches") List<String> uiNiches,
+      Pageable pageable);
 
   @Query(
       value = """
@@ -232,22 +191,23 @@ public interface PublicCreatorMetricRepository
                  m.category AS category,
                  m.creator_type AS creatorType,
                  CASE 
-                     WHEN c.embedding IS NOT NULL AND :briefVector IS NOT NULL 
+                     WHEN c.embedding IS NOT NULL AND :briefVector IS NOT NULL AND vector_norm(c.embedding) > 0
                      THEN (1.0 - (c.embedding <=> CAST(:briefVector AS vector)))
-                     ELSE 0.50 
+                     ELSE NULL
                  END AS semanticScore
           FROM creator c
           JOIN shortlist_item s ON s.creator_id = c.id
           LEFT JOIN public_creator_metric m ON m.id = (
               SELECT m2.id FROM public_creator_metric m2
               WHERE m2.creator_id = c.id
-              ORDER BY m2.observed_at DESC NULLS LAST, m2.collected_at DESC, m2.id DESC
+              ORDER BY m2.collected_at DESC, m2.id DESC
               LIMIT 1
           )
           WHERE s.campaign_id = :campaignId
             AND s.status != 'REMOVED'
+            AND (m.id IS NULL OR (m.creator_type IN ('KOL', 'KOC') AND m.freshness_status = 'FRESH'))
             AND (:hasExcludedIds = false OR c.id NOT IN (:excludedIds))
-          ORDER BY semanticScore DESC
+          ORDER BY semanticScore DESC NULLS LAST, c.id
           """,
       nativeQuery = true
   )

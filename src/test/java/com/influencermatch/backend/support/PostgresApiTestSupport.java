@@ -147,6 +147,16 @@ public abstract class PostgresApiTestSupport {
     return body;
   }
 
+  protected UUID shortlistedCreator(UUID campaignId, User owner) {
+    UUID creator = UUID.randomUUID();
+    jdbc.update("insert into creator(id,platform,external_id,user_name,created_at,updated_at)"
+        + " values(?,'TIKTOK',?,'Shortlist fixture',now(),now())", creator, creator.toString());
+    jdbc.update("insert into shortlist_item(id,campaign_id,creator_id,user_id,priority,added_at,status,source)"
+        + " values(?,?,?,?,'MEDIUM',now(),'SAVED','MANUAL_DISCOVERY')",
+        UUID.randomUUID(), campaignId, creator, owner.getId());
+    return creator;
+  }
+
   protected UUID createCampaign(User user, UUID brand) throws Exception {
     grantCampaignSubscription(brand, 100);
     return UUID.fromString(

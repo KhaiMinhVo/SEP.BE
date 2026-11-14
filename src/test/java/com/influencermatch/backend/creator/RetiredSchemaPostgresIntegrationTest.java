@@ -19,6 +19,9 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 class RetiredSchemaPostgresIntegrationTest extends PostgresApiTestSupport {
+  @org.springframework.boot.test.mock.mockito.MockBean
+  com.influencermatch.backend.creator.client.AiServiceClient discoveryAi;
+
   @Autowired CreatorIngestionService ingestion;
   @Autowired CreatorRepository creators;
   @Autowired PublicCreatorMetricRepository metrics;

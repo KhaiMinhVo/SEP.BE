@@ -103,7 +103,8 @@ public class CreatorIngestionService {
     }
 
     // Only public core fields are writable by ingestion; ownership and rates are not accepted.
-    creator.setUserName(request.getUserName());
+    creator.setUserName(request.getUserName() == null ? null
+        : request.getUserName().trim().replaceFirst("^@+", "").trim());
     if (request.getDisplayName() != null) {
       creator.setDisplayName(request.getDisplayName());
     }
@@ -176,7 +177,11 @@ public class CreatorIngestionService {
     metric.setAvgComments(request.getAvgComments());
     metric.setAvgShares(request.getAvgShares());
     metric.setEngagementRate(request.getEngagementRate());
-    metric.setNiche(request.getNiche());
+    // A manager-approved niche takes precedence over subsequent crawler output.
+    if (metric.getQualityReviewedAt() == null && request.getNiche() != null
+        && !request.getNiche().isBlank() && !"UNKNOWN".equalsIgnoreCase(request.getNiche().trim())) {
+      metric.setNiche(request.getNiche());
+    }
     metric.setContentSummary(request.getContentSummary());
     metric.setCollectedAt(LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS));
     metric.setCrawlRunId(request.getCrawlRunId());
@@ -186,7 +191,10 @@ public class CreatorIngestionService {
     metric.setFreshnessStatus(status);
     metric.setDataConfidence(request.getDataConfidence());
     metric.setContact(request.getContact());
-    metric.setCategory(request.getCategory());
+    if (request.getCategory() != null && !request.getCategory().isBlank()
+        && !"UNKNOWN".equalsIgnoreCase(request.getCategory().trim())) {
+      metric.setCategory(request.getCategory());
+    }
 
     // Fee Benchmark (Declarative fallback if crawler didn't supply)
     if (request.getEstimatedFeeMin() != null && request.getEstimatedFeeMax() != null) {

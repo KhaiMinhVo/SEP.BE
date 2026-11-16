@@ -2,6 +2,7 @@ package com.influencermatch.backend.creator.dto;
 
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.NotBlank;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -15,8 +16,8 @@ public final class DataQualityDtos {
   }
 
   public record RejectRequest(
-      @Size(max = 255) String reason,
-      @Size(max = 50) String reclassifiedType) {
+      @NotBlank @Size(max = 255) String reason,
+      @Pattern(regexp = "REJECTED|BRAND|KOC|KOL", message = "Invalid review classification") String reclassifiedType) {
     public RejectRequest {
       reason = reason == null ? null : reason.trim();
       reclassifiedType = reclassifiedType == null ? null : reclassifiedType.trim().toUpperCase();
@@ -26,5 +27,5 @@ public final class DataQualityDtos {
   public record QualityItem(UUID metricId, UUID creatorId, String platform, String userName,
       String displayName, String profileUrl, String niche, String contentSummary,
       BigDecimal dataConfidence, LocalDateTime collectedAt, UUID qualityReviewedBy,
-      LocalDateTime qualityReviewedAt) {}
+      LocalDateTime qualityReviewedAt, String creatorType) {}
 }

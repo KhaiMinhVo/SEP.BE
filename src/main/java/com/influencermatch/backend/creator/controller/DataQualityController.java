@@ -22,10 +22,17 @@ public class DataQualityController {
   private final DataQualityService service;
 
   @GetMapping("/pending")
-  @Operation(summary = "List latest unreviewed KOC snapshots with confidence below 0.7")
+  @Operation(summary = "List latest unreviewed KOC/KOL snapshots with low confidence or missing niche")
   public ApiResponse<PageResponse<QualityItem>> pending(@RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size) {
     return ApiResponse.ok(service.pending(page, size));
+  }
+
+  @PostMapping("/review-statuses")
+  public ApiResponse<java.util.List<QualityItem>> reviewStatuses(
+      @Valid @RequestBody @jakarta.validation.constraints.Size(max = 100)
+      java.util.List<@jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 255) String> names) {
+    return ApiResponse.ok(service.reviewStatuses(names));
   }
 
   @PutMapping("/{id}/approve")
@@ -35,7 +42,7 @@ public class DataQualityController {
   }
 
   @PutMapping("/{id}/reject")
-  @Operation(summary = "Reject a pending metric snapshot", description = "id is metricId. Reclassifies creator (e.g. BRAND, REJECTED) and records decision in audit log. Excluded from Discovery.")
+  @Operation(summary = "Reject or reclassify a pending metric snapshot", description = "id is metricId. Requires a reason. Allowed types: BRAND, REJECTED, KOC, KOL. Records decision in audit log.")
   public ApiResponse<QualityItem> reject(@PathVariable UUID id, @Valid @RequestBody(required = false) RejectRequest request) {
     return ApiResponse.ok(service.reject(id, request != null ? request : new RejectRequest(null, null)));
   }

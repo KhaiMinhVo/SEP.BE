@@ -70,6 +70,9 @@ public interface PublicCreatorMetricRepository
               FROM post p WHERE p.creator_id = c.id
           ) post_evidence ON true
           WHERE m.creator_type IN ('KOL', 'KOC') AND m.freshness_status = 'FRESH'
+            AND (m.quality_reviewed_at IS NOT NULL OR (
+              (m.data_confidence IS NULL OR m.data_confidence >= 0.7)
+              AND NULLIF(BTRIM(m.niche), '') IS NOT NULL AND UPPER(BTRIM(m.niche)) <> 'UNKNOWN'))
             AND m.id = (SELECT latest.id FROM public_creator_metric latest
                         WHERE latest.creator_id = c.id
                         ORDER BY latest.collected_at DESC, latest.id DESC LIMIT 1)
@@ -225,6 +228,9 @@ public interface PublicCreatorMetricRepository
           WHERE s.campaign_id = :campaignId
             AND s.status != 'REMOVED'
             AND (m.id IS NULL OR (m.creator_type IN ('KOL', 'KOC') AND m.freshness_status = 'FRESH'))
+            AND (m.id IS NULL OR m.quality_reviewed_at IS NOT NULL OR (
+              (m.data_confidence IS NULL OR m.data_confidence >= 0.7)
+              AND NULLIF(BTRIM(m.niche), '') IS NOT NULL AND UPPER(BTRIM(m.niche)) <> 'UNKNOWN'))
             AND (:hasExcludedIds = false OR c.id NOT IN (:excludedIds))
           ORDER BY semanticScore DESC NULLS LAST, c.id
           """,

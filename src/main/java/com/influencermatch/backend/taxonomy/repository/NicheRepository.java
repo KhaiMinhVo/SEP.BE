@@ -8,5 +8,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface NicheRepository extends JpaRepository<Niche, UUID> {
   List<Niche> findAllByOrderByNameAsc();
   boolean existsByNameIgnoreCase(String name);
+  java.util.Optional<Niche> findByNameIgnoreCaseAndActiveTrue(String name);
   boolean existsByNameIgnoreCaseAndIdNot(String name, UUID id);
 }

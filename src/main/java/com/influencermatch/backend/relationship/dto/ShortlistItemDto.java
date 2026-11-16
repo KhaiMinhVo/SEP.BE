@@ -22,6 +22,12 @@ public class ShortlistItemDto {
   private UUID creatorId;
   private UUID masterId;
   private String creatorName;
+  private String userName;
+  private String category;
+  private String contentSummary;
+  private BigDecimal estimatedFeeMin;
+  private BigDecimal estimatedFeeMax;
+  private BigDecimal actualFee;
   private String platform;
   private String avatarUrl;
   private UUID metricId;

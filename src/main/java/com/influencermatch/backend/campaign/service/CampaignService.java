@@ -290,8 +290,7 @@ public class CampaignService {
     CampaignStatus target = request.status();
     campaign.getStatus().requireTransitionTo(target);
     if (target == CampaignStatus.READY_FOR_DISCOVERY) {
-      validateReady(campaign);
-      m3.create(campaign, false);
+      prepareReady(campaign);
     }
     if (target == CampaignStatus.COMPLETED) {
       Long completed =
@@ -331,6 +330,20 @@ public class CampaignService {
 
   public CampaignResponse changeStatus(UUID id, CampaignStatusRequest r, Authentication a) {
     return changeStatus(id, r, a, null);
+  }
+
+  @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('RUN_RECOMMENDATION')")
+  public void prepareForRecommendation(UUID id, String revision) {
+    Permissions.require(Permission.RUN_RECOMMENDATION);
+    Campaign campaign = writeLocks.owned(id);
+    if (campaign.getStatus() != CampaignStatus.DRAFT) return;
+    Permissions.require(Permission.CHANGE_CAMPAIGN_STATUS);
+    CampaignRevision.require(revision, id, campaign.getCampaignRevision());
+    campaign.getStatus().requireTransitionTo(CampaignStatus.READY_FOR_DISCOVERY);
+    prepareReady(campaign);
+    campaign.setStatus(CampaignStatus.READY_FOR_DISCOVERY);
+    campaign.setCampaignRevision(campaign.getCampaignRevision() + 1);
   }
 
   public CampaignResponse archive(UUID id, Authentication a) {
@@ -391,6 +404,11 @@ public class CampaignService {
     if (c.getDeliverables().isEmpty())
       missing.put("deliverables", List.of("At least one required"));
     if (!missing.isEmpty()) throw new ProfileIncompleteException(missing);
+  }
+
+  private void prepareReady(Campaign campaign) {
+    validateReady(campaign);
+    m3.create(campaign, false);
   }
 
   private boolean greater(Long min, Long max) {

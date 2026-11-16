@@ -86,11 +86,11 @@ spring:
 # ------------------------------------------------------------------------------------
 application:
   campaign-embedding:
-    enabled: ${CAMPAIGN_EMBEDDING_ENABLED:false}
+    enabled: ${CAMPAIGN_EMBEDDING_ENABLED:true}
     model: ${CAMPAIGN_EMBEDDING_MODEL:bkai-foundation-models/vietnamese-bi-encoder}
     model-version: ${CAMPAIGN_EMBEDDING_MODEL_VERSION:m3-embed-v1}
   brand-embedding:
-    enabled: ${BRAND_EMBEDDING_ENABLED:false}
+    enabled: ${BRAND_EMBEDDING_ENABLED:true}
     model: ${BRAND_EMBEDDING_MODEL:bkai-foundation-models/vietnamese-bi-encoder}
     model-version: ${BRAND_EMBEDDING_MODEL_VERSION:m4-embed-v1}
   policies:

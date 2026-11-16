@@ -51,10 +51,10 @@ class DataQualityServiceTest {
     order.verify(metrics).findFirstByCreatorIdOrderByCollectedAtDescIdDesc(m.getCreator().getId());
     order.verify(metrics).flush();order.verify(audit).record(eq("APPROVE_DATA_QUALITY"),anyString(),eq(m.getId()),any(),any(),anyString());
   }
-  @ParameterizedTest @ValueSource(strings={"kol","nullConfidence","threshold","reviewed","stale"})
+  @ParameterizedTest @ValueSource(strings={"brand","nullConfidence","threshold","reviewed","stale"})
   void ineligibleSnapshotDoesNotChangeOrAudit(String kind){
     var m=pending();
-    switch(kind){case "kol"->m.setCreatorType("KOL");case "nullConfidence"->m.setDataConfidence(null);
+    switch(kind){case "brand"->m.setCreatorType("BRAND");case "nullConfidence"->m.setDataConfidence(null);
       case "threshold"->m.setDataConfidence(new BigDecimal("0.7"));case "reviewed"->m.setQualityReviewedAt(LocalDateTime.of(2026,1,2,0,0));
       case "stale"->when(metrics.findFirstByCreatorIdOrderByCollectedAtDescIdDesc(m.getCreator().getId()))
           .thenReturn(Optional.of(PublicCreatorMetric.builder().id(UUID.randomUUID()).build()));}
@@ -69,6 +69,15 @@ class DataQualityServiceTest {
     verifyNoInteractions(metrics,creators,em,audit);
     assertThatThrownBy(()->service.approve(UUID.randomUUID(),new ApproveRequest(null))).isInstanceOf(NotFoundException.class);
     verifyNoInteractions(creators,em,audit);
+  }
+  @ParameterizedTest @ValueSource(strings={"KOC", "KOL"})
+  void unknownNicheWithHighConfidenceCanBeReviewed(String type){
+    var m=pending();m.setCreatorType(type);m.setNiche("UNKNOWN");
+    m.setDataConfidence(new BigDecimal("0.84"));
+    var result=service.approve(m.getId(),new ApproveRequest("Ch?m s?c da"));
+    assertThat(result.niche()).isEqualTo("Ch?m s?c da");
+    assertThat(result.dataConfidence()).isEqualByComparingTo("0.84");
+    assertThat(result.qualityReviewedAt()).isNotNull();
   }
   @Test void pendingClampsPageAndSize(){
     when(metrics.pending(any())).thenReturn(Page.empty());service.pending(-1,1000);

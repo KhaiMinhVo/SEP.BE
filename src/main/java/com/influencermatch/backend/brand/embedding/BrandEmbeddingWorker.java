@@ -23,7 +23,7 @@ public class BrandEmbeddingWorker {
       store.finish(lease, vector);
     } catch (Exception ex) {
       store.fail(lease);
-      log.warn("Brand embedding attempt failed jobId={} attempt={}", lease.id(), lease.attempts());
+      log.warn("Brand embedding attempt failed jobId={} attempt={}", lease.id(), lease.attempts(), ex);
     }
   }
 }

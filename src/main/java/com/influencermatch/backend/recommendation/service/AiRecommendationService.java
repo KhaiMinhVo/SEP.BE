@@ -142,6 +142,7 @@ public class AiRecommendationService {
 
     validateSelectedCreatorIds(id, source, creatorIds);
     campaignService.prepareForRecommendation(id, revision);
+    requireShortlistNotEmpty(id);
 
     var context = m3.prepare(id);
     var embedding = m3Embeddings.ready(context.getEmbeddingSourceContextId());
@@ -209,6 +210,7 @@ public class AiRecommendationService {
     Permissions.require(Permission.RUN_RECOMMENDATION);
     Campaign campaign = ownership.requireOwned(campaignId);
     Set<UUID> selectedIds = validateSelectedCreatorIds(campaignId, source, creatorIds);
+    requireShortlistNotEmpty(campaignId);
     var preparedContext = m3.prepare(campaignId);
     var preparedEmbedding = m3Embeddings.ready(preparedContext.getEmbeddingSourceContextId());
     if (preparedEmbedding == null)
@@ -254,39 +256,7 @@ public class AiRecommendationService {
           publicCreatorMetricRepository.findCandidatesByShortlist(
               campaignId, briefVectorStr, hasExcluded, safeExcluded);
 
-      // Nếu Shortlist chưa có ai, fallback sang quét toàn bộ kho Discovery (cho phép khám phá rộng)
-      if (source == com.influencermatch.backend.campaign.enums.CandidateSource.DISCOVERY
-          || (source == null && rawCandidates.isEmpty())) {
-        boolean hasPlatforms =
-            campaign.getPlatforms() != null && !campaign.getPlatforms().isEmpty();
-        Collection<String> safePlatforms =
-            hasPlatforms ? campaign.getPlatforms() : List.of("TIKTOK");
-
-        int retrievalLimit = Math.max(limit * 3, 50);
-        // Theo kiến trúc InfluencerMatch: Follower Range là Soft Preference mặc định (không được
-        // lọc cứng ở SQL làm mất ứng viên tốt).
-        // Chỉ Platform và Negative Constraints (Brand Exclusion) là Hard Constraints được lọc trước
-        // ở SQL.
-        rawCandidates =
-            publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-                briefVectorStr,
-                hasExcluded,
-                safeExcluded,
-                hasPlatforms,
-                safePlatforms,
-                null, // followerMin = null (Soft Preference)
-                null, // followerMax = null (Soft Preference)
-                retrievalLimit);
-        log.info(
-            "Shortlist was empty. Retrieved {} raw candidates via pgvector search for campaign {}",
-            rawCandidates.size(),
-            campaignId);
-      } else {
-        log.info(
-            "Retrieved {} candidates from shortlist for campaign {}",
-            rawCandidates.size(),
-            campaignId);
-      }
+      log.info("Retrieved {} candidates from campaign shortlist {}", rawCandidates.size(), campaignId);
 
       if (!selectedIds.isEmpty())
         rawCandidates = rawCandidates.stream()
@@ -666,7 +636,7 @@ public class AiRecommendationService {
                   .embeddingJobId(preparedEmbedding.jobId())
                   .embeddingModel(preparedEmbedding.model())
                   .embeddingModelVersion(preparedEmbedding.modelVersion())
-                  .candidateSource(source == null ? "LEGACY_AUTO" : source.name())
+                  .candidateSource("SHORTLIST")
                   .brandContextId(preparedContext.getBrandContextId())
                   .brandContextVersion(
                       preparedContext.getBrandContextId() == null
@@ -712,6 +682,9 @@ public class AiRecommendationService {
       UUID campaignId,
       com.influencermatch.backend.campaign.enums.CandidateSource source,
       List<UUID> creatorIds) {
+    if (source == com.influencermatch.backend.campaign.enums.CandidateSource.DISCOVERY)
+      throw new com.influencermatch.backend.exception.BadRequestException(
+          "Add creators to the campaign shortlist before running AI scoring");
     Set<UUID> selectedIds = creatorIds == null ? Set.of() : new LinkedHashSet<>(creatorIds);
     if (creatorIds != null
         && (creatorIds.isEmpty()
@@ -732,6 +705,14 @@ public class AiRecommendationService {
             "Every selected channel must belong to this campaign's active shortlist");
     }
     return selectedIds;
+  }
+
+  private void requireShortlistNotEmpty(UUID campaignId) {
+    if (shortlistItemRepository.countByCampaignIdAndStatusNot(campaignId, ShortlistStatus.REMOVED)
+        == 0)
+      throw new BusinessException(
+          ErrorCode.RECOMMENDATION_NO_CANDIDATES,
+          "Campaign shortlist is empty. Select creators from discovery first");
   }
 
   private String recommendationRequestHash(

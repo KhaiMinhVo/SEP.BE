@@ -8,6 +8,9 @@ COPY src ./src
 RUN mvn -B -DskipTests package
 
 FROM eclipse-temurin:21-jre-alpine
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.revision=$VCS_REF
+ENV APP_GIT_COMMIT=$VCS_REF
 WORKDIR /app
 
 RUN addgroup -S spring && adduser -S spring -G spring

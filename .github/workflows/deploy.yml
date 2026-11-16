@@ -5,6 +5,10 @@ on:
     branches:
       - develop
 
+concurrency:
+  group: backend-develop-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -17,8 +21,40 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
+            set -eu
             cd ~/SEP.BE
-            git fetch origin
-            git checkout develop
-            git pull origin develop
-            docker compose up --build -d
+            repo_dir=$(pwd)
+            git fetch origin develop
+            export DEPLOY_COMMIT='${{ github.sha }}'
+            git merge-base --is-ancestor "$DEPLOY_COMMIT" origin/develop
+            project_name=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' influencermatch_api)
+            test -n "$project_name"
+            test -f "$repo_dir/.env"
+            release_dir="$HOME/SEP.BE-releases/$DEPLOY_COMMIT"
+            mkdir -p "$HOME/SEP.BE-releases"
+            if [ ! -d "$release_dir" ]; then
+              git worktree add --detach "$release_dir" "$DEPLOY_COMMIT"
+            fi
+            test "$(git -C "$release_dir" rev-parse HEAD)" = "$DEPLOY_COMMIT"
+            test -z "$(git -C "$release_dir" status --porcelain --untracked-files=no)"
+            ln -sfn "$repo_dir/.env" "$release_dir/.env"
+            compose() {
+              docker compose --project-name "$project_name" --env-file "$repo_dir/.env" -f "$release_dir/docker-compose.yml" "$@"
+            }
+            compose up --build -d
+            api_id=$(compose ps -q api)
+            test -n "$api_id"
+            actual_commit=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$api_id")
+            test "$actual_commit" = "$DEPLOY_COMMIT"
+            attempts=0
+            until [ "$(docker inspect --format '{{.State.Health.Status}}' "$api_id")" = healthy ]; do
+              attempts=$((attempts + 1))
+              if [ "$attempts" -ge 60 ]; then
+                echo 'Backend did not become healthy; deployment failed.'
+                exit 1
+              fi
+              sleep 3
+            done
+            command -v python3
+            contract=$(curl --fail --silent --show-error --max-time 20 "https://api.influencermatch.site/api/v1/api-docs?revision=$DEPLOY_COMMIT")
+            printf '%s' "$contract" | python3 -c 'import json,os,sys; spec=json.load(sys.stdin); assert spec.get("info",{}).get("x-build-commit") == os.environ["DEPLOY_COMMIT"], "Public API commit does not match the deployed release"; params={p["name"] for p in spec["paths"]["/campaigns/{campaignId}/discovery"]["get"]["parameters"]}; assert {"platform","sortBy","minEr","isClaimed"} <= params, "Public API is still serving the old discovery contract"; required={"/billing/payments", "/billing/payments/{reference}"}; assert required <= spec["paths"].keys(), "Public API is missing payment verification or history endpoints"'

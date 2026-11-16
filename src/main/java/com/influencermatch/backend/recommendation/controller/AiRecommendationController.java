@@ -30,11 +30,13 @@ public class AiRecommendationController {
   @PostMapping
   @PreAuthorize("hasAuthority('RUN_RECOMMENDATION')")
   @Operation(
-      summary = "Run AI KOC Recommendation using Four-Memory Framework",
+      summary = "Score campaign shortlist using Four-Memory Framework",
       description =
-          "Requires Idempotency-Key. A DRAFT campaign is transitioned to READY_FOR_DISCOVERY; "
-              + "if embedding is still processing, retry this request with the same key after "
-              + "checking GET /campaigns/{id}.",
+         "Select creators from database discovery and save them to the campaign shortlist first. "
+             + "Only SHORTLIST is accepted; DISCOVERY is rejected. Requires Idempotency-Key. "
+             + "A DRAFT campaign is transitioned to READY_FOR_DISCOVERY; if embedding is still "
+             + "processing, retry this request with the same key after checking GET "
+             + "/campaigns/{id}.",
       security = @SecurityRequirement(name = "BearerAuth"))
   public ResponseEntity<ApiResponse<RecommendationResponseDto>> recommendKocs(
       @PathVariable UUID campaignId,

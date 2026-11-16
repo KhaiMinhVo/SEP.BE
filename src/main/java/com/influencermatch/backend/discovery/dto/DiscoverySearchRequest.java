@@ -25,4 +25,13 @@ public class DiscoverySearchRequest {
     private Long minFollowers;
     private Long maxFollowers;
     private String niche;
+    private String platform;
+    private String tier;
+    private java.math.BigDecimal minEr;
+    private java.math.BigDecimal maxEr;
+    private Boolean isClaimed;
+    private java.math.BigDecimal minFee;
+    private java.math.BigDecimal maxFee;
+    private String sortBy;
+
 }

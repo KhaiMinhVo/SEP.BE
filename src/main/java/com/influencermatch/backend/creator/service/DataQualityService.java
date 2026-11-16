@@ -28,6 +28,13 @@ public class DataQualityService {
   private final AuditService audit;
   private final Validator validator;
 
+  private boolean needsReview(PublicCreatorMetric metric) {
+    String niche = metric.getNiche();
+    return niche == null || niche.isBlank() || "UNKNOWN".equalsIgnoreCase(niche.trim())
+        || (metric.getDataConfidence() != null
+            && metric.getDataConfidence().compareTo(new BigDecimal("0.7")) < 0);
+  }
+
   @Transactional(readOnly = true)
   public PageResponse<QualityItem> pending(int page, int size) {
     Permissions.require(Permission.REVIEW_CREATOR_CLASSIFICATION);
@@ -46,8 +53,8 @@ public class DataQualityService {
     PublicCreatorMetric metric = metrics.findLocked(id).orElseThrow(() -> new NotFoundException("Metric not found"));
     em.refresh(metric);
     var latest = metrics.findFirstByCreatorIdOrderByCollectedAtDescIdDesc(creatorId);
-    if (latest.isEmpty() || !latest.get().getId().equals(id) || !"KOC".equals(metric.getCreatorType())
-        || metric.getDataConfidence() == null || metric.getDataConfidence().compareTo(new BigDecimal("0.7")) >= 0
+    if (latest.isEmpty() || !latest.get().getId().equals(id) || !("KOC".equals(metric.getCreatorType()) || "KOL".equals(metric.getCreatorType()))
+        || !needsReview(metric)
         || metric.getQualityReviewedAt() != null) {
       throw new ConflictException(ErrorCode.DATA_QUALITY_REVIEW_CONFLICT, "Snapshot is no longer pending review");
     }
@@ -73,8 +80,8 @@ public class DataQualityService {
     PublicCreatorMetric metric = metrics.findLocked(id).orElseThrow(() -> new NotFoundException("Metric not found"));
     em.refresh(metric);
     var latest = metrics.findFirstByCreatorIdOrderByCollectedAtDescIdDesc(creatorId);
-    if (latest.isEmpty() || !latest.get().getId().equals(id) || !"KOC".equals(metric.getCreatorType())
-        || metric.getDataConfidence() == null || metric.getDataConfidence().compareTo(new BigDecimal("0.7")) >= 0
+    if (latest.isEmpty() || !latest.get().getId().equals(id) || !("KOC".equals(metric.getCreatorType()) || "KOL".equals(metric.getCreatorType()))
+        || !needsReview(metric)
         || metric.getQualityReviewedAt() != null) {
       throw new ConflictException(ErrorCode.DATA_QUALITY_REVIEW_CONFLICT, "Snapshot is no longer pending review");
     }

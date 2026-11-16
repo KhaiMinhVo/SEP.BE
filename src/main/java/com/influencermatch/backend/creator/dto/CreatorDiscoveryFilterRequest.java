@@ -11,6 +11,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CreatorDiscoveryFilterRequest {
+  private String keyword;
+  private Long minFollowers;
+  private Long maxFollowers;
   private String platform;
   private String niche;
   private String tier;          // NANO (<10k), MICRO (10k-100k), MACRO (100k-1M), MEGA (>1M)
@@ -19,6 +22,6 @@ public class CreatorDiscoveryFilterRequest {
   private Boolean isClaimed;
   private BigDecimal minFee;
   private BigDecimal maxFee;
-  private String sortBy;        // SEMANTIC_RELEVANCE, BUDGET_FIT, LOWEST_COMPARABLE_FEE
+  private String sortBy;        // DATABASE_RELEVANCE (legacy SEMANTIC_RELEVANCE alias), BUDGET_FIT, LOWEST_COMPARABLE_FEE
 }
 

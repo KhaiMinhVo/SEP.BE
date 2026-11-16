@@ -187,7 +187,9 @@ public class CreatorIngestionService {
     metric.setCrawlRunId(request.getCrawlRunId());
     metric.setObservedAt(
         request.getObservedAt() != null ? request.getObservedAt() : LocalDateTime.now());
-    metric.setCreatorType(request.getCreatorType());
+    if (metric.getQualityReviewedAt() == null) {
+      metric.setCreatorType(request.getCreatorType());
+    }
     metric.setFreshnessStatus(status);
     metric.setDataConfidence(request.getDataConfidence());
     metric.setContact(request.getContact());
@@ -276,8 +278,9 @@ public class CreatorIngestionService {
     return CreatorIngestionResponse.builder()
         .creatorId(savedCreator.getId())
         .metricId(metric.getId())
-        .status("SUCCESS")
-        .message("Creator data ingested successfully")
+        .status("REJECTED".equals(metric.getCreatorType()) || "BRAND".equals(metric.getCreatorType()) ? "REJECTED" : "SUCCESS")
+        .message("REJECTED".equals(metric.getCreatorType()) || "BRAND".equals(metric.getCreatorType())
+            ? "Creator remains excluded by manager review" : "Creator data ingested successfully")
         .build();
   }
 }

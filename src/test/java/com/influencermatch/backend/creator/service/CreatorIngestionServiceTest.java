@@ -66,6 +66,23 @@ class CreatorIngestionServiceTest {
   }
 
   @Test
+  void recrawlCannotOverwriteManagerRejection() {
+    var creator = Creator.builder().id(UUID.randomUUID()).platform("TIKTOK").externalId("reviewed").build();
+    var reviewedAt = java.time.LocalDateTime.now();
+    var metric = PublicCreatorMetric.builder().id(UUID.randomUUID()).creator(creator)
+        .creatorType("REJECTED").niche("Music").qualityReviewedAt(reviewedAt).build();
+    when(creatorRepository.findLockedByPlatformAndExternalId(any(), any())).thenReturn(Optional.of(creator));
+    when(creatorRepository.save(any())).thenReturn(creator);
+    when(metricRepository.findByCreatorId(creator.getId())).thenReturn(Optional.of(metric));
+    when(metricRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    service.ingestCreatorData(CreatorIngestionRequest.builder().platform("TIKTOK").externalId("reviewed")
+        .userName("reviewed").creatorType("KOL").niche("Beauty").followers(100000L).build());
+    assertThat(metric.getCreatorType()).isEqualTo("REJECTED");
+    assertThat(metric.getNiche()).isEqualTo("Music");
+    assertThat(metric.getQualityReviewedAt()).isEqualTo(reviewedAt);
+  }
+
+  @Test
   @DisplayName("testIngestKol_Success: Gửi payload creatorType = KOL -> trả về SUCCESS")
   void testIngestKol_Success() {
     when(creatorRepository.findLockedByPlatformAndExternalId(any(), any())).thenReturn(Optional.empty());

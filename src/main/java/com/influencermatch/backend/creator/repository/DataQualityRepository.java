@@ -32,4 +32,7 @@ public interface DataQualityRepository extends JpaRepository<PublicCreatorMetric
   Optional<PublicCreatorMetric> findLocked(@Param("id") UUID id);
 
   Optional<PublicCreatorMetric> findFirstByCreatorIdOrderByCollectedAtDescIdDesc(UUID creatorId);
+
+  @Query("select m from PublicCreatorMetric m join fetch m.creator c where lower(c.userName) in :names and m.qualityReviewedAt is not null order by m.collectedAt desc, m.id desc")
+  java.util.List<PublicCreatorMetric> reviewedByUserNames(@Param("names") java.util.Collection<String> names);
 }

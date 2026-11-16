@@ -77,6 +77,12 @@ class CampaignM3PostgresIntegrationTest extends PostgresApiTestSupport {
         200);
   }
 
+  MockHttpServletRequestBuilder recommendation(String key) throws Exception {
+    return post("/campaigns/" + campaign + "/ai-recommendations")
+        .header("Idempotency-Key", key)
+        .header("If-Match", etag(campaign));
+  }
+
   int raw(MockHttpServletRequestBuilder request, Object body) throws Exception {
     request.header("Authorization", "Bearer " + jwt.generateToken(owner));
     if (body != null)
@@ -117,6 +123,15 @@ class CampaignM3PostgresIntegrationTest extends PostgresApiTestSupport {
             Map.of("status", "READY_FOR_DISCOVERY"),
             400);
     assertThat(failed.path("fieldErrors").has("brief")).isTrue();
+    var recommendationFailure =
+        call(
+            owner,
+            post("/campaigns/" + id + "/ai-recommendations")
+                .header("If-Match", etag(id))
+                .header("Idempotency-Key", "incomplete-draft"),
+            null,
+            400);
+    assertThat(recommendationFailure.path("fieldErrors").has("brief")).isTrue();
     assertThat(jdbc.queryForObject("select status from campaign where id=?", String.class, id))
         .isEqualTo("DRAFT");
     assertThat(
@@ -250,13 +265,13 @@ class CampaignM3PostgresIntegrationTest extends PostgresApiTestSupport {
   @Test
   void pendingAndEmptySourcesNeverReserveQuotaOrCallEmbedding() throws Exception {
     ready();
-    var pending = call(owner, post("/campaigns/" + campaign + "/ai-recommendations"), null, 409);
+    var pending = call(owner, recommendation("pending-empty"), null, 409);
     assertThat(pending.path("embeddingStatus").asText()).isEqualTo("PENDING");
     assertThat(used()).isZero();
     verify(ai, never()).getEmbedding(anyString());
     worker.process(job());
     clearInvocations(ai);
-    var empty = call(owner, post("/campaigns/" + campaign + "/ai-recommendations"), null, 409);
+    var empty = call(owner, recommendation("pending-empty"), null, 409);
     assertThat(empty.path("code").asText()).isEqualTo("RECOMMENDATION_NO_CANDIDATES");
     assertThat(used()).isZero();
     verify(metrics, never())
@@ -266,12 +281,99 @@ class CampaignM3PostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
+  void draftRecommendationPreparesOnceAndConcurrentRetriesShareResult() throws Exception {
+    String draftRevision = etag(campaign);
+    assertThat(
+            raw(
+                post("/campaigns/" + campaign + "/ai-recommendations")
+                    .header("Idempotency-Key", "missing-revision"),
+                null))
+        .isEqualTo(428);
+    assertThat(
+            raw(
+                post("/campaigns/" + campaign + "/ai-recommendations")
+                    .header("Idempotency-Key", "stale-revision")
+                    .header("If-Match", "\"campaign:" + campaign + ":r999\""),
+                null))
+        .isEqualTo(409);
+    assertThat(etag(campaign)).isEqualTo(draftRevision);
+    assertThat(used()).isZero();
+
+    var pending = call(owner, recommendation("draft-run"), null, 409);
+    assertThat(pending.path("code").asText()).isEqualTo("CAMPAIGN_EMBEDDING_NOT_READY");
+    assertThat(pending.path("embeddingStatus").asText()).isEqualTo("PENDING");
+    assertThat(etag(campaign)).isNotEqualTo(draftRevision);
+    var campaignStatus =
+        call(owner, get("/campaigns/" + campaign), null, 200).path("data");
+    assertThat(campaignStatus.path("status").asText()).isEqualTo("READY_FOR_DISCOVERY");
+    assertThat(campaignStatus.path("embeddingContextId").asText()).isNotBlank();
+    assertThat(campaignStatus.path("embeddingStatus").asText()).isEqualTo("PENDING");
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from campaign_context where campaign_id=?",
+                Integer.class,
+                campaign))
+        .isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from campaign_embedding_job where context_id=?",
+                Integer.class,
+                source()))
+        .isEqualTo(1);
+    assertThat(used()).isZero();
+    worker.process(job());
+    candidates();
+
+    var gate = new CountDownLatch(1);
+    var pool = Executors.newFixedThreadPool(2);
+    try {
+      List<Future<com.fasterxml.jackson.databind.JsonNode>> futures = new ArrayList<>();
+      for (int i = 0; i < 2; i++) {
+        futures.add(
+            pool.submit(
+                () -> {
+                  gate.await();
+                  return call(owner, recommendation("draft-run"), null, 200).path("data");
+                }));
+      }
+      gate.countDown();
+      var first = futures.get(0).get(30, TimeUnit.SECONDS);
+      var second = futures.get(1).get(30, TimeUnit.SECONDS);
+      assertThat(first.path("recommendationRunId").asText())
+          .isEqualTo(second.path("recommendationRunId").asText());
+      assertThat(used()).isEqualTo(1);
+      assertThat(
+              jdbc.queryForObject(
+                  "select count(*) from recommendation_run where campaign_id=?",
+                  Integer.class,
+                  campaign))
+          .isEqualTo(1);
+      var replay = call(owner, recommendation("draft-run"), null, 200).path("data");
+      assertThat(replay.path("recommendationRunId").asText())
+          .isEqualTo(first.path("recommendationRunId").asText());
+      assertThat(used()).isEqualTo(1);
+    } finally {
+      pool.shutdownNow();
+    }
+
+    var mismatch =
+        call(
+            owner,
+            post("/campaigns/" + campaign + "/ai-recommendations?displayMode=BUDGET_READY_FIRST")
+                .header("Idempotency-Key", "draft-run")
+                .header("If-Match", etag(campaign)),
+            null,
+            409);
+    assertThat(mismatch.path("code").asText()).isEqualTo("IDEMPOTENCY_CONFLICT");
+  }
+
+  @Test
   void explicitDiscoveryAndShortlistPersistProvenanceAndReuseFeedbackVector() throws Exception {
     ready();
     worker.process(job());
     candidates();
     var first =
-        call(owner, post("/campaigns/" + campaign + "/ai-recommendations"), null, 200).path("data");
+        call(owner, recommendation("shortlist-run"), null, 200).path("data");
     UUID run = UUID.fromString(first.path("recommendationRunId").asText());
     UUID original = source();
     String prior =
@@ -296,7 +398,9 @@ class CampaignM3PostgresIntegrationTest extends PostgresApiTestSupport {
         .isEqualTo(1);
     call(
         owner,
-        post("/campaigns/" + campaign + "/ai-recommendations?candidateSource=DISCOVERY"),
+        post("/campaigns/" + campaign + "/ai-recommendations?candidateSource=DISCOVERY")
+            .header("Idempotency-Key", "discovery-run")
+            .header("If-Match", etag(campaign)),
         null,
         200);
     verify(metrics)
@@ -346,6 +450,10 @@ class CampaignM3PostgresIntegrationTest extends PostgresApiTestSupport {
       assertThat(store.view(source()).status()).isEqualTo(attempt == 5 ? "FAILED" : "PENDING");
       if (attempt < 5) now = now.plusSeconds(15L << (attempt - 1));
     }
+    var failedRequest = call(owner, recommendation("failed-embedding"), null, 409);
+    assertThat(failedRequest.path("code").asText()).isEqualTo("CAMPAIGN_EMBEDDING_NOT_READY");
+    assertThat(failedRequest.path("embeddingStatus").asText()).isEqualTo("FAILED");
+    assertThat(used()).isZero();
     assertThat(etag(campaign)).isEqualTo(tag);
     call(owner, post("/campaigns/" + campaign + "/context/embedding/retry"), null, 200);
     assertThat(store.view(source()).status()).isEqualTo("PENDING");
@@ -360,7 +468,7 @@ class CampaignM3PostgresIntegrationTest extends PostgresApiTestSupport {
             + " where id=?",
         campaign);
     for (int n = 0; n < 2; n++)
-      call(owner, post("/campaigns/" + campaign + "/ai-recommendations"), null, 409);
+      call(owner, recommendation("legacy-pending"), null, 409);
     assertThat(
             jdbc.queryForObject(
                 "select count(*) from campaign_context where campaign_id=?",

@@ -14,6 +14,7 @@ import com.influencermatch.backend.campaign.model.RecommendationRun;
 import com.influencermatch.backend.campaign.repository.CampaignContextRepository;
 import com.influencermatch.backend.campaign.repository.HistoricalCampaignRepository;
 import com.influencermatch.backend.campaign.repository.RecommendationRunRepository;
+import com.influencermatch.backend.campaign.service.CampaignService;
 import com.influencermatch.backend.creator.client.AiServiceClient;
 import com.influencermatch.backend.creator.dto.RecommendationCandidateProjection;
 import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
@@ -37,6 +38,8 @@ import com.influencermatch.backend.relationship.service.CampaignOwnershipService
 import com.influencermatch.backend.security.permission.Permission;
 import com.influencermatch.backend.security.permission.Permissions;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.function.Function;
@@ -86,6 +89,11 @@ public class AiRecommendationService {
   @org.springframework.beans.factory.annotation.Autowired
   private com.influencermatch.backend.campaign.embedding.CampaignEmbeddingStore m3Embeddings;
 
+  @org.springframework.beans.factory.annotation.Autowired private CampaignService campaignService;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  private RecommendationRequestStore recommendationRequests;
+
   @org.springframework.beans.factory.annotation.Autowired
   private com.influencermatch.backend.campaign.service.CampaignWriteLock campaignLocks;
 
@@ -102,6 +110,56 @@ public class AiRecommendationService {
   public RecommendationResponseDto recommendKocs(
       UUID id, int limit, com.influencermatch.backend.campaign.enums.CandidateSource source) {
     return run(id, limit, DisplayMode.BEST_MATCH, source);
+  }
+
+  @Transactional
+  public RecommendationResponseDto recommendKocs(
+      UUID id, int limit,
+      com.influencermatch.backend.campaign.enums.CandidateSource source,
+      DisplayMode mode, List<UUID> creatorIds) {
+    return run(id, limit, mode, source, creatorIds);
+  }
+
+  @Transactional
+  public RecommendationResponseDto recommendKocs(
+      UUID id,
+      int limit,
+      com.influencermatch.backend.campaign.enums.CandidateSource source,
+      DisplayMode mode,
+      List<UUID> creatorIds,
+      String idempotencyKey,
+      String revision) {
+    Permissions.require(Permission.RUN_RECOMMENDATION);
+    if (idempotencyKey == null || !idempotencyKey.matches("[A-Za-z0-9._:-]{1,100}"))
+      throw new com.influencermatch.backend.exception.ValidationException(
+          "Idempotency-Key is required (1-100 safe characters)");
+
+    ownership.requireOwned(id);
+    String requestHash = recommendationRequestHash(id, limit, source, mode, creatorIds);
+    RecommendationResponseDto previous =
+        recommendationRequests.replay(id, idempotencyKey, requestHash);
+    if (previous != null) return previous;
+
+    validateSelectedCreatorIds(id, source, creatorIds);
+    campaignService.prepareForRecommendation(id, revision);
+
+    var context = m3.prepare(id);
+    var embedding = m3Embeddings.ready(context.getEmbeddingSourceContextId());
+    if (embedding == null)
+      throw new com.influencermatch.backend.exception.CampaignEmbeddingPendingException(
+          m3Embeddings.view(context.getEmbeddingSourceContextId()).status());
+
+    previous =
+        recommendationRequests.replayOrClaim(id, idempotencyKey, requestHash);
+    if (previous != null) return previous;
+
+    RecommendationResponseDto result = run(id, limit, mode, source, creatorIds);
+    try {
+      recommendationRequests.complete(id, idempotencyKey, objectMapper.writeValueAsString(result));
+    } catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
+      throw new IllegalStateException("Could not store recommendation response", ex);
+    }
+    return result;
   }
 
   @Transactional(readOnly = true)
@@ -140,9 +198,17 @@ public class AiRecommendationService {
       int limit,
       DisplayMode displayMode,
       com.influencermatch.backend.campaign.enums.CandidateSource source) {
+    return run(campaignId, limit, displayMode, source, null);
+  }
+
+  private RecommendationResponseDto run(
+      UUID campaignId, int limit, DisplayMode displayMode,
+      com.influencermatch.backend.campaign.enums.CandidateSource source,
+      List<UUID> creatorIds) {
     DisplayMode mode = (displayMode != null) ? displayMode : DisplayMode.BEST_MATCH;
     Permissions.require(Permission.RUN_RECOMMENDATION);
     Campaign campaign = ownership.requireOwned(campaignId);
+    Set<UUID> selectedIds = validateSelectedCreatorIds(campaignId, source, creatorIds);
     var preparedContext = m3.prepare(campaignId);
     var preparedEmbedding = m3Embeddings.ready(preparedContext.getEmbeddingSourceContextId());
     if (preparedEmbedding == null)
@@ -221,6 +287,10 @@ public class AiRecommendationService {
             rawCandidates.size(),
             campaignId);
       }
+
+      if (!selectedIds.isEmpty())
+        rawCandidates = rawCandidates.stream()
+            .filter(candidate -> selectedIds.contains(candidate.getCreatorId())).toList();
 
       if (rawCandidates.isEmpty())
         throw new BusinessException(
@@ -635,6 +705,55 @@ public class AiRecommendationService {
       }
       throw new BusinessException(
           ErrorCode.INTERNAL_ERROR, "Failed to run AI recommendation: " + e.getMessage());
+    }
+  }
+
+  private Set<UUID> validateSelectedCreatorIds(
+      UUID campaignId,
+      com.influencermatch.backend.campaign.enums.CandidateSource source,
+      List<UUID> creatorIds) {
+    Set<UUID> selectedIds = creatorIds == null ? Set.of() : new LinkedHashSet<>(creatorIds);
+    if (creatorIds != null
+        && (creatorIds.isEmpty()
+            || creatorIds.size() > 100
+            || selectedIds.contains(null)
+            || selectedIds.size() != creatorIds.size()
+            || source != com.influencermatch.backend.campaign.enums.CandidateSource.SHORTLIST))
+      throw new com.influencermatch.backend.exception.ValidationException(
+          "creatorIds requires 1-100 distinct channels and candidateSource=SHORTLIST");
+    if (!selectedIds.isEmpty()) {
+      Set<UUID> activeIds = new HashSet<>();
+      for (var item :
+          shortlistItemRepository.findByCampaignIdAndCreatorIdIn(campaignId, selectedIds))
+        if (item.getStatus() != ShortlistStatus.REMOVED)
+          activeIds.add(item.getCreator().getId());
+      if (!activeIds.equals(selectedIds))
+        throw new com.influencermatch.backend.exception.ValidationException(
+            "Every selected channel must belong to this campaign's active shortlist");
+    }
+    return selectedIds;
+  }
+
+  private String recommendationRequestHash(
+      UUID campaignId,
+      int limit,
+      com.influencermatch.backend.campaign.enums.CandidateSource source,
+      DisplayMode mode,
+      List<UUID> creatorIds) {
+    var request = objectMapper.createObjectNode();
+    request.put("campaignId", campaignId.toString());
+    request.put("candidateSource", source == null ? null : source.name());
+    request.put("displayMode", mode == null ? DisplayMode.BEST_MATCH.name() : mode.name());
+    request.put("limit", limit);
+    if (creatorIds == null) request.putNull("creatorIds");
+    else request.set("creatorIds", objectMapper.valueToTree(creatorIds));
+    try {
+      return HexFormat.of()
+          .formatHex(
+              MessageDigest.getInstance("SHA-256")
+                  .digest(request.toString().getBytes(StandardCharsets.UTF_8)));
+    } catch (Exception ex) {
+      throw new IllegalStateException("Could not fingerprint recommendation request", ex);
     }
   }
 

@@ -273,7 +273,13 @@ class BrandM4PostgresIntegrationTest extends PostgresApiTestSupport {
                 .explanationAvailable(false)
                 .build());
     var first =
-        request(post("/campaigns/" + campaign + "/ai-recommendations"), null, null, 200).data;
+        request(
+                post("/campaigns/" + campaign + "/ai-recommendations")
+                    .header("Idempotency-Key", "brand-m4-run-1"),
+                null,
+                null,
+                200)
+            .data;
     UUID run = UUID.fromString(first.path("recommendationRunId").asText());
     assertThat(jdbc.queryForObject("select scoring_policy_version from recommendation_run where id=?",String.class,run)).isEqualTo("develop-topsis");
     String snapshot =
@@ -282,7 +288,12 @@ class BrandM4PostgresIntegrationTest extends PostgresApiTestSupport {
     UUID old = context();
     review(campaign, 5);
     request(patch("/brands/me"), Map.of("positioning", "Changed brand"), tag, 200);
-    request(post("/campaigns/" + campaign + "/ai-recommendations"), null, null, 200);
+    request(
+        post("/campaigns/" + campaign + "/ai-recommendations")
+            .header("Idempotency-Key", "brand-m4-run-2"),
+        null,
+        null,
+        200);
     assertThat(
             jdbc.queryForObject(
                 "select brand_context_id from recommendation_run where id=?", UUID.class, run))

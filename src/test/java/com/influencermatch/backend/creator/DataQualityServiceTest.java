@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.influencermatch.backend.audit.service.AuditService;
 import com.influencermatch.backend.creator.dto.DataQualityDtos.ApproveRequest;
+import com.influencermatch.backend.creator.dto.DataQualityDtos.RejectRequest;
 import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.creator.service.DataQualityService;
@@ -28,9 +29,17 @@ class DataQualityServiceTest {
   final EntityManager em=mock(EntityManager.class);
   final AuditService audit=mock(AuditService.class);
   final ValidatorFactory factory=Validation.buildDefaultValidatorFactory();
-  final DataQualityService service=new DataQualityService(metrics,creators,em,audit,factory.getValidator());
+  final com.influencermatch.backend.taxonomy.repository.NicheRepository niches=mock(com.influencermatch.backend.taxonomy.repository.NicheRepository.class);
+  final DataQualityService service=new DataQualityService(metrics,creators,em,audit,factory.getValidator(),niches);
   final com.influencermatch.backend.user.model.User reviewer=TestActors.user(Role.DATA_MANAGER);
-  @BeforeEach void login(){TestActors.authenticate(reviewer);}
+  @BeforeEach void login(){
+    TestActors.authenticate(reviewer);
+    when(niches.findByNameIgnoreCaseAndActiveTrue(anyString())).thenAnswer(invocation -> {
+      var niche=new com.influencermatch.backend.taxonomy.model.Niche();
+      niche.setName(invocation.getArgument(0));
+      return Optional.of(niche);
+    });
+  }
   @AfterEach void clear(){SecurityContextHolder.clearContext();factory.close();}
   PublicCreatorMetric pending(){
     var c=Creator.builder().id(UUID.randomUUID()).platform("TIKTOK").userName("koc").build();
@@ -82,5 +91,33 @@ class DataQualityServiceTest {
   @Test void pendingClampsPageAndSize(){
     when(metrics.pending(any())).thenReturn(Page.empty());service.pending(-1,1000);
     verify(metrics).pending(PageRequest.of(0,100));
+  }
+  @ParameterizedTest @ValueSource(strings={"UNKNOWN", " unknown "})
+  void unresolvedNicheCannotBeApproved(String niche){
+    var m=pending();
+    assertThatThrownBy(()->service.approve(m.getId(),new ApproveRequest(niche))).isInstanceOf(BadRequestException.class);
+    assertThat(m.getQualityReviewedAt()).isNull();verifyNoInteractions(audit);
+  }
+  @ParameterizedTest @ValueSource(strings={"REJECTED", "BRAND", "KOC", "KOL"})
+  void rejectionRecordsValidatedClassificationAndReason(String type){
+    var m=pending();
+    var result=service.reject(m.getId(),new RejectRequest(" Wrong classification ",type));
+    assertThat(result.creatorType()).isEqualTo(type);
+    assertThat(result.qualityReviewedAt()).isNotNull();
+    assertThat(result.qualityReviewedBy()).isEqualTo(reviewer.getId());
+    assertThat(result.dataConfidence()).isEqualByComparingTo("0.65");
+    verify(audit).record(eq("REJECT_DATA_QUALITY"),anyString(),eq(m.getId()),any(),any(),eq("Wrong classification"));
+  }
+  @Test void rejectionRejectsMissingReasonAndArbitraryTypesBeforeLookup(){
+    assertThatThrownBy(()->service.reject(UUID.randomUUID(),new RejectRequest(" ","BRAND"))).isInstanceOf(ConstraintViolationException.class);
+    assertThatThrownBy(()->service.reject(UUID.randomUUID(),new RejectRequest("Reason","ADMIN"))).isInstanceOf(ConstraintViolationException.class);
+    verifyNoInteractions(metrics,creators,em,audit);
+  }
+  @Test void approvalRejectsNamesOutsideActiveManagedTaxonomy(){
+    var m=pending();
+    when(niches.findByNameIgnoreCaseAndActiveTrue("Invented category")).thenReturn(Optional.empty());
+    assertThatThrownBy(()->service.approve(m.getId(),new ApproveRequest("Invented category"))).isInstanceOf(BadRequestException.class);
+    assertThat(m.getQualityReviewedAt()).isNull();
+    verify(metrics,never()).flush();verifyNoInteractions(audit);
   }
 }

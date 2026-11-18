@@ -81,13 +81,13 @@ public class CreatorCatalogService {
         db.queryForObject("SELECT COUNT(*) FROM creator WHERE master_id IS NULL", Long.class)
     ).orElse(0L);
 
-    long duplicateCandidates = 0L;
-    try {
-      duplicateCandidates = Optional.ofNullable(
-          db.queryForObject("SELECT COUNT(*) FROM creator_identity_conflict WHERE status = 'PENDING_MANAGER'", Long.class)
-      ).orElse(0L);
-    } catch (Exception ignored) {
-    }
+    long duplicateCandidates =
+        Optional.ofNullable(
+                db.queryForObject(
+                    "SELECT COUNT(*) FROM creator_identity_conflict WHERE status ="
+                        + " 'PENDING_MANAGER'",
+                    Long.class))
+            .orElse(0L);
 
     java.util.Map<String, Object> res = new java.util.LinkedHashMap<>();
     res.put("total_masters", totalMasters);
@@ -112,7 +112,15 @@ public class CreatorCatalogService {
     var args = new ArrayList<Object>();
     String where = " where true";
     if (q != null && !q.isEmpty()) {
-      where += " and (strpos(lower(m.canonical_name),lower(?))>0 or m.id::text=lower(?))";
+      where +=
+          " and (strpos(lower(m.canonical_name),lower(?))>0 or m.id::text=lower(?) or"
+              + " exists(select 1 from creator c where c.master_id=m.id and"
+              + " (strpos(lower(c.user_name),lower(?))>0 or"
+              + " strpos(lower(coalesce(c.display_name,'')),lower(?))>0 or"
+              + " strpos(lower(c.external_id),lower(?))>0)))";
+      args.add(q);
+      args.add(q);
+      args.add(q);
       args.add(q);
       args.add(q);
     }

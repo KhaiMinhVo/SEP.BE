@@ -16,8 +16,8 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/data")
 @RequiredArgsConstructor
 @Tag(
-    name = "Creator Master Catalog",
-    description = "Read-only identity catalog. No contact disclosure or ownership transfer.")
+    name = "Danh mục định danh nhà sáng tạo",
+    description = "Tra cứu định danh chỉ đọc; không tiết lộ thông tin liên hệ hoặc chuyển quyền sở hữu.")
 @SecurityRequirement(name = "BearerAuth")
 public class CreatorCatalogController {
   final CreatorCatalogService service;
@@ -30,7 +30,11 @@ public class CreatorCatalogController {
 
   @GetMapping("/creator-masters")
   @PreAuthorize("hasAuthority('VIEW_CREATOR_MASTER_CATALOG')")
-  @Operation(summary = "List Master identities, including identities without linked channels")
+  @Operation(
+      summary = "Danh sách hồ sơ định danh, kể cả hồ sơ chưa liên kết kênh",
+      description =
+          "Từ khóa q tìm theo tên hoặc mã hồ sơ, username, tên hiển thị hoặc mã định danh nền tảng"
+              + " của các kênh đã liên kết.")
   public ResponseEntity<ApiResponse<PageResponse<CatalogDtos.Master>>> masters(
       @RequestParam(required = false) String q,
       @RequestParam(required = false) String status,
@@ -43,19 +47,21 @@ public class CreatorCatalogController {
 
   @GetMapping("/creator-masters/summary")
   @PreAuthorize("hasAuthority('VIEW_CREATOR_MASTER_CATALOG')")
-  @Operation(summary = "Tổng hợp số liệu kênh đã liên kết vs chưa nhận (DM-01 Summary)")
+  @Operation(summary = "Tổng hợp số lượng hồ sơ, kênh đã liên kết, chưa liên kết và xung đột")
   public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> summary() {
     return read(service.summary());
   }
 
   @GetMapping("/creator-masters/{id}")
   @PreAuthorize("hasAuthority('VIEW_CREATOR_MASTER_CATALOG')")
+  @Operation(summary = "Xem chi tiết hồ sơ định danh")
   public ResponseEntity<ApiResponse<CatalogDtos.Master>> master(@PathVariable UUID id) {
     return read(service.master(id));
   }
 
   @GetMapping("/creator-masters/{id}/accounts")
   @PreAuthorize("hasAuthority('VIEW_CREATOR_MASTER_CATALOG')")
+  @Operation(summary = "Danh sách kênh liên kết với hồ sơ định danh")
   public ResponseEntity<ApiResponse<PageResponse<CatalogDtos.Account>>> accounts(
       @PathVariable UUID id,
       @RequestParam(defaultValue = "0") int page,
@@ -65,6 +71,7 @@ public class CreatorCatalogController {
 
   @GetMapping("/creator-accounts/unclaimed")
   @PreAuthorize("hasAuthority('VIEW_CREATOR_MASTER_CATALOG')")
+  @Operation(summary = "Danh sách kênh chưa liên kết với hồ sơ định danh")
   public ResponseEntity<ApiResponse<PageResponse<CatalogDtos.Account>>> unclaimed(
       @RequestParam(required = false) String q,
       @RequestParam(required = false) String platform,
@@ -79,7 +86,10 @@ public class CreatorCatalogController {
   @PreAuthorize("hasAuthority('VIEW_CREATOR_IDENTITY_HISTORY')")
   @Operation(
       summary =
-          "Read whitelisted identity events; unknown historical Master references remain null")
+          "Tra cứu lịch sử định danh theo hồ sơ, kênh, người thực hiện hoặc khoảng thời gian",
+      description =
+          "Chỉ trả về các trường lịch sử được cho phép; mã hồ sơ không xác định trong dữ liệu cũ"
+              + " được để trống.")
   public ResponseEntity<ApiResponse<PageResponse<CatalogDtos.Event>>> events(
       @RequestParam(required = false) UUID masterId,
       @RequestParam(required = false) UUID creatorId,

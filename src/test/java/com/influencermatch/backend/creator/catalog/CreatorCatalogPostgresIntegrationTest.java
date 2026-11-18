@@ -148,6 +148,27 @@ class CreatorCatalogPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
+  void catalogSearchResolvesMasterThroughLinkedAccountIdentifiers() throws Exception {
+    String externalId = "stable-channel-" + UUID.randomUUID();
+    String userName = "creator-" + UUID.randomUUID();
+    var linked = channel("TIKTOK", userName);
+    linked.setExternalId(externalId);
+    var master =
+        masters.saveAndFlush(
+            CreatorMaster.builder().user(owner).canonicalName("Unrelated canonical name").build());
+    linked.setMaster(master);
+    creators.saveAndFlush(linked);
+
+    for (String query : List.of(externalId, userName)) {
+      var response =
+          call(dm, get("/data/creator-masters").param("q", query), null, 200).path("data");
+      assertThat(response.path("totalElements").asLong()).isEqualTo(1);
+      assertThat(response.path("items").get(0).path("id").asText())
+          .isEqualTo(master.getId().toString());
+    }
+  }
+
+  @Test
   void unclaimedAndValidationAndRoles() throws Exception {
     var r =
         call(

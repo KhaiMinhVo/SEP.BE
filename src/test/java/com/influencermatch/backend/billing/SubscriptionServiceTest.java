@@ -61,11 +61,11 @@ class SubscriptionServiceTest {
   }
   @Test void cancellationPreservesQuotaAndAdminNoopDoesNotAudit(){
     TestActors.authenticate(TestActors.user(Role.ADMIN));var sub=Subscription.builder().id(UUID.randomUUID()).brandProfile(brand).plan(plan)
-        .status(SubscriptionStatus.ACTIVE).startDate(LocalDate.of(2026,1,1)).expirationDate(LocalDate.of(2026,1,31)).usedCampaignQuota(2).build();
+        .status(SubscriptionStatus.ACTIVE).startDate(LocalDate.of(2026,1,1)).expirationDate(LocalDate.now().plusDays(30)).usedCampaignQuota(2).build();
     when(subscriptions.findById(sub.getId())).thenReturn(Optional.of(sub));when(brands.lockForBilling(brand.getId())).thenReturn(Optional.of(brand));
     service.cancelSubscription(sub.getId());service.cancelSubscription(sub.getId());
-    assertThat(sub.getStatus()).isEqualTo(SubscriptionStatus.CANCELLED);assertThat(sub.getUsedCampaignQuota()).isEqualTo(2);
-    assertThat(sub.getExpirationDate()).isEqualTo(LocalDate.of(2026,1,31));
+    assertThat(sub.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);assertThat(sub.isCancelAtPeriodEnd()).isTrue();assertThat(sub.getUsedCampaignQuota()).isEqualTo(2);
+    assertThat(sub.getExpirationDate()).isEqualTo(LocalDate.now().plusDays(30));
     verify(audit,times(1)).record(eq("CANCEL_SUBSCRIPTION"),anyString(),eq(sub.getId()),any(),any(),anyString());
   }
   @Test void checkAndDeductCampaignQuotaSuccessAndExceeded(){

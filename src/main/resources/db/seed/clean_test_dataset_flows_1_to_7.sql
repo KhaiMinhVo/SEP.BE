@@ -179,7 +179,9 @@ ON CONFLICT (brand_profile_id) DO NOTHING;
 -- Subscription PRO đang hoạt động cho Acme Cosmetics
 INSERT INTO subscription (
     id, brand_profile_id, plan_id, start_date, expiration_date,
-    status, used_campaign_quota, used_ai_quota, used_refresh_quota
+    status, used_campaign_quota, used_ai_quota, used_refresh_quota,
+    purchased_plan_name, purchased_price, purchased_currency, purchased_duration_days,
+    purchased_campaign_quota, purchased_recommendation_quota, purchased_refresh_quota, purchased_description
 ) VALUES (
     '22222222-2222-2222-2222-222222222231',
     '22222222-2222-2222-2222-222222222211',
@@ -189,7 +191,15 @@ INSERT INTO subscription (
     'ACTIVE',
     1,
     1,
-    0
+    0,
+    (SELECT plan_name FROM plan WHERE id = '11111111-1111-1111-1111-111111111102'),
+    (SELECT price FROM plan WHERE id = '11111111-1111-1111-1111-111111111102'),
+    'VND',
+    (SELECT duration_days FROM plan WHERE id = '11111111-1111-1111-1111-111111111102'),
+    (SELECT campaign_quota FROM plan WHERE id = '11111111-1111-1111-1111-111111111102'),
+    (SELECT ai_recommendation_quota FROM plan WHERE id = '11111111-1111-1111-1111-111111111102'),
+    (SELECT refresh_quota FROM plan WHERE id = '11111111-1111-1111-1111-111111111102'),
+    (SELECT description FROM plan WHERE id = '11111111-1111-1111-1111-111111111102')
 )
 ON CONFLICT (id) DO NOTHING;
 

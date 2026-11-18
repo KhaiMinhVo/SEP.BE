@@ -61,14 +61,14 @@ public class SubscriptionService {
       boolean alreadyUsedTrial =
           history != null
               && history.stream()
-                  .anyMatch(
-                      s ->
-                          s.getPlan() != null
-                              && (s.getPlan().getPrice().signum() == 0
-                                  || (s.getPlan().getPlanName() != null
-                                      && (s.getPlan().getPlanName().equalsIgnoreCase("FREE")
-                                          || s.getPlan().getPlanName().toLowerCase().contains("trial")
-                                          || s.getPlan().getPlanName().toLowerCase().contains("free")))));
+                  .anyMatch(s -> {
+                    if (s.getPlan() == null && s.getPurchasedPrice() == null) return false;
+                    var price = s.getPurchasedPrice() != null ? s.getPurchasedPrice() : s.getPlan().getPrice();
+                    var name = s.getPurchasedPlanName() != null ? s.getPurchasedPlanName() : s.getPlan().getPlanName();
+                    return price.signum() == 0 || (name != null
+                        && (name.equalsIgnoreCase("FREE") || name.toLowerCase(java.util.Locale.ROOT).contains("trial")
+                            || name.toLowerCase(java.util.Locale.ROOT).contains("free")));
+                  });
 
       if (alreadyUsedTrial) {
         throw new ConflictException(
@@ -123,8 +123,11 @@ public class SubscriptionService {
     brandProfileRepository.lockForBilling(sub.getBrandProfile().getId()).orElseThrow();
     entityManager.refresh(sub);
     var before = toResponse(sub);
-    if (sub.getStatus() == SubscriptionStatus.CANCELLED) return;
-    sub.setStatus(SubscriptionStatus.CANCELLED);
+    if (sub.getStatus() == SubscriptionStatus.CANCELLED || sub.isCancelAtPeriodEnd()) return;
+    if (sub.getStatus() != SubscriptionStatus.ACTIVE)
+      throw new ValidationException("Only active subscriptions can be cancelled at period end");
+    sub.setCancelAtPeriodEnd(true);
+    if (sub.getExpirationDate().isBefore(LocalDate.now())) sub.setStatus(SubscriptionStatus.CANCELLED);
     if (Permissions.has(Permission.MANAGE_SUBSCRIPTION))
       audit.record(
           "CANCEL_SUBSCRIPTION",
@@ -144,7 +147,7 @@ public class SubscriptionService {
         subscriptionRepository.findByBrandProfileId(brandProfileId).stream()
             .filter(
                 s ->
-                    s.getStatus() == SubscriptionStatus.ACTIVE
+                    s.getStatus() == SubscriptionStatus.ACTIVE && !s.isRefundHold()
                         && !s.getExpirationDate().isBefore(LocalDate.now()))
             .findFirst()
             .orElse(null);
@@ -173,7 +176,7 @@ public class SubscriptionService {
         subscriptionRepository.findByBrandProfileId(brandProfileId).stream()
             .filter(
                 s ->
-                    s.getStatus() == SubscriptionStatus.ACTIVE
+                    s.getStatus() == SubscriptionStatus.ACTIVE && !s.isRefundHold()
                         && !s.getExpirationDate().isBefore(LocalDate.now()))
             .findFirst()
             .orElse(null);
@@ -188,7 +191,8 @@ public class SubscriptionService {
 
     int updated = subscriptionRepository.reserveQuotaAtomically(sub.getId());
     if (updated == 0) {
-      int quotaLimit = sub.getPlan().getRecommendationQuota();
+      int quotaLimit = sub.getPurchasedRecommendationQuota() != null
+          ? sub.getPurchasedRecommendationQuota() : sub.getPlan().getRecommendationQuota();
       throw new ConflictException(
           ErrorCode.QUOTA_EXCEEDED,
           "AI recommendation quota exceeded (" + sub.getUsedRecommendationQuota() + "/" + quotaLimit + "). Please upgrade your plan.");
@@ -215,13 +219,26 @@ public class SubscriptionService {
   }
 
   public SubscriptionDTOs.SubscriptionResponse toResponse(Subscription sub) {
+    var contract = planService.toResponse(sub.getPlan());
+    if (sub.getPurchasedDurationDays() != null) {
+      contract.setPlanName(sub.getPurchasedPlanName());
+      contract.setPrice(sub.getPurchasedPrice());
+      contract.setCurrency(sub.getPurchasedCurrency());
+      contract.setDurationDays(sub.getPurchasedDurationDays());
+      contract.setCampaignQuota(sub.getPurchasedCampaignQuota());
+      contract.setRecommendationQuota(sub.getPurchasedRecommendationQuota());
+      contract.setRefreshQuota(sub.getPurchasedRefreshQuota());
+      contract.setDescription(sub.getPurchasedDescription());
+    }
     return SubscriptionDTOs.SubscriptionResponse.builder()
         .id(sub.getId())
         .brandId(sub.getBrandProfile().getId())
-        .plan(planService.toResponse(sub.getPlan()))
+        .plan(contract)
         .startDate(sub.getStartDate())
         .expirationDate(sub.getExpirationDate())
         .status(sub.getStatus())
+        .cancelAtPeriodEnd(sub.isCancelAtPeriodEnd())
+        .refundHold(sub.isRefundHold())
         .usedCampaignQuota(sub.getUsedCampaignQuota())
         .usedRecommendationQuota(sub.getUsedRecommendationQuota())
         .usedRefreshQuota(sub.getUsedRefreshQuota())

@@ -44,6 +44,11 @@ public class Subscription {
   private SubscriptionStatus status;
 
   @Column(nullable = false)
+  private boolean cancelAtPeriodEnd;
+  @Column(nullable = false)
+  private boolean refundHold;
+
+  @Column(nullable = false)
   private int usedCampaignQuota;
 
   @Column(name = "used_ai_quota", nullable = false)
@@ -51,4 +56,42 @@ public class Subscription {
 
   @Column(nullable = false)
   private int usedRefreshQuota;
+
+  // Contract captured when the subscription is created; independent of catalog edits.
+  @Column(nullable = false, length = 100)
+  private String purchasedPlanName;
+  @Column(nullable = false, precision = 19, scale = 2)
+  private java.math.BigDecimal purchasedPrice;
+  @Column(nullable = false, length = 3)
+  private String purchasedCurrency;
+  @Column(nullable = false)
+  private Integer purchasedDurationDays;
+  @Column(nullable = false)
+  private Integer purchasedCampaignQuota;
+  @Column(nullable = false)
+  private Integer purchasedRecommendationQuota;
+  @Column(nullable = false)
+  private Integer purchasedRefreshQuota;
+  private String purchasedDescription;
+
+  @PrePersist
+  public void capturePlan() {
+    if (purchasedDurationDays != null || plan == null) return;
+    purchasedPlanName = plan.getPlanName();
+    purchasedPrice = plan.getPrice();
+    purchasedCurrency = plan.getCurrency();
+    purchasedDurationDays = plan.getDurationDays();
+    purchasedCampaignQuota = plan.getCampaignQuota();
+    purchasedRecommendationQuota = plan.getRecommendationQuota();
+    purchasedRefreshQuota = plan.getRefreshQuota();
+    purchasedDescription = plan.getDescription();
+  }
+
+  public String contractPlanName() {
+    return purchasedPlanName != null ? purchasedPlanName : plan.getPlanName();
+  }
+
+  public int contractDurationDays() {
+    return purchasedDurationDays != null ? purchasedDurationDays : plan.getDurationDays();
+  }
 }

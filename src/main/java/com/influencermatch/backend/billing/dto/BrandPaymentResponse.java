@@ -9,4 +9,4 @@ import java.util.UUID;
 public record BrandPaymentResponse(UUID id, String transactionCode, String planName,
     BigDecimal amount, String currency, String gateway, PaymentStatus status,
     LocalDateTime createdAt, LocalDateTime paidAt, LocalDate startDate,
-    LocalDate expirationDate, String failureReason) {}
+    LocalDate expirationDate, String failureReason, AdminPaymentDTOs.RefundDetails refund) {}

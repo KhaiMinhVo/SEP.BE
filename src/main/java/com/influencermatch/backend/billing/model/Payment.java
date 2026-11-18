@@ -53,8 +53,37 @@ public class Payment {
   @Column(nullable = false, length = 32)
   private PaymentStatus status;
 
+  private String gatewayCreateDate;
+  private LocalDateTime lastReconciledAt;
   private LocalDateTime paidAt;
   private String failureReason;
+
+  @Enumerated(EnumType.STRING)
+  @Column(nullable = false, length = 32)
+  @Builder.Default
+  private RefundStatus refundStatus = RefundStatus.NONE;
+  private LocalDateTime refundRequestedAt;
+  private LocalDateTime refundApprovedAt;
+  private LocalDateTime refundedAt;
+  @Column(length = 1000)
+  private String refundReason;
+  @Column(length = 1000)
+  private String refundDecisionReason;
+  @Column(length = 255)
+  private String refundTransferReference;
+  @Column(length = 32)
+  private String refundExceptionType;
+  private UUID refundApprovedBy;
+  private UUID refundCompletedBy;
+  @Column(length = 32)
+  private String gatewayRefundRequestId;
+  @Column(length = 14)
+  private String gatewayRefundCreateDate;
+  private LocalDateTime gatewayRefundLastCheckedAt;
+  @Column(length = 32)
+  private String gatewayRefundCode;
+  @Column(length = 32)
+  private String gatewayRefundTransactionNo;
 
   @Column(nullable = false)
   private LocalDateTime createdAt;

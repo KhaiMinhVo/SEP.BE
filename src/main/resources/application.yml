@@ -177,6 +177,12 @@ application:
     pay-url: ${VNPAY_PAY_URL:https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
     return-url: ${VNPAY_RETURN_URL:https://api.influencermatch.site/api/v1/billing/vnpay/return}
     frontend-return-url: ${VNPAY_FRONTEND_RETURN_URL:http://localhost:5173/subscription}
+    query-url: ${VNPAY_QUERY_URL:https://sandbox.vnpayment.vn/merchant_webapi/api/transaction}
+    query-ip-address: ${VNPAY_QUERY_IP_ADDRESS:127.0.0.1}
+    refund-enabled: ${VNPAY_REFUND_ENABLED:false}
+    refund-reconciliation-delay-ms: ${VNPAY_REFUND_RECONCILIATION_DELAY_MS:60000}
+    reconciliation-enabled: ${VNPAY_RECONCILIATION_ENABLED:true}
+    reconciliation-delay-ms: ${VNPAY_RECONCILIATION_DELAY_MS:60000}
 
 # ------------------------------------------------------------------------------------
 #  SpringDoc / OpenAPI (Swagger UI)

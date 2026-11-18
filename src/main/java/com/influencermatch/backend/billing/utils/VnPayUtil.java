@@ -1,6 +1,8 @@
 package com.influencermatch.backend.billing.utils;
 
 import java.nio.charset.StandardCharsets;
+import java.math.BigDecimal;
+import com.influencermatch.backend.exception.ValidationException;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -13,6 +15,14 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class VnPayUtil {
+  public static String gatewayAmount(BigDecimal amount) {
+    if (amount == null || amount.signum() <= 0 || amount.stripTrailingZeros().scale() > 0)
+      throw new ValidationException("VNPAY refund requires a positive whole VND amount");
+    String scaled = amount.multiply(BigDecimal.valueOf(100)).toBigIntegerExact().toString();
+    if (scaled.length() > 12) throw new ValidationException("Amount exceeds VNPAY's 12-digit amount field");
+    return scaled;
+  }
+
 
   public static String hmacSHA512(final String key, final String data) {
     try {

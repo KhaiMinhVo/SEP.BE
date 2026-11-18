@@ -33,6 +33,41 @@ public class AdminPaymentController {
 
   private final AdminPaymentService service;
   private final PaymentReportService reports;
+  private final com.influencermatch.backend.billing.service.RefundService refunds;
+  private final com.influencermatch.backend.billing.service.VnPayRefundService gatewayRefunds;
+
+  @PostMapping("/{id}/refund/approve")
+  public ApiResponse<com.influencermatch.backend.billing.dto.AdminPaymentDTOs.RefundDetails> approveRefund(
+      @PathVariable UUID id, @RequestBody com.influencermatch.backend.billing.dto.AdminPaymentDTOs.RefundApprovalRequest request) {
+    return ApiResponse.ok(gatewayRefunds.approve(id, request));
+  }
+
+  @PostMapping("/{id}/refund/vnpay")
+  @Operation(summary = "Submit an approved refund to VNPAY")
+  public ApiResponse<com.influencermatch.backend.billing.dto.AdminPaymentDTOs.RefundDetails> submitVnPayRefund(
+      @PathVariable UUID id) {
+    return ApiResponse.ok(gatewayRefunds.submit(id));
+  }
+
+  @PostMapping("/{id}/refund/vnpay/query")
+  @Operation(summary = "Query a pending VNPAY refund without resubmitting it")
+  public ApiResponse<com.influencermatch.backend.billing.dto.AdminPaymentDTOs.RefundDetails> queryVnPayRefund(
+      @PathVariable UUID id) {
+    return ApiResponse.ok(gatewayRefunds.query(id));
+  }
+
+  @PostMapping("/{id}/refund/reject")
+  public ApiResponse<com.influencermatch.backend.billing.dto.AdminPaymentDTOs.RefundDetails> rejectRefund(
+      @PathVariable UUID id, @RequestBody RefundRequest request) {
+    return ApiResponse.ok(refunds.reject(id, request));
+  }
+
+  @PostMapping("/{id}/refund/confirm")
+  public ApiResponse<com.influencermatch.backend.billing.dto.AdminPaymentDTOs.RefundDetails> confirmRefund(
+      @PathVariable UUID id, @RequestBody com.influencermatch.backend.billing.dto.AdminPaymentDTOs.RefundConfirmationRequest request) {
+    return ApiResponse.ok(refunds.confirm(id, request));
+  }
+
 
   @Operation(
       summary = "List payment transactions with filters and pagination",
@@ -85,7 +120,7 @@ public class AdminPaymentController {
     return ApiResponse.ok(service.getPayment(id));
   }
 
-  @Operation(summary = "Refund a paid transaction")
+  @Operation(summary = "Submit a paid transaction for manual refund review")
   @PostMapping("/{id}/refund")
   public ApiResponse<AdminPaymentResponse> refund(
       @PathVariable UUID id, @RequestBody(required = false) RefundRequest request) {

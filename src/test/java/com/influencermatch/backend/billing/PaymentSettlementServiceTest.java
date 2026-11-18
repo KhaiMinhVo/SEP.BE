@@ -76,4 +76,10 @@ class PaymentSettlementServiceTest {
     var p=payment();p.getSubscription().setStatus(SubscriptionStatus.CANCELLED);
     assertThat(service.apply(p,true,null)).isFalse();verifyNoInteractions(payments,subscriptions);
   }
+  @Test void planEditDuringCheckoutDoesNotChangePurchasedDuration() {
+    var p=payment(); var sub=p.getSubscription(); sub.capturePlan();
+    sub.getPlan().setDurationDays(3);
+    assertThat(service.apply(p,true,null)).isTrue();
+    assertThat(sub.getExpirationDate()).isEqualTo(sub.getStartDate().plusDays(30));
+  }
 }

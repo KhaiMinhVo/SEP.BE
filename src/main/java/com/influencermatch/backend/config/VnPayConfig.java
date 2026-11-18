@@ -10,6 +10,10 @@ import org.springframework.context.annotation.Configuration;
 @Getter
 @Setter
 public class VnPayConfig {
+  private String queryUrl = "https://sandbox.vnpayment.vn/merchant_webapi/api/transaction";
+  private String queryIpAddress = "127.0.0.1";
+  private boolean reconciliationEnabled = true;
+  private boolean refundEnabled = false;
   private String tmnCode;
   private String hashSecret;
   private String payUrl;

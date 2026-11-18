@@ -87,7 +87,8 @@ public class PaymentController {
       }
     }
 
-    boolean success = paymentService.processVnPayReturn(fields);
+    var result = paymentService.processVnPayCallback(fields);
+    boolean success = result == PaymentService.CallbackResult.ACCEPTED;
     boolean isPaid =
         success
             && "00".equals(fields.get("vnp_ResponseCode"))
@@ -102,9 +103,9 @@ public class PaymentController {
         target
             + delimiter
             + "payment="
-            + (isPaid ? "success" : "failed")
+            + (isPaid ? "success" : success ? "failed" : "pending")
             + "&txnRef="
-            + (fields.getOrDefault("vnp_TxnRef", ""));
+            + java.net.URLEncoder.encode(fields.getOrDefault("vnp_TxnRef", ""), java.nio.charset.StandardCharsets.UTF_8);
 
     HttpHeaders headers = new HttpHeaders();
     headers.setLocation(URI.create(redirectUrl));
@@ -126,14 +127,20 @@ public class PaymentController {
       }
     }
 
-    boolean success = paymentService.processVnPayReturn(fields);
+    var result = paymentService.processVnPayCallback(fields);
+    boolean success = result == PaymentService.CallbackResult.ACCEPTED;
     Map<String, String> response = new HashMap<>();
     if (success) {
       response.put("RspCode", "00");
       response.put("Message", "Confirm Success");
     } else {
-      response.put("RspCode", "97");
-      response.put("Message", "Invalid Signature or Failed");
+      response.put("RspCode", switch (result) {
+        case INVALID_SIGNATURE, INVALID_MERCHANT -> "97";
+        case NOT_FOUND -> "01";
+        case INVALID_AMOUNT -> "04";
+        default -> "99";
+      });
+      response.put("Message", result.name());
     }
     return ResponseEntity.ok(response);
   }

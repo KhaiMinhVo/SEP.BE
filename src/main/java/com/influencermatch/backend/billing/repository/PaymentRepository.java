@@ -33,6 +33,22 @@ public interface PaymentRepository
     BigDecimal getRevenue();
   }
 
+  @Query("select p from Payment p where p.status = com.influencermatch.backend.billing.enums.PaymentStatus.PENDING "
+      + "and p.paymentGateway = 'VNPAY' and p.gatewayCreateDate is not null "
+      + "and p.createdAt < :before and (p.lastReconciledAt is null or p.lastReconciledAt < :before) "
+      + "order by p.lastReconciledAt asc nulls first, p.createdAt asc")
+  List<Payment> findReconciliationCandidates(@Param("before") java.time.LocalDateTime before, Pageable page);
+
+  @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @Query("select p from Payment p where p.id = :id")
+  Optional<Payment> findLockedById(@Param("id") UUID id);
+
+  @Query("select p from Payment p where p.refundStatus = com.influencermatch.backend.billing.enums.RefundStatus.PROCESSING "
+      + "and p.paymentGateway = 'VNPAY' and p.gatewayRefundRequestId is not null "
+      + "and (p.gatewayRefundLastCheckedAt is null or p.gatewayRefundLastCheckedAt < :before) "
+      + "order by p.gatewayRefundLastCheckedAt asc nulls first")
+  List<Payment> findRefundReconciliationCandidates(@Param("before") java.time.LocalDateTime before, Pageable page);
+
   Optional<Payment> findByTransactionCode(String transactionCode);
 
   @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)

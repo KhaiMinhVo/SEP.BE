@@ -33,6 +33,7 @@ public class AdminPaymentService {
 
   private final PaymentRepository paymentRepository;
   private final AuditService auditService;
+  private final RefundService refunds;
 
   @Transactional(readOnly = true)
   public PageResponse<AdminPaymentResponse> listPayments(
@@ -44,6 +45,7 @@ public class AdminPaymentService {
       Pageable pageable) {
 
     Permissions.require(Permission.MANAGE_SUBSCRIPTION);
+    PaymentReportService.validateRange(from, to);
 
     Specification<Payment> spec =
         (root, query, cb) -> {
@@ -124,51 +126,18 @@ public class AdminPaymentService {
         .build();
   }
 
+  /** Legacy route now submits for review; it never marks money as transferred. */
   @Transactional
   public AdminPaymentResponse refundPayment(UUID id, RefundRequest request) {
     Permissions.require(Permission.MANAGE_SUBSCRIPTION);
-
-    Payment payment =
-        paymentRepository
-            .findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("Payment not found with id: " + id));
-
-    if (payment.getStatus() != PaymentStatus.PAID) {
-      throw new ValidationException(
-          "Chỉ giao dịch đã thanh toán (PAID) mới có thể hoàn tiền. Trạng thái hiện tại: "
-              + payment.getStatus());
-    }
-
-    PaymentStatus oldStatus = payment.getStatus();
-    payment.setStatus(PaymentStatus.REFUNDED);
-    String reason =
-        (request != null && request.getReason() != null && !request.getReason().isBlank())
-            ? request.getReason()
-            : "Admin manual refund";
-    payment.setFailureReason("Hoàn tiền: " + reason);
-    paymentRepository.save(payment);
-
-    if (payment.getSubscription() != null
-        && payment.getSubscription().getStatus() == SubscriptionStatus.ACTIVE) {
-      payment.getSubscription().setStatus(SubscriptionStatus.CANCELLED);
-    }
-
-    auditService.record(
-        "REFUND_PAYMENT",
-        "Payment",
-        payment.getId(),
-        oldStatus.name(),
-        PaymentStatus.REFUNDED.name(),
-        (reason != null && !reason.isBlank()) ? reason : "Quản trị viên hoàn tiền giao dịch");
-
-    return mapToResponse(payment);
+    refunds.request(id, request);
+    return getPayment(id);
   }
 
   private AdminPaymentResponse mapToResponse(Payment payment) {
     var brand = payment.getBrandProfile();
     var user = brand != null ? brand.getUser() : null;
     var sub = payment.getSubscription();
-    var plan = sub != null ? sub.getPlan() : null;
 
     return AdminPaymentResponse.builder()
         .id(payment.getId())
@@ -184,7 +153,7 @@ public class AdminPaymentService {
                 ? user.getFullName()
                 : (brand != null ? brand.getBusinessName() : "Khách hàng"))
         .userEmail(user != null ? user.getEmail() : "")
-        .plan(plan != null ? plan.getPlanName() : "Gói dịch vụ")
+        .plan(sub != null ? sub.contractPlanName() : "Gói dịch vụ")
         .amount(payment.getAmount())
         .currency(payment.getCurrency() != null ? payment.getCurrency() : "VND")
         .gateway(payment.getPaymentGateway() != null ? payment.getPaymentGateway() : "VNPAY")
@@ -192,6 +161,7 @@ public class AdminPaymentService {
         .createdAt(payment.getCreatedAt())
         .paidAt(payment.getPaidAt())
         .failureReason(payment.getFailureReason())
+        .refund(com.influencermatch.backend.billing.dto.AdminPaymentDTOs.RefundDetails.from(payment))
         .build();
   }
 }

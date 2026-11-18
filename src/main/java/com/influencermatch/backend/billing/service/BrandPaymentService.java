@@ -38,8 +38,9 @@ public class BrandPaymentService {
   private BrandPaymentResponse response(Payment payment) {
     var sub = payment.getSubscription();
     return new BrandPaymentResponse(payment.getId(), payment.getTransactionCode(),
-        sub.getPlan().getPlanName(), payment.getAmount(), payment.getCurrency(),
+        sub.contractPlanName(), payment.getAmount(), payment.getCurrency(),
         payment.getPaymentGateway(), payment.getStatus(), payment.getCreatedAt(),
-        payment.getPaidAt(), sub.getStartDate(), sub.getExpirationDate(), payment.getFailureReason());
+        payment.getPaidAt(), sub.getStartDate(), sub.getExpirationDate(), payment.getFailureReason(),
+        com.influencermatch.backend.billing.dto.AdminPaymentDTOs.RefundDetails.from(payment));
   }
 }

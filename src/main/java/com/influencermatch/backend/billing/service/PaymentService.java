@@ -55,14 +55,6 @@ public class PaymentService {
     brands
         .lockForBilling(brand.getId())
         .orElseThrow(() -> new ResourceNotFoundException("Brand not found"));
-    // Cancel any previous PENDING checkouts for this brand to prevent lingering sessions
-    java.util.List<Subscription> pendingSubs =
-        subscriptionRepository.findByBrandProfileIdAndStatus(
-            brand.getId(), SubscriptionStatus.PENDING);
-    for (Subscription pending : pendingSubs) {
-      pending.setStatus(SubscriptionStatus.CANCELLED);
-      subscriptionRepository.save(pending);
-    }
     Plan plan =
         planRepository
             .findById(planId)
@@ -88,6 +80,7 @@ public class PaymentService {
             .usedRecommendationQuota(0)
             .usedRefreshQuota(0)
             .build();
+    subscription.capturePlan();
     subscription = subscriptionRepository.save(subscription);
 
     String txnRef = UUID.randomUUID().toString().replace("-", "").substring(0, 15);
@@ -106,7 +99,7 @@ public class PaymentService {
     paymentRepository.save(payment);
 
     // Build VNPay params
-    long amount = plan.getPrice().multiply(java.math.BigDecimal.valueOf(100)).longValueExact();
+    String amount = VnPayUtil.gatewayAmount(plan.getPrice());
 
     Map<String, String> vnp_Params = new HashMap<>();
     vnp_Params.put("vnp_Version", "2.1.0");
@@ -123,7 +116,8 @@ public class PaymentService {
 
     LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
     DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
-    vnp_Params.put("vnp_CreateDate", now.format(formatter));
+    payment.setGatewayCreateDate(now.format(formatter));
+    vnp_Params.put("vnp_CreateDate", payment.getGatewayCreateDate());
     vnp_Params.put("vnp_ExpireDate", now.plusMinutes(15).format(formatter));
 
     String vnp_SecureHash = VnPayUtil.hashAllFields(vnp_Params, vnPayConfig.getHashSecret());
@@ -141,17 +135,24 @@ public class PaymentService {
     return new PaymentResponse(vnPayConfig.getPayUrl() + "?" + queryString, txnRef);
   }
 
+  public enum CallbackResult { ACCEPTED, INVALID_SIGNATURE, INVALID_MERCHANT, NOT_FOUND, INVALID_AMOUNT, PENDING, CONFLICT }
+
   @Transactional
   public boolean processVnPayReturn(Map<String, String> params) {
+    return processVnPayCallback(params) == CallbackResult.ACCEPTED;
+  }
+
+  @Transactional
+  public CallbackResult processVnPayCallback(Map<String, String> params) {
     String signature = params.get("vnp_SecureHash");
     String txnRef = params.get("vnp_TxnRef");
     if (signature == null || signature.length() != 128) {
       log.warn("VNPay callback rejected: invalid or missing vnp_SecureHash for txnRef='{}'", txnRef);
-      return false;
+      return CallbackResult.INVALID_SIGNATURE;
     }
     if (vnPayConfig.getHashSecret() == null || vnPayConfig.getHashSecret().isBlank()) {
       log.error("VNPay callback rejected: vnp_HashSecret is unconfigured for txnRef='{}'", txnRef);
-      return false;
+      return CallbackResult.INVALID_SIGNATURE;
     }
     Map<String, String> signed = new HashMap<>();
     params.forEach(
@@ -165,20 +166,20 @@ public class PaymentService {
         expected.getBytes(StandardCharsets.US_ASCII),
         signature.toLowerCase(java.util.Locale.ROOT).getBytes(StandardCharsets.US_ASCII))) {
       log.warn("VNPay callback rejected: signature mismatch for txnRef='{}'", txnRef);
-      return false;
+      return CallbackResult.INVALID_SIGNATURE;
     }
     if (!java.util.Objects.equals(vnPayConfig.getTmnCode(), params.get("vnp_TmnCode"))) {
       log.warn(
           "VNPay callback rejected: merchant code mismatch for txnRef='{}', received='{}'",
           txnRef,
           params.get("vnp_TmnCode"));
-      return false;
+      return CallbackResult.INVALID_MERCHANT;
     }
     Payment existing =
         paymentRepository.findByTransactionCode(txnRef).orElse(null);
     if (existing == null) {
       log.warn("VNPay callback rejected: transaction not found for txnRef='{}'", txnRef);
-      return false;
+      return CallbackResult.NOT_FOUND;
     }
     Payment payment = settlement.lock(existing);
     long expectedAmount =
@@ -189,11 +190,18 @@ public class PaymentService {
           txnRef,
           expectedAmount,
           params.get("vnp_Amount"));
-      return false;
+      return CallbackResult.INVALID_AMOUNT;
     }
+    String transactionStatus = params.get("vnp_TransactionStatus");
+    // Unknown or unfinished outcomes must remain pending for reconciliation.
+    if (!java.util.Set.of("00", "02").contains(transactionStatus == null ? "" : transactionStatus))
+      return CallbackResult.PENDING;
+    if ("00".equals(transactionStatus) && !"00".equals(params.get("vnp_ResponseCode")))
+      return CallbackResult.PENDING;
     boolean success =
         "00".equals(params.get("vnp_ResponseCode"))
             && "00".equals(params.get("vnp_TransactionStatus"));
-    return settlement.apply(payment, success, params.get("vnp_ResponseCode"));
+    return settlement.apply(payment, success, params.get("vnp_ResponseCode"))
+        ? CallbackResult.ACCEPTED : CallbackResult.CONFLICT;
   }
 }

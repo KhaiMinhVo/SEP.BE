@@ -18,6 +18,15 @@ import org.springframework.web.bind.annotation.*;
 @Tag(name = "Billing & Payments")
 public class BrandPaymentController {
   private final BrandPaymentService service;
+  private final com.influencermatch.backend.billing.service.RefundService refunds;
+
+  @PostMapping("/{id}/refund")
+  public ApiResponse<com.influencermatch.backend.billing.dto.AdminPaymentDTOs.RefundDetails> requestRefund(
+      @PathVariable java.util.UUID id,
+      @RequestBody com.influencermatch.backend.billing.dto.AdminPaymentDTOs.RefundRequest request) {
+    return ApiResponse.ok(refunds.request(id, request));
+  }
+
 
   @GetMapping
   public ApiResponse<PageResponse<BrandPaymentResponse>> history(

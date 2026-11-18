@@ -47,4 +47,11 @@ class PaymentCallbackServiceTest {
     when(settlement.apply(payment,false,"24")).thenReturn(true);
     assertThat(service.processVnPayReturn(p)).isTrue();verify(settlement).apply(payment,false,"24");
   }
+  @ParameterizedTest @ValueSource(strings={"01", "04", "05", "07", "", "99"})
+  void uncertainGatewayOutcomeNeverFailsOrActivatesPayment(String outcome) {
+    when(config.getHashSecret()).thenReturn("test-secret"); when(config.getTmnCode()).thenReturn("TEST");
+    stored(); var p=params(); p.put("vnp_TransactionStatus",outcome); sign(p);
+    assertThat(service.processVnPayCallback(p)).isEqualTo(PaymentService.CallbackResult.PENDING);
+    verify(settlement,never()).apply(any(),anyBoolean(),any());
+  }
 }

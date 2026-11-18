@@ -48,11 +48,11 @@ public class PaymentSettlementService {
       payment.setPaidAt(LocalDateTime.now());
       sub.setStatus(SubscriptionStatus.ACTIVE);
       sub.setStartDate(LocalDate.now());
-      sub.setExpirationDate(LocalDate.now().plusDays(sub.getPlan().getDurationDays()));
+      sub.setExpirationDate(LocalDate.now().plusDays(sub.contractDurationDays()));
       if (notificationService != null
           && payment.getBrandProfile() != null
           && payment.getBrandProfile().getUser() != null) {
-        String planName = sub.getPlan() != null ? sub.getPlan().getPlanName() : "dịch vụ";
+        String planName = sub.getPlan() != null ? sub.contractPlanName() : "dịch vụ";
         notificationService.createAndDispatch(
             payment.getBrandProfile().getUser().getId(),
             com.influencermatch.backend.notification.enums.NotificationType.PAYMENT_SUCCESS,

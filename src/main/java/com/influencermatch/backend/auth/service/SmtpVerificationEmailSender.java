@@ -89,6 +89,16 @@ public class SmtpVerificationEmailSender implements VerificationEmailSender {
             + "\nMã này có hiệu lực trong vòng 10 phút. Tuyệt đối không chia sẻ mã này với bất kỳ ai.");
   }
 
+  @Override
+  public void sendPasswordReset(String email, String otp) {
+    deliver(
+        email,
+        "InfluencerMatch - Đặt lại mật khẩu",
+        "Mã đặt lại mật khẩu của bạn là: " + otp
+            + "\nMã có hiệu lực trong 10 phút. Không chia sẻ mã này với người khác."
+            + "\nNếu bạn không yêu cầu đặt lại mật khẩu, hãy bỏ qua email này.");
+  }
+
   private void deliver(String email, String subject, String text) {
     requireConfigured();
     var message = new SimpleMailMessage();

@@ -54,6 +54,8 @@ public class SecurityConfig {
     "/auth/creator-invitations/resolve",
     "/auth/password-setup/request",
     "/auth/password-setup/confirm",
+    "/auth/password-reset/request",
+    "/auth/password-reset/confirm",
     "/actuator/health",
     "/v3/api-docs/**",
     "/api-docs/**",

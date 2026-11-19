@@ -22,6 +22,7 @@ public class CollaborationExecution {
   final ExecutionSnapshot snapshots;
   final AuditService audit;
   final ExecutionHistoryReader history;
+  final CollaborationVideo videos;
 
   UUID actor() {
     return Permissions.actor().getId();
@@ -123,16 +124,19 @@ public class CollaborationExecution {
   }
 
   private ObjectNode forActor(JsonNode snapshot) {
-    if (Permissions.actor().getRole() == Role.BRAND) return (ObjectNode) snapshot;
+    if (Permissions.actor().getRole() == Role.BRAND) {
+      return ((ObjectNode) snapshot).put("videoSubmissionRequired", videos.required());
+    }
     var result = select(snapshot, "id", "campaignId", "campaignStatus", "status", "agreedFee",
         "currency", "executionSource", "executionRevision");
+    result.put("videoSubmissionRequired", videos.required());
     var deliverables = result.putArray("deliverables");
     snapshot.path("deliverables").forEach(unit -> {
       var row = select(unit, "id", "creatorId", "contentType", "dueAt", "acceptanceChecklist",
           "maxRevisionRounds", "revisionRounds", "revision", "submissionRevision", "status");
       var submissions = row.putArray("submissions");
       unit.path("submissions").forEach(draft -> submissions.add(select(draft, "id", "revision",
-          "url", "source", "createdAt")));
+          "url", "videoFileName", "videoSizeBytes", "source", "createdAt")));
       var reviews = row.putArray("reviews");
       unit.path("reviews").forEach(review -> reviews.add(select(review, "id", "submissionRevision",
           "decision", "checklist", "reason", "createdAt")));
@@ -273,30 +277,64 @@ public class CollaborationExecution {
   }
 
   @Transactional
+  public CollaborationVideoStorage.UploadGrant openVideo(UUID id, UUID d, ExecutionDtos.VideoUpload ask) {
+    if (Permissions.actor().getRole() != Role.CREATOR) throw new ForbiddenException("Creator required");
+    var c = lock(id, false, Permission.MANAGE_OWN_COLLABORATION);
+    requireSubmissionReady(c, deliverable(id, d), ask.expectedRevision());
+    return videos.open(d, actor(), ask);
+  }
+
+  @Transactional(readOnly = true)
+  public CollaborationVideoStorage.Playback videoPlayback(UUID id, UUID d, UUID submission) {
+    access(initial(id), false, Permission.MANAGE_OWN_COLLABORATION);
+    return videos.playback(id, d, submission);
+  }
+
+  private void requireSubmissionReady(Map<String, Object> c, Map<String, Object> row, long revision) {
+    progress(c);
+    revision(row, "revision", revision);
+    if ("SUBMITTED".equals(row.get("status")))
+      throw conflict("Review the pending submission before replacing it");
+  }
+
+  @Transactional
   public JsonNode submit(UUID id, UUID d, ExecutionDtos.Submission r, String key) {
     if (Permissions.actor().getRole() != Role.CREATOR) throw new ForbiddenException("Creator required");
     var c = lock(id, false, Permission.MANAGE_OWN_COLLABORATION);
     String scope = "submission:" + d;
     var old = replay(scope, key, r);
     if (old != null) return old;
-    progress(c);
     var row = deliverable(id, d);
-    revision(row, "revision", r.expectedRevision());
-    if (!"CREATOR_PORTAL".equals(r.source()) || r.sourceDescription() != null)
+    requireSubmissionReady(c, row, r.expectedRevision());
+    if (r.sourceDescription() != null
+        || (r.source() != null && !"CREATOR_PORTAL".equals(r.source()))
+        || (r.uploadId() == null && !"CREATOR_PORTAL".equals(r.source())))
       throw new ValidationException("Submission source/provenance does not match actor");
-    if ("SUBMITTED".equals(row.get("status")))
-      throw conflict("Review the pending submission before replacing it");
+    String url = null;
+    if (r.uploadId() != null) {
+      if (r.url() != null) throw new ValidationException("Chỉ gửi tệp video cho bản nộp mới.");
+      videos.validateSubmission(r.uploadId(), d, actor(), r.expectedRevision());
+    } else if (videos.required()) {
+      throw new BusinessException(ErrorCode.COLLABORATION_VIDEO_REQUIRED,
+          "Hãy tải lại trang và nộp tệp video MP4.");
+    } else {
+      if (r.url() == null) throw new ValidationException("Submission URL required");
+      url = https(r.url());
+    }
     long rev = ((Number) row.get("submission_revision")).longValue() + 1;
     s.db.update(
-        "insert into collaboration_submission values(?,?,?,?,?,?,?,?)",
+        "insert into collaboration_submission "
+            + "(id,deliverable_id,revision,url,actor_id,source,source_description,created_at,video_upload_id)"
+            + " values(?,?,?,?,?,?,?,?,?)",
         UUID.randomUUID(),
         d,
         rev,
-        https(r.url()),
+        url,
         actor(),
-        r.source(),
-        r.sourceDescription(),
-        s.time());
+        "CREATOR_PORTAL",
+        null,
+        s.time(),
+        r.uploadId());
     s.db.update(
         "update collaboration_deliverable set"
             + " revision=revision+1,submission_revision=?,status='SUBMITTED' where id=?",

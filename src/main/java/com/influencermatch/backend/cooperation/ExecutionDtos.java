@@ -19,9 +19,21 @@ public final class ExecutionDtos {
           @com.fasterxml.jackson.databind.annotation.JsonDeserialize(
               using = com.influencermatch.backend.collaboration.dto.StrictNumbers.LongValue.class)
           long expectedRevision,
-      @NotBlank @Size(max = 2000) String url,
-      @NotBlank String source,
-      @Size(max = 2000) String sourceDescription) {}
+      @Size(max = 2000) String url,
+      String source,
+      @Size(max = 2000) String sourceDescription,
+      @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+      UUID uploadId) {}
+
+  public record VideoUpload(
+      @Min(1) @com.fasterxml.jackson.databind.annotation.JsonDeserialize(
+          using = com.influencermatch.backend.collaboration.dto.StrictNumbers.LongValue.class)
+      long expectedRevision,
+      @NotBlank @Size(max = 255) String fileName,
+      @Min(1) @Max(CollaborationVideo.MAX_BYTES)
+          @com.fasterxml.jackson.databind.annotation.JsonDeserialize(
+              using = com.influencermatch.backend.collaboration.dto.StrictNumbers.LongValue.class)
+      long sizeBytes) {}
 
   public record Decision(
       @Min(1)

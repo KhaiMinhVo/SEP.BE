@@ -7,6 +7,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,6 +21,23 @@ import org.springframework.web.bind.annotation.*;
     description = "Revision-aware execution; submitted metrics are SELF_REPORTED")
 public class CollaborationExecutionController {
   private final CollaborationExecution execution;
+
+  @PostMapping("/deliverables/{deliverableId}/submission-uploads")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION')")
+  public ResponseEntity<ApiResponse<CollaborationVideoStorage.UploadGrant>> openVideo(
+      @PathVariable UUID id, @PathVariable UUID deliverableId,
+      @Valid @RequestBody ExecutionDtos.VideoUpload body) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(ApiResponse.ok(execution.openVideo(id, deliverableId, body)));
+  }
+
+  @GetMapping("/deliverables/{deliverableId}/submissions/{submissionId}/video")
+  @PreAuthorize("(hasRole('BRAND') and hasAuthority('MANAGE_OWN_COLLABORATION')) or (hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION'))")
+  public ResponseEntity<ApiResponse<CollaborationVideoStorage.Playback>> video(
+      @PathVariable UUID id, @PathVariable UUID deliverableId, @PathVariable UUID submissionId) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(ApiResponse.ok(execution.videoPlayback(id, deliverableId, submissionId)));
+  }
 
   @GetMapping("/deliverables")
   @PreAuthorize("(hasRole('BRAND') and hasAuthority('MANAGE_OWN_COLLABORATION')) or (hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION'))")

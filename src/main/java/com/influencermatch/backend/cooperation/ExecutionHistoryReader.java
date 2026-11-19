@@ -96,8 +96,11 @@ public class ExecutionHistoryReader {
     var submissions =
         group(
             s.db.queryForList(
-                "select a.* from collaboration_submission a join collaboration_deliverable d on"
-                    + " d.id=a.deliverable_id where d.collaboration_id=? order by"
+                "select a.id,a.deliverable_id,a.revision,a.url,a.actor_id,a.source,a.source_description,"
+                    + "a.created_at,u.file_name video_file_name,u.size_bytes video_size_bytes"
+                    + " from collaboration_submission a join collaboration_deliverable d on d.id=a.deliverable_id"
+                    + " left join collaboration_video_upload u on u.id=a.video_upload_id"
+                    + " where d.collaboration_id=? order by"
                     + " a.deliverable_id,a.revision",
                 id));
     var reviews =

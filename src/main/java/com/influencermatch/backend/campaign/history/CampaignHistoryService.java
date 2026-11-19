@@ -12,6 +12,8 @@ import com.influencermatch.backend.campaign.service.*;
 import com.influencermatch.backend.collaboration.enums.CollaborationStatus;
 import com.influencermatch.backend.common.dto.PageResponse;
 import com.influencermatch.backend.cooperation.ExecutionHistoryReader;
+import com.influencermatch.backend.cooperation.CollaborationVideo;
+import com.influencermatch.backend.cooperation.CollaborationVideoStorage;
 import com.influencermatch.backend.exception.*;
 import jakarta.persistence.EntityManager;
 import java.nio.charset.StandardCharsets;
@@ -31,6 +33,7 @@ public class CampaignHistoryService {
   final CampaignService campaigns;
   final CampaignRepository campaignRepository;
   final ExecutionHistoryReader execution;
+  final CollaborationVideo videos;
   final AuditService audit;
   final Clock clock;
   @jakarta.persistence.PersistenceContext EntityManager em;
@@ -172,6 +175,13 @@ public class CampaignHistoryService {
         page,
         size,
         count);
+  }
+
+  public CollaborationVideoStorage.Playback video(UUID campaign, UUID id, UUID deliverable, UUID submission) {
+    q.access(false);
+    q.owned(campaign);
+    q.one("select id from collaboration where id=? and campaign_id=?", id, campaign);
+    return videos.playback(id, deliverable, submission);
   }
 
   public CollaborationDetail collaboration(UUID campaign, UUID id) {

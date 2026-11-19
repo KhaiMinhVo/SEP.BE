@@ -493,6 +493,29 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
+  void revokingManualEvidenceKeepsOwnershipAfterSameCreatorVerifiesWithMeta() throws Exception {
+    var manager = account(Role.DATA_MANAGER);
+    String claimId = call(
+            creator,
+            post("/creators/" + channel.getId() + "/claim"),
+            Map.of("evidenceUrls", List.of("https://proof.test/manual"), "note", "Manual verification"),
+            201)
+        .at("/data/id").asText();
+    call(manager, patch("/data/creator-claims/" + claimId + "/review"),
+        Map.of("decision", "APPROVED", "reason", "Verified manual evidence"), 200);
+    UUID manualMaster = masters.findByUserId(creator.getId()).orElseThrow().getId();
+
+    var session = ready(creator);
+    var connected = confirm(creator, session, channel.getExternalId(), 200).path("data");
+    assertThat(connected.path("masterId").asText()).isEqualTo(manualMaster.toString());
+    var revoked = call(manager, post("/data/creator-claims/" + claimId + "/revoke"),
+        Map.of("reason", "Manual evidence was withdrawn"), 200).path("data");
+    assertThat(revoked.path("status").asText()).isEqualTo("REVOKED");
+    assertThat(jdbc.queryForObject(
+        "select master_id from creator where id=?", UUID.class, channel.getId())).isEqualTo(manualMaster);
+  }
+
+  @Test
   void manualReviewAndMetaConfirmationCannotAssignDifferentOwners() throws Exception {
     var s = ready(creator);
     var manager = account(Role.DATA_MANAGER);

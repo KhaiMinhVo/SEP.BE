@@ -1,10 +1,12 @@
 package com.influencermatch.backend.creator.repository;
 
 import com.influencermatch.backend.creator.dto.CreatorVectorSearchProjection;
+import com.influencermatch.backend.creator.enums.CreatorSourceType;
 import com.influencermatch.backend.creator.model.Creator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -33,6 +35,17 @@ public interface CreatorRepository extends JpaRepository<Creator, UUID> {
   @Query("select c from Creator c where c.platform=:platform and c.externalId=:externalId")
   Optional<Creator> findLockedByPlatformAndExternalId(@Param("platform") String platform,@Param("externalId") String externalId);
   Optional<Creator> findByPlatformAndExternalId(String platform, String externalId);
+
+  @Query("""
+      select c from Creator c
+      where c.platform = :platform and c.master is null and c.sourceType = :sourceType
+        and (c.externalId = :externalId or lower(c.userName) in (:username, :handle))
+      order by c.id
+      """)
+  List<Creator> findClaimTargets(
+      @Param("platform") String platform, @Param("sourceType") CreatorSourceType sourceType,
+      @Param("externalId") String externalId, @Param("username") String username,
+      @Param("handle") String handle, Pageable pageable);
 
   @Modifying
   @Query(value = "UPDATE creator SET embedding = cast(:embedding as vector) WHERE id = :id", nativeQuery = true)

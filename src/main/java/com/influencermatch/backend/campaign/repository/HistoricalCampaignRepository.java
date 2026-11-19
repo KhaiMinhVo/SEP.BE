@@ -16,6 +16,12 @@ public interface HistoricalCampaignRepository extends JpaRepository<HistoricalCa
 
   List<HistoricalCampaign> findByMasterId(UUID masterId);
 
+  List<HistoricalCampaign> findByEvidenceRootIdOrderByRevisionNumberDesc(UUID evidenceRootId);
+
+  List<HistoricalCampaign> findByCreatorIdAndStatus(UUID creatorId, String status);
+
+  List<HistoricalCampaign> findByMasterIdAndStatus(UUID masterId, String status);
+
   List<HistoricalCampaign> findByCreatorIdIn(Collection<UUID> creatorIds);
 
   List<HistoricalCampaign> findByMasterIdIn(Collection<UUID> masterIds);

@@ -15,4 +15,6 @@ public class ReasoningCardDto {
   private List<String> reasons;
   private boolean explanationAvailable;
   private List<String> evidenceWarnings;
+  private Double confidenceScore;
+  private String confidenceTier;
 }

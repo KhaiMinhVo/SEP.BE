@@ -59,6 +59,46 @@ public class HistoricalCampaign {
   private Long sourceRevision;
   @Builder.Default private String provenance = "LEGACY_UNVERIFIED";
 
+  @Column(name = "evidence_root_id", nullable = false)
+  private UUID evidenceRootId;
+
+  @Builder.Default
+  @Column(name = "revision_number", nullable = false)
+  private Long revisionNumber = 1L;
+
+  @Builder.Default
+  @Column(name = "schema_version", nullable = false, length = 16)
+  private String schemaVersion = "1.0";
+
+  @Column(name = "supersedes_id")
+  private UUID supersedesId;
+
+  @Column(name = "business_occurred_at")
+  private LocalDateTime businessOccurredAt;
+
+  @Builder.Default
+  @Column(name = "status", nullable = false, length = 32)
+  private String status = "ACTIVE";
+
   @Column(name = "recorded_at", nullable = false)
   private LocalDateTime recordedAt;
+
+  @PrePersist
+  public void prePersist() {
+    if (evidenceRootId == null) {
+      evidenceRootId = id != null ? id : UUID.randomUUID();
+    }
+    if (businessOccurredAt == null) {
+      businessOccurredAt = recordedAt != null ? recordedAt : LocalDateTime.now();
+    }
+    if (status == null) {
+      status = "ACTIVE";
+    }
+    if (revisionNumber == null) {
+      revisionNumber = 1L;
+    }
+    if (schemaVersion == null) {
+      schemaVersion = "1.0";
+    }
+  }
 }

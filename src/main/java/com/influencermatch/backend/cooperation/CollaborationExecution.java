@@ -866,11 +866,14 @@ public class CollaborationExecution {
             .put("m1Policy", "M1_POLICY_NOT_IMPLEMENTED");
     proof.set("outcome", data);
     proof.set("calculation", calc);
+    UUID histId = UUID.randomUUID();
     s.db.update(
         "insert into"
-            + " historical_campaign(id,creator_id,master_id,collaboration_id,outcome_id,evidence_type,evidence_value,quality,recorded_at,source_review_id,source_revision,provenance)"
-            + " values(?,?,?,?,?,'COLLABORATION_REVIEW',?::jsonb,'SELF_REPORTED',?,?,1,'BRAND_ACCEPTED')",
-        UUID.randomUUID(),
+            + " historical_campaign(id,evidence_root_id,revision_number,schema_version,status,business_occurred_at,creator_id,master_id,collaboration_id,outcome_id,evidence_type,evidence_value,quality,recorded_at,source_review_id,source_revision,provenance)"
+            + " values(?,?,1,'1.0','ACTIVE',?,?,?,?,?,'COLLABORATION_REVIEW',?::jsonb,'SELF_REPORTED',?,?,1,'BRAND_ACCEPTED')",
+        histId,
+        histId,
+        s.time(),
         c.get("creator_id"),
         c.get("master_id"),
         id,
@@ -922,16 +925,19 @@ public class CollaborationExecution {
             .put("metricSource", "LEGACY_UNVERIFIED")
             .put("overallRating", r.overallRating())
             .put("brandFitRating", r.brandFitRating());
+    UUID histId = UUID.randomUUID();
     s.db.update(
         "insert into"
-            + " historical_campaign(id,creator_id,master_id,collaboration_id,outcome_id,evidence_type,evidence_value,quality,recorded_at,source_review_id,source_revision,provenance)"
-            + " values(?,?,?,?,?,'COLLABORATION_REVIEW',?::jsonb,'SELF_REPORTED',?,?,1,'LEGACY_UNVERIFIED')",
-        UUID.randomUUID(),
+            + " historical_campaign(id,evidence_root_id,revision_number,schema_version,creator_id,master_id,collaboration_id,outcome_id,evidence_type,evidence_value,quality,recorded_at,business_occurred_at,source_review_id,source_revision,provenance,status)"
+            + " values(?,?,1,'1.0',?,?,?,?,'COLLABORATION_REVIEW',?::jsonb,'SELF_REPORTED',?,?,?,1,'LEGACY_UNVERIFIED','ACTIVE')",
+        histId,
+        histId,
         c.get("creator_id"),
         c.get("master_id"),
         id,
         outcome.get("id"),
         proof.toString(),
+        s.time(),
         s.time(),
         review);
     changed(id, "LEGACY_COLLABORATION_REVIEWED");

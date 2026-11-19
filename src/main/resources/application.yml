@@ -233,7 +233,7 @@ crawler:
 # ------------------------------------------------------------------------------------
 gemini:
   api-key: ${GEMINI_API_KEY:}
-  model: ${GEMINI_MODEL:gemini-3.5-flash}
+  model: ${GEMINI_MODEL:gemini-3-flash-preview}
   base-url: https://generativelanguage.googleapis.com/v1beta/models
   max-output-tokens: 2048
   temperature: 0.3

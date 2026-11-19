@@ -178,7 +178,6 @@ AWARENESS, ENGAGEMENT, TRAFFIC, CONVERSION
                               Math.max(geminiProperties.getMaxOutputTokens(), 2048));
                           put("temperature", geminiProperties.getTemperature());
                           put("responseMimeType", "application/json");
-                          put("thinkingConfig", Map.of("thinkingBudget", 0));
                         }
                       });
                 }

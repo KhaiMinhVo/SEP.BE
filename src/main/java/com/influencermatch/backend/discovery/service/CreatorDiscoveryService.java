@@ -72,8 +72,8 @@ public class CreatorDiscoveryService {
                 log.warn("Discovery query embedding unavailable; retaining context filters and lexical retrieval: {}", e.getMessage());
             }
         }
-        var locations = campaign.getLocations();
-        boolean hasLocations = locations != null && !locations.isEmpty();
+        var locations = DiscoveryLocations.expand(campaign.getLocations());
+        boolean hasLocations = !locations.isEmpty();
         var pool = metricRepository.searchDiscoveryCreators(
             hasPlatforms, hasPlatforms ? campaign.getPlatforms() : List.of("__NONE__"),
             hasNiches, hasNiches ? niches : List.of("__NONE__"), min, max,

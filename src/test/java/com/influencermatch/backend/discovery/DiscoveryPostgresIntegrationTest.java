@@ -174,6 +174,39 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
     verify(ai, never()).getExplanation(any());
   }
 
+  @Test void nationwideAndCityAliasesApplyOnBothDiscoveryEndpoints() throws Exception {
+    var hcm = creator("HCM reviewer", "BEAUTY", topic, "KOC");
+    var hanoi = creator("Hanoi reviewer", "BEAUTY", topic, "KOC");
+    jdbc.update("update creator set location='TP.HCM' where id=?", hcm.getId());
+    jdbc.update("update creator set location='Hà Nội' where id=?", hanoi.getId());
+    for (String location : List.of("Thành phố Hồ Chí Minh", "Toàn quốc", "Vietnam")) {
+      jdbc.update("update campaign set locations=array[?]::text[] where id=?", location, campaign);
+      for (var route : List.of("discover", "discovery")) {
+        var data = call(owner, get("/campaigns/" + campaign + "/" + route), null, 200).path("data");
+        if (location.equals("Thành phố Hồ Chí Minh"))
+          assertThat(ids(data)).containsExactly(hcm.getId().toString());
+        else
+          assertThat(ids(data)).containsExactlyInAnyOrder(hcm.getId().toString(), hanoi.getId().toString());
+      }
+    }
+  }
+
+  @Test void vectorRecoversBroadBeautyProfilesWithoutExactProductWords() throws Exception {
+    jdbc.update("update campaign set product_service='kem chống nắng',niches=array['BEAUTY'] where id=?", campaign);
+    var candidate = creator("Beauty reviewer", "UNKNOWN", "Trải nghiệm mỹ phẩm hằng ngày", "KOC");
+    var vector = Collections.nCopies(768, 0.1f);
+    when(ai.getEmbedding(anyString())).thenReturn(vector);
+    jdbc.update("update public_creator_metric set category='BEAUTY' where creator_id=?", candidate.getId());
+    jdbc.update("update creator set embedding=cast(? as vector) where id=?", vector.toString(), candidate.getId());
+    var wrongPlatform = creator("Wrong platform", "BEAUTY", "Mỹ phẩm", "KOC");
+    jdbc.update("update creator set platform='YOUTUBE',embedding=cast(? as vector) where id=?", vector.toString(), wrongPlatform.getId());
+    jdbc.update("update campaign set platforms=array['TIKTOK'] where id=?", campaign);
+    for (var route : List.of("discover", "discovery")) {
+      var data = call(owner, get("/campaigns/" + campaign + "/" + route), null, 200).path("data");
+      assertThat(ids(data)).containsExactly(candidate.getId().toString());
+    }
+  }
+
   @Test void vectorRanksOnlyContextEligibleProfilesBeforeTakingTop50() throws Exception {
     var query = new ArrayList<>(Collections.nCopies(768, 0.0f));
     query.set(0, 1.0f);

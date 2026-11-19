@@ -473,9 +473,11 @@ class GoogleBrandLoginPostgresIntegrationTest extends PostgresApiTestSupport {
   @Test
   void linkingRequiresReauthenticationAndSameEmailAndDoesNotCreateUser() throws Exception {
     var u = account(Role.BRAND);
-    String access = jwt.generateToken(u);
-    var a = linkStart(u, access, 200);
     String subject = UUID.randomUUID().toString();
+    var beforeLink = start();
+    login(beforeLink, proof(beforeLink, u.getEmail(), subject), 409);
+    String access = login(u).path("accessToken").asText();
+    var a = linkStart(u, access, 200);
     confirm(a, access, proof(a, email(), subject), 409);
     assertThat(identities.findByUserIdAndProvider(u.getId(), ExternalIdentityProvider.GOOGLE))
         .isEmpty();
@@ -489,6 +491,23 @@ class GoogleBrandLoginPostgresIntegrationTest extends PostgresApiTestSupport {
                 .getUser()
                 .getId())
         .isEqualTo(u.getId());
+    var afterLink = start();
+    var login = login(afterLink, proof(afterLink, u.getEmail(), subject), 200);
+    assertThat(json.readTree(login.getResponse().getContentAsByteArray()).at("/data/user/id").asText())
+        .isEqualTo(u.getId().toString());
+  }
+
+  @Test
+  void expiredLinkChallengeLeavesIdentityUnlinked() throws Exception {
+    var user = account(Role.BRAND);
+    String access = login(user).path("accessToken").asText();
+    var attempt = linkStart(user, access, 200);
+    jdbc.update(
+        "update google_login_session set expires_at=now()-interval '1 second' where id=?",
+        attempt.id);
+    confirm(attempt, access, proof(attempt, user.getEmail(), UUID.randomUUID().toString()), 401);
+    assertThat(identities.findByUserIdAndProvider(user.getId(), ExternalIdentityProvider.GOOGLE))
+        .isEmpty();
   }
 
   @Test

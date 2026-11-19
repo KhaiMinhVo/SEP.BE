@@ -96,7 +96,7 @@ public class PaymentController {
 
     String target = vnPayConfig.getFrontendReturnUrl();
     if (target == null || target.isBlank()) {
-      target = "http://localhost:5173/subscription";
+      target = "https://www.influencermatch.site/subscription";
     }
     String delimiter = target.contains("?") ? "&" : "?";
     String redirectUrl =

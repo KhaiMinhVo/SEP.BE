@@ -18,5 +18,5 @@ public class VnPayConfig {
   private String hashSecret;
   private String payUrl;
   private String returnUrl;
-  private String frontendReturnUrl = "http://localhost:5173/subscription";
+  private String frontendReturnUrl = "https://www.influencermatch.site/subscription";
 }

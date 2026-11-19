@@ -45,7 +45,7 @@ class DiscoveryRegressionTest {
     var next = service.discoverCreators(campaign.getId(), req);
     assertThat(next.getContent()).isEmpty();
     assertThat(next.getTotalElements()).isEqualTo(1);
-    verify(metrics, times(2)).searchDiscoveryCreators(eq(true), eq(List.of("TIKTOK")),
+    verify(metrics, times(6)).searchDiscoveryCreators(eq(true), eq(List.of("TIKTOK")),
         eq(true), anyList(), eq(20000L), eq(50000L), anyString(), eq(""), isNull(),
         any(), eq(false), anyList(), anyList(), anyList(), eq(PageRequest.of(0, 50)));
   }

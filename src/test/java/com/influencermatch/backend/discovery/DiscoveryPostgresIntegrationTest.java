@@ -95,7 +95,7 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
     }
   }
 
-  @Test void uiFiltersApplyBeforeRankingAndCannotWidenCampaignBounds() throws Exception {
+  @Test void uiFiltersStayHardWhileSparseCampaignPreferencesCanExpand() throws Exception {
     var wanted = creator("Wanted", "BEAUTY", topic, "KOC");
     var wrongEr = creator("WrongER", "BEAUTY", topic, "KOC");
     jdbc.update("update public_creator_metric set engagement_rate=0.1 where creator_id=?", wrongEr.getId());
@@ -106,7 +106,11 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
       var data = call(owner, get("/campaigns/" + campaign + "/" + route)
           .param("minEr", "1").param("maxEr", "4").param("tier", "MICRO")
           .param("minFollowers", "0").param("maxFollowers", "1000000"), null, 200).path("data");
-      assertThat(ids(data)).as(route).containsExactly(wanted.getId().toString());
+      assertThat(ids(data)).as(route).containsExactly(wanted.getId().toString(), wrongFollowers.getId().toString());
+      var rows = data.has("content") ? data.path("content") : data.path("items");
+      assertThat(rows.get(0).path("isSimilarFallback").asBoolean()).isFalse();
+      assertThat(rows.get(1).path("isSimilarFallback").asBoolean()).isTrue();
+      assertThat(rows.get(1).path("expansionReasons").toString()).contains("FOLLOWERS");
       data = call(owner, get("/campaigns/" + campaign + "/" + route)
           .param("niche", "PETS"), null, 200).path("data");
       assertThat(ids(data)).as(route).isEmpty();
@@ -167,7 +171,7 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
       if (route.equals("discovery")) {
         var card = data.path("content").get(0);
         assertThat(card.path("aiScoreAvailable").asBoolean()).isFalse();
-        assertThat(card.path("discoveryPolicyVersion").asText()).isEqualTo("context-db-v2");
+        assertThat(card.path("discoveryPolicyVersion").asText()).isEqualTo("progressive-v3");
         assertThat(card.path("finalScore").isNull() || card.path("finalScore").isMissingNode()).isTrue();
       }
     }
@@ -183,9 +187,11 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
       jdbc.update("update campaign set locations=array[?]::text[] where id=?", location, campaign);
       for (var route : List.of("discover", "discovery")) {
         var data = call(owner, get("/campaigns/" + campaign + "/" + route), null, 200).path("data");
-        if (location.equals("Thành phố Hồ Chí Minh"))
-          assertThat(ids(data)).containsExactly(hcm.getId().toString());
-        else
+        if (location.equals("Thành phố Hồ Chí Minh")) {
+          assertThat(ids(data)).containsExactly(hcm.getId().toString(), hanoi.getId().toString());
+          var rows = data.has("content") ? data.path("content") : data.path("items");
+          assertThat(rows.get(1).path("expansionReasons").toString()).contains("LOCATION");
+        } else
           assertThat(ids(data)).containsExactlyInAnyOrder(hcm.getId().toString(), hanoi.getId().toString());
       }
     }

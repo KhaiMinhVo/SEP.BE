@@ -24,4 +24,7 @@ public interface HybridDiscoveryCreatorProjection {
     Double getFtsScore();
     Double getHybridScore();
     String getRetrievalMethod();
+    String getLocation();
+    default java.util.List<String> getExpansionReasons() { return java.util.List.of(); }
+    default boolean getIsSimilarFallback() { return !getExpansionReasons().isEmpty(); }
 }

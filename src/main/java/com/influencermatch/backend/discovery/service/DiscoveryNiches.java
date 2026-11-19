@@ -53,8 +53,8 @@ public final class DiscoveryNiches {
             .trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
     }
     private static final List<List<String>> ALIASES = List.of(
-        List.of("BEAUTY", "Beauty", "Làm đẹp", "Làm đẹp & Mỹ phẩm", "Mỹ phẩm & Làm đẹp"),
-        List.of("SKINCARE", "Chăm sóc da", "Chăm sóc da & Skincare"),
+        List.of("BEAUTY", "Beauty", "Làm đẹp", "Làm đẹp & Mỹ phẩm", "Mỹ phẩm & Làm đẹp", "Mỹ phẩm", "Review mỹ phẩm", "Cosmetics"),
+        List.of("SKINCARE", "Chăm sóc da", "Chăm sóc da & Skincare", "Dưỡng da", "Review skincare"),
         List.of("FASHION", "Fashion", "Thời trang", "Thời trang & Phong cách", "Thời trang & Phụ kiện"),
         List.of("Ẩm thực", "FOOD", "Ẩm thực và ăn uống", "Ẩm thực và Đồ ăn vặt", "Ẩm thực & Nhà hàng"),
         List.of("Du lịch", "TRAVEL", "Du lịch & Trải nghiệm"),
@@ -73,6 +73,17 @@ public final class DiscoveryNiches {
                 if (group.stream().anyMatch(alias -> alias.equalsIgnoreCase(value)))
                     group.forEach(alias -> result.add(alias.toLowerCase(Locale.ROOT)));
         }
+        return List.copyOf(result);
+    }
+
+    /** Related categories are used only for explicitly labelled expanded results. */
+    public static List<String> related(List<String> niches, List<String> productNiches) {
+        var result = new LinkedHashSet<>(expand(niches));
+        result.addAll(productNiches);
+        if (result.stream().anyMatch(value -> value.contains("skincare") || value.contains("chăm sóc da")
+                || value.contains("makeup") || value.contains("trang điểm") || value.contains("haircare")
+                || value.contains("chăm sóc tóc") || value.contains("beauty") || value.contains("mỹ phẩm")))
+            result.addAll(expand(List.of("BEAUTY")));
         return List.copyOf(result);
     }
 }

@@ -28,7 +28,7 @@ public class CreatorDiscoveryController {
     @GetMapping("/{campaignId}/discovery")
     @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SEARCH_CREATOR')")
     @Transactional(readOnly = true)
-    @Operation(summary = "Discover creators for campaign", description = "Filters creator records by campaign context, then retrieves by stored vector similarity and keyword relevance. Four-Memory/TOPSIS scoring runs separately on the shortlist.")
+    @Operation(summary = "Discover creators for campaign", description = "Retrieves exact campaign matches first. If fewer than five exist, progressively expands campaign location, follower range and related topics. Explicit UI filters, platforms and data quality remain mandatory. Expanded results disclose isSimilarFallback and expansionReasons. Four-Memory/TOPSIS scoring runs separately on the shortlist.")
     public ResponseEntity<ApiResponse<Page<Map<String, Object>>>> discoverCreators(
             @PathVariable UUID campaignId,
             @ParameterObject @ModelAttribute DiscoverySearchRequest searchRequest) {
@@ -54,6 +54,10 @@ public class CreatorDiscoveryController {
             map.put("platform", p.getPlatform());
             map.put("avatarUrl", p.getAvatarUrl());
             map.put("profileUrl", p.getProfileUrl());
+            map.put("location", p.getLocation());
+            map.put("isSimilarFallback", p.getIsSimilarFallback());
+            map.put("expansionReasons", p.getExpansionReasons());
+            map.put("reason", com.influencermatch.backend.discovery.dto.ExpandedDiscoveryCreator.describe(p.getExpansionReasons()));
             map.put("followers", p.getFollowers());
             map.put("avgViews", p.getAvgViews());
             map.put("avgLikes", p.getAvgLikes());
@@ -67,7 +71,7 @@ public class CreatorDiscoveryController {
             map.put("retrievalMethod", p.getRetrievalMethod());
             map.put("retrievalSimilarity", p.getSemanticScore());
             map.put("aiScoreAvailable", false);
-            map.put("discoveryPolicyVersion", "context-db-v2");
+            map.put("discoveryPolicyVersion", "progressive-v3");
             map.put("semanticScore", null);
             map.put("ftsScore", p.getFtsScore());
             map.put("hybridScore", null);

@@ -128,6 +128,8 @@ public class CampaignService {
         .isClaimed(filter.getIsClaimed()).minFee(filter.getMinFee()).maxFee(filter.getMaxFee())
         .sortBy(filter.getSortBy()).page(0).size(50).build();
     var ranked = discovery.discoverCreators(campaignId, request);
+    var retrievalByCreator = ranked.getContent().stream().collect(java.util.stream.Collectors.toMap(
+        p -> p.getCreatorId(), p -> p));
     var metricIds = ranked.getContent().stream().map(p -> p.getId()).toList();
     var byId = metricRepository.findAllById(metricIds).stream().collect(
         java.util.stream.Collectors.toMap(m -> m.getId(), m -> m));
@@ -176,7 +178,10 @@ public class CampaignService {
               .estimatedFeeMax(feeMax)
               .actualFee(metric.getActualFee())
               .isClaimed(isClaimed)
-              .isSimilarFallback(false)
+              .isSimilarFallback(retrievalByCreator.get(metric.getCreator().getId()).getIsSimilarFallback())
+              .expansionReasons(retrievalByCreator.get(metric.getCreator().getId()).getExpansionReasons())
+              .reason(com.influencermatch.backend.discovery.dto.ExpandedDiscoveryCreator.describe(
+                  retrievalByCreator.get(metric.getCreator().getId()).getExpansionReasons()))
               .recentPosts(
                   postsByCreatorId
                       .getOrDefault(metric.getCreator().getId(), new ArrayList<>())
@@ -234,7 +239,8 @@ public class CampaignService {
       comparator = Comparator.comparingInt(r -> candidateOrder.get(r.creatorId()));
     }
 
-    responses.sort(comparator);
+    responses.sort(Comparator.comparing((CreatorDiscoveryResponse r) -> Boolean.TRUE.equals(r.isSimilarFallback()))
+        .thenComparing(comparator));
 
     // 7. Slicing pagination
     int start = (int) pageable.getOffset();

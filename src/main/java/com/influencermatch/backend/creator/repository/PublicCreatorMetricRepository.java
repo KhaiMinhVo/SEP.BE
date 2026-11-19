@@ -44,7 +44,7 @@ public interface PublicCreatorMetricRepository
       WITH eligible AS (
           SELECT m.id, c.id AS creatorId, c.master_id AS masterId,
                  COALESCE(cm.canonical_name, c.display_name, c.user_name) AS displayName,
-                 c.platform, c.user_name AS userName, c.avatar_url AS avatarUrl,
+                 c.platform, c.location, c.user_name AS userName, c.avatar_url AS avatarUrl,
                  c.profile_url AS profileUrl, m.followers, m.avg_views AS avgViews,
                  m.avg_likes AS avgLikes, m.niche, m.category,
                  m.engagement_rate AS engagementRate, m.content_summary AS contentSummary,
@@ -82,6 +82,9 @@ public interface PublicCreatorMetricRepository
                  OR UPPER(c.platform) = UPPER(BTRIM(CAST(:#{#filters.platform} AS text))))
             AND (:hasLocations = false OR LOWER(BTRIM(c.location)) IN (:locations))
             AND (:hasNiches = false OR LOWER(BTRIM(m.category)) IN (:niches)
+                 OR (:#{#filters.similarityExpansion} = true AND CAST(:queryVector AS text) IS NOT NULL
+                     AND c.embedding IS NOT NULL AND vector_norm(c.embedding) > 0
+                     AND 1.0 - (c.embedding <=> CAST(CAST(:queryVector AS text) AS vector)) >= 0.5)
                  OR EXISTS (SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part
                             WHERE LOWER(BTRIM(part)) IN (:niches)))
             AND (COALESCE(BTRIM(CAST(:#{#filters.niche} AS text)), '') = ''
@@ -101,15 +104,21 @@ public interface PublicCreatorMetricRepository
             AND (CAST(:#{#filters.isClaimed} AS boolean) IS NULL
                  OR :#{#filters.isClaimed} = (c.source_type = 'AUTHORIZED' OR c.authorized_at IS NOT NULL))
             AND (:topicQuery = ''
-                 OR (CAST(:queryVector AS text) IS NOT NULL AND c.embedding IS NOT NULL AND vector_norm(c.embedding) > 0
-                     AND (COALESCE(UPPER(BTRIM(m.niche)), 'UNKNOWN') IN ('', 'UNKNOWN', 'GENERAL')
-                          OR LOWER(BTRIM(m.niche)) IN (:niches)))
+                 OR (:#{#filters.similarityExpansion} = true AND (
+                     (LOWER(BTRIM(m.category)) IN (:topicNiches)
+                         AND (COALESCE(UPPER(BTRIM(m.niche)), 'UNKNOWN') IN ('', 'UNKNOWN', 'GENERAL')
+                              OR LOWER(BTRIM(m.niche)) IN (:topicNiches)))
+                     OR EXISTS (SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS related_part
+                                WHERE LOWER(BTRIM(related_part)) IN (:topicNiches))
+                     OR (CAST(:queryVector AS text) IS NOT NULL AND c.embedding IS NOT NULL AND vector_norm(c.embedding) > 0
+                         AND 1.0 - (c.embedding <=> CAST(CAST(:queryVector AS text) AS vector)) >= 0.5)))
                  OR (COALESCE(m.search_vector, ''::tsvector) || post_evidence.search_vector) @@ websearch_to_tsquery('simple', :topicQuery)
                  OR LOWER(BTRIM(m.category)) IN (:topicNiches)
                  OR EXISTS (SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS topic_part
                             WHERE LOWER(BTRIM(topic_part)) IN (:topicNiches)))
             AND (COALESCE(BTRIM(CAST(:#{#filters.keyword} AS text)), '') = ''
-                 OR (CAST(:queryVector AS text) IS NOT NULL AND c.embedding IS NOT NULL AND vector_norm(c.embedding) > 0)
+                 OR (CAST(:queryVector AS text) IS NOT NULL AND c.embedding IS NOT NULL AND vector_norm(c.embedding) > 0
+                     AND 1.0 - (c.embedding <=> CAST(CAST(:queryVector AS text) AS vector)) >= 0.5)
                  OR (COALESCE(m.search_vector, ''::tsvector) || post_evidence.search_vector || to_tsvector('simple', COALESCE(c.display_name, '') || ' ' || COALESCE(c.user_name, '')))
                      @@ websearch_to_tsquery('simple', CAST(:#{#filters.keyword} AS text)))
       ), filtered AS MATERIALIZED (

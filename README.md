@@ -403,13 +403,30 @@ keys. Direct Login works even with Facebook OAuth disabled or unconfigured. Miss
 returns `503 INSTAGRAM_OAUTH_UNAVAILABLE`; it never falls back to Facebook or the dev mock.
 Do not enable or replace secrets in an existing environment until its corresponding app is configured.
 
+### Creator Portal on Vercel
+
+For `https://influencermatch-six.vercel.app`, register the full URLs below in the corresponding
+Meta Login settings and set the same values in the backend deployment environment.
+
+```dotenv
+META_REDIRECT_URI=https://influencermatch-six.vercel.app/api/v1/integrations/meta/callback
+INSTAGRAM_REDIRECT_URI=https://influencermatch-six.vercel.app/api/v1/integrations/instagram/callback
+```
+
+Deploy the frontend callback proxy and backend together. Open **Kênh liên kết** on this
+same origin, sign in as an email-verified Creator, start the connection and select the
+channel after consent. The OAuth browser cookie belongs to the origin that started the
+flow. For manual claims, the portal first calls
+`GET /api/v1/creator-claims/channels/lookup?platform=FACEBOOK&q=<username-or-id>`, then
+submits evidence for the selected channel through the existing Claim endpoint.
+
 ### API and browser test
 
 1. Apply V18 in the intended test database and run the updated backend. V18 adds `oauth_flow` to sessions;
    existing sessions default to `FACEBOOK_LOGIN` and keep their ciphertext/ownership unchanged.
 2. Open Swagger through the **same HTTPS backend hostname** used by `INSTAGRAM_REDIRECT_URI`. If a
-   test tunnel is needed, configure it explicitly; a Start request on localhost will not set a cookie
-   for a different tunnel hostname. No frontend page or automatic tunnel is provided.
+   test tunnel is needed, configure it explicitly. A Start request on localhost sets its
+   cookie on localhost.
 3. Log in the verified Creator, Authorize Swagger, then call
    `POST /api/v1/creators/portal/accounts/connect/instagram/start` with `{}` for discovery, or
    `{"creatorId":"<existing Instagram UUID>","invitationToken":"<optional claim invitation>"}`.

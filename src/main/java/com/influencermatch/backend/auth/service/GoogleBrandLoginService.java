@@ -52,13 +52,19 @@ public class GoogleBrandLoginService {
   public record Complete(
       @NotNull UUID sessionId,
       @NotBlank @Size(max = 150) String fullName,
-      @NotBlank @Size(max = 200) String businessName,
+      @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+          @NotBlank @Size(min = 8, max = 72) String password,
       @NotBlank @Size(max = 30) String phoneNumber,
       @Valid @NotNull PolicyAcceptance policyAcceptance) {
     @JsonAnySetter
     public void unknown(String key, Object value) {
       throw new ValidationException(
           "Google registration does not accept email, role or unknown fields");
+    }
+
+    @Override
+    public String toString() {
+      return "Complete[sessionId=" + sessionId + "]";
     }
   }
 
@@ -177,6 +183,13 @@ public class GoogleBrandLoginService {
   public Result complete(Complete request, String browser) {
     registration.validate(request.policyAcceptance());
     RegistrationSupport.phone(request.phoneNumber());
+    String password = request.password();
+    if (password.codePointCount(0, password.length()) < 8) {
+      throw new ValidationException("Password must have at least 8 characters");
+    }
+    if (password.getBytes(StandardCharsets.UTF_8).length > 72) {
+      throw new ValidationException("Password must not exceed 72 UTF-8 bytes");
+    }
     verifier.requireConfigured();
     users.lockRoleChanges();
     // Read identity metadata first, then take the same email advisory lock as password
@@ -207,11 +220,12 @@ public class GoogleBrandLoginService {
             User.builder()
                 .email(email)
                 .fullName(request.fullName().trim())
+                .passwordHash(encoder.encode(password))
                 .role(Role.BRAND)
                 .status(UserStatus.ACTIVE)
                 .emailVerified(true)
                 .build());
-    registration.brand(user, request.businessName(), request.phoneNumber());
+    registration.brand(user, null, request.phoneNumber());
     registration.consent(user, request.policyAcceptance(), "GOOGLE_REGISTRATION");
     identities.saveAndFlush(
         ExternalIdentity.builder()

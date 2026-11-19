@@ -29,6 +29,7 @@ class GoogleBrandLoginPostgresIntegrationTest extends PostgresApiTestSupport {
   @SpyBean AuthSessionIssuer issuer;
   @SpyBean com.influencermatch.backend.audit.service.AuditService audit;
   final String client = "test.apps.googleusercontent.com";
+  private static final String NEW_PASSWORD = "BrandPassword123!";
 
   @BeforeEach
   void configured() {
@@ -81,24 +82,25 @@ class GoogleBrandLoginPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   MvcResult complete(Attempt a, int code) throws Exception {
+    return complete(a, registrationBody(a), code);
+  }
+
+  Map<String, Object> registrationBody(Attempt a) {
+    return new HashMap<>(Map.of(
+        "sessionId", a.id,
+        "fullName", "Brand Owner",
+        "password", NEW_PASSWORD,
+        "phoneNumber", "0912345678",
+        "policyAcceptance", TestAuthHttp.acceptance()));
+  }
+
+  MvcResult complete(Attempt a, Map<String, Object> body, int code) throws Exception {
     return mvc.perform(
             post("/auth/google/registration/complete")
                 .with(TestAuthHttp.csrf())
                 .cookie(a.cookie)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    json.writeValueAsBytes(
-                        Map.of(
-                            "sessionId",
-                            a.id,
-                            "fullName",
-                            "Brand Owner",
-                            "businessName",
-                            "Google Brand",
-                            "phoneNumber",
-                            "0912345678",
-                            "policyAcceptance",
-                            TestAuthHttp.acceptance()))))
+                .content(json.writeValueAsBytes(body)))
         .andExpect(status().is(code))
         .andReturn();
   }
@@ -135,7 +137,17 @@ class GoogleBrandLoginPostgresIntegrationTest extends PostgresApiTestSupport {
     var user = users.findByEmail(email).orElseThrow();
     assertThat(user.getRole()).isEqualTo(Role.BRAND);
     assertThat(user.isEmailVerified()).isTrue();
-    assertThat(user.getPasswordHash()).isNull();
+    assertThat(user.getPasswordHash()).isNotEqualTo(NEW_PASSWORD);
+    assertThat(encoder.matches(NEW_PASSWORD, user.getPasswordHash())).isTrue();
+    assertThat(done.getContentAsString()).doesNotContain(NEW_PASSWORD, user.getPasswordHash());
+    assertThat(data.path("user").path("onboardingStatus").asText()).isEqualTo("PENDING");
+    var profile = callToken(data.path("accessToken").asText(), get("/brands/me"), null, 200)
+        .path("data");
+    assertThat(profile.path("businessName").asText()).isEmpty();
+    assertThat(profile.path("phoneNumber").asText()).isEqualTo("+84912345678");
+    var named = callToken(data.path("accessToken").asText(), patch("/brands/me"),
+        Map.of("businessName", "Tên nhập khi thiết lập hồ sơ"), 200).path("data");
+    assertThat(named.path("businessName").asText()).isEqualTo("Tên nhập khi thiết lập hồ sơ");
     assertThat(
             jdbc.queryForObject(
                 "select count(*) from brand_profile where user_id=?", Integer.class, user.getId()))
@@ -159,14 +171,109 @@ class GoogleBrandLoginPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
+  void newBrandSignsInWithPasswordAndGoogleAfterLogout() throws Exception {
+    var a = start();
+    String email = email(), subject = UUID.randomUUID().toString();
+    login(a, proof(a, email, subject), 200);
+    var registration = complete(a, 200).getResponse();
+    var id = users.findByEmail(email).orElseThrow().getId().toString();
+    logout(registration);
+
+    var passwordLogin = mvc.perform(
+            post("/auth/login").with(TestAuthHttp.csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsBytes(Map.of("email", email, "password", NEW_PASSWORD))))
+        .andExpect(status().isOk())
+        .andReturn().getResponse();
+    assertThat(json.readTree(passwordLogin.getContentAsByteArray()).at("/data/user/id").asText())
+        .isEqualTo(id);
+    logout(passwordLogin);
+
+    var next = start();
+    var googleLogin = login(next, proof(next, email, subject), 200).getResponse();
+    assertThat(json.readTree(googleLogin.getContentAsByteArray()).at("/data/user/id").asText())
+        .isEqualTo(id);
+  }
+
+  void logout(org.springframework.mock.web.MockHttpServletResponse authenticated) throws Exception {
+    var access = json.readTree(authenticated.getContentAsByteArray()).at("/data/accessToken").asText();
+    mvc.perform(post("/auth/logout").with(TestAuthHttp.csrf())
+            .header("Authorization", "Bearer " + access)
+            .cookie(authenticated.getCookie("IM_REFRESH")))
+        .andExpect(status().isNoContent());
+  }
+
+  @Test
+  void invalidPasswordLeavesRegistrationAvailableForRetry() throws Exception {
+    var a = start();
+    String email = email();
+    login(a, proof(a, email, UUID.randomUUID().toString()), 200);
+    var body = registrationBody(a);
+    body.remove("password");
+    complete(a, body, 400);
+    for (String invalid : List.of(
+        "short", " ".repeat(8), "\uD83D\uDE80".repeat(4), "\u00e9".repeat(37))) {
+      body.put("password", invalid);
+      complete(a, body, 400);
+    }
+    assertThat(users.findByEmail(email)).isEmpty();
+    String passwordAtLimit = "\u00e9".repeat(36);
+    body.put("password", passwordAtLimit);
+    complete(a, body, 200);
+    assertThat(encoder.matches(passwordAtLimit, users.findByEmail(email).orElseThrow().getPasswordHash()))
+        .isTrue();
+  }
+
+  @Test
+  void expiredPendingRegistrationCannotCreateBrand() throws Exception {
+    var a = start();
+    String email = email();
+    login(a, proof(a, email, UUID.randomUUID().toString()), 200);
+    jdbc.update(
+        "update google_login_session set expires_at=now()-interval '1 second' where id=?", a.id);
+    complete(a, 401);
+    assertThat(users.findByEmail(email)).isEmpty();
+  }
+
+  @Test
+  void brandContextFailureRollsBackAndSameGoogleSessionCanRetry() throws Exception {
+    var a = start();
+    String email = email();
+    login(a, proof(a, email, UUID.randomUUID().toString()), 200);
+    jdbc.execute("""
+        create function test_google_registration_context_failure() returns trigger language plpgsql as $$
+        begin
+          raise exception 'Test Brand Context failure';
+          return new;
+        end;
+        $$""");
+    try {
+      jdbc.execute("""
+          create trigger test_google_registration_context_failure before insert on brand_context
+          for each row execute function test_google_registration_context_failure()""");
+      complete(a, 500);
+    } finally {
+      jdbc.execute("drop trigger if exists test_google_registration_context_failure on brand_context");
+      jdbc.execute("drop function test_google_registration_context_failure()");
+    }
+    assertThat(users.findByEmail(email)).isEmpty();
+    assertThat(jdbc.queryForObject(
+        "select status from google_login_session where id=?", String.class, a.id))
+        .isEqualTo("REGISTRATION_REQUIRED");
+    complete(a, 200);
+  }
+
+  @Test
   void knownGoogleSubjectReusesBrandAndSupportsRefreshAndMe() throws Exception {
     var user = account(Role.BRAND);
+    user.setPasswordHash(null);
+    users.saveAndFlush(user);
     String subject = UUID.randomUUID().toString();
     identity(user, subject);
     var a = start();
     var r = login(a, proof(a, user.getEmail(), subject), 200).getResponse();
     var data = json.readTree(r.getContentAsString()).path("data");
     assertThat(data.path("user").path("id").asText()).isEqualTo(user.getId().toString());
+    assertThat(users.findById(user.getId()).orElseThrow().getPasswordHash()).isNull();
     assertThat(data.has("refreshToken")).isFalse();
     var me = callToken(data.path("accessToken").asText(), get("/auth/me"), null, 200);
     assertThat(me.path("data").path("permissions"))
@@ -319,19 +426,7 @@ class GoogleBrandLoginPostgresIntegrationTest extends PostgresApiTestSupport {
                         .with(TestAuthHttp.csrf())
                         .cookie(a.cookie)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(
-                            json.writeValueAsBytes(
-                                Map.of(
-                                    "sessionId",
-                                    a.id,
-                                    "fullName",
-                                    "Owner",
-                                    "businessName",
-                                    "Brand",
-                                    "phoneNumber",
-                                    "0912345678",
-                                    "policyAcceptance",
-                                    TestAuthHttp.acceptance()))))
+                        .content(json.writeValueAsBytes(registrationBody(a))))
                 .andReturn()
                 .getResponse()
                 .getStatus();

@@ -48,13 +48,26 @@ public class BrandAffinityScorer {
       sm4Norm = (double) matches / total;
     }
 
-    // Combine with winning brand pattern if present
+    // Combine with winning brand patterns and learned feedback patterns if present
     if (brandPatterns != null && !brandPatterns.isEmpty()) {
-      BrandPattern pattern = brandPatterns.get(0);
-      if (pattern.getPlatform() != null
-          && candidatePlatform != null
-          && pattern.getPlatform().equalsIgnoreCase(candidatePlatform)) {
-        sm4Norm = Math.min(1.0, sm4Norm + 0.10);
+      for (BrandPattern pattern : brandPatterns) {
+        if (pattern == null) continue;
+
+        // 1. Platform alignment boost (+0.10)
+        if (pattern.getPlatform() != null
+            && candidatePlatform != null
+            && pattern.getPlatform().equalsIgnoreCase(candidatePlatform)) {
+          sm4Norm = Math.min(1.0, sm4Norm + 0.10);
+        }
+
+        // 2. Learned Rejection Feedback (Brand Taste Penalty)
+        if ("REJECTION_FEEDBACK".equalsIgnoreCase(pattern.getPatternType())
+            && pattern.getPatternValue() != null) {
+          com.fasterxml.jackson.databind.JsonNode pVal = pattern.getPatternValue();
+          if (pVal.has("NICHE_MISMATCH") && matches == 0 && isConfigured) {
+            sm4Norm = Math.max(0.0, sm4Norm - 0.10);
+          }
+        }
       }
     }
 

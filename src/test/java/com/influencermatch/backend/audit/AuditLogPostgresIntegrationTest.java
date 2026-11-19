@@ -5,6 +5,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import com.influencermatch.backend.audit.model.AuditLog;
 import com.influencermatch.backend.audit.repository.AuditLogRepository;
 import com.influencermatch.backend.support.PostgresApiTestSupport;
+import com.influencermatch.backend.support.TestAuthHttp;
+import com.influencermatch.backend.support.TestBrandHttp;
+import com.influencermatch.backend.support.TestCampaignHttp;
 import com.influencermatch.backend.user.enums.Role;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -43,6 +46,53 @@ class AuditLogPostgresIntegrationTest extends PostgresApiTestSupport {
     assertThat(clamped.path("page").asInt()).isZero();assertThat(clamped.path("size").asInt()).isEqualTo(100);
     assertThat(call(admin,get("/admin/audit-logs").param("action",action).param("size","0"),null,200).path("data").path("size").asInt()).isEqualTo(1);
   }
+  @Test void keywordSearchReturnsSafeDtoAndPreservesDeletedActorId() throws Exception {
+    var admin=account(Role.ADMIN);var deletedActor=UUID.randomUUID();var entity=UUID.randomUUID();
+    String action="KEYWORD_AUDIT_"+UUID.randomUUID();
+    logs.saveAndFlush(AuditLog.builder().userId(deletedActor).action(action).entityType("SensitiveEntity")
+        .entityId(entity).createdAt(LocalDateTime.now())
+        .oldValue(json.createObjectNode().put("status","ACTIVE").put("password","not-for-response").put("email","private@example.test"))
+        .newValue(json.createObjectNode().put("role","ADMIN").put("accessToken","private-token"))
+        .description("private-description").ipAddress("192.0.2.1").build());
+
+    var response=call(admin,get("/admin/audit-logs").param("keyword","sensitiveentity")
+        .param("actorId",deletedActor.toString()).param("entityId",entity.toString()),null,200);
+    var item=response.path("data").path("items").get(0);
+    assertThat(response.path("data").path("totalElements").asLong()).isEqualTo(1);
+    assertThat(item.path("actorId").asText()).isEqualTo(deletedActor.toString());
+    assertThat(item.path("userId").asText()).isEqualTo(deletedActor.toString());
+    assertThat(item.path("entityType").asText()).isEqualTo("SensitiveEntity");
+    assertThat(item.path("timestamp").asText()).isNotBlank();
+    assertThat(item.path("oldValue").path("status").asText()).isEqualTo("ACTIVE");
+    assertThat(item.path("oldValue").has("password")).isFalse();
+    assertThat(item.path("oldValue").has("email")).isFalse();
+    assertThat(item.path("newValue").has("accessToken")).isFalse();
+    assertThat(item.has("description")).isFalse();
+    assertThat(response.toString()).doesNotContain("not-for-response","private@example.test","private-token","private-description");
+    var byActorKeyword=call(admin,get("/admin/audit-logs").param("keyword",deletedActor.toString()),null,200);
+    assertThat(byActorKeyword.path("data").path("totalElements").asLong()).isGreaterThanOrEqualTo(1);
+  }
+  @Test void csvExportAppliesFiltersAndOmitsPrivateAuditPayload() throws Exception {
+    var admin=account(Role.ADMIN);var actor=UUID.randomUUID();var entity=UUID.randomUUID();
+    String action="CSV_AUDIT_"+UUID.randomUUID();
+    logs.saveAndFlush(AuditLog.builder().userId(actor).action(action).entityType("User").entityId(entity)
+        .createdAt(LocalDateTime.now()).oldValue(json.createObjectNode().put("password","csv-secret"))
+        .newValue(json.createObjectNode().put("email","csv-private@example.test"))
+        .description("csv-private-description").ipAddress("192.0.2.44").build());
+    event(UUID.randomUUID(),action+"_OTHER",entity,LocalDateTime.now());
+    var response=mvc.perform(get("/admin/audit-logs/export").header("Authorization","Bearer "+jwt.generateToken(admin))
+            .param("keyword",action)
+            .param("actorId",actor.toString()).param("entityId",entity.toString()).param("limit","99999")
+            .with(TestAuthHttp.request(null)).with(TestBrandHttp.revision(mvc)).with(TestCampaignHttp.revision(mvc)))
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+        .andReturn().getResponse();
+    String csv=response.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+    assertThat(response.getHeader("Content-Disposition")).contains("attachment");
+    assertThat(response.getHeader("X-Export-Row-Limit")).isEqualTo("10000");
+    assertThat(csv).contains("id,actorId,action,entityType,entityId,timestamp",action,actor.toString(),entity.toString());
+    assertThat(csv.lines().count()).isEqualTo(2);
+    assertThat(csv).doesNotContain("csv-secret","csv-private@example.test","csv-private-description","192.0.2.44");
+  }
   @ParameterizedTest @ValueSource(strings={"reversed","badDate","badActor"})
   void invalidFiltersAre400AndDoNotCreateAudit(String kind) throws Exception {
     var admin=account(Role.ADMIN);var req=get("/admin/audit-logs");
@@ -52,8 +102,14 @@ class AuditLogPostgresIntegrationTest extends PostgresApiTestSupport {
     assertThat(jdbc.queryForObject("select count(*) from audit_log where user_id=?",Long.class,admin.getId())).isZero();
   }
   @ParameterizedTest @EnumSource(value=Role.class,names={"BRAND","CREATOR","DATA_MANAGER"})
-  void nonAdminCannotReadAudit(Role role) throws Exception {call(account(role),get("/admin/audit-logs"),null,403);}
-  @Test void anonymousCannotReadAudit() throws Exception {call(null,get("/admin/audit-logs"),null,401);}
+  void nonAdminCannotReadAudit(Role role) throws Exception {
+    call(account(role),get("/admin/audit-logs"),null,403);
+    call(account(role),get("/admin/audit-logs/export"),null,403);
+  }
+  @Test void anonymousCannotReadAudit() throws Exception {
+    call(null,get("/admin/audit-logs"),null,401);
+    call(null,get("/admin/audit-logs/export"),null,401);
+  }
   @Test void auditFailureRollsBackUserStatusVersionAndRefreshRevocation() throws Exception {
     var admin=account(Role.ADMIN);var target=account(Role.BRAND);var session=login(target);
     jdbc.execute("CREATE FUNCTION admin_audit_test_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.entity_id='"+target.getId()+"'::uuid AND NEW.action='CHANGE_USER_STATUS' THEN RAISE EXCEPTION 'audit test failure'; END IF; RETURN NEW; END $$");

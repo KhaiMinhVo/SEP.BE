@@ -39,17 +39,40 @@ public class NotificationEmailSender {
       return;
     }
 
-    try {
-      SimpleMailMessage mailMessage = new SimpleMailMessage();
-      mailMessage.setFrom(fromEmail);
-      mailMessage.setTo(recipientEmail);
-      mailMessage.setSubject("InfluencerMatch - " + subject);
-      mailMessage.setText(content);
+    SimpleMailMessage mailMessage = new SimpleMailMessage();
+    mailMessage.setFrom(fromEmail);
+    mailMessage.setTo(recipientEmail);
+    mailMessage.setSubject("InfluencerMatch - " + subject);
+    mailMessage.setText(content);
 
-      sender.send(mailMessage);
-      log.info("Notification email dispatched successfully to {}", recipientEmail);
-    } catch (Exception ex) {
-      log.warn("Failed to dispatch notification email to {}: {}", recipientEmail, ex.getMessage());
+    int maxAttempts = 3;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        sender.send(mailMessage);
+        log.info("Notification email dispatched successfully to {}", recipientEmail);
+        return;
+      } catch (Exception ex) {
+        if (attempt == maxAttempts) {
+          log.warn(
+              "Failed to dispatch notification email to {} after {} attempts: {}",
+              recipientEmail,
+              maxAttempts,
+              ex.getMessage());
+        } else {
+          log.debug(
+              "Attempt {} failed to dispatch email to {}: {}. Retrying...",
+              attempt,
+              recipientEmail,
+              ex.getMessage());
+          try {
+            Thread.sleep(500L * attempt);
+          } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            log.warn("Email retry interrupted for {}", recipientEmail);
+            return;
+          }
+        }
+      }
     }
   }
 }

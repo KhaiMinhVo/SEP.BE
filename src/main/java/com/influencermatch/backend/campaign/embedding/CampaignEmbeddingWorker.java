@@ -24,7 +24,7 @@ public class CampaignEmbeddingWorker {
     } catch (Exception ex) {
       store.fail(lease);
       log.warn(
-          "Campaign embedding attempt failed jobId={} attempt={}", lease.id(), lease.attempts());
+          "Campaign embedding attempt failed jobId={} attempt={}", lease.id(), lease.attempts(), ex);
     }
   }
 }

@@ -50,6 +50,10 @@ public class PlanController extends BaseController {
       @RequestParam(required = false) String sortBy,
       @RequestParam(required = false) String direction) {
 
+    if (sortBy != null && !sortBy.isBlank() && !java.util.Set.of(
+        "id", "planName", "price", "currency", "durationDays", "campaignQuota",
+        "recommendationQuota", "refreshQuota", "status", "createdAt").contains(sortBy))
+      throw new com.influencermatch.backend.exception.ValidationException("Unsupported plan sort field");
     Pageable pageable = buildPageable(page, size, sortBy, direction);
     Page<PlanDTOs.PlanResponse> planPage = planService.getAllPlans(pageable);
     return pagedOk("Plans retrieved successfully", planPage);

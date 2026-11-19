@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
  * from the Discovery UI (e.g., keyword search, page navigation, extra filters).
  */
 @Data
-@Builder
+@Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
 public class DiscoverySearchRequest {
@@ -25,4 +25,19 @@ public class DiscoverySearchRequest {
     private Long minFollowers;
     private Long maxFollowers;
     private String niche;
+    private String platform;
+    private String tier;
+    private java.math.BigDecimal minEr;
+    private java.math.BigDecimal maxEr;
+    private Boolean isClaimed;
+    private java.math.BigDecimal minFee;
+    private java.math.BigDecimal maxFee;
+    private String sortBy;
+
+    // Internal retrieval mode. The service always resets client-provided values.
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @io.swagger.v3.oas.annotations.media.Schema(hidden = true)
+    @Builder.Default
+    private boolean similarityExpansion = false;
+
 }

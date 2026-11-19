@@ -29,6 +29,8 @@ import org.testcontainers.utility.DockerImageName;
     properties = {
       "spring.jpa.hibernate.ddl-auto=validate",
       "spring.flyway.enabled=true",
+      "application.vnpay.reconciliation-enabled=false",
+      "application.vnpay.refund-enabled=false",
       "application.bootstrap-admin.enabled=false",
       "application.oauth2.google.enabled=false",
       "application.auth.creator-mock.enabled=false",
@@ -147,6 +149,16 @@ public abstract class PostgresApiTestSupport {
     return body;
   }
 
+  protected UUID shortlistedCreator(UUID campaignId, User owner) {
+    UUID creator = UUID.randomUUID();
+    jdbc.update("insert into creator(id,platform,external_id,user_name,created_at,updated_at)"
+        + " values(?,'TIKTOK',?,'Shortlist fixture',now(),now())", creator, creator.toString());
+    jdbc.update("insert into shortlist_item(id,campaign_id,creator_id,user_id,priority,added_at,status,source)"
+        + " values(?,?,?,?,'MEDIUM',now(),'SAVED','MANUAL_DISCOVERY')",
+        UUID.randomUUID(), campaignId, creator, owner.getId());
+    return creator;
+  }
+
   protected UUID createCampaign(User user, UUID brand) throws Exception {
     grantCampaignSubscription(brand, 100);
     return UUID.fromString(
@@ -174,13 +186,15 @@ public abstract class PostgresApiTestSupport {
     java.time.LocalDate today = java.time.LocalDate.now();
     jdbc.update(
         "insert into"
-            + " subscription(id,brand_profile_id,plan_id,start_date,expiration_date,status,used_campaign_quota,used_ai_quota,used_refresh_quota)"
-            + " values(?,?,?,?,?,'ACTIVE',0,0,0)",
+            + " subscription(id,brand_profile_id,plan_id,start_date,expiration_date,status,used_campaign_quota,used_ai_quota,used_refresh_quota,"
+            + "purchased_plan_name,purchased_price,purchased_currency,purchased_duration_days,purchased_campaign_quota,purchased_recommendation_quota,purchased_refresh_quota)"
+            + " select ?,?,?,?,?,'ACTIVE',0,0,0,plan_name,price,currency,duration_days,campaign_quota,ai_recommendation_quota,refresh_quota from plan where id=?",
         subscription,
         brand,
         plan,
         today,
-        today.plusDays(365));
+        today.plusDays(365),
+        plan);
     return subscription;
   }
 }

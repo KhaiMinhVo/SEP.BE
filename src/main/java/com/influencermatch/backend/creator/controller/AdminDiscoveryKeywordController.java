@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/data/crawler/keywords")
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('DATA_MANAGER')")
 @RequiredArgsConstructor
 @Tag(name = "Data Manager Keyword Discovery Management", description = "Quản lý từ khóa săn KOC mục tiêu (Target) và từ khóa rác (Blacklist)")
 public class AdminDiscoveryKeywordController {

@@ -11,10 +11,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping({"/data/crawler", "/admin/crawler"})
+@RequestMapping("/data/crawler")
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('DATA_MANAGER')")
 @RequiredArgsConstructor
-@Tag(name = "Data Manager Crawler Management & Live Demo", description = "Luồng DM-05: Giám sát hiệu suất & Cào thử nghiệm / Hàng loạt KOC cho Data Manager")
-public class AdminCrawlerController {
+@Tag(name = "Data Manager Crawler", description = "Luồng DM-05: Giám sát hiệu suất & Cào thử nghiệm / Hàng loạt KOC cho Data Manager")
+public class DataManagerCrawlerController {
 
   private final CrawlerServiceClient crawlerServiceClient;
 
@@ -42,31 +43,18 @@ public class AdminCrawlerController {
     String category = (String) request.get("category");
     @SuppressWarnings("unchecked")
     List<String> usernames = (List<String>) request.get("usernames");
+    @SuppressWarnings("unchecked")
+    List<String> keywords = (List<String>) request.get("keywords");
     Number maxChannelsNum = (Number) request.getOrDefault("maxChannels", request.getOrDefault("max_channels", 5));
     int maxChannels = maxChannelsNum != null ? maxChannelsNum.intValue() : 5;
 
-    var resultOpt = crawlerServiceClient.batchCrawl(platform, category, usernames, maxChannels);
+    var resultOpt = crawlerServiceClient.batchCrawl(platform, category, keywords, usernames, maxChannels);
     return resultOpt
         .map(ResponseEntity::ok)
         .orElseGet(() -> ResponseEntity.badRequest().body(Map.of(
             "status", "error",
             "message", "Thực thi cào hàng loạt thất bại."
         )));
-  }
-
-  @GetMapping("/metrics")
-  @Operation(summary = "Lấy chỉ số hiệu suất Crawler thời gian thực (Realtime Metrics: Success, Rate Limit 429, Latency)")
-  public ApiResponse<Map<String, Object>> getMetrics() {
-    Map<String, Object> metrics = crawlerServiceClient.getPerformanceMetrics();
-    return ApiResponse.ok(metrics);
-  }
-
-  @GetMapping("/trends")
-  @Operation(summary = "Biểu đồ chuỗi thời gian cào theo ngày (7 ngày / 30 ngày) cho Data Manager DM-05")
-  public ApiResponse<List<Map<String, Object>>> getTrends(
-      @RequestParam(value = "days", defaultValue = "7") int days) {
-    List<Map<String, Object>> trends = crawlerServiceClient.getTrends(days);
-    return ApiResponse.ok(trends);
   }
 
   @GetMapping("/overview")
@@ -77,28 +65,4 @@ public class AdminCrawlerController {
     return ApiResponse.ok(overview);
   }
 
-  @GetMapping("/creator/{username}")
-  @Operation(summary = "Xem chi tiết 1 Creator và kết quả thẩm định Staging")
-  public ResponseEntity<Map<String, Object>> getCreatorDetail(
-      @PathVariable("username") String username,
-      @RequestParam(value = "platform", defaultValue = "TIKTOK") String platform) {
-    var detail = crawlerServiceClient.getCreatorDetail(username, platform);
-    return detail.map(ResponseEntity::ok)
-        .orElseGet(() -> ResponseEntity.notFound().build());
-  }
-
-  @PostMapping("/retry")
-  @Operation(summary = "Thử lại (Retry) cào KOC bị lỗi hoặc đưa vào lại hàng đợi")
-  public ResponseEntity<Map<String, Object>> retryCrawl(
-      @RequestBody Map<String, String> request) {
-    String username = request.get("username");
-    String platform = request.getOrDefault("platform", "TIKTOK");
-    var result = crawlerServiceClient.retryCrawl(username, platform);
-    return result.map(ResponseEntity::ok)
-        .orElseGet(() -> ResponseEntity.badRequest().body(Map.of(
-            "status", "error",
-            "message", "Không thể thử lại cào cho: " + username
-        )));
-  }
 }
-

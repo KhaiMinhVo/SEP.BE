@@ -24,7 +24,7 @@ public class CreatorPortalCollaborationController {
   private final CollaborationService collaborationService;
 
   @GetMapping
-  @PreAuthorize("hasRole('CREATOR')")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION')")
   @Operation(
       summary = "Get collaboration list for authenticated creator",
       description =

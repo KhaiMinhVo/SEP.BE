@@ -27,6 +27,8 @@ public class CooperationDelivery {
   final ClaimEmailCipher cipher;
   final VerificationEmailSender sender;
   final ApplicationEventPublisher events;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  com.influencermatch.backend.notification.service.NotificationService notificationService;
 
   @Value("${application.auth.creator-invitation.frontend-base-url:http://localhost:5173}")
   String frontend;
@@ -104,16 +106,27 @@ public class CooperationDelivery {
         email == null ? "MANUAL_REQUIRED" : "QUEUED",
         email == null ? null : store.time(),
         cipher.encrypt(email == null ? "" : email, link));
-    if (owner != null)
-      store.db.update(
-          "insert into"
-              + " notification(id,user_id,type,title,message,entity_type,entity_id,is_read,created_at)"
-              + " values(?,?,'COOPERATION_INVITATION','Cooperation invitation','A Brand has sent a"
-              + " cooperation proposal.','COOPERATION_DEAL',?,false,?)",
-          UUID.randomUUID(),
-          owner,
-          id,
-          store.time());
+    if (owner != null) {
+      if (notificationService != null) {
+        notificationService.createAndDispatch(
+            owner,
+            com.influencermatch.backend.notification.enums.NotificationType.COOPERATION_INVITATION,
+            "Cooperation invitation",
+            "A Brand has sent a cooperation proposal.",
+            "COOPERATION_DEAL",
+            id);
+      } else {
+        store.db.update(
+            "insert into"
+                + " notification(id,user_id,type,title,message,entity_type,entity_id,is_read,created_at)"
+                + " values(?,?,'COOPERATION_INVITATION','Cooperation invitation','A Brand has sent a"
+                + " cooperation proposal.','COOPERATION_DEAL',?,false,?)",
+            UUID.randomUUID(),
+            owner,
+            id,
+            store.time());
+      }
+    }
     if (email != null) events.publishEvent(new Queued(job));
     return Map.of(
         "invitationId",

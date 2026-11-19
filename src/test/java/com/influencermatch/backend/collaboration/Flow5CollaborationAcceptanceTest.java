@@ -267,7 +267,8 @@ class Flow5CollaborationAcceptanceTest {
     // Request không truyền agreedFee -> Tự động fallback về agreedFee từ relationship
     CreateCollaborationRequest req =
         new CreateCollaborationRequest(
-            relationship.getId(), null, null, "Kế hoạch bàn giao 1 video TikTok");
+            relationship.getId(), null, null, "Kế hoạch bàn giao 1 video TikTok",
+            UUID.randomUUID(), 2L, "PORTAL", null, null, null, null);
 
     ResponseEntity<ApiResponse<CollaborationResponse>> response =
         collaborationController.create(campaign.getId(), req, "confirm-key");
@@ -298,7 +299,8 @@ class Flow5CollaborationAcceptanceTest {
 
     CreateCollaborationRequest req =
         new CreateCollaborationRequest(
-            relationship.getId(), new BigDecimal("4000000"), "VND", "Thử trùng");
+            relationship.getId(), new BigDecimal("4000000"), "VND", "Thử trùng",
+            UUID.randomUUID(), 2L, "PORTAL", null, null, null, null);
 
     assertThatThrownBy(() -> collaborationController.create(campaign.getId(), req, "confirm-key"))
         .isInstanceOf(ConflictException.class)
@@ -408,7 +410,7 @@ class Flow5CollaborationAcceptanceTest {
   @Test
   @DisplayName(
       "TEST-F5-06 [Submit Evidence]: KOC nộp link bài đăng và ảnh chụp Insights khi IN_PROGRESS")
-  void testF506_SubmitEvidence_KocOrBrandSubmitsAsset_UpdatesPostUrlAndPersistsEvidence() {
+  void testF506_SubmitEvidence_CreatorAttachesWithoutUpdatingOfficialPost() {
     authenticate(creatorUser);
     when(collaborations.findById(collaboration.getId())).thenReturn(Optional.of(collaboration));
     when(evidenceAssets.save(any(EvidenceAsset.class)))
@@ -434,8 +436,7 @@ class Flow5CollaborationAcceptanceTest {
     EvidenceAssetResponse assetDto = response.getBody().data();
     assertThat(assetDto.assetType()).isEqualTo("POST_LINK");
     assertThat(assetDto.source()).isEqualTo("CREATOR_SUBMITTED");
-    assertThat(collaboration.getPublishedContentUrl())
-        .isEqualTo("https://tiktok.com/@glow.beauty/video/1234567");
+    assertThat(collaboration.getPublishedContentUrl()).isNull();
   }
 
   // =========================================================================

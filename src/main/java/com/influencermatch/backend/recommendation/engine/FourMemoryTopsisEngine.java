@@ -140,6 +140,18 @@ public class FourMemoryTopsisEngine {
       Function<RecommendationCandidateProjection, List<HistoricalCampaign>> historyProvider,
       List<BrandPattern> brandPatterns,
       Function<RecommendationCandidateProjection, PriceStatus> priceStatusProvider) {
+    return evaluateAndRank(candidates, phase0Map, campaign, historyProvider, brandPatterns, priceStatusProvider, Collections.emptyList(), java.time.LocalDateTime.now());
+  }
+
+  public List<EvaluatedCandidate> evaluateAndRank(
+      List<RecommendationCandidateProjection> candidates,
+      Map<UUID, NormalizedCandidateContext> phase0Map,
+      Campaign campaign,
+      Function<RecommendationCandidateProjection, List<HistoricalCampaign>> historyProvider,
+      List<BrandPattern> brandPatterns,
+      Function<RecommendationCandidateProjection, PriceStatus> priceStatusProvider,
+      List<com.influencermatch.backend.recommendation.engine.memory.LearnedM4Evaluator.BrandReviewRecord> brandReviews,
+      java.time.LocalDateTime scoringAsOf) {
 
     if (candidates == null || candidates.isEmpty()) {
       return List.of();
@@ -160,7 +172,7 @@ public class FourMemoryTopsisEngine {
         List<HistoricalCampaign> past = (historyProvider != null) ? historyProvider.apply(cand) : Collections.emptyList();
 
         CandidateMemoryScores scores =
-            fourMemoryScorer.evaluate(cand, p0, campaign, past, brandPatterns);
+            fourMemoryScorer.evaluate(cand, p0, campaign, past, brandPatterns, brandReviews, scoringAsOf);
 
         intermediateList.add(new IntermediateEvaluation(cand, scores));
         matrix.add(scores.asVector());
@@ -246,8 +258,21 @@ public class FourMemoryTopsisEngine {
       List<BrandPattern> brandPatterns,
       EngineWeights weights,
       PriceStatus priceStatus) {
+    return evaluateSingle(cand, p0, campaign, past, brandPatterns, weights, priceStatus, Collections.emptyList(), java.time.LocalDateTime.now());
+  }
 
-    CandidateMemoryScores scores = fourMemoryScorer.evaluate(cand, p0, campaign, past, brandPatterns);
+  public EvaluatedCandidate evaluateSingle(
+      RecommendationCandidateProjection cand,
+      NormalizedCandidateContext p0,
+      Campaign campaign,
+      List<HistoricalCampaign> past,
+      List<BrandPattern> brandPatterns,
+      EngineWeights weights,
+      PriceStatus priceStatus,
+      List<com.influencermatch.backend.recommendation.engine.memory.LearnedM4Evaluator.BrandReviewRecord> brandReviews,
+      java.time.LocalDateTime scoringAsOf) {
+
+    CandidateMemoryScores scores = fourMemoryScorer.evaluate(cand, p0, campaign, past, brandPatterns, brandReviews, scoringAsOf);
     TopsisResult topsis = topsisEngine.compute(scores, weights);
     ConfidenceAssessment confidence = confidenceCalculator.calculate(scores, weights);
 
@@ -263,6 +288,8 @@ public class FourMemoryTopsisEngine {
    */
   public ScoreBreakdownDto toScoreBreakdownDto(EvaluatedCandidate evaluated) {
     CandidateMemoryScores m = evaluated.memoryScores();
+    boolean m1Avail = "AVAILABLE".equalsIgnoreCase(m.m1Availability());
+
     return ScoreBreakdownDto.builder()
         .m1Score(roundTwoDecimals(m.m1Score100()))
         .m2Score(roundTwoDecimals(m.m2Score100()))
@@ -273,6 +300,19 @@ public class FourMemoryTopsisEngine {
         .semanticMatchScore(roundTwoDecimals(m.m3Score100()))
         .nicheMatchScore(roundTwoDecimals(m.m4Score100()))
         .finalScore(roundTwoDecimals(evaluated.topsisResult().matchScore()))
+        .m1Availability(m.m1Availability() != null ? m.m1Availability() : (m1Avail ? "AVAILABLE" : "UNAVAILABLE"))
+        .rScore(m.rScore() != null ? roundTwoDecimals(m.rScore() * 100.0) : null)
+        .tScore(m.tScore() != null ? roundTwoDecimals(m.tScore() * 100.0) : null)
+        .kScore(m.kScore() != null ? roundTwoDecimals(m.kScore() * 100.0) : null)
+        .eligibleEvaluatedCollaborations(m.eligibleCollaborations())
+        .distinctBrandCount(m.distinctBrandCount())
+        .maxBrandShare(roundTwoDecimals(m.maxBrandShare() * 100.0))
+        .m4LearnedScore(m.m4LearnedScore() != null ? roundTwoDecimals(m.m4LearnedScore() * 100.0) : null)
+        .m4ExplicitScore(m.m4ExplicitScore() != null ? roundTwoDecimals(m.m4ExplicitScore() * 100.0) : null)
+        .m4EffectiveScore(m.m4EffectiveScore() != null ? roundTwoDecimals(m.m4EffectiveScore() * 100.0) : null)
+        .m4Source(m.m4Source() != null ? m.m4Source() : "EXPLICIT_FALLBACK")
+        .confidenceScore(evaluated.confidence() != null ? roundTwoDecimals(evaluated.confidence().compositeConfidence() * 100.0) : null)
+        .confidenceTier(evaluated.confidence() != null && evaluated.confidence().tier() != null ? evaluated.confidence().tier().name() : null)
         .build();
   }
 

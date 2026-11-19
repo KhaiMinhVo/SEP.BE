@@ -18,4 +18,7 @@ public class RecommendationResponseDto {
   private int totalCandidates;
   private List<CreatorRecommendationItemDto> recommendations;
   private List<CreatorRecommendationItemDto> provisionalRecommendations;
+  @Builder.Default
+  private List<ExcludedCandidateDto> excludedCandidates = List.of();
+  private com.fasterxml.jackson.databind.JsonNode runMetadata;
 }

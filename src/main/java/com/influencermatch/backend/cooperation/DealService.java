@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.influencermatch.backend.audit.service.AuditService;
 import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.campaign.service.*;
+import com.influencermatch.backend.creator.portal.CreatorPortalProjection;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.security.permission.*;
 import java.math.BigDecimal;
@@ -27,6 +28,7 @@ public class DealService {
   final ExecutionSnapshot executionSnapshot;
   final CooperationDelivery delivery;
   final ExecutionHistoryReader historyReader;
+  final CreatorPortalProjection creatorProjection;
   @jakarta.persistence.PersistenceContext jakarta.persistence.EntityManager em;
 
   UUID actor() {
@@ -50,7 +52,7 @@ public class DealService {
     return c;
   }
 
-  void fresh(Permission permission) {
+  public void fresh(Permission permission) {
     var u =
         store.one(
             "select role,status,email_verified,auth_version from \"user\" where id=?", actor());
@@ -902,12 +904,12 @@ public class DealService {
   @Transactional
   public Object transition(UUID campaign, UUID id, String action, CooperationDtos.Cancel request) {
     Permissions.require(Permission.MANAGE_OWN_COLLABORATION);
+    store.one("select id from rbac_guard where id=1 for update");
     var d = locked(campaign, id);
     fresh(Permission.MANAGE_OWN_COLLABORATION);
     rev(d, request.expectedRevision());
     if ("start".equals(action)) {
       if (!"CONFIRMED".equals(d.get("status"))) throw conflict("Confirmed deal required");
-      currentOwnership(d);
       if (!"ACTIVE"
           .equals(store.one("select status from campaign where id=?", campaign).get("status")))
         throw conflict("Campaign must be ACTIVE");
@@ -916,6 +918,8 @@ public class DealService {
               "select status from collaboration where id=? for update", d.get("collaboration_id"));
       if (!"PLANNED".equals(c.get("status")))
         throw conflict("Only PLANNED collaboration may start");
+      if (!"READY".equals(assignmentStatus(uuid(d.get("collaboration_id")), d)))
+        throw conflict("An eligible Creator must confirm the assignment before start");
       store.db.update(
           "update collaboration set status='IN_PROGRESS',start_at=?,updated_at=? where id=?",
           store.time(),
@@ -1018,25 +1022,149 @@ public class DealService {
 
   @Transactional(readOnly = true)
   public boolean canAccessCollaboration(UUID user, UUID collaboration) {
+    var original =
+        store.one("select master_id from collaboration where id=?", collaboration).get("master_id");
+    var recipient = executionRecipient(collaboration);
+    return recipient.isPresent() && user.equals(recipient.get().userId())
+        && recipient.get().masterId().equals(original);
+  }
+
+  record ExecutionRecipient(UUID masterId, UUID userId) {}
+
+  Optional<ExecutionRecipient> executionRecipient(UUID collaboration) {
     var rows =
         store.db.queryForList(
-            "select cr.master_id,cr.source_type,m.user_id,u.role,u.status,u.email_verified from"
+            "select cr.id,cr.master_id,cr.source_type,m.user_id,m.status master_status,u.role,u.status,u.email_verified from"
                 + " collaboration c join collaboration_channel cc on cc.collaboration_id=c.id join"
                 + " creator cr on cr.id=cc.creator_id left join creator_master m on"
                 + " m.id=cr.master_id left join \"user\" u on u.id=m.user_id where c.id=?",
             collaboration);
-    if (rows.isEmpty()) return false;
-    var original =
-        store.one("select master_id from collaboration where id=?", collaboration).get("master_id");
-    return rows.stream()
-        .allMatch(
-            r ->
-                user.equals(r.get("user_id"))
-                    && (original == null || original.equals(r.get("master_id")))
-                    && "AUTHORIZED".equals(r.get("source_type"))
-                    && "CREATOR".equals(r.get("role"))
-                    && "ACTIVE".equals(r.get("status"))
-                    && Boolean.TRUE.equals(r.get("email_verified")));
+    if (rows.isEmpty()) return Optional.empty();
+    var master = uuid(rows.getFirst().get("master_id"));
+    var user = uuid(rows.getFirst().get("user_id"));
+    if (master == null || user == null
+        || rows.stream().anyMatch(r -> !master.equals(r.get("master_id"))
+            || !user.equals(r.get("user_id")) || !"AUTHORIZED".equals(r.get("source_type"))
+            || !"ACTIVE".equals(r.get("master_status")) || !"CREATOR".equals(r.get("role"))
+            || !"ACTIVE".equals(r.get("status")) || !Boolean.TRUE.equals(r.get("email_verified")))
+        || Boolean.TRUE.equals(store.db.queryForObject(
+            "select exists(select 1 from role_permission_override where role='CREATOR'"
+                + " and permission='RESPOND_OWN_COOPERATION' and enabled=false)", Boolean.class)))
+      return Optional.empty();
+    var ids = rows.stream().map(row -> uuid(row.get("id"))).toList();
+    var verification = creatorProjection.project(ids, false);
+    if (ids.stream().anyMatch(id -> !verification.containsKey(id)
+        || !verification.get(id).verification().verified()
+        || !master.equals(verification.get(id).masterId()))) return Optional.empty();
+    return Optional.of(new ExecutionRecipient(master, user));
+  }
+
+  Optional<Map<String, Object>> confirmedProposal(UUID deal) {
+    return store.optional(
+        "select p.* from cooperation_history h join cooperation_proposal p on p.deal_id=h.deal_id"
+            + " and to_jsonb(p.revision)=h.metadata->'proposalRevision'"
+            + " where h.deal_id=? and h.action='DEAL_CONFIRMED' order by h.revision desc,h.id desc limit 1",
+        deal);
+  }
+
+  String assignmentStatus(UUID collaboration, Map<String, Object> deal) {
+    var recipient = executionRecipient(collaboration);
+    var master = uuid(deal.get("master_id"));
+    var assigned = store.one("select master_id from collaboration where id=?", collaboration).get("master_id");
+    if (master == null && confirmedProposal(uuid(deal.get("id"))).isEmpty())
+      return "NO_CONFIRMED_PROPOSAL";
+    if (recipient.isEmpty() || !Objects.equals(master, assigned)
+        || (master != null && !master.equals(recipient.get().masterId())))
+      return "WAITING_FOR_VERIFICATION";
+    return master == null ? "WAITING_FOR_ACCEPTANCE" : "READY";
+  }
+
+  @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+  public List<Map<String, Object>> pendingAssignments() {
+    requireAssignmentCreator();
+    return store.db.queryForList(
+            "select d.*,c.id collaboration_id,ca.name campaign_name,b.business_name brand_name"
+                + " from collaboration c join cooperation_deal d on d.collaboration_id=c.id"
+                + " join campaign ca on ca.id=c.campaign_id join brand_profile b on b.id=ca.brand_profile_id"
+                + " where c.status='PLANNED' and c.master_id is null and d.status='CONFIRMED'"
+                + " and d.master_id is null and exists(select 1 from collaboration_channel cc"
+                + " join creator cr on cr.id=cc.creator_id join creator_master m on m.id=cr.master_id"
+                + " where cc.collaboration_id=c.id and m.user_id=?) order by d.updated_at desc,d.id",
+            actor()).stream()
+        .flatMap(d -> {
+          UUID collaboration = uuid(d.get("collaboration_id"));
+          if (executionRecipient(collaboration).filter(r -> actor().equals(r.userId())).isEmpty())
+            return java.util.stream.Stream.empty();
+          return confirmedProposal(uuid(d.get("id"))).stream().map(p -> Map.<String, Object>of(
+              "collaborationId", collaboration, "dealRevision", store.revision(d),
+              "proposalRevision", store.revision(p), "campaignName", d.get("campaign_name"),
+              "brandName", d.get("brand_name"), "channels", channels(collaboration).stream()
+                  .map(ch -> Map.of("creatorId", ch.creatorId(), "platform", ch.platform(),
+                      "username", Objects.toString(ch.username(), ""))).toList(),
+              "deliverables", store.decode(p.get("deliverables")), "fee", p.get("fee"),
+              "currency", p.get("currency"), "terms", p.get("terms")));
+        }).toList();
+  }
+
+  void requireAssignmentCreator() {
+    if (!"CREATOR".equals(Permissions.actor().getRole().name()))
+      throw new ForbiddenException("Creator required");
+    Permissions.require(Permission.RESPOND_OWN_COOPERATION);
+    fresh(Permission.RESPOND_OWN_COOPERATION);
+  }
+
+  @Transactional
+  public JsonNode acceptAssignment(UUID collaboration, ExecutionDtos.Assignment request, String key) {
+    store.one("select id from rbac_guard where id=1 for update");
+    lockUser();
+    requireAssignmentCreator();
+    var initial = store.one("select campaign_id from collaboration where id=?", collaboration);
+    var campaign = uuid(initial.get("campaign_id"));
+    store.one("select id from campaign where id=? for update", campaign);
+    var d = lockMembersAndDeal(store.one(
+        "select * from cooperation_deal where collaboration_id=?", collaboration));
+    var row = store.one("select * from collaboration where id=? for update", collaboration);
+    var recipient = executionRecipient(collaboration).filter(r -> actor().equals(r.userId()))
+        .orElseThrow(() -> new ForbiddenException("Verified ownership of every channel is required"));
+    if (row.get("master_id") != null && !recipient.masterId().equals(row.get("master_id")))
+      throw new ForbiddenException("Collaboration is assigned to another Creator");
+    String scope = "collaboration-assignment:" + collaboration;
+    var old = replay(scope, key, request);
+    if (old != null) return old;
+    if (!"PLANNED".equals(row.get("status")) || !"CONFIRMED".equals(d.get("status"))
+        || row.get("master_id") != null || d.get("master_id") != null)
+      throw conflict("Collaboration is not awaiting Creator assignment");
+    rev(d, request.expectedRevision());
+    var proposal = confirmedProposal(uuid(d.get("id")))
+        .orElseThrow(() -> conflict("Confirmed proposal is missing"));
+    if (store.revision(proposal) != request.proposalRevision())
+      throw conflict("Confirmed proposal revision changed");
+    var master = recipient.masterId();
+    var deal = uuid(d.get("id"));
+    if (!store.members(deal).stream().map(m -> uuid(m.get("creator_id"))).toList().equals(
+        store.db.queryForList("select creator_id from collaboration_channel where collaboration_id=? order by creator_id",
+            UUID.class, collaboration)))
+      throw conflict("The assigned channels differ from the confirmed deal");
+    if (Boolean.TRUE.equals(store.db.queryForObject(
+        "select exists(select 1 from cooperation_deal other where other.campaign_id=?"
+            + " and other.id<>? and other.status<>'CANCELLED' and (other.master_id=? or exists("
+            + " select 1 from cooperation_member m join creator ch on ch.id=m.creator_id"
+            + " where m.deal_id=other.id and ch.master_id=?)))",
+        Boolean.class, campaign, deal, master, master)))
+      throw conflict("Creator already has a deal in this campaign");
+    store.db.update(
+        "update cooperation_deal set master_id=?,recipient_key=?,accepted_revision=?,accepted_by=?,"
+            + "accepted_at=?,updated_at=?,revision=revision+1 where id=?",
+        master, "MASTER:" + master, request.proposalRevision(), actor(), store.time(), store.time(), deal);
+    store.db.update(
+        "update collaboration set master_id=?,execution_revision=execution_revision+1,updated_at=? where id=?",
+        master, store.time(), collaboration);
+    long next = store.revision(d) + 1;
+    record(deal, "CREATOR_ASSIGNMENT_ACCEPTED", next,
+        Map.of("collaborationId", collaboration, "proposalRevision", request.proposalRevision(),
+            "masterId", master, "creatorUserId", actor()));
+    return remembered(scope, key, request, Map.of("collaborationId", collaboration,
+        "dealRevision", next, "proposalRevision", request.proposalRevision(), "status", "PLANNED"));
   }
 
   @Transactional(readOnly = true)

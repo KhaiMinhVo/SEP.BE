@@ -36,5 +36,6 @@ public class CreatorRecommendationItemDto {
   private PriceStatus priceStatus;
   private Boolean isScoreReady;
   private Boolean isProvisional;
+  private String recommendationTier; // HISTORY_SUPPORTED | LIMITED_HISTORY
 }
 

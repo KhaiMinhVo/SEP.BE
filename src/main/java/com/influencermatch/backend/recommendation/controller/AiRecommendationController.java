@@ -30,16 +30,26 @@ public class AiRecommendationController {
   @PostMapping
   @PreAuthorize("hasAuthority('RUN_RECOMMENDATION')")
   @Operation(
-      summary = "Run AI KOC Recommendation using Four-Memory Framework",
+      summary = "Score campaign shortlist using Four-Memory Framework",
+      description =
+         "Select creators from database discovery and save them to the campaign shortlist first. "
+             + "Only SHORTLIST is accepted; DISCOVERY is rejected. Requires Idempotency-Key. "
+             + "A DRAFT campaign is transitioned to READY_FOR_DISCOVERY; if embedding is still "
+             + "processing, retry this request with the same key after checking GET "
+             + "/campaigns/{id}.",
       security = @SecurityRequirement(name = "BearerAuth"))
   public ResponseEntity<ApiResponse<RecommendationResponseDto>> recommendKocs(
       @PathVariable UUID campaignId,
       @RequestParam(defaultValue = "30") int limit,
       @RequestParam(required = false, defaultValue = "BEST_MATCH") DisplayMode displayMode,
       @RequestParam(defaultValue = "SHORTLIST")
-          com.influencermatch.backend.campaign.enums.CandidateSource candidateSource) {
+          com.influencermatch.backend.campaign.enums.CandidateSource candidateSource,
+      @RequestParam(required = false) List<UUID> creatorIds,
+      @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+      @RequestHeader(value = "If-Match", required = false) String revision) {
     RecommendationResponseDto result =
-        recommendationService.recommendKocs(campaignId, limit, candidateSource, displayMode);
+        recommendationService.recommendKocs(
+            campaignId, limit, candidateSource, displayMode, creatorIds, idempotencyKey, revision);
     return ResponseEntity.ok(ApiResponse.ok("KOC recommendations generated successfully", result));
   }
 

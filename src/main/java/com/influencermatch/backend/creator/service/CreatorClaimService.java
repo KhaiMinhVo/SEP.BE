@@ -34,6 +34,8 @@ public class CreatorClaimService {
 
   @org.springframework.beans.factory.annotation.Autowired private java.time.Clock clock;
   @org.springframework.beans.factory.annotation.Autowired private ManualClaimGuard guard;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.notification.service.NotificationService notificationService;
   private final CreatorRepository creators;
   private final CreatorMasterRepository masters;
   private final CreatorClaimRepository claims;
@@ -202,9 +204,39 @@ public class CreatorClaimService {
             Map.of("status", "PENDING"),
             Map.of("status", "REJECTED"),
             other.getReason());
+        if (notificationService != null && other.getClaimant() != null) {
+          notificationService.createAndDispatch(
+              other.getClaimant().getId(),
+              com.influencermatch.backend.notification.enums.NotificationType.CLAIM_REJECTED,
+              "Yêu cầu quản lý kênh Creator bị từ chối",
+              "Yêu cầu nhận quyền quản lý kênh Creator của bạn đã bị từ chối do quyền sở hữu đã được xác nhận cho người khác.",
+              "CREATOR_CLAIM",
+              other.getId());
+        }
       }
     } else claim.setStatus(CreatorClaimStatus.REJECTED);
     decide(claim, claim.getStatus(), reviewer, request.reason());
+    if (notificationService != null && claim.getClaimant() != null) {
+      if (claim.getStatus() == CreatorClaimStatus.APPROVED) {
+        notificationService.createAndDispatch(
+            claim.getClaimant().getId(),
+            com.influencermatch.backend.notification.enums.NotificationType.CLAIM_APPROVED,
+            "Yêu cầu quản lý kênh Creator được duyệt",
+            "Yêu cầu nhận quyền quản lý kênh Creator của bạn đã được quản trị viên phê duyệt.",
+            "CREATOR_CLAIM",
+            claim.getId());
+      } else {
+        notificationService.createAndDispatch(
+            claim.getClaimant().getId(),
+            com.influencermatch.backend.notification.enums.NotificationType.CLAIM_REJECTED,
+            "Yêu cầu quản lý kênh Creator bị từ chối",
+            request.reason() != null && !request.reason().isBlank()
+                ? "Yêu cầu nhận quyền quản lý kênh Creator của bạn đã bị từ chối do: " + request.reason()
+                : "Yêu cầu nhận quyền quản lý kênh Creator của bạn đã bị từ chối.",
+            "CREATOR_CLAIM",
+            claim.getId());
+      }
+    }
     var reviewData = new LinkedHashMap<String, Object>();
     reviewData.put("status", claim.getStatus().name());
     reviewData.put("creatorId", creator.getId());

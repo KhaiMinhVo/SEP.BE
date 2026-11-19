@@ -49,11 +49,11 @@ public class SubscriptionController extends BaseController {
         subscriptionService.getSubscriptionsForBrand(brandId));
   }
 
-  @Operation(summary = "Cancel active subscription")
+  @Operation(summary = "Cancel subscription at the end of the paid period")
   @DeleteMapping("/{id}")
   @PreAuthorize("hasAuthority('MANAGE_OWN_SUBSCRIPTION')")
   public ResponseEntity<ApiResponse<Void>> cancelSubscription(@PathVariable UUID id) {
     subscriptionService.cancelSubscription(id);
-    return ok("Subscription cancelled successfully");
+    return ok("Cancellation scheduled; access continues until expiration");
   }
 }

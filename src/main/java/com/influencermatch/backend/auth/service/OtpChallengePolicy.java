@@ -4,8 +4,15 @@ import com.influencermatch.backend.auth.model.EmailVerificationDelivery;
 import com.influencermatch.backend.exception.*;import java.time.*;import java.util.*;
 public final class OtpChallengePolicy {
  private OtpChallengePolicy(){}
- public enum Purpose {EMAIL_VERIFICATION,PASSWORD_SETUP}
- private static boolean matches(EmailOtpCodes crypto,UUID id,Purpose purpose,String raw,String hash){return purpose==Purpose.EMAIL_VERIFICATION?crypto.matches(id,raw,hash):crypto.matches(id,"password-setup",raw,hash);}
+ public enum Purpose {
+  EMAIL_VERIFICATION(null), PASSWORD_SETUP("password-setup"), PASSWORD_RESET("password-reset");
+
+  private final String namespace;
+
+  Purpose(String namespace) { this.namespace = namespace; }
+ }
+
+ private static boolean matches(EmailOtpCodes crypto,UUID id,Purpose purpose,String raw,String hash){return purpose.namespace==null?crypto.matches(id,raw,hash):crypto.matches(id,purpose.namespace,raw,hash);}
  public static String issue(OtpChallengeState state,UUID id,Purpose purpose,EmailOtpCodes crypto,Clock clock,EmailVerificationDeliveryRepository deliveries){
   Instant now=clock.instant();
   if((state.getLastSentAt()!=null&&now.isBefore(state.getLastSentAt().plusSeconds(60)))||deliveries.countByUserIdAndSentAtAfter(id,now.minusSeconds(3600))>=5)
@@ -13,7 +20,7 @@ public final class OtpChallengePolicy {
   String raw=null;
   for(int i=0;i<10;i++){String candidate=crypto.generate();if(state.getCodeHash()==null||!matches(crypto,id,purpose,candidate,state.getCodeHash())){raw=candidate;break;}}
   if(raw==null)throw new BusinessException(ErrorCode.EMAIL_DELIVERY_UNAVAILABLE,"Unable to generate a new code");
-  state.setUserId(id);state.setCodeHash(purpose==Purpose.EMAIL_VERIFICATION?crypto.hash(id,raw):crypto.hash(id,"password-setup",raw));
+  state.setUserId(id);state.setCodeHash(purpose.namespace==null?crypto.hash(id,raw):crypto.hash(id,purpose.namespace,raw));
   state.setExpiresAt(now.plusSeconds(600));state.setLastSentAt(now);state.setAttempts(0);state.setConsumedAt(null);
   deliveries.deleteByUserIdAndSentAtBefore(id,now.minusSeconds(3600));deliveries.save(new EmailVerificationDelivery(UUID.randomUUID(),id,now));return raw;
  }

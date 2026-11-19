@@ -5,203 +5,160 @@ import com.influencermatch.backend.campaign.model.Campaign;
 import com.influencermatch.backend.campaign.repository.CampaignRepository;
 import com.influencermatch.backend.creator.client.AiServiceClient;
 import com.influencermatch.backend.creator.repository.PublicCreatorMetricRepository;
-import com.influencermatch.backend.discovery.dto.DiscoveryContext;
-import com.influencermatch.backend.discovery.dto.DiscoverySearchRequest;
-import com.influencermatch.backend.discovery.dto.HybridDiscoveryCreatorProjection;
-import com.influencermatch.backend.exception.ConflictException;
-import com.influencermatch.backend.exception.ErrorCode;
-import com.influencermatch.backend.exception.ResourceNotFoundException;
+import com.influencermatch.backend.discovery.dto.*;
+import com.influencermatch.backend.exception.*;
+import com.influencermatch.backend.security.permission.*;
+import java.util.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.Collections;
-import java.util.List;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class CreatorDiscoveryService {
-
     private final CampaignRepository campaignRepository;
     private final PublicCreatorMetricRepository metricRepository;
     private final AiServiceClient aiServiceClient;
 
     @Transactional(readOnly = true)
     public Page<HybridDiscoveryCreatorProjection> discoverCreators(UUID campaignId, DiscoverySearchRequest req) {
-        com.influencermatch.backend.security.permission.Permissions.require(com.influencermatch.backend.security.permission.Permission.SEARCH_CREATOR);
-        // 1. Fetch Campaign and validate existence
+        Permissions.require(Permission.SEARCH_CREATOR);
         Campaign campaign = campaignRepository.findById(campaignId)
-                .orElseThrow(() -> new ResourceNotFoundException("Campaign", "id", campaignId));
+            .orElseThrow(() -> new ResourceNotFoundException("Campaign", "id", campaignId));
+        if (!campaign.getBrandProfile().getUser().getId().equals(Permissions.actor().getId()))
+            throw new ForbiddenException("Campaign belongs to another brand");
+        if (campaign.getStatus() == CampaignStatus.ARCHIVED)
+            throw new ConflictException(ErrorCode.CAMPAIGN_CONTEXT_NOT_READY,
+                "Cannot run discovery on an ARCHIVED campaign.");
+        if (req == null) req = new DiscoverySearchRequest();
+        // Never mutate UI filters or accept a client-controlled internal expansion mode.
+        req = req.toBuilder().similarityExpansion(false).build();
+        validate(req);
+        int size = req.getSize() == null || req.getSize() < 1 ? 50 : Math.min(req.getSize(), 50);
+        int page = req.getPage() == null || req.getPage() < 0 ? 0 : req.getPage();
+        Pageable pageable = PageRequest.of(page, size);
 
-        if (!campaign.getBrandProfile().getUser().getId().equals(com.influencermatch.backend.security.permission.Permissions.actor().getId()))
-            throw new com.influencermatch.backend.exception.ForbiddenException("Campaign belongs to another brand");
-        // Allow DRAFT, READY_FOR_DISCOVERY, and ACTIVE campaigns to preview/discover creators.
-        // Only block ARCHIVED campaigns.
-        if (campaign.getStatus() == CampaignStatus.ARCHIVED) {
-            throw new ConflictException(ErrorCode.CAMPAIGN_CONTEXT_NOT_READY, "Cannot run discovery on an ARCHIVED campaign.");
-        }
-
-        // BƯỚC 1: LỌC KHUNG CỨNG (Extract M3 Context)
-        DiscoveryContext ctx = DiscoveryContext.builder()
-                .platforms(campaign.getPlatforms())
-                .niches(campaign.getNiches())
-                .followerMin(campaign.getFollowerMin())
-                .followerMax(campaign.getFollowerMax())
-                .budgetMin(campaign.getBudgetMin())
-                .budgetMax(campaign.getBudgetMax())
-                .build();
-
-        // BƯỚC 2: TÌM KIẾM THÔNG MINH KÉP (AI Semantic + FTS Lexical)
-        boolean hasExplicitKeyword = (req.getKeyword() != null && !req.getKeyword().trim().isEmpty());
-        String effectiveKeyword;
-        boolean isStrictSearch;
-
-        if (hasExplicitKeyword) {
-            effectiveKeyword = req.getKeyword().trim();
-            isStrictSearch = true;
-        } else {
-            // Khi không truyền keyword, tự động dùng context của Campaign để tính Semantic & FTS Score
-            StringBuilder sb = new StringBuilder();
-            if (campaign.getProductService() != null && !campaign.getProductService().isBlank()) {
-                sb.append(campaign.getProductService()).append(" ");
-            }
-            if (campaign.getName() != null && !campaign.getName().isBlank()) {
-                sb.append(campaign.getName()).append(" ");
-            }
-            if (campaign.getNiches() != null && !campaign.getNiches().isEmpty()) {
-                sb.append(String.join(" ", campaign.getNiches())).append(" ");
-            }
-            effectiveKeyword = sb.toString().trim();
-            isStrictSearch = false;
-        }
-
-        boolean hasKeyword = !effectiveKeyword.isEmpty();
-        String formattedKeyword = formatKeyword(effectiveKeyword);
-        
-        List<Float> vector = Collections.emptyList();
-        boolean hasVector = false;
-        String queryVectorStr = null;
-
-        if (hasKeyword) {
+        boolean hasPlatforms = campaign.getPlatforms() != null && !campaign.getPlatforms().isEmpty();
+        var niches = DiscoveryNiches.expand(campaign.getNiches());
+        boolean hasNiches = !niches.isEmpty();
+        // An absent niche is not permission to return the entire catalogue. Require product
+        // evidence in public content instead. A name is only a last resort for incomplete drafts.
+        var productNiches = DiscoveryNiches.productNiches(campaign.getProductService(), campaign.getName());
+        boolean requiresProductEvidence = !hasNiches || !productNiches.isEmpty()
+            || (DiscoveryNiches.onlyBroadCategories(campaign.getNiches()) && hasText(campaign.getProductService()));
+        String topic = requiresProductEvidence
+            ? firstText(campaign.getProductService(), campaign.getName(), campaign.getBrief()) : "";
+        String productEvidenceQuery = DiscoveryNiches.productEvidenceQuery(campaign.getProductService(), campaign.getName());
+        if (requiresProductEvidence && !productEvidenceQuery.isBlank()) topic = productEvidenceQuery;
+        if (!hasNiches && topic.isBlank()) return Page.empty(pageable);
+        String keyword = firstText(req.getKeyword(), campaign.getProductService(),
+            String.join(" ", niches), campaign.getName(), campaign.getBrief());
+        if (!hasText(req.getKeyword()) && !productEvidenceQuery.isBlank()) keyword = productEvidenceQuery;
+        Long min = maximum(campaign.getFollowerMin(), req.getMinFollowers());
+        Long max = minimum(campaign.getFollowerMax(), req.getMaxFollowers());
+        String queryVector = null;
+        String queryText = String.join(" ",
+            firstText(campaign.getProductService(), campaign.getName()),
+            firstText(campaign.getBrief()),
+            campaign.getNiches() == null ? "" : String.join(" ", campaign.getNiches()),
+            firstText(req.getKeyword())).trim();
+        if (hasText(req.getKeyword())) queryText = req.getKeyword().trim();
+        if (!queryText.isBlank()) {
             try {
-                // Nhánh 1: Gọi Python AI Service lấy vector 768 chiều
-                vector = aiServiceClient.getEmbedding(effectiveKeyword);
-                if (vector != null && !vector.isEmpty()) {
-                    hasVector = true;
-                    queryVectorStr = vector.toString();
-                }
+                var vector = aiServiceClient.getEmbedding(queryText);
+                if (validEmbedding(vector)) queryVector = vector.toString();
             } catch (Exception e) {
-                // Phao cứu sinh (Circuit Breaker): AI Service lỗi -> Tự trượt về FTS
-                log.warn("AI Service unavailable or timed out. Falling back to 100% Lexical FTS: {}", e.getMessage());
-                hasVector = false;
-                queryVectorStr = null;
+                log.warn("Discovery query embedding unavailable; retaining context filters and lexical retrieval: {}", e.getMessage());
             }
         }
-
-        int safePageSize = (req.getSize() != null && req.getSize() > 0 && req.getSize() <= 30) ? req.getSize() : 30;
-        int safePage = (req.getPage() != null && req.getPage() >= 0) ? req.getPage() : 0;
-        Pageable pageable = PageRequest.of(safePage, safePageSize);
-
-        // BƯỚC 3: TRỘN ĐIỂM XẾP HẠNG (Chạy Native Hybrid Query)
-        Page<HybridDiscoveryCreatorProjection> pool = executeHybridSearch(ctx, req, isStrictSearch, hasKeyword, formattedKeyword, hasVector, queryVectorStr, pageable);
-
-        // BƯỚC 4: TỰ CHỮA LÀNH (FALLBACK - Nới lỏng ràng buộc nếu < 5 ứng viên)
-        if (req.getPage() == 0 && pool.getContent().size() < 5) {
-            int attempt = 1;
-            while (pool.getContent().size() < 5 && attempt <= 2) {
-                log.info("Discovery Fallback triggered: Attempt {}", attempt);
-                relaxConstraints(ctx, req, attempt);
-                pool = executeHybridSearch(ctx, req, isStrictSearch, hasKeyword, formattedKeyword, hasVector, queryVectorStr, pageable);
-                attempt++;
+        var locations = DiscoveryLocations.expand(campaign.getLocations());
+        boolean hasLocations = !locations.isEmpty();
+        // Restore progressive retrieval: preserve exact matches, then supplement a sparse
+        // pool (<5) with increasingly relaxed campaign preferences. UI filters remain hard.
+        var selected = new LinkedHashMap<String, HybridDiscoveryCreatorProjection>();
+        for (int stage = 0; stage <= 3 && (stage == 0 || selected.size() < 5); stage++) {
+            if (stage == 1 && !hasLocations) continue;
+            if (stage == 2 && campaign.getFollowerMin() == null && campaign.getFollowerMax() == null) continue;
+            boolean similar = stage == 3;
+            var stageNiches = similar ? DiscoveryNiches.related(campaign.getNiches(), productNiches) : niches;
+            Long stageMin = stage < 2 ? min : maximum(similar ? null : widenedMin(campaign.getFollowerMin()), req.getMinFollowers());
+            Long stageMax = stage < 2 ? max : minimum(similar ? null : widenedMax(campaign.getFollowerMax()), req.getMaxFollowers());
+            if (stageMin != null && stageMax != null && stageMin > stageMax) continue;
+            var stageRequest = req.toBuilder().similarityExpansion(similar).build();
+            var pool = metricRepository.searchDiscoveryCreators(
+                hasPlatforms, hasPlatforms ? campaign.getPlatforms() : List.of("__NONE__"),
+                !stageNiches.isEmpty(), stageNiches.isEmpty() ? List.of("__NONE__") : stageNiches, stageMin, stageMax,
+                keyword, topic, queryVector, stageRequest,
+                stage == 0 && hasLocations, stage == 0 && hasLocations ? locations : List.of("__NONE__"),
+                hasText(req.getNiche()) ? DiscoveryNiches.expand(List.of(req.getNiche())) : List.of("__NONE__"),
+                similar && !stageNiches.isEmpty() ? stageNiches : productNiches.isEmpty() ? List.of("__NONE__") : productNiches,
+                PageRequest.of(0, 50));
+            for (var row : pool.getContent()) {
+                String key = row.getMasterId() != null ? "MASTER:" + row.getMasterId()
+                    : "ACCOUNT:" + (row.getCreatorId() != null ? row.getCreatorId() : row.getId());
+                if (selected.containsKey(key) || selected.size() >= 50) continue;
+                var reasons = new ArrayList<String>();
+                if (stage > 0 && hasLocations && (row.getLocation() == null
+                    || !locations.contains(row.getLocation().trim().toLowerCase(Locale.ROOT)))) reasons.add("LOCATION");
+                if (stage >= 2 && (row.getFollowers() == null
+                    || (campaign.getFollowerMin() != null && row.getFollowers() < campaign.getFollowerMin())
+                    || (campaign.getFollowerMax() != null && row.getFollowers() > campaign.getFollowerMax()))) reasons.add("FOLLOWERS");
+                if (similar) reasons.add("TOPIC");
+                selected.put(key, reasons.isEmpty() ? row : new ExpandedDiscoveryCreator(row, reasons));
             }
+            log.info("Discovery campaign={} stage={} retrieved={} merged={} vectorAvailable={}",
+                campaignId, stage, pool.getNumberOfElements(), selected.size(), queryVector != null);
         }
-
-        return pool;
+        var top = new ArrayList<>(selected.values());
+        long offset = pageable.getOffset();
+        var content = offset >= top.size() ? List.<HybridDiscoveryCreatorProjection>of()
+            : top.subList((int) offset, Math.min((int) offset + size, top.size()));
+        return new PageImpl<>(content, pageable, top.size());
     }
 
-    private Page<HybridDiscoveryCreatorProjection> executeHybridSearch(
-            DiscoveryContext ctx,
-            DiscoverySearchRequest req,
-            boolean isStrictSearch,
-            boolean hasKeyword,
-            String formattedKeyword,
-            boolean hasVector,
-            String queryVectorStr,
-            Pageable pageable) {
-
-        boolean hasPlatforms = (ctx.getPlatforms() != null && !ctx.getPlatforms().isEmpty());
-        List<String> safePlatforms = hasPlatforms ? ctx.getPlatforms() : List.of("__NONE__");
-
-        boolean hasNiches = (ctx.getNiches() != null && !ctx.getNiches().isEmpty());
-        List<String> safeNiches = hasNiches ? ctx.getNiches() : List.of("__NONE__");
-
-        Long followerMin = req.getMinFollowers() != null ? req.getMinFollowers() : ctx.getFollowerMin();
-        Long followerMax = req.getMaxFollowers() != null ? req.getMaxFollowers() : ctx.getFollowerMax();
-
-        return metricRepository.searchHybridCreators(
-                hasPlatforms,
-                safePlatforms,
-                hasNiches,
-                safeNiches,
-                req.getNiche(),
-                followerMin,
-                followerMax,
-                isStrictSearch,
-                hasKeyword,
-                formattedKeyword,
-                hasVector,
-                queryVectorStr,
-                pageable
-        );
+    private static Long widenedMin(Long value) { return value == null ? null : value - value / 5; }
+    private static Long widenedMax(Long value) {
+        return value == null ? null : value > Long.MAX_VALUE - value / 5 ? Long.MAX_VALUE : value + value / 5;
     }
 
-    private void relaxConstraints(DiscoveryContext ctx, DiscoverySearchRequest req, int level) {
-        if (level == 1) {
-            // Lần 1: Nới biên độ follower ra 20%
-            if (ctx.getFollowerMin() != null) {
-                ctx.setFollowerMin((long) (ctx.getFollowerMin() * 0.8));
-            }
-            if (ctx.getFollowerMax() != null) {
-                ctx.setFollowerMax((long) (ctx.getFollowerMax() * 1.2));
-            }
-            if (req.getMinFollowers() != null) {
-                req.setMinFollowers((long) (req.getMinFollowers() * 0.8));
-            }
-            if (req.getMaxFollowers() != null) {
-                req.setMaxFollowers((long) (req.getMaxFollowers() * 1.2));
-            }
-        } else if (level == 2) {
-            // Lần 2: Nới biên độ follower ra 50% nhưng giữ nguyên Niche/Category để tránh kéo creator sai ngành
-            if (ctx.getFollowerMin() != null) {
-                ctx.setFollowerMin((long) (ctx.getFollowerMin() * 0.5));
-            }
-            if (ctx.getFollowerMax() != null) {
-                ctx.setFollowerMax((long) (ctx.getFollowerMax() * 1.5));
-            }
-            if (req.getMinFollowers() != null) {
-                req.setMinFollowers((long) (req.getMinFollowers() * 0.5));
-            }
-            if (req.getMaxFollowers() != null) {
-                req.setMaxFollowers((long) (req.getMaxFollowers() * 1.5));
-            }
-        }
+    private static void validate(DiscoverySearchRequest req) {
+        if ((req.getMinFollowers() != null && req.getMinFollowers() < 0)
+            || (req.getMaxFollowers() != null && req.getMaxFollowers() < 0)
+            || (req.getMinFollowers() != null && req.getMaxFollowers() != null
+                && req.getMinFollowers() > req.getMaxFollowers()))
+            throw new BadRequestException("Invalid follower range");
+        if (hasText(req.getTier()) && !List.of("NANO", "MICRO", "MACRO", "MEGA")
+            .contains(req.getTier().trim().toUpperCase(Locale.ROOT)))
+            throw new BadRequestException("Unknown creator tier");
+        if (req.getMinEr() != null && req.getMaxEr() != null
+            && req.getMinEr().compareTo(req.getMaxEr()) > 0)
+            throw new BadRequestException("Invalid engagement rate range");
+        if (req.getMinFee() != null && req.getMaxFee() != null
+            && req.getMinFee().compareTo(req.getMaxFee()) > 0)
+            throw new BadRequestException("Invalid fee range");
     }
 
-    private String formatKeyword(String keyword) {
-        if (keyword == null || keyword.trim().isEmpty()) {
-            return "";
-        }
-        String cleaned = keyword.replaceAll("[&|!*:()<>]", " ").trim();
-        if (cleaned.isEmpty()) {
-            return "";
-        }
-        String[] terms = cleaned.split("\\s+");
-        return String.join(" | ", terms);
+    private static Long maximum(Long a, Long b) {
+        if (a == null) return b;
+        if (b == null) return a;
+        return Math.max(a, b);
+    }
+    private static boolean validEmbedding(List<Float> vector) {
+        return vector != null && vector.size() == 768
+            && vector.stream().allMatch(v -> v != null && Float.isFinite(v))
+            && vector.stream().anyMatch(v -> v != 0.0f);
+    }
+    private static Long minimum(Long a, Long b) {
+        if (a == null) return b;
+        if (b == null) return a;
+        return Math.min(a, b);
+    }
+    private static boolean hasText(String value) { return value != null && !value.isBlank(); }
+    private static String firstText(String... values) {
+        for (var value : values) if (hasText(value)) return value.trim();
+        return "";
     }
 }

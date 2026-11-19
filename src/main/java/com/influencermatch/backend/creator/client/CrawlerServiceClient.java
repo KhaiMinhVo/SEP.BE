@@ -149,11 +149,19 @@ public class CrawlerServiceClient {
    */
   public Optional<Map<String, Object>> batchCrawl(
       String platform, String category, List<String> usernames, int maxChannels) {
+    return batchCrawl(platform, category, null, usernames, maxChannels);
+  }
+
+  public Optional<Map<String, Object>> batchCrawl(
+      String platform, String category, List<String> keywords, List<String> usernames, int maxChannels) {
     try {
       Map<String, Object> body = new HashMap<>();
       body.put("platform", platform != null ? platform.trim().toUpperCase() : "TIKTOK");
       if (category != null && !category.isBlank()) {
         body.put("category", category.trim());
+      }
+      if (keywords != null && !keywords.isEmpty()) {
+        body.put("keywords", keywords);
       }
       if (usernames != null && !usernames.isEmpty()) {
         body.put("usernames", usernames);

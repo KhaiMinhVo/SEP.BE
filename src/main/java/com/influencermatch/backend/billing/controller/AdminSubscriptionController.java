@@ -2,7 +2,10 @@ package com.influencermatch.backend.billing.controller;
 
 import com.influencermatch.backend.billing.dto.SubscriptionDTOs;
 import com.influencermatch.backend.billing.service.SubscriptionService;
+import com.influencermatch.backend.admin.dto.AdminAnalyticsDtos.SubscriptionSummary;
+import com.influencermatch.backend.admin.service.AdminAnalyticsService;
 import com.influencermatch.backend.common.dto.ApiResponse;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.*;
@@ -17,6 +20,13 @@ import org.springframework.web.bind.annotation.*;
 @Tag(name = "Admin Subscriptions", description = "MANAGE_SUBSCRIPTION; changes are audited")
 public class AdminSubscriptionController {
   private final SubscriptionService service;
+  private final AdminAnalyticsService analyticsService;
+
+  @GetMapping("/summary")
+  @Operation(summary = "Subscription counts by lifecycle status")
+  public ApiResponse<SubscriptionSummary> summary() {
+    return ApiResponse.ok(analyticsService.subscriptionSummary());
+  }
 
   @PostMapping
   public ApiResponse<SubscriptionDTOs.SubscriptionResponse> create(

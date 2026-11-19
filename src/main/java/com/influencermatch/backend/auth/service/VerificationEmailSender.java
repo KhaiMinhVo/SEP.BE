@@ -14,4 +14,6 @@ public interface VerificationEmailSender {
   }
 
   void sendPasswordSetup(String email, String otp);
+
+  void sendPasswordReset(String email, String otp);
 }

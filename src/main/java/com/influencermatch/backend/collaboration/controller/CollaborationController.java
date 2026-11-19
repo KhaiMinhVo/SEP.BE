@@ -63,6 +63,9 @@ public class CollaborationController {
           @PathVariable UUID id,
           @Valid @RequestBody CreateCollaborationRequest request,
           @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+    if (request.dealId() == null || request.expectedRevision() == null)
+      throw new com.influencermatch.backend.exception.ValidationException(
+          "Confirm a Deal with its proposal revision and agreement evidence");
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(
             com.influencermatch.backend.common.dto.ApiResponse.ok(
@@ -94,12 +97,11 @@ public class CollaborationController {
   }
 
   @GetMapping("/collaborations/{id}")
-  @PreAuthorize("isAuthenticated()")
+  @PreAuthorize("(hasRole('BRAND') and hasAuthority('MANAGE_OWN_COLLABORATION')) or (hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION'))")
   @Operation(
       summary = "Get collaboration detail",
       description =
-          "Owned by campaign brand owner or assigned creator master. Returns full detail with"
-              + " outcome, review, and evidence assets.")
+          "Owned by campaign Brand or assigned Creator. Internal review and Brand evidence are visible to Brand only.")
   @ApiResponse(responseCode = "200", description = "Collaboration detail retrieved")
   public ResponseEntity<
           com.influencermatch.backend.common.dto.ApiResponse<CollaborationDetailResponse>>
@@ -109,12 +111,11 @@ public class CollaborationController {
   }
 
   @PostMapping("/collaborations/{id}/evidence")
-  @PreAuthorize("isAuthenticated()")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION')")
   @Operation(
       summary = "Submit deliverables and evidence for a collaboration",
       description =
-          "Allowed for campaign brand owner or assigned creator master. Submits post link,"
-              + " screenshots, or draft videos during or after execution.")
+          "Assigned Creator may attach evidence during active execution. This endpoint does not set official publication or submission.")
   @ApiResponse(responseCode = "201", description = "Evidence asset submitted")
   public ResponseEntity<com.influencermatch.backend.common.dto.ApiResponse<EvidenceAssetResponse>>
       submitEvidence(@PathVariable UUID id, @Valid @RequestBody SubmitEvidenceRequest request) {
@@ -125,7 +126,7 @@ public class CollaborationController {
   }
 
   @GetMapping("/collaborations/{id}/evidence")
-  @PreAuthorize("isAuthenticated()")
+  @PreAuthorize("(hasRole('BRAND') and hasAuthority('MANAGE_OWN_COLLABORATION')) or (hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION'))")
   @Operation(
       summary = "Get list of evidence assets for a collaboration",
       description =

@@ -40,6 +40,8 @@ public final class SubscriptionDTOs {
     private LocalDate startDate;
     private LocalDate expirationDate;
     private SubscriptionStatus status;
+    private boolean cancelAtPeriodEnd;
+    private boolean refundHold;
     private int usedCampaignQuota;
     private int usedRecommendationQuota;
     private int usedRefreshQuota;

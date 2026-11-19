@@ -17,6 +17,71 @@ import org.junit.jupiter.api.*;
 
 class ExecutionPostgresIntegrationTest extends ExecutionScenarioSupport {
   @Test
+  void savesEachPublicationAndKpiAtomicallyAndRequiresCompleteDeclarations() throws Exception {
+    submit();
+    approve();
+    var firstUnit = unit();
+    var firstPath = root + "/deliverables/" + firstUnit + "/outcome";
+    var first = json.<com.fasterxml.jackson.databind.node.ObjectNode>valueToTree(measurement());
+    first.remove("deliverableId");
+    first.put("url", "https://www.tiktok.com/@test/video/123");
+    first.put("expectedRevision", revision());
+    first.put("views", 0);
+    var incomplete = first.deepCopy();
+    incomplete.remove("unavailableMetrics");
+    request(brand, firstPath, first, 403);
+    request(owner, firstPath, incomplete, 400);
+    assertThat(state().path("deliverables").get(0).path("publications")).isEmpty();
+
+    var badPeriod = first.deepCopy();
+    badPeriod.put("periodEnd", "2026-10-31T00:00:00Z");
+    request(owner, firstPath, badPeriod, 400);
+    assertThat(revision()).isEqualTo(first.path("expectedRevision").asLong());
+    assertThat(state().path("deliverables").get(0).path("publications")).isEmpty();
+    assertThat(state().path("outcomeRevisions")).isEmpty();
+
+    String key = UUID.randomUUID().toString();
+    request(owner, firstPath, first, 200, key);
+    request(owner, firstPath, first, 200, key);
+    var result = state().path("outcomeRevisions");
+    assertThat(result).hasSize(1);
+    assertThat(result.get(0).path("reason").asText()).isEqualTo("Ghi nhận kết quả bài đăng lần đầu");
+    var measurement = result.get(0).path("payload").path("posts").get(0);
+    assertThat(measurement.path("views").asLong()).isZero();
+    assertThat(measurement.path("unavailableMetrics").get(0).asText()).isEqualTo("clicks");
+    request(owner, firstPath, first, 409);
+    first.put("expectedRevision", revision());
+    request(owner, firstPath, first, 400);
+    first.remove("url");
+    first.put("reason", "Corrected views");
+    first.put("views", 50);
+    request(owner, firstPath, first, 200);
+    assertThat(state().path("deliverables").get(0).path("publications")).hasSize(1);
+
+    request(brand, root + "/outcome/finance", Map.of(
+        "expectedRevision", revision(), "currency", "VND", "financialConfirmed", true,
+        "costs", List.of(Map.of("description", "Production", "amount", 1000))), 200);
+    request(brand, root + "/outcome/finance", Map.of(
+        "expectedRevision", revision(), "currency", "VND", "financialConfirmed", false), 400);
+    var latest = state().path("outcomeRevisions").get(2);
+    assertThat(latest.path("reason").asText()).isEqualTo("Ghi nhận tài chính lần đầu");
+
+    // Simulate an incomplete historical revision while the collaboration is still open.
+    var historical = (com.fasterxml.jackson.databind.node.ObjectNode) latest.path("payload").deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) historical.path("posts").get(0)).remove("unavailableMetrics");
+    jdbc.update(
+        "insert into collaboration_outcome_revision(id,collaboration_id,revision,payload,calculation,actor_id,source,reason,created_at)"
+            + " select gen_random_uuid(),collaboration_id,revision+1,?::jsonb,calculation,actor_id,source,reason,now()"
+            + " from collaboration_outcome_revision where collaboration_id=? and revision=?",
+        historical.toString(), collaboration, latest.path("revision").asLong());
+    request(brand, root + "/outcome/accept", Map.of("expectedRevision", revision(), "outcomeRevision", latestOutcome()), 409);
+    first.put("expectedRevision", revision());
+    request(owner, firstPath, first, 200);
+    assertThat(state().path("outcomeRevisions").get(4).path("calculation").path("actualCost").asLong()).isEqualTo(1000);
+    accept();
+  }
+
+  @Test
   void fullWorkflowOnlyReviewCompletesAndDoesNotFabricateVerification() throws Exception {
     ready();
     assertThat(state().path("status").asText()).isEqualTo("IN_PROGRESS");
@@ -122,7 +187,7 @@ class ExecutionPostgresIntegrationTest extends ExecutionScenarioSupport {
     request(
         brand,
         root + "/outcome/accept",
-        Map.of("expectedRevision", revision(), "outcomeRevision", 1),
+        Map.of("expectedRevision", revision(), "outcomeRevision", latestOutcome()),
         409);
     publish(true);
     accept();
@@ -131,19 +196,20 @@ class ExecutionPostgresIntegrationTest extends ExecutionScenarioSupport {
   @Test
   void acceptsOnlyLatestOutcomeAndCanReopenBeforeFinalReview() throws Exception {
     ready();
-    outcome();
+    request(owner, root + "/outcome", Map.of("expectedRevision", revision(), "reason", "Updated measurements",
+        "posts", List.of(measurement())), 200);
     request(
         brand,
         root + "/outcome/accept",
-        Map.of("expectedRevision", revision(), "outcomeRevision", 1),
+        Map.of("expectedRevision", revision(), "outcomeRevision", latestOutcome() - 1),
         409);
     request(
         brand,
         root + "/outcome/accept",
-        Map.of("expectedRevision", revision(), "outcomeRevision", 2),
+        Map.of("expectedRevision", revision(), "outcomeRevision", latestOutcome()),
         200);
     request(
-        brand,
+        owner,
         root + "/outcome",
         Map.of(
             "expectedRevision", revision(), "reason", "Changed", "posts", List.of(measurement())),
@@ -159,7 +225,7 @@ class ExecutionPostgresIntegrationTest extends ExecutionScenarioSupport {
                 "select count(*) from collaboration_outcome_revision where collaboration_id=?",
                 Integer.class,
                 collaboration))
-        .isEqualTo(2);
+        .isEqualTo(3);
   }
 
   @Test
@@ -185,6 +251,43 @@ class ExecutionPostgresIntegrationTest extends ExecutionScenarioSupport {
         root + "/outcome/accept",
         Map.of("expectedRevision", revision(), "outcomeRevision", 1),
         403);
+  }
+
+  @Test
+  void brandFinancePreservesCreatorKpiAndCreatorReadsAndReceiptsKeepFinancePrivate() throws Exception {
+    var path = root + "/deliverables/" + unit();
+    request(brand, path + "/submissions",
+        Map.of("expectedRevision", 1, "url", "https://content.test/draft", "source", "CREATOR_PORTAL"), 403);
+    request(brand, root + "/outcome",
+        Map.of("expectedRevision", revision(), "reason", "Brand KPI", "posts", List.of(measurement())), 403);
+    submit();
+    request(brand, path + "/publication", Map.of("expectedRevision", 2, "submissionRevision", 1,
+        "url", "https://www.tiktok.com/@test/video/123", "acknowledgeException", true,
+        "exceptionReason", "Would create new publication"), 409);
+    approve();
+    publish(false);
+    outcome();
+    request(owner, root + "/outcome/finance",
+        Map.of("expectedRevision", revision(), "reason", "Creator finance"), 403);
+    request(brand, root + "/outcome/finance",
+        Map.of("expectedRevision", revision(), "reason", "Override KPI", "posts", List.of(measurement())), 403);
+    var kpi = Map.of("expectedRevision", revision(), "reason", "Creator updated",
+        "posts", List.of(measurement()));
+    var response = request(owner, root + "/outcome", kpi, 200, "private-kpi");
+    assertThat(response.toString()).doesNotContain("actualCost", "financialConfirmed", "revenue", "roi", "reviewedByUserId");
+    var full = state();
+    assertThat(full.path("outcomeRevisions").get(2).path("calculation").path("actualCost").asLong())
+        .isEqualTo(1000);
+    jdbc.update("update cooperation_idempotency set response=?::jsonb where actor_id=? and key=?",
+        full.toString(), owner.getId(), "private-kpi");
+    assertThat(request(owner, root + "/outcome", kpi, 200, "private-kpi")).isEqualTo(response);
+    accept();
+    request(brand, root + "/review", review(), 200);
+    var creator = call(owner, get(root + "/deliverables"), null, 200).path("data");
+    assertThat(creator.toString()).doesNotContain("actualCost", "financialConfirmed", "revenue", "roi",
+        "overallRating", "brandFitRating", "reviewTags");
+    assertThat(creator.path("acceptances").size()).isEqualTo(1);
+    assertThat(call(owner, get(root), null, 200).path("data").hasNonNull("review")).isFalse();
   }
 
   @Test
@@ -354,7 +457,7 @@ class ExecutionPostgresIntegrationTest extends ExecutionScenarioSupport {
     approve();
     publish(false);
     request(
-        brand,
+        owner,
         root + "/outcome",
         Map.of(
             "expectedRevision",
@@ -405,7 +508,7 @@ class ExecutionPostgresIntegrationTest extends ExecutionScenarioSupport {
         .when(target)
         .record(eq("OUTCOME_RECORDED"), any(), any(), any(), any(), any());
     request(
-        brand,
+        owner,
         root + "/outcome",
         Map.of(
             "expectedRevision", revision(), "reason", "Measured", "posts", List.of(measurement())),

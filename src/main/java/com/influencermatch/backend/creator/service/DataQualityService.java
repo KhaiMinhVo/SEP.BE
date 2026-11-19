@@ -27,12 +27,30 @@ public class DataQualityService {
   private final EntityManager em;
   private final AuditService audit;
   private final Validator validator;
+  private final com.influencermatch.backend.taxonomy.repository.NicheRepository niches;
+
+  private boolean needsReview(PublicCreatorMetric metric) {
+    String niche = metric.getNiche();
+    return niche == null || niche.isBlank() || "UNKNOWN".equalsIgnoreCase(niche.trim())
+        || (metric.getDataConfidence() != null
+            && metric.getDataConfidence().compareTo(new BigDecimal("0.7")) < 0);
+  }
 
   @Transactional(readOnly = true)
   public PageResponse<QualityItem> pending(int page, int size) {
     Permissions.require(Permission.REVIEW_CREATOR_CLASSIFICATION);
     return PageResponse.from(metrics.pending(PageRequest.of(Math.max(0, page), Math.min(100, Math.max(1, size))))
         .map(this::item));
+  }
+
+  @Transactional(readOnly = true)
+  public java.util.List<QualityItem> reviewStatuses(java.util.List<String> names) {
+    Permissions.require(Permission.REVIEW_CREATOR_CLASSIFICATION);
+    var normalized = names.stream().map(name -> name.trim().replaceFirst("^@+", "").toLowerCase(java.util.Locale.ROOT)).distinct().toList();
+    if (normalized.isEmpty()) return java.util.List.of();
+    var latest = new java.util.LinkedHashMap<UUID, QualityItem>();
+    for (var metric : metrics.reviewedByUserNames(normalized)) latest.putIfAbsent(metric.getCreator().getId(), item(metric));
+    return java.util.List.copyOf(latest.values());
   }
 
   @Transactional
@@ -46,35 +64,40 @@ public class DataQualityService {
     PublicCreatorMetric metric = metrics.findLocked(id).orElseThrow(() -> new NotFoundException("Metric not found"));
     em.refresh(metric);
     var latest = metrics.findFirstByCreatorIdOrderByCollectedAtDescIdDesc(creatorId);
-    if (latest.isEmpty() || !latest.get().getId().equals(id) || !"KOC".equals(metric.getCreatorType())
-        || metric.getDataConfidence() == null || metric.getDataConfidence().compareTo(new BigDecimal("0.7")) >= 0
+    if (latest.isEmpty() || !latest.get().getId().equals(id) || !("KOC".equals(metric.getCreatorType()) || "KOL".equals(metric.getCreatorType()))
+        || !needsReview(metric)
         || metric.getQualityReviewedAt() != null) {
       throw new ConflictException(ErrorCode.DATA_QUALITY_REVIEW_CONFLICT, "Snapshot is no longer pending review");
     }
     QualityItem before = item(metric);
-    if (request.niche() != null) metric.setNiche(request.niche());
+    String approvedNiche = request.niche() == null ? metric.getNiche() : request.niche();
+    if (approvedNiche == null || approvedNiche.isBlank() || "UNKNOWN".equalsIgnoreCase(approvedNiche.trim())) {
+      throw new BadRequestException("Cần xác định ngành hàng cụ thể trước khi duyệt");
+    }
+    var approved = niches.findByNameIgnoreCaseAndActiveTrue(approvedNiche.trim())
+        .orElseThrow(() -> new BadRequestException("Ngành hàng không thuộc danh mục đang bật. Vui lòng chọn lại."));
+    metric.setNiche(approved.getName());
     metric.setQualityReviewedBy(Permissions.actor());
     metric.setQualityReviewedAt(LocalDateTime.now());
     metrics.flush();
     QualityItem after = item(metric);
-    audit.record("APPROVE_DATA_QUALITY", "PublicCreatorMetric", id, before, after, "Phê duyệt thẩm định thủ công phân loại KOC");
+    audit.record("APPROVE_DATA_QUALITY", "PublicCreatorMetric", id, before, after, "Phê duyệt thẩm định thủ công phân loại " + metric.getCreatorType());
     return after;
   }
 
   @Transactional
   public QualityItem reject(UUID id, RejectRequest request) {
     Permissions.require(Permission.REVIEW_CREATOR_CLASSIFICATION);
-    if (request != null) {
-      var violations = validator.validate(request);
-      if (!violations.isEmpty()) throw new ConstraintViolationException(violations);
-    }
+    if (request == null) request = new RejectRequest(null, null);
+    var violations = validator.validate(request);
+    if (!violations.isEmpty()) throw new ConstraintViolationException(violations);
     UUID creatorId = metrics.creatorId(id).orElseThrow(() -> new NotFoundException("Metric not found"));
     creators.findLockedById(creatorId).orElseThrow(() -> new NotFoundException("Creator not found"));
     PublicCreatorMetric metric = metrics.findLocked(id).orElseThrow(() -> new NotFoundException("Metric not found"));
     em.refresh(metric);
     var latest = metrics.findFirstByCreatorIdOrderByCollectedAtDescIdDesc(creatorId);
-    if (latest.isEmpty() || !latest.get().getId().equals(id) || !"KOC".equals(metric.getCreatorType())
-        || metric.getDataConfidence() == null || metric.getDataConfidence().compareTo(new BigDecimal("0.7")) >= 0
+    if (latest.isEmpty() || !latest.get().getId().equals(id) || !("KOC".equals(metric.getCreatorType()) || "KOL".equals(metric.getCreatorType()))
+        || !needsReview(metric)
         || metric.getQualityReviewedAt() != null) {
       throw new ConflictException(ErrorCode.DATA_QUALITY_REVIEW_CONFLICT, "Snapshot is no longer pending review");
     }
@@ -99,6 +122,6 @@ public class DataQualityService {
     return new QualityItem(metric.getId(), c.getId(), c.getPlatform(), c.getUserName(), c.getDisplayName(),
         c.getProfileUrl(), metric.getNiche(), metric.getContentSummary(), metric.getDataConfidence(),
         metric.getCollectedAt(), metric.getQualityReviewedBy() == null ? null : metric.getQualityReviewedBy().getId(),
-        metric.getQualityReviewedAt());
+        metric.getQualityReviewedAt(), metric.getCreatorType());
   }
 }

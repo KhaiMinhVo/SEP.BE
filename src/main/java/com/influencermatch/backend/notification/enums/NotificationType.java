@@ -17,6 +17,11 @@ public enum NotificationType {
       "Hợp tác chiến dịch đã được ghi nhận",
       "Thỏa thuận hợp tác chiến dịch của bạn đã được ghi nhận thành công trên hệ thống.",
       OccurrencePolicy.SINGLE_PER_ENTITY),
+  COOPERATION_INVITATION(
+      true,
+      "Lời mời hợp tác từ nhãn hàng",
+      "Nhãn hàng đã gửi cho bạn một lời mời hợp tác chiến dịch.",
+      OccurrencePolicy.SINGLE_PER_ENTITY),
   COLLABORATION_PROPOSAL(
       true,
       "Lời mời hợp tác chiến dịch",

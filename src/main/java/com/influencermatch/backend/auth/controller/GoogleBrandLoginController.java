@@ -71,6 +71,7 @@ public class GoogleBrandLoginController {
   @PostMapping("/registration/complete")
   @Operation(
       summary = "Complete new Google Brand registration before issuing a session",
+      description = "Requires a new password and creates a pending Brand profile for onboarding.",
       security = {})
   public ApiResponse<GoogleBrandLoginService.Result> complete(
       @Valid @RequestBody GoogleBrandLoginService.Complete body,

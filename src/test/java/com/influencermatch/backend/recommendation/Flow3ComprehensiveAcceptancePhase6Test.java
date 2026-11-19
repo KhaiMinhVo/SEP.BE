@@ -108,6 +108,7 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     historicalCampaignRepository = mock(HistoricalCampaignRepository.class);
     brandPatternRepository = mock(BrandPatternRepository.class);
     shortlistItemRepository = mock(ShortlistItemRepository.class);
+    when(shortlistItemRepository.countByCampaignIdAndStatusNot(any(), any())).thenReturn(1L);
     recommendationRunRepository = mock(RecommendationRunRepository.class);
     aiServiceClient = mock(AiServiceClient.class);
     objectMapper = new ObjectMapper();
@@ -367,8 +368,8 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     when(instaCandidate.getNiche()).thenReturn("BEAUTY");
     when(instaCandidate.getAccountStatus()).thenReturn("ACTIVE");
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(tikTokCandidate, instaCandidate));
 
     when(historicalCampaignRepository.findByCreatorId(any())).thenReturn(Collections.emptyList());
@@ -417,8 +418,8 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     when(cand.getNiche()).thenReturn("BEAUTY");
     when(cand.getAccountStatus()).thenReturn("ACTIVE");
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(cand));
 
     // KOC chưa có bất kỳ lịch sử nào
@@ -659,15 +660,8 @@ class Flow3ComprehensiveAcceptancePhase6Test {
     when(aiServiceClient.getEmbedding(anyString())).thenReturn(Collections.nCopies(768, 0.1f));
 
     ArgumentCaptor<Collection<UUID>> excludedCaptor = ArgumentCaptor.forClass(Collection.class);
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(),
-            eq(true),
-            excludedCaptor.capture(),
-            anyBoolean(),
-            any(),
-            any(),
-            any(),
-            anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            eq(campaignId), anyString(), eq(true), excludedCaptor.capture()))
         .thenReturn(Collections.emptyList());
 
     assertThatThrownBy(() -> aiRecommendationService.recommendKocs(campaignId, 10))

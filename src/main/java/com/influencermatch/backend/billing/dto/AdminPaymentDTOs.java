@@ -33,6 +33,7 @@ public class AdminPaymentDTOs {
     private LocalDateTime createdAt;
     private LocalDateTime paidAt;
     private String failureReason;
+    private RefundDetails refund;
   }
 
   @Getter
@@ -51,11 +52,24 @@ public class AdminPaymentDTOs {
     private long totalCount;
   }
 
-  @Getter
-  @Setter
-  @NoArgsConstructor
-  @AllArgsConstructor
-  public static class RefundRequest {
-    private String reason;
+  public record RefundDetails(com.influencermatch.backend.billing.enums.RefundStatus status,
+      LocalDateTime requestedAt, LocalDateTime approvedAt, LocalDateTime completedAt,
+      String reason, String decisionReason, String transferReference, String exceptionType,
+      String gatewayRequestId, String gatewayCode, String gatewayTransactionNo) {
+    public static RefundDetails from(com.influencermatch.backend.billing.model.Payment p) {
+      return new RefundDetails(p.getRefundStatus(), p.getRefundRequestedAt(), p.getRefundApprovedAt(),
+          p.getRefundedAt(), p.getRefundReason(), p.getRefundDecisionReason(),
+          p.getRefundTransferReference(), p.getRefundExceptionType(), p.getGatewayRefundRequestId(),
+          p.getGatewayRefundCode(), p.getGatewayRefundTransactionNo());
+    }
   }
+
+  @Getter @Setter @NoArgsConstructor @AllArgsConstructor
+  public static class RefundRequest { private String reason; }
+
+  public enum RefundExceptionType { DUPLICATE_PAYMENT, SYSTEM_ERROR }
+  public record RefundApprovalRequest(String reason, RefundExceptionType exceptionType, boolean manual) {
+    public RefundApprovalRequest(String reason, RefundExceptionType exceptionType) { this(reason, exceptionType, false); }
+  }
+  public record RefundConfirmationRequest(BigDecimal amount, String currency, String transferReference) {}
 }

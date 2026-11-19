@@ -6,6 +6,8 @@ public enum ErrorCode {
   CREATOR_PROFILE_REVISION_CONFLICT(HttpStatus.CONFLICT, "Creator profile revision changed"),
   DEAL_REVISION_CONFLICT(HttpStatus.CONFLICT, "Deal revision changed"),
   DEAL_STATE_CONFLICT(HttpStatus.CONFLICT, "Deal workflow conflict"),
+  COLLABORATION_VIDEO_REQUIRED(HttpStatus.CONFLICT, "Video submission required"),
+  COLLABORATION_VIDEO_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Video storage unavailable"),
   DEAL_BUDGET_EXCEEDED(HttpStatus.CONFLICT, "Campaign budget exceeded"),
   DEAL_BUDGET_UNAVAILABLE(HttpStatus.CONFLICT, "Campaign commitment cannot be assessed"),
   DEAL_SINGLE_LIMIT(HttpStatus.CONFLICT, "Single Creator limit reached"),

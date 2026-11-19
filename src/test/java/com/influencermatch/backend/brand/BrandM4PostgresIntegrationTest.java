@@ -256,7 +256,7 @@ class BrandM4PostgresIntegrationTest extends PostgresApiTestSupport {
     m3Store.finish(m3Lease, Collections.nCopies(768, 0.1f));
     for (int i = 0; i < 4; i++) review(campaign, 5);
     var c = mock(com.influencermatch.backend.creator.dto.RecommendationCandidateProjection.class);
-    when(c.getCreatorId()).thenReturn(UUID.randomUUID());
+    when(c.getCreatorId()).thenReturn(shortlistedCreator(campaign, owner));
     when(c.getPlatform()).thenReturn("TIKTOK");
     when(c.getNiche()).thenReturn("Beauty");
     when(c.getFollowers()).thenReturn(25000L);
@@ -272,8 +272,15 @@ class BrandM4PostgresIntegrationTest extends PostgresApiTestSupport {
                 .reasons(List.of())
                 .explanationAvailable(false)
                 .build());
+    shortlistedCreator(campaign, owner);
     var first =
-        request(post("/campaigns/" + campaign + "/ai-recommendations"), null, null, 200).data;
+        request(
+                post("/campaigns/" + campaign + "/ai-recommendations")
+                    .header("Idempotency-Key", "brand-m4-run-1"),
+                null,
+                null,
+                200)
+            .data;
     UUID run = UUID.fromString(first.path("recommendationRunId").asText());
     assertThat(jdbc.queryForObject("select scoring_policy_version from recommendation_run where id=?",String.class,run)).isEqualTo("develop-topsis");
     String snapshot =
@@ -282,7 +289,12 @@ class BrandM4PostgresIntegrationTest extends PostgresApiTestSupport {
     UUID old = context();
     review(campaign, 5);
     request(patch("/brands/me"), Map.of("positioning", "Changed brand"), tag, 200);
-    request(post("/campaigns/" + campaign + "/ai-recommendations"), null, null, 200);
+    request(
+        post("/campaigns/" + campaign + "/ai-recommendations")
+            .header("Idempotency-Key", "brand-m4-run-2"),
+        null,
+        null,
+        200);
     assertThat(
             jdbc.queryForObject(
                 "select brand_context_id from recommendation_run where id=?", UUID.class, run))

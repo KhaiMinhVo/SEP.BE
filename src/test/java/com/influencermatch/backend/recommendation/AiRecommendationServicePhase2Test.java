@@ -1,5 +1,6 @@
 package com.influencermatch.backend.recommendation;
 
+import com.influencermatch.backend.recommendation.engine.presentation.enums.DisplayMode;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -65,6 +66,7 @@ class AiRecommendationServicePhase2Test {
     historicalCampaignRepository = mock(HistoricalCampaignRepository.class);
     brandPatternRepository = mock(BrandPatternRepository.class);
     shortlistItemRepository = mock(ShortlistItemRepository.class);
+    when(shortlistItemRepository.countByCampaignIdAndStatusNot(any(), any())).thenReturn(1L);
     recommendationRunRepository = mock(RecommendationRunRepository.class);
     aiServiceClient = mock(AiServiceClient.class);
 
@@ -230,8 +232,8 @@ class AiRecommendationServicePhase2Test {
             "Lifestyle",
             0.75);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(tiktokCand, igCand, otherCand));
 
     RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
@@ -320,8 +322,8 @@ class AiRecommendationServicePhase2Test {
             "Skincare",
             0.65);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(cand));
 
     // Giả lập Python service timeout / crash trả về fallback
@@ -426,8 +428,8 @@ class AiRecommendationServicePhase2Test {
 
     service.setPostRepository(mockPostRepo);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(readyCand, provCand));
 
     RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
@@ -578,8 +580,8 @@ class AiRecommendationServicePhase2Test {
     when(mockPostRepo.findByCreatorIdIn(any())).thenReturn(allPosts);
     service.setPostRepository(mockPostRepo);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(readyCand, provCand, notScorableCand, invalidDataCand));
 
     // Thực thi Recommendation Run
@@ -658,8 +660,8 @@ class AiRecommendationServicePhase2Test {
     when(mockPostRepo.findByCreatorIdIn(any())).thenReturn(List.of(p1));
     service.setPostRepository(mockPostRepo);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(provCand));
 
     RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
@@ -771,8 +773,8 @@ class AiRecommendationServicePhase2Test {
                     .build()));
     service.setPostRepository(mockPostRepo);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(readyCand, provCand, indepCand));
 
     RecommendationResponseDto response = service.recommendKocs(campaignId, 10);
@@ -897,8 +899,8 @@ class AiRecommendationServicePhase2Test {
                     .build()));
     service.setPostRepository(mockPostRepo);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(c1, c2, c3, c4));
 
     // Yêu cầu limit = 2
@@ -975,8 +977,8 @@ class AiRecommendationServicePhase2Test {
     when(historicalCampaignRepository.findByCreatorId(creatorId))
         .thenReturn(Collections.emptyList());
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(cand));
 
     // AI microservice trả về explanation thành công
@@ -1064,8 +1066,8 @@ class AiRecommendationServicePhase2Test {
     when(historicalCampaignRepository.findByCreatorId(creatorId))
         .thenReturn(Collections.emptyList());
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(cand));
 
     // AI response có explanationAvailable = false và summary rỗng
@@ -1147,8 +1149,8 @@ class AiRecommendationServicePhase2Test {
                     .build()));
     service.setPostRepository(mockPostRepo);
 
-    when(publicCreatorMetricRepository.findTopCandidatesByEmbedding(
-            anyString(), anyBoolean(), any(), anyBoolean(), any(), any(), any(), anyInt()))
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+            any(), anyString(), anyBoolean(), any()))
         .thenReturn(List.of(cand));
 
     // Kiểm tra chạy thành công cả 3 DisplayMode
@@ -1206,4 +1208,128 @@ class AiRecommendationServicePhase2Test {
     when(m.getAccountStatus()).thenReturn("ACTIVE");
     return m;
   }
+  @org.junit.jupiter.api.Test
+  void selectedScopeRejectsDiscoveryAndDuplicateIdsBeforeQuota() {
+    var source = com.influencermatch.backend.campaign.enums.CandidateSource.SHORTLIST;
+    UUID id = UUID.randomUUID();
+    assertThatThrownBy(() -> service.recommendKocs(campaignId, 50,
+        com.influencermatch.backend.campaign.enums.CandidateSource.DISCOVERY,
+        DisplayMode.BEST_MATCH, List.of(id)))
+        .isInstanceOf(com.influencermatch.backend.exception.BadRequestException.class);
+    assertThatThrownBy(() -> service.recommendKocs(campaignId, 50, source,
+        DisplayMode.BEST_MATCH, List.of(id, id)))
+        .isInstanceOf(com.influencermatch.backend.exception.ValidationException.class);
+    verify(subscriptionService, never()).reserveRecommendationQuota(any());
+  }
+
+  @org.junit.jupiter.api.Test
+  void selectedScopeRejectsChannelsOutsideActiveShortlistBeforeQuota() {
+    UUID id = UUID.randomUUID();
+    when(shortlistItemRepository.findByCampaignIdAndCreatorIdIn(eq(campaignId), any()))
+        .thenReturn(List.of());
+    assertThatThrownBy(() -> service.recommendKocs(campaignId, 50,
+        com.influencermatch.backend.campaign.enums.CandidateSource.SHORTLIST,
+        DisplayMode.BEST_MATCH, List.of(id)))
+        .isInstanceOf(com.influencermatch.backend.exception.ValidationException.class);
+    verify(subscriptionService, never()).reserveRecommendationQuota(any());
+  }
+
+  @org.junit.jupiter.api.Test
+  void selectedScopeScoresOnlySelectedShortlistedChannel() {
+    UUID selected = UUID.randomUUID(), other = UUID.randomUUID();
+    var selectedCandidate = mockCandidate(selected, null, "TIKTOK", "Selected", 30000L,
+        BigDecimal.valueOf(10000), BigDecimal.valueOf(500), BigDecimal.valueOf(0.05),
+        "Beauty", "Skincare", 0.8);
+    var otherCandidate = mockCandidate(other, null, "TIKTOK", "Other", 60000L,
+        BigDecimal.valueOf(20000), BigDecimal.valueOf(1000), BigDecimal.valueOf(0.05),
+        "Beauty", "Skincare", 0.9);
+    var item = new com.influencermatch.backend.relationship.model.ShortlistItem();
+    var creator = new com.influencermatch.backend.creator.model.Creator();
+    creator.setId(selected); item.setCreator(creator);
+    item.setStatus(com.influencermatch.backend.relationship.enums.ShortlistStatus.SAVED);
+    when(shortlistItemRepository.findByCampaignIdAndCreatorIdIn(eq(campaignId), any()))
+        .thenReturn(List.of(item));
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(any(), anyString(), anyBoolean(), any()))
+        .thenReturn(List.of(selectedCandidate, otherCandidate));
+    var response = service.recommendKocs(campaignId, 50,
+        com.influencermatch.backend.campaign.enums.CandidateSource.SHORTLIST,
+        DisplayMode.BEST_MATCH, List.of(selected));
+    var ids = new java.util.ArrayList<UUID>();
+    response.getRecommendations().forEach(row -> ids.add(row.getCreatorId()));
+    response.getProvisionalRecommendations().forEach(row -> ids.add(row.getCreatorId()));
+    assertThat(ids).containsExactly(selected);
+    verify(subscriptionService).reserveRecommendationQuota(brandProfileId);
+  }
+
+  @org.junit.jupiter.api.Test
+  void preparationReturnsPendingWithoutClaimingRequestOrReservingQuota() {
+    var campaignService =
+        mock(com.influencermatch.backend.campaign.service.CampaignService.class);
+    var requestStore =
+        mock(com.influencermatch.backend.recommendation.service.RecommendationRequestStore.class);
+    var embeddingStore =
+        (com.influencermatch.backend.campaign.embedding.CampaignEmbeddingStore)
+            org.springframework.test.util.ReflectionTestUtils.getField(service, "m3Embeddings");
+    when(embeddingStore.ready(any())).thenReturn(null);
+    when(embeddingStore.view(any()))
+        .thenReturn(
+            new com.influencermatch.backend.campaign.embedding.CampaignEmbeddingStore.View(
+                "PROCESSING", "model", "version", null));
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "campaignService", campaignService);
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "recommendationRequests", requestStore);
+
+    assertThatThrownBy(
+            () ->
+                service.recommendKocs(
+                    campaignId,
+                    30,
+                    com.influencermatch.backend.campaign.enums.CandidateSource.SHORTLIST,
+                    DisplayMode.BEST_MATCH,
+                    null,
+                    "pending-request",
+                    null))
+        .isInstanceOf(
+            com.influencermatch.backend.exception.CampaignEmbeddingPendingException.class);
+    verify(campaignService).prepareForRecommendation(campaignId, null);
+    verify(requestStore).replay(eq(campaignId), eq("pending-request"), anyString());
+    verify(requestStore, never()).replayOrClaim(any(), anyString(), anyString());
+    verify(subscriptionService, never()).reserveRecommendationQuota(any());
+  }
+
+  @org.junit.jupiter.api.Test
+  void completedIdempotentRequestReplaysWithoutPreparingOrReservingQuota() {
+    var campaignService =
+        mock(com.influencermatch.backend.campaign.service.CampaignService.class);
+    var requestStore =
+        mock(com.influencermatch.backend.recommendation.service.RecommendationRequestStore.class);
+    var cached =
+        RecommendationResponseDto.builder()
+            .campaignId(campaignId)
+            .recommendationRunId(UUID.randomUUID())
+            .build();
+    when(requestStore.replay(eq(campaignId), eq("completed-request"), anyString()))
+        .thenReturn(cached);
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "campaignService", campaignService);
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "recommendationRequests", requestStore);
+
+    var response =
+        service.recommendKocs(
+            campaignId,
+            30,
+            com.influencermatch.backend.campaign.enums.CandidateSource.SHORTLIST,
+            DisplayMode.BEST_MATCH,
+            null,
+            "completed-request",
+            null);
+
+    assertThat(response).isSameAs(cached);
+    verify(campaignService, never()).prepareForRecommendation(any(), any());
+    verify(subscriptionService, never()).reserveRecommendationQuota(any());
+    verify(requestStore, never()).replayOrClaim(any(), anyString(), anyString());
+  }
+
 }

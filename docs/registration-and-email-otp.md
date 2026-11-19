@@ -49,6 +49,14 @@ Manual Claim and review/revoke remain. A claimant must be ACTIVE CREATOR with ve
 
 `OAuthProofClient` remains a simulation, available only with profile dev, without prod, and `SOCIAL_PROOF_MOCK_ENABLED=true`. Otherwise provider proof returns 503. This is not real Facebook/Instagram/TikTok/YouTube verification. No real provider adapter is added.
 
+## Forgot password
+
+Brand and Creator accounts with an active status, verified email and an existing password can reset it without signing in. `POST /auth/password-reset/request` accepts `{email}` and returns the same `202` acknowledgement whether or not a code is sent. SMTP and OTP configuration must be available for this endpoint.
+
+`POST /auth/password-reset/confirm` accepts `{email, otp, newPassword}` and returns `204` after updating the password and revoking all sessions. Reset codes use separate storage from email verification and first password setup. Codes expire after 10 minutes, allow at most five failed attempts and become invalid when reissued or when the account's authentication version changes. Resends have a 60-second cooldown and share the five-delivery hourly limit.
+
+V40 adds the reset code table. Deploy the backend migration and verify SMTP with a QA inbox before enabling the new frontend flow.
+
 ## Database and verification
 
 V13 adds email verification and OTP delivery storage; V14 adds separate `creator_registration_invitation` tables and password-setup OTP. Vy's `creator_invitation` table is the distinct channel-claim invitation and is preserved. V1–V14 migration files remain unchanged. V15 subsequently removes historical `auth_exchange_code` and retired Rate Card storage, while retaining identities, OTP, invitations and ownership; see [V15 cleanup](schema-cleanup-v15.md).

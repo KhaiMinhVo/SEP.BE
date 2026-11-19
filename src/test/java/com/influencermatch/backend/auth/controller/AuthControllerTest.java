@@ -14,6 +14,7 @@ import com.influencermatch.backend.auth.dto.LoginResponse;
 import com.influencermatch.backend.auth.dto.RegisterRequest;
 import com.influencermatch.backend.auth.dto.UserProfileResponse;
 import com.influencermatch.backend.auth.service.AuthService;
+import com.influencermatch.backend.auth.service.ChangePasswordService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +38,7 @@ class AuthControllerTest {
   @Autowired private ObjectMapper objectMapper;
 
   @MockBean private AuthService authService;
+  @MockBean private ChangePasswordService changePasswords;
   @MockBean private com.influencermatch.backend.auth.service.AuthCookies cookies;
   @MockBean private com.influencermatch.backend.auth.service.RefreshTokenService refreshTokens;
   @MockBean private com.influencermatch.backend.auth.service.RegistrationSupport registration;
@@ -60,7 +62,7 @@ class AuthControllerTest {
   }
 
   @Test
-  @DisplayName("POST /auth/register - Success returns 201 Created")
+  @DisplayName("POST /auth/register - A valid request without a business name returns 201")
   void register_ValidRequest_Returns201() throws Exception {
     // GIVEN
     RegisterRequest request = createValidRegisterRequest();
@@ -162,7 +164,6 @@ class AuthControllerTest {
         .email("test@example.com")
         .password("Password123!")
         .fullName("Test User")
-        .businessName("Brand")
         .phoneNumber("0912345678")
         .policyAcceptance(com.influencermatch.backend.support.TestAuthHttp.acceptance())
         .build();

@@ -6,6 +6,7 @@ import com.influencermatch.backend.brand.enums.Platform;
 import com.influencermatch.backend.campaign.enums.CampaignStatus;
 import com.influencermatch.backend.collaboration.enums.CollaborationStatus;
 import com.influencermatch.backend.common.dto.*;
+import com.influencermatch.backend.cooperation.CollaborationVideoStorage;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -83,6 +84,14 @@ public class CampaignHistoryController {
   public ApiResponse<CollaborationDetail> collaboration(
       @PathVariable UUID id, @PathVariable UUID collaborationId) {
     return ApiResponse.ok(service.collaboration(id, collaborationId));
+  }
+
+  @GetMapping("/campaigns/{id}/history/collaborations/{collaborationId}/deliverables/{deliverableId}/submissions/{submissionId}/video")
+  public ResponseEntity<ApiResponse<CollaborationVideoStorage.Playback>> video(
+      @PathVariable UUID id, @PathVariable UUID collaborationId,
+      @PathVariable UUID deliverableId, @PathVariable UUID submissionId) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(ApiResponse.ok(service.video(id, collaborationId, deliverableId, submissionId)));
   }
 
   @GetMapping("/campaigns/{id}/duplicate-brief/preview")

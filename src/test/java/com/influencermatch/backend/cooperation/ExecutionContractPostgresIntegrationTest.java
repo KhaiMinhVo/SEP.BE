@@ -20,7 +20,7 @@ class ExecutionContractPostgresIntegrationTest extends ExecutionScenarioSupport 
   void completeSmokePersistsRelationsAndDoesNotChangeCampaignOrPayment() throws Exception {
     ready();
     var initial = state();
-    var calc = initial.path("outcomeRevisions").get(0).path("calculation");
+    var calc = initial.path("outcomeRevisions").get(1).path("calculation");
     assertThat(calc.path("views").asLong()).isEqualTo(1000);
     assertThat(calc.path("roas").decimalValue()).isEqualByComparingTo("5");
     assertThat(calc.path("roi").decimalValue()).isEqualByComparingTo("2");
@@ -72,7 +72,7 @@ class ExecutionContractPostgresIntegrationTest extends ExecutionScenarioSupport 
             "BRAND_EXTERNAL",
             "sourceDescription",
             "Email"),
-        404);
+        403);
   }
 
   @ParameterizedTest
@@ -149,8 +149,11 @@ class ExecutionContractPostgresIntegrationTest extends ExecutionScenarioSupport 
     var post = json.valueToTree(measurement());
     ((ObjectNode) post).set("views", json.readTree(views));
     ((ObjectNode) post).set("clicks", json.readTree(clicks));
+    var unavailable = ((ObjectNode) post).putArray("unavailableMetrics");
+    if ("null".equals(views)) unavailable.add("views");
+    if ("null".equals(clicks)) unavailable.add("clicks");
     request(
-        brand,
+        owner,
         root + "/outcome",
         Map.of("expectedRevision", revision(), "reason", "Boundary test", "posts", List.of(post)),
         code);
@@ -196,7 +199,7 @@ class ExecutionContractPostgresIntegrationTest extends ExecutionScenarioSupport 
                 collaboration))
         .isZero();
     assertThat(state().path("status").asText()).isEqualTo("AWAITING_REVIEW");
-    assertThat(state().path("outcomeRevisions").size()).isEqualTo(1);
+    assertThat(state().path("outcomeRevisions").size()).isEqualTo(2);
   }
 
   @Test

@@ -22,11 +22,55 @@ public record RecommendationRunView(
     String candidateSource,
     String scoringPolicyVersion,
     JsonNode scoringSnapshot,
+    JsonNode runMetadata,
     String status,
     int candidatesCount,
     String queryBrief,
     LocalDateTime createdAt) {
+
+  public RecommendationRunView(
+      UUID id,
+      UUID campaignId,
+      UUID brandProfileId,
+      int contextVersion,
+      UUID campaignContextId,
+      UUID brandContextId,
+      Integer brandContextVersion,
+      UUID embeddingContextId,
+      UUID embeddingJobId,
+      String embeddingModel,
+      String embeddingModelVersion,
+      String candidateSource,
+      String scoringPolicyVersion,
+      JsonNode scoringSnapshot,
+      String status,
+      int candidatesCount,
+      String queryBrief,
+      LocalDateTime createdAt) {
+    this(
+        id,
+        campaignId,
+        brandProfileId,
+        contextVersion,
+        campaignContextId,
+        brandContextId,
+        brandContextVersion,
+        embeddingContextId,
+        embeddingJobId,
+        embeddingModel,
+        embeddingModelVersion,
+        candidateSource,
+        scoringPolicyVersion,
+        scoringSnapshot,
+        null,
+        status,
+        candidatesCount,
+        queryBrief,
+        createdAt);
+  }
+
   public static RecommendationRunView from(RecommendationRun r) {
+    JsonNode rawSnapshot = r.getScoringSnapshot();
     return new RecommendationRunView(
         r.getId(),
         r.getCampaign().getId(),
@@ -41,18 +85,38 @@ public record RecommendationRunView(
         r.getEmbeddingModelVersion(),
         r.getCandidateSource(),
         r.getScoringPolicyVersion(),
-        sanitize(r.getScoringSnapshot()),
+        sanitize(rawSnapshot),
+        extractRunMetadata(rawSnapshot),
         r.getStatus(),
         r.getCandidatesCount(),
         r.getQueryBrief(),
         r.getCreatedAt());
   }
 
+  public static JsonNode extractRunMetadata(JsonNode snapshot) {
+    if (snapshot == null || !snapshot.isObject() || !snapshot.has("runMetadata")) {
+      return null;
+    }
+    JsonNode meta = snapshot.get("runMetadata");
+    if (meta == null || meta.isNull() || !meta.isObject()) {
+      return null;
+    }
+    return meta.deepCopy();
+  }
+
   public static JsonNode sanitize(JsonNode snapshot) {
     if (snapshot == null || snapshot.isNull()) return NullNode.instance;
     var result = JsonNodeFactory.instance.arrayNode();
-    if (!snapshot.isArray()) return result;
-    for (var row : snapshot) {
+    JsonNode sourceArray = snapshot;
+    if (snapshot.isObject()) {
+      if (snapshot.has("candidates")) {
+        sourceArray = snapshot.get("candidates");
+      } else if (snapshot.has("recommendations")) {
+        sourceArray = snapshot.get("recommendations");
+      }
+    }
+    if (!sourceArray.isArray()) return result;
+    for (var row : sourceArray) {
       var out =
           copy(
               row,
@@ -80,7 +144,8 @@ public record RecommendationRunView(
                   "scoreReady",
                   "isScoreReady",
                   "provisional",
-                  "isProvisional"));
+                  "isProvisional",
+                  "recommendationTier"));
       if (row.has("scoreBreakdown")) {
         var scores =
             copy(
@@ -95,7 +160,20 @@ public record RecommendationRunView(
                     "semanticMatchScore",
                     "nicheMatchScore",
                     "finalScore",
-                    "scoringPolicyVersion"));
+                    "scoringPolicyVersion",
+                    "m1Availability",
+                    "rScore",
+                    "tScore",
+                    "kScore",
+                    "eligibleEvaluatedCollaborations",
+                    "distinctBrandCount",
+                    "maxBrandShare",
+                    "m4LearnedScore",
+                    "m4ExplicitScore",
+                    "m4EffectiveScore",
+                    "m4Source",
+                    "confidenceScore",
+                    "confidenceTier"));
         out.set("scoreBreakdown", scores);
       }
       if (row.has("reasoning"))
@@ -103,7 +181,7 @@ public record RecommendationRunView(
             "reasoning",
             copy(
                 row.path("reasoning"),
-                Set.of("summary", "reasons", "explanationAvailable", "evidenceWarnings")));
+                Set.of("summary", "reasons", "explanationAvailable", "evidenceWarnings", "confidenceScore", "confidenceTier")));
       result.add(out);
     }
     return result;

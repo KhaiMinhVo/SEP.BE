@@ -264,8 +264,10 @@ public class CampaignService {
     campaign.getStatus().requireEditable();
     validate(request);
     var before = CampaignBriefData.snapshot(campaign, objectMapper);
+    String previousImageUrl = campaign.getImageUrl();
     applyCampaign(campaign, request);
-    if (!before.equals(CampaignBriefData.snapshot(campaign, objectMapper)))
+    if (!before.equals(CampaignBriefData.snapshot(campaign, objectMapper))
+        || !java.util.Objects.equals(previousImageUrl, campaign.getImageUrl()))
       campaign.setCampaignRevision(campaign.getCampaignRevision() + 1);
     return response(campaign);
   }
@@ -445,6 +447,7 @@ public class CampaignService {
     c.setLocations(strings(r.locations()));
     c.setFollowerMin(r.followerMin());
     c.setFollowerMax(r.followerMax());
+    c.setImageUrl(r.imageUrl());
     c.setBrief(BrandContextData.text(r.brief()));
     c.setCreatorMode(r.creatorMode());
     c.setTargetCreatorCount(r.targetCreatorCount());
@@ -516,7 +519,8 @@ public class CampaignService {
         view == null ? "NOT_REQUESTED" : view.status(),
         view == null ? null : view.model(),
         view == null ? null : view.modelVersion(),
-        view == null ? null : view.readyAt());
+        view == null ? null : view.readyAt(),
+        c.getImageUrl());
   }
 
   private BusinessException notFound(String detail) {

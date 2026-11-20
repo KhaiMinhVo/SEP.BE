@@ -40,7 +40,35 @@ public record CampaignRequest(
         BigDecimal totalBudget,
     @Pattern(regexp = "VND") String currency,
     @PositiveOrZero @Digits(integer = 17, fraction = 2) BigDecimal creatorFeeMin,
-    @PositiveOrZero @Digits(integer = 17, fraction = 2) BigDecimal creatorFeeMax) {
+    @PositiveOrZero @Digits(integer = 17, fraction = 2) BigDecimal creatorFeeMax,
+    @org.hibernate.validator.constraints.URL(protocol = "https")
+    @Size(max = 2048) @Pattern(regexp = "^https://[A-Za-z0-9][^\\s]*$", message = "Image URL must use HTTPS") String imageUrl) {
+  public CampaignRequest(
+      String name,
+      String productService,
+      CampaignObjective objective,
+      List<String> targetAudiences,
+      String contentType,
+      LocalDate startDate,
+      LocalDate endDate,
+      List<Platform> platforms,
+      List<String> niches,
+      List<String> locations,
+      Long followerMin,
+      Long followerMax,
+      BigDecimal budgetMin,
+      BigDecimal budgetMax,
+      String brief,
+      CreatorMode creatorMode,
+      Integer targetCreatorCount,
+      List<CampaignDeliverable> deliverables,
+      BigDecimal totalBudget,
+      String currency,
+      BigDecimal creatorFeeMin,
+      BigDecimal creatorFeeMax) {
+    this(name, productService, objective, targetAudiences, contentType, startDate, endDate, platforms, niches, locations, followerMin, followerMax, budgetMin, budgetMax, brief, creatorMode, targetCreatorCount, deliverables, totalBudget, currency, creatorFeeMin, creatorFeeMax, null);
+  }
+
   public CampaignRequest(
       String name,
       String productService,

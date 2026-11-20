@@ -403,6 +403,7 @@ public class CampaignService {
             .entrySet())
       if (e.getValue().isBlank()) missing.put(e.getKey(), List.of("Required before READY"));
     if (c.getObjective() == null) missing.put("objective", List.of("Required"));
+    if (c.getNiches().isEmpty()) missing.put("niches", List.of("Select at least one campaign category before READY"));
     if (c.getPlatforms().isEmpty()) missing.put("platforms", List.of("At least one required"));
     if (c.getStartDate() == null) missing.put("startDate", List.of("Required"));
     if (c.getEndDate() == null) missing.put("endDate", List.of("Required"));

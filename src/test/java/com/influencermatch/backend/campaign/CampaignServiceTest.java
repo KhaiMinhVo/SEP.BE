@@ -142,6 +142,7 @@ class CampaignServiceTest {
             .id(UUID.randomUUID())
             .brandProfile(brand)
             .name("Old")
+            .niches(List.of("Beauty"))
             .productService("Product")
             .objective(CampaignObjective.AWARENESS)
             .status(status)
@@ -223,6 +224,21 @@ class CampaignServiceTest {
             c.getId(), c.getCampaignRevision()));
     assertThat(c.getStatus()).isEqualTo(CampaignStatus.ACTIVE);
     verify(contexts, times(1)).saveAndFlush(any());
+  }
+
+  @Test
+  void missingCategoryBlocksReadyAndRecommendationPreparation() {
+    var c = campaign(CampaignStatus.DRAFT);
+    c.setNiches(List.of());
+    String revision = com.influencermatch.backend.campaign.service.CampaignRevision.tag(c.getId(), c.getCampaignRevision());
+    assertThatThrownBy(() -> service.changeStatus(c.getId(), new CampaignStatusRequest(CampaignStatus.READY_FOR_DISCOVERY), auth, revision))
+        .isInstanceOfSatisfying(com.influencermatch.backend.exception.ProfileIncompleteException.class,
+            e -> assertThat(e.fields()).containsKey("niches"));
+    assertThatThrownBy(() -> service.prepareForRecommendation(c.getId(), revision))
+        .isInstanceOfSatisfying(com.influencermatch.backend.exception.ProfileIncompleteException.class,
+            e -> assertThat(e.fields()).containsKey("niches"));
+    assertThat(c.getStatus()).isEqualTo(CampaignStatus.DRAFT);
+    verify(contexts, never()).saveAndFlush(any());
   }
 
   @Test

@@ -46,7 +46,10 @@ public final class CooperationDtos {
 
   public record Revision(@Min(1) long expectedRevision) {}
 
-  public record Send(@Min(1) long expectedRevision) {}
+  public record Send(@Min(1) long expectedRevision,
+      @Pattern(regexp = "PORTAL_EMAIL|PORTAL_ONLY|EMAIL_ONLY|MANUAL_LINK") String deliveryMethod) {
+    public Send(long expectedRevision) { this(expectedRevision, null); }
+  }
 
   public record Confirm(
       @Min(1) long expectedRevision,

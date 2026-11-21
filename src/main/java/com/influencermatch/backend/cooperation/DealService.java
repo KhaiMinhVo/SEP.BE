@@ -326,6 +326,8 @@ public class DealService {
     v.put("campaignName", info.get("name"));
     v.put("campaignStatus", info.get("status"));
     v.put("brandName", info.get("business_name"));
+    v.put("plannedContactChannel", delivery.plannedContactChannel(d));
+    v.put("availableDeliveryMethods", delivery.availableDeliveryMethods(d));
     for (String k :
         List.of(
             "id",
@@ -565,7 +567,7 @@ public class DealService {
     var proposal = store.latest(id);
     if (!"OFFER".equals(proposal.get("kind"))) throw conflict("Issue a Brand OFFER before sending an invitation");
     contactPolicy.requirePreviouslyEvaluated(campaign, store.members(id).stream().map(row -> uuid(row.get("creator_id"))).toList());
-    var result = delivery.enqueue(d, proposal);
+    var result = delivery.enqueue(d, proposal, request.deliveryMethod());
     record(
         id,
         "INVITATION_CREATED",

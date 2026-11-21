@@ -269,6 +269,7 @@ public class CooperationDelivery {
     result.put("nextAttemptAt", j.get("next_attempt_at"));
     result.put("sentAt", j.get("sent_at"));
     result.put("canRetry", canRetry(i, j));
+    result.put("canResend", canResend(i, j));
     return result;
   }
 
@@ -280,8 +281,17 @@ public class CooperationDelivery {
 
   boolean canRetry(Map<String, Object> i, Map<String, Object> j) {
     return "FAILED".equals(j.get("status"))
-        && j.get("payload") != null
+        && canRequestEmail(i, j);
+  }
+
+  boolean canResend(Map<String, Object> i, Map<String, Object> j) {
+    return "SENT".equals(j.get("status")) && canRequestEmail(i, j);
+  }
+
+  private boolean canRequestEmail(Map<String, Object> i, Map<String, Object> j) {
+    return j.get("payload") != null
         && valid(i)
+        && !Objects.equals(store.deal(uuid(i.get("deal_id"))).get("accepted_revision"), i.get("proposal_revision"))
         && j.get("last_attempt_at") != null
         && !instant(j.get("last_attempt_at")).plusSeconds(60).isAfter(store.now())
         && retries(j).stream().filter(t -> t.isAfter(store.now().minusSeconds(3600))).count() < 5;
@@ -289,6 +299,15 @@ public class CooperationDelivery {
 
   @Transactional
   public Object retry(UUID invitation) {
+    return requeueEmail(invitation, "FAILED");
+  }
+
+  @Transactional
+  public Object resend(UUID invitation) {
+    return requeueEmail(invitation, "SENT");
+  }
+
+  private Object requeueEmail(UUID invitation, String expectedStatus) {
     var i = owned(invitation);
     store.one("select id from \"user\" where id=? for update", Permissions.actor().getId());
     var d = store.deal(uuid(i.get("deal_id")));
@@ -297,9 +316,9 @@ public class CooperationDelivery {
     var j =
         store.one(
             "select * from cooperation_email_job where invitation_id=? for update", invitation);
-    if (!"FAILED".equals(j.get("status")) || !valid(i) || j.get("payload") == null)
+    if (!expectedStatus.equals(j.get("status")) || !valid(i) || j.get("payload") == null)
       throw conflict("Invitation email cannot be retried");
-    if (!canRetry(i, j))
+    if (!canRequestEmail(i, j))
       throw new BusinessException(
           ErrorCode.CLAIM_EMAIL_RATE_LIMITED, "Cooperation retry limit exceeded");
     sender.requireConfigured();

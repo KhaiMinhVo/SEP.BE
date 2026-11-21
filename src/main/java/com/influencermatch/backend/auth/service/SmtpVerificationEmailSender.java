@@ -5,6 +5,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.*;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -70,13 +71,20 @@ public class SmtpVerificationEmailSender implements VerificationEmailSender {
 
   @Override
   public void sendCooperationInvitation(String email, String link) {
-    deliver(
-        email,
-        "InfluencerMatch - Thư mời hợp tác chiến dịch",
-        "Một Brand đã gửi lời mời hợp tác chiến dịch đến bạn trên InfluencerMatch.\n"
-            + link
-            + "\n"
-            + "Liên kết này có hiệu lực trong 7 ngày. Liên kết này không tự động tạo tài khoản, không cấp quyền sở hữu kênh hoặc chấp nhận thỏa thuận.");
+    requireConfigured();
+    String html = CooperationInvitationEmail.html(link);
+    try {
+      var message = sender.getObject().createMimeMessage();
+      var helper = new MimeMessageHelper(message, true, "UTF-8");
+      helper.setFrom(from, "InfluencerMatch");
+      helper.setTo(email);
+      helper.setReplyTo(CooperationInvitationEmail.SUPPORT);
+      helper.setSubject(CooperationInvitationEmail.SUBJECT);
+      helper.setText(CooperationInvitationEmail.text(link), html);
+      sender.getObject().send(message);
+    } catch (MailException | jakarta.mail.MessagingException | java.io.UnsupportedEncodingException ex) {
+      throw new BusinessException(ErrorCode.EMAIL_DELIVERY_UNAVAILABLE, "Unable to send email. Please try again.");
+    }
   }
 
   @Override

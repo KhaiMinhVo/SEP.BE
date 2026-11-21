@@ -28,6 +28,17 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 public class CampaignController {
   private final CampaignService service;
   private final GeminiCampaignAutofillService autofillService;
+  private final CampaignDeletionService deletionService;
+
+  @DeleteMapping("/campaigns/{id}")
+  @Operation(summary = "Permanently delete an unused draft campaign",
+      description = "Requires If-Match. Linked business history prevents deletion; use archive instead.")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('CHANGE_CAMPAIGN_STATUS')")
+  public ResponseEntity<Void> deleteDraft(@PathVariable UUID id,
+      @RequestHeader(value = "If-Match", required = false) String revision) {
+    deletionService.deleteDraft(id, revision);
+    return ResponseEntity.noContent().build();
+  }
 
   @PostMapping("/brands/{brandId}/campaigns")
   @Operation(summary = "Create a draft campaign")

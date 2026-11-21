@@ -91,6 +91,11 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   UUID relationship(Creator c) throws Exception {
+    // WF-02 now requires real persisted recommendation membership before outreach.
+    jdbc.update("insert into shortlist_item(id,campaign_id,creator_id,user_id,priority,added_at,status,source) values(gen_random_uuid(),?,?,?,'MEDIUM',now(),'SAVED','MANUAL_DISCOVERY') on conflict(campaign_id,creator_id) do update set status='SAVED'", campaign,c.getId(),brand.getId());
+    var eligible = jdbc.queryForList("select creator_id from shortlist_item where campaign_id=? and status<>'REMOVED'", UUID.class,campaign);
+    String snapshot = json.writeValueAsString(Map.of("candidates",eligible.stream().map(id -> Map.of("creatorId",id,"recommendationTier","HISTORY_SUPPORTED")).toList()));
+    jdbc.update("insert into recommendation_run(id,campaign_id,brand_profile_id,context_version,status,candidates_count,created_at,scoring_snapshot) values(gen_random_uuid(),?,(select brand_profile_id from campaign where id=?),1,'COMPLETED',?,now(),?::jsonb)",campaign,campaign,eligible.size(),snapshot);
     return UUID.fromString(
         call(
                 brand,

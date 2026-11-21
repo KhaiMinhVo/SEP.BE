@@ -15,6 +15,7 @@ import lombok.NoArgsConstructor;
 public class CreateRelationshipRequest {
   @NotNull(message = "Creator ID is required")
   private UUID creatorId;
+  private UUID recommendationRunId;
 
   private UUID shortlistItemId; // Optional, if this comes from a shortlist
 

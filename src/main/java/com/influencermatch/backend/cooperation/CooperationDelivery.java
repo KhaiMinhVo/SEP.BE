@@ -219,6 +219,9 @@ public class CooperationDelivery {
   Object statusView(Map<String, Object> i, Map<String, Object> j) {
     var result = new LinkedHashMap<String, Object>();
     result.put("invitationId", i.get("id"));
+    result.put("invitationStatus", i.get("status"));
+    result.put("expiresAt", i.get("expires_at"));
+    result.put("active", valid(i));
     result.put("emailStatus", j.get("status"));
     result.put("attempts", j.get("attempts"));
     result.put("nextAttemptAt", j.get("next_attempt_at"));

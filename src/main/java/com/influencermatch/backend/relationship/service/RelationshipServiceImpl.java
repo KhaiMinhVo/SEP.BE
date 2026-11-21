@@ -43,6 +43,8 @@ public class RelationshipServiceImpl implements RelationshipService {
 
   @org.springframework.beans.factory.annotation.Autowired
   private com.influencermatch.backend.audit.service.AuditService audit;
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.cooperation.RecommendationContactPolicy contactPolicy;
 
   @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
 
@@ -52,6 +54,7 @@ public class RelationshipServiceImpl implements RelationshipService {
     Permissions.require(Permission.MANAGE_OWN_RELATIONSHIP);
     ownership.requireOwned(campaignId);
     Campaign campaign = writeLock.owned(campaignId);
+    contactPolicy.requireEvaluated(campaignId, java.util.List.of(request.getCreatorId()), request.getRecommendationRunId());
     UUID userId = Permissions.actor().getId();
     var existing =
         relationshipRepository.findByCampaignIdAndCreatorId(campaignId, request.getCreatorId());

@@ -30,6 +30,7 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
   @Autowired CreatorRepository creators;
   @Autowired PublicCreatorMetricRepository metrics;
   @Autowired CreatorMasterRepository masters;
+  @Autowired jakarta.persistence.EntityManager entityManager;
   @MockBean AiServiceClient ai;
   User owner;
   UUID campaign;
@@ -67,6 +68,38 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
     var items = data.has("content") ? data.path("content") : data.path("items");
     items.forEach(item -> result.add(item.path("creatorId").asText()));
     return result;
+  }
+
+  @Test
+  @org.springframework.transaction.annotation.Transactional
+  void fullBriefChangesPreselectionWithinSameCategoryBeforeTop50AndAiReview() throws Exception {
+    entityManager.flush();
+    entityManager.clear();
+    jdbc.update("update campaign set product_service='Travel',niches=array['TRAVEL'],brief='Trekking mountain hiking' where id=?", campaign);
+    // The strongest candidate is inserted after more than one retrieval page of weak matches.
+    for (int i = 0; i < 51; i++) creator("Generic travel " + i, "TRAVEL", "Travel lifestyle", "KOC");
+    var resort = creator("Resort specialist", "TRAVEL", "Travel resort luxury hotel vacation", "KOC");
+    var mountain = creator("Mountain specialist", "TRAVEL", "Travel trekking mountain hiking", "KOC");
+    var hashtag = creator("Hashtag only", "TRAVEL", "Travel lifestyle", "KOC");
+    for (int i = 0; i < 5; i++) {
+      posts.saveAndFlush(Post.builder().creator(mountain).platformPostId(UUID.randomUUID().toString())
+          .caption("Travel trekking mountain hiking guide").build());
+      posts.saveAndFlush(Post.builder().creator(resort).platformPostId(UUID.randomUUID().toString())
+          .caption("Travel resort luxury hotel vacation guide").build());
+      posts.saveAndFlush(Post.builder().creator(hashtag).platformPostId(UUID.randomUUID().toString())
+          .caption("Daily dance #trekking #mountain #hiking").build());
+    }
+    for (var route : List.of("discover", "discovery")) {
+      var data = call(owner, get("/campaigns/" + campaign + "/" + route).param("size", "1"), null, 200).path("data");
+      assertThat(ids(data)).containsExactly(mountain.getId().toString());
+    }
+    jdbc.update("update campaign set brief='Resort luxury hotel vacation' where id=?", campaign);
+    entityManager.clear();
+    for (var route : List.of("discover", "discovery")) {
+      var data = call(owner, get("/campaigns/" + campaign + "/" + route).param("size", "1"), null, 200).path("data");
+      assertThat(ids(data)).containsExactly(resort.getId().toString());
+    }
+    verify(ai, never()).getExplanation(any());
   }
 
   @Test void productWithoutNicheNeverDumpsUnrelatedCatalogOnEitherEndpoint() throws Exception {

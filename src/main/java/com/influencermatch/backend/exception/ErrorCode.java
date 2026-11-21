@@ -102,6 +102,10 @@ public enum ErrorCode {
   TIKTOK_AUTHORIZATION_REJECTED(HttpStatus.FORBIDDEN, "TikTok authorization rejected"),
   TIKTOK_PROVIDER_ERROR(HttpStatus.BAD_GATEWAY, "TikTok provider error"),
   TIKTOK_IDENTITY_RESOLUTION_FAILED(HttpStatus.BAD_GATEWAY, "TikTok identity resolution failed"),
+  CAMPAIGN_IMAGE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Campaign image storage unavailable"),
+  CAMPAIGN_DELETE_BLOCKED(HttpStatus.CONFLICT, "Campaign cannot be permanently deleted"),
+  RECOMMENDATION_REQUIRED(HttpStatus.CONFLICT, "Recommendation required before outreach"),
+  UPLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "Upload exceeds size limit"),
   INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
   private final HttpStatus status;
   private final String title;

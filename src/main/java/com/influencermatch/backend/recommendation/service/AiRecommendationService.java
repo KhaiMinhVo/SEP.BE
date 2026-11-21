@@ -727,6 +727,12 @@ public class AiRecommendationService {
       runMetadata.put("mainPoolSize", recommendationItems.size());
       runMetadata.put("provisionalPoolSize", provisionalItems.size());
       runMetadata.put("excludedCount", excludedCandidates.size());
+      // Coverage is independent of top-N display and Master deduplication. No hidden scores are published.
+      var evaluatedIds = new java.util.LinkedHashSet<UUID>();
+      evaluatedReadyList.forEach(item -> evaluatedIds.add(item.candidate().getCreatorId()));
+      evaluatedProvisionalList.forEach(item -> evaluatedIds.add(item.candidate().getCreatorId()));
+      runMetadata.set("evaluatedCreatorIds", objectMapper.valueToTree(evaluatedIds));
+      runMetadata.put("evaluatedCount", evaluatedIds.size());
 
       List<CreatorRecommendationItemDto> allSnapshotItems = new ArrayList<>(recommendationItems);
       allSnapshotItems.addAll(provisionalItems);

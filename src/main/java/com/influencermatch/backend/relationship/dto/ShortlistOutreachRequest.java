@@ -21,6 +21,7 @@ public class ShortlistOutreachRequest {
       description = "List of shortlist item IDs to outreach",
       example = "[\"11111111-1111-1111-1111-111111111111\"]")
   private List<UUID> shortlistItemIds;
+  private UUID recommendationRunId;
 
   @Schema(
       description = "Outreach collaboration message / notes",

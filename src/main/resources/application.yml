@@ -18,6 +18,10 @@ server:
     include-stacktrace: never          # Never expose internal error messages to clients
 
 spring:
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
   mail:
     host: ${SMTP_HOST:}
     port: ${SMTP_PORT:587}

@@ -60,6 +60,23 @@ class DataQualityServiceTest {
     order.verify(metrics).findFirstByCreatorIdOrderByCollectedAtDescIdDesc(m.getCreator().getId());
     order.verify(metrics).flush();order.verify(audit).record(eq("APPROVE_DATA_QUALITY"),anyString(),eq(m.getId()),any(),any(),anyString());
   }
+  @Test void multiNicheApprovalNormalizesAndJoinsCanonicalNames(){
+    var m=pending();
+    when(niches.findByNameIgnoreCaseAndActiveTrue("Lifestyle")).thenAnswer(inv -> {
+      var n = new com.influencermatch.backend.taxonomy.model.Niche();
+      n.setName("Lifestyle");
+      return Optional.of(n);
+    });
+    when(niches.findByNameIgnoreCaseAndActiveTrue("Tech")).thenAnswer(inv -> {
+      var n = new com.influencermatch.backend.taxonomy.model.Niche();
+      n.setName("Technology");
+      return Optional.of(n);
+    });
+    var result=service.approve(m.getId(), new ApproveRequest(" Lifestyle, Tech "));
+    assertThat(result.niche()).isEqualTo("Lifestyle, Technology");
+    assertThat(m.getNiche()).isEqualTo("Lifestyle, Technology");
+    assertThat(m.getCategory()).isEqualTo("Lifestyle");
+  }
   @ParameterizedTest @ValueSource(strings={"brand","nullConfidence","threshold","reviewed","stale"})
   void ineligibleSnapshotDoesNotChangeOrAudit(String kind){
     var m=pending();

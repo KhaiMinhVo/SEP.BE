@@ -21,6 +21,8 @@ public final class CreatorClaimDtos {
   public record ClaimResponse(UUID id,UUID creatorId,UUID claimantId,List<String> evidenceUrls,String note,
       CreatorClaimStatus status,UUID reviewerId,String reason,LocalDateTime reviewedAt,
       UUID revokedById,String revokeReason,LocalDateTime revokedAt,LocalDateTime createdAt,LocalDateTime updatedAt) {}
+  public record ClaimChannel(UUID id, String platform, String externalId, String userName,
+      String displayName, String profileUrl) {}
   public record PublicCreator(UUID id,String platform,String externalId,String userName,String displayName,
       String profileUrl,String avatarUrl,String location,CreatorSourceType sourceType,
       boolean verifiedByInfluencerMatch,LocalDateTime authorizedAt) {}

@@ -403,13 +403,32 @@ keys. Direct Login works even with Facebook OAuth disabled or unconfigured. Miss
 returns `503 INSTAGRAM_OAUTH_UNAVAILABLE`; it never falls back to Facebook or the dev mock.
 Do not enable or replace secrets in an existing environment until its corresponding app is configured.
 
+### Creator Portal on the production domain
+
+Register these exact callback URLs in the corresponding provider settings and set the same values
+in the backend deployment environment. For TikTok, register the callback in the Sandbox Login Kit.
+
+```dotenv
+META_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/meta/callback
+INSTAGRAM_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/instagram/callback
+TIKTOK_SANDBOX_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/tiktok/callback
+```
+
+Deploy the backend Claim lookup first, then the frontend callback proxy. Check the three
+callbacks on the frontend origin before enabling or switching the corresponding provider settings.
+Open **Kênh liên kết** on that origin as an email-verified Creator. Facebook and Instagram
+show channel choices after consent. TikTok Sandbox reads the completed session and linked channels.
+The OAuth browser cookie belongs to the origin that started the flow. For manual claims, the portal first calls
+`GET /api/v1/creator-claims/channels/lookup?platform=FACEBOOK&q=<username-or-id>`, then
+submits evidence for the selected channel through the existing Claim endpoint.
+
 ### API and browser test
 
 1. Apply V18 in the intended test database and run the updated backend. V18 adds `oauth_flow` to sessions;
    existing sessions default to `FACEBOOK_LOGIN` and keep their ciphertext/ownership unchanged.
 2. Open Swagger through the **same HTTPS backend hostname** used by `INSTAGRAM_REDIRECT_URI`. If a
-   test tunnel is needed, configure it explicitly; a Start request on localhost will not set a cookie
-   for a different tunnel hostname. No frontend page or automatic tunnel is provided.
+   test tunnel is needed, configure it explicitly. A Start request on localhost sets its
+   cookie on localhost.
 3. Log in the verified Creator, Authorize Swagger, then call
    `POST /api/v1/creators/portal/accounts/connect/instagram/start` with `{}` for discovery, or
    `{"creatorId":"<existing Instagram UUID>","invitationToken":"<optional claim invitation>"}`.
@@ -471,7 +490,7 @@ Configure your environment using `.env.example` (the actual `.env` is not modifi
 TIKTOK_SANDBOX_LOGIN_ENABLED=true
 TIKTOK_SANDBOX_CLIENT_KEY=<Sandbox client key>
 TIKTOK_SANDBOX_CLIENT_SECRET=<Sandbox client secret>
-TIKTOK_SANDBOX_REDIRECT_URI=https://api.influencermatch.site/api/v1/integrations/tiktok/callback
+TIKTOK_SANDBOX_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/tiktok/callback
 TIKTOK_SANDBOX_SCOPE=user.info.basic,user.info.profile
 CRAWLER_SERVICE_URL=http://localhost:8000/api/v1/crawl
 ```

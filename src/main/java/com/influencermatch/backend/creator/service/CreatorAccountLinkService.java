@@ -250,9 +250,8 @@ public class CreatorAccountLinkService {
    */
   @Transactional(readOnly = true)
   public List<LinkedAccountDto> getLinkedAccounts(UUID userId) {
-    CreatorMaster master = creatorMasterRepository.findByUserId(userId)
-        .orElseThrow(() -> new ResourceNotFoundException("CreatorMaster", "userId", userId));
-
+    CreatorMaster master = creatorMasterRepository.findByUserId(userId).orElse(null);
+    if (master == null) return List.of();
     List<Creator> creators = creatorRepository.findByMasterId(master.getId());
     return creators.stream()
         .map(c -> LinkedAccountDto.builder()

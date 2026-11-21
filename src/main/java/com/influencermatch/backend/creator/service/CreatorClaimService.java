@@ -14,7 +14,8 @@ import com.influencermatch.backend.user.enums.*;
 import com.influencermatch.backend.user.model.User;
 import com.influencermatch.backend.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
-import jakarta.validation.*;
+import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.Validator;
 import java.time.LocalDateTime;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
@@ -46,6 +47,25 @@ public class CreatorClaimService {
   private final Validator validator;
   private final Optional<com.influencermatch.backend.auth.service.DevCreatorLoginService>
       devCreatorLogin;
+
+  @Transactional(readOnly = true)
+  public List<ClaimChannel> lookupChannels(String platform, String query) {
+    guard.read(Permission.CLAIM_CREATOR_PROFILE);
+    String normalizedPlatform = platform.trim().toUpperCase(Locale.ROOT);
+    String exact = query.trim();
+    String username = exact.replaceFirst("^@", "").toLowerCase(Locale.ROOT);
+    if (!normalizedPlatform.matches("[A-Z][A-Z0-9_]{0,49}")
+        || exact.length() > 255 || username.isBlank())
+      throw new ValidationException("Enter a platform and an exact username or channel ID");
+
+    return creators.findClaimTargets(
+            normalizedPlatform, CreatorSourceType.PUBLIC, exact, username, "@" + username,
+            PageRequest.of(0, 20))
+        .stream()
+        .map(c -> new ClaimChannel(c.getId(), c.getPlatform(), c.getExternalId(),
+            c.getUserName(), c.getDisplayName(), c.getProfileUrl()))
+        .toList();
+  }
 
   @Transactional(noRollbackFor = CreatorOwnershipConflictException.class)
   @PreAuthorize("hasAuthority('CLAIM_CREATOR_PROFILE')")

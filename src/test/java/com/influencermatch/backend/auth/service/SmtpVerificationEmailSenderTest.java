@@ -59,4 +59,45 @@ class SmtpVerificationEmailSenderTest {
     assertThat(msg.getValue().getText()).contains("7 ngày","/claim-profile?token=random","Admin/Data Manager");
   }
 
+  @Test void cooperationEmailHasUtf8HtmlAndPlainTextAlternatives() throws Exception {
+    when(provider.getIfAvailable()).thenReturn(mail); when(provider.getObject()).thenReturn(mail);
+    var mime = new jakarta.mail.internet.MimeMessage(jakarta.mail.Session.getInstance(new java.util.Properties()));
+    when(mail.createMimeMessage()).thenReturn(mime);
+    String link = "https://frontend.example.test/cooperation-invitations?token=test&source=email";
+    new SmtpVerificationEmailSender(provider,true,"smtp.test","from@example.test",secret).sendCooperationInvitation("to@example.test",link);
+    verify(mail).send(mime);
+    mime.saveChanges();
+    assertThat(mime.getSubject()).contains("lời mời hợp tác", "InfluencerMatch");
+    assertThat(mime.getAllRecipients()[0].toString()).isEqualTo("to@example.test");
+    assertThat(mime.getReplyTo()[0].toString()).isEqualTo(CooperationInvitationEmail.SUPPORT);
+    String content = mimeContent(mime);
+    assertThat(content).contains("text/plain", "text/html", "UTF-8", "Xem lời mời hợp tác", "7 ngày", "không gia hạn", "href=\"https://frontend.example.test/cooperation-invitations?token=test&amp;source=email\"", "không tự tạo tài khoản");
+    assertThat(content).doesNotContain("<script");
+  }
+
+  private static String mimeContent(jakarta.mail.Part part) throws Exception {
+    if (part.getContent() instanceof jakarta.mail.Multipart multipart) {
+      var result = new StringBuilder();
+      for (int i=0; i<multipart.getCount(); i++) result.append(mimeContent(multipart.getBodyPart(i)));
+      return result.toString();
+    }
+    return part.getContentType() + "\n" + part.getContent();
+  }
+
+  @Test void cooperationEmailRejectsNonWebLinks() {
+    when(provider.getIfAvailable()).thenReturn(mail);
+    assertThatThrownBy(() -> new SmtpVerificationEmailSender(provider,true,"smtp.test","from@example.test",secret).sendCooperationInvitation("to@example.test","javascript:alert(1)"))
+        .isInstanceOf(IllegalArgumentException.class);
+    verifyNoInteractions(mail);
+  }
+
+  @Test void cooperationHtmlSmtpFailureIsMappedWithoutProviderDetails() {
+    when(provider.getIfAvailable()).thenReturn(mail); when(provider.getObject()).thenReturn(mail);
+    var mime = new jakarta.mail.internet.MimeMessage(jakarta.mail.Session.getInstance(new java.util.Properties()));
+    when(mail.createMimeMessage()).thenReturn(mime);
+    doThrow(new MailSendException("private SMTP detail")).when(mail).send(mime);
+    assertThatThrownBy(() -> new SmtpVerificationEmailSender(provider,true,"smtp.test","from@example.test",secret).sendCooperationInvitation("to@example.test","https://frontend.example.test/cooperation-invitations?token=test"))
+      .isInstanceOfSatisfying(BusinessException.class, e -> { assertThat(e.code()).isEqualTo(ErrorCode.EMAIL_DELIVERY_UNAVAILABLE); assertThat(e.getMessage()).doesNotContain("private SMTP detail"); });
+  }
+
 }

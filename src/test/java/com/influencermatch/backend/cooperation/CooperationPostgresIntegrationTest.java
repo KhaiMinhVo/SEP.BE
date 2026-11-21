@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import com.fasterxml.jackson.databind.JsonNode;
 import com.influencermatch.backend.audit.service.AuditService;
 import com.influencermatch.backend.auth.service.VerificationEmailSender;
+import com.influencermatch.backend.creator.email.ClaimEmailCipher;
 import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.support.*;
@@ -48,6 +49,7 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
   @Autowired CreatorMasterRepository masters;
   @Autowired CooperationDelivery delivery;
   @Autowired CooperationWorker worker;
+  @Autowired ClaimEmailCipher invitationCipher;
   @Autowired org.springframework.transaction.support.TransactionTemplate tx;
   @MockBean VerificationEmailSender sender;
   @Autowired AuditService audit;
@@ -90,12 +92,22 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
     return channel;
   }
 
-  UUID relationship(Creator c) throws Exception {
-    // WF-02 now requires real persisted recommendation membership before outreach.
-    jdbc.update("insert into shortlist_item(id,campaign_id,creator_id,user_id,priority,added_at,status,source) values(gen_random_uuid(),?,?,?,'MEDIUM',now(),'SAVED','MANUAL_DISCOVERY') on conflict(campaign_id,creator_id) do update set status='SAVED'", campaign,c.getId(),brand.getId());
+  void makeContactable(List<Creator> candidates) throws Exception {
+    // Outreach requires persisted recommendation membership.
+    for (Creator candidate : candidates) {
+      jdbc.update(
+          "insert into shortlist_item(id,campaign_id,creator_id,user_id,priority,added_at,status,source)"
+              + " values(gen_random_uuid(),?,?,?,'MEDIUM',now(),'SAVED','MANUAL_DISCOVERY')"
+              + " on conflict(campaign_id,creator_id) do update set status='SAVED'",
+          campaign, candidate.getId(), brand.getId());
+    }
     var eligible = jdbc.queryForList("select creator_id from shortlist_item where campaign_id=? and status<>'REMOVED'", UUID.class,campaign);
     String snapshot = json.writeValueAsString(Map.of("candidates",eligible.stream().map(id -> Map.of("creatorId",id,"recommendationTier","HISTORY_SUPPORTED")).toList()));
     jdbc.update("insert into recommendation_run(id,campaign_id,brand_profile_id,context_version,status,candidates_count,created_at,scoring_snapshot) values(gen_random_uuid(),?,(select brand_profile_id from campaign where id=?),1,'COMPLETED',?,now(),?::jsonb)",campaign,campaign,eligible.size(),snapshot);
+  }
+
+  UUID relationship(Creator c) throws Exception {
+    makeContactable(List.of(c));
     return UUID.fromString(
         call(
                 brand,
@@ -536,7 +548,15 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
             .path("data")
             .path("link")
             .asText();
-    String token = link.substring(link.indexOf("token=") + 6);
+    String token = java.net.URI.create(link).getRawQuery().substring("token=".length());
+    String legacyLink = "https://old-frontend.example/cooperation-invitations?token=" + token;
+    jdbc.update(
+        "update cooperation_email_job set payload=? where invitation_id=?",
+        invitationCipher.encrypt("", legacyLink), UUID.fromString(invitation));
+    var updated =
+        call(brand, get("/cooperation-invitations/" + invitation + "/manual-link"), null, 200)
+            .path("data");
+    assertThat(updated.path("link").asText()).isEqualTo(link);
     var preview =
         call(null, get("/cooperation-invitations/preview").param("token", token), null, 200);
     assertThat(preview.toString()).doesNotContain("100000", "Agreed review", "email", "masterId");
@@ -659,6 +679,7 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
   void batchRelationshipsCommitValidItemsAndRestoreNoMetadataOnRetry() throws Exception {
     var a = channel(false);
     var b = channel(false);
+    makeContactable(List.of(a, b));
     var response =
         call(
                 brand,
@@ -882,6 +903,51 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
+  void resendUsesCurrentFrontendAndPreservesTokenAndExpiry() throws Exception {
+    UUID deal = prepared(List.of(channel(true)), 100000);
+    var sent =
+        call(
+                brand,
+                post(root() + "/" + deal + "/invitations").header("Idempotency-Key", "resend"),
+                Map.of("expectedRevision", 2),
+                200)
+            .path("data");
+    UUID invitation = UUID.fromString(sent.path("invitationId").asText());
+    var job = jdbc.queryForMap(
+        "select id,payload from cooperation_email_job where invitation_id=?", invitation);
+    UUID jobId = (UUID) job.get("id");
+    var original = invitationCipher.decrypt(job.get("payload").toString());
+    String legacyLink = "https://old-frontend.example/cooperation-invitations?"
+        + java.net.URI.create(original.link()).getRawQuery();
+    jdbc.update("update cooperation_email_job set payload=? where id=?",
+        invitationCipher.encrypt(original.email(), legacyLink), jobId);
+
+    String invitationQuery = "select token_hash,expires_at from cooperation_invitation where id=?";
+    var originalIdentity = jdbc.queryForMap(invitationQuery, invitation);
+    worker.process(jobId);
+    jdbc.update(
+        "update cooperation_email_job set last_attempt_at=now()-interval '61 seconds' where id=?",
+        jobId);
+    call(brand, post("/cooperation-invitations/" + invitation + "/resend-email"), null, 200);
+    worker.process(jobId);
+
+    verify(sender, times(2)).sendCooperationInvitation(original.email(), original.link());
+    assertThat(jdbc.queryForMap(invitationQuery, invitation)).isEqualTo(originalIdentity);
+
+    jdbc.update(
+        "update cooperation_invitation set expires_at=now()-interval '1 second' where id=?",
+        invitation);
+    assertThat(delivery.due()).contains(jobId);
+    worker.process(jobId);
+    var expired = jdbc.queryForMap(
+        "select status,payload from cooperation_email_job where id=?", jobId);
+    assertThat(expired.get("status")).isEqualTo("SENT");
+    assertThat(expired.get("payload")).isNull();
+    call(brand, post("/cooperation-invitations/" + invitation + "/resend-email"), null, 409);
+    verify(sender, times(2)).sendCooperationInvitation(anyString(), anyString());
+  }
+
+  @Test
   void replacementAndExpiryClearPayloadAndNeverSendMail() throws Exception {
     var c = channel(true);
     UUID id = prepared(List.of(c), 100000);
@@ -1040,7 +1106,7 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
     assertThat(
             jdbc.queryForObject(
                 "select payload from cooperation_email_job where id=?", String.class, committed))
-        .isNull();
+        .isNotBlank();
   }
 
   @Test

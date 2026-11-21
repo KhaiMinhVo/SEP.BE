@@ -160,9 +160,10 @@ public class DealService {
         id);
     store.db.update(
         "update cooperation_email_job j set"
-            + " status='CANCELLED',payload=null,processing_token=null,lease_until=null,next_attempt_at=null"
+            + " status=case when j.status='SENT' then 'SENT' else 'CANCELLED' end,"
+            + " payload=null,processing_token=null,lease_until=null,next_attempt_at=null"
             + " where invitation_id in(select id from cooperation_invitation where deal_id=?) and"
-            + " status<>'SENT'",
+            + " (j.status<>'SENT' or j.payload is not null)",
         id);
   }
 

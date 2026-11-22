@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,9 @@ public class PaymentService {
   private final VnPayConfig vnPayConfig;
   private final com.influencermatch.backend.brand.repository.BrandProfileRepository brands;
   private final PaymentSettlementService settlement;
+
+  /** VNPay gateway URL is valid for 15 minutes; reuse PENDING checkout within this window. */
+  static final int CHECKOUT_REUSE_WINDOW_MINUTES = 15;
 
   @Transactional
   public PaymentResponse createCheckout(UUID planId, BrandProfile brand, String ipAddress)
@@ -69,6 +73,20 @@ public class PaymentService {
       throw new com.influencermatch.backend.exception.BusinessException(
           com.influencermatch.backend.exception.ErrorCode.INTERNAL_ERROR,
           "Payment provider is not configured");
+
+    // Reuse an existing PENDING checkout for the same plan if still within the gateway window.
+    // This prevents duplicate Payment/Subscription rows on double-click or page reload.
+    LocalDateTime reuseWindowStart = LocalDateTime.now().minusMinutes(CHECKOUT_REUSE_WINDOW_MINUTES);
+    List<Payment> recent = paymentRepository.findRecentPendingCheckouts(
+        brand.getId(), planId, reuseWindowStart, org.springframework.data.domain.PageRequest.of(0, 1));
+    if (!recent.isEmpty()) {
+      Payment existing = recent.get(0);
+      // Rebuild the VNPay URL from stored parameters rather than storing the full URL in DB.
+      // If the gateway date is missing the checkout is too stale to rebuild; fall through to create a new one.
+      if (existing.getGatewayCreateDate() != null && existing.getTransactionCode() != null) {
+        return rebuildCheckoutUrl(existing, plan, ipAddress);
+      }
+    }
     Subscription subscription =
         Subscription.builder()
             .brandProfile(brand)
@@ -132,6 +150,48 @@ public class PaymentService {
             .collect(java.util.stream.Collectors.joining("&"));
     queryString += "&vnp_SecureHash=" + vnp_SecureHash;
 
+    return new PaymentResponse(vnPayConfig.getPayUrl() + "?" + queryString, txnRef);
+  }
+
+  /**
+   * Rebuild a VNPay payment URL for an existing PENDING checkout using the original
+   * txnRef and gateway create-date so that the callback/IPN can still find it.
+   * A fresh ExpireDate (+15 min from now) is used so the link works immediately.
+   */
+  PaymentResponse rebuildCheckoutUrl(Payment existing, Plan plan, String ipAddress)
+      throws UnsupportedEncodingException {
+    String txnRef = existing.getTransactionCode();
+    String amount = VnPayUtil.gatewayAmount(plan.getPrice());
+
+    LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
+    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+
+    Map<String, String> vnp_Params = new HashMap<>();
+    vnp_Params.put("vnp_Version", "2.1.0");
+    vnp_Params.put("vnp_Command", "pay");
+    vnp_Params.put("vnp_TmnCode", vnPayConfig.getTmnCode());
+    vnp_Params.put("vnp_Amount", amount);
+    vnp_Params.put("vnp_CurrCode", "VND");
+    vnp_Params.put("vnp_TxnRef", txnRef);
+    vnp_Params.put("vnp_OrderInfo", "Thanh toan don hang " + txnRef);
+    vnp_Params.put("vnp_OrderType", "other");
+    vnp_Params.put("vnp_Locale", "vn");
+    vnp_Params.put("vnp_ReturnUrl", vnPayConfig.getReturnUrl());
+    vnp_Params.put("vnp_IpAddr", ipAddress);
+    // Keep original CreateDate so callback lookup by txnRef still works at gateway.
+    vnp_Params.put("vnp_CreateDate", existing.getGatewayCreateDate());
+    vnp_Params.put("vnp_ExpireDate", now.plusMinutes(CHECKOUT_REUSE_WINDOW_MINUTES).format(formatter));
+
+    String vnp_SecureHash = VnPayUtil.hashAllFields(vnp_Params, vnPayConfig.getHashSecret());
+    String queryString =
+        vnp_Params.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .map(e -> URLEncoder.encode(e.getKey(), StandardCharsets.US_ASCII)
+                + "=" + URLEncoder.encode(e.getValue(), StandardCharsets.US_ASCII))
+            .collect(java.util.stream.Collectors.joining("&"));
+    queryString += "&vnp_SecureHash=" + vnp_SecureHash;
+
+    log.info("Reusing PENDING checkout txnRef={} for brand={}", txnRef, existing.getBrandProfile().getId());
     return new PaymentResponse(vnPayConfig.getPayUrl() + "?" + queryString, txnRef);
   }
 

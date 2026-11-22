@@ -126,11 +126,10 @@ class QuotaReservationPhase1Test {
   }
 
   @Test
-  @DisplayName("Throws ForbiddenException when brand has no active subscription and plans exist")
+  @DisplayName("Throws ForbiddenException when brand has no active subscription")
   void testReserveQuota_noActiveSubscription() {
     when(subscriptionRepository.findByBrandProfileId(brandProfileId))
         .thenReturn(List.of());
-    when(planRepository.count()).thenReturn(2L);
 
     assertThatThrownBy(() -> subscriptionService.reserveRecommendationQuota(brandProfileId))
         .isInstanceOf(ForbiddenException.class);

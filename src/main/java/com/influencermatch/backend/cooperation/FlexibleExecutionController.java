@@ -34,6 +34,8 @@ public class FlexibleExecutionController {
     return ApiResponse.ok(execution.publishExternal(id, unit, body, key));
   }
   @PostMapping("/deliverables/{unit}/external-outcome")
+  @io.swagger.v3.oas.annotations.Operation(summary = "Record externally received KPI",
+      description = "Requires expectedRevision, submissionRevision, periodStart, periodEnd, sourceDescription, receivedAt and all metrics or unavailableMetrics. reason is required for edits.")
   @PreAuthorize("hasRole('BRAND') and hasAuthority('RECORD_OWN_OUTCOME') and hasAuthority('MANAGE_OWN_COLLABORATION')")
   public ApiResponse<JsonNode> outcome(@PathVariable UUID id, @PathVariable UUID unit,
       @RequestBody JsonNode body, @RequestHeader("Idempotency-Key") String key) {
@@ -55,6 +57,21 @@ public class FlexibleExecutionController {
       + " (hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION'))")
   public ApiResponse<JsonNode> terminate(@PathVariable UUID id, @Valid @RequestBody FlexibleDtos.Exit body,
       @RequestHeader("Idempotency-Key") String key) { return ApiResponse.ok(flexible.terminate(id, body, key, false)); }
+
+  @PostMapping("/terminate-external")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('MANAGE_OWN_COLLABORATION')")
+  @io.swagger.v3.oas.annotations.Operation(summary = "Record documented external consent to terminate a Brand-managed collaboration")
+  public ApiResponse<JsonNode> terminateExternal(@PathVariable UUID id, @Valid @RequestBody FlexibleDtos.ExternalTermination body,
+      @RequestHeader("Idempotency-Key") String key) { return ApiResponse.ok(flexible.terminateExternal(id, body, key)); }
+
+  @PostMapping("/termination-requests/{requestId}/withdraw")
+  @PreAuthorize("(hasRole('BRAND') and hasAuthority('MANAGE_OWN_COLLABORATION')) or"
+      + " (hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION'))")
+  @io.swagger.v3.oas.annotations.Operation(summary = "Withdraw your pending termination request")
+  public ApiResponse<JsonNode> withdraw(@PathVariable UUID id, @PathVariable UUID requestId,
+      @Valid @RequestBody FlexibleDtos.Withdrawal body, @RequestHeader("Idempotency-Key") String key) {
+    return ApiResponse.ok(flexible.withdraw(id, requestId, body, key));
+  }
 
   @PostMapping("/termination-requests/decline")
   @PreAuthorize("(hasRole('BRAND') and hasAuthority('MANAGE_OWN_COLLABORATION')) or"

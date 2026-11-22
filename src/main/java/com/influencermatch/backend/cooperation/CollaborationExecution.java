@@ -33,19 +33,20 @@ public class CollaborationExecution {
   }
 
   private void requireRecorder(Map<String, Object> c, boolean external) {
-    if (external) {
-      if (!isBrand(c) || !"BRAND_MANAGED".equals(c.get("management_mode")))
-        throw new ForbiddenException("Brand-managed recording required");
-    } else if (Permissions.actor().getRole() != Role.CREATOR
-        || "BRAND_MANAGED".equals(c.get("management_mode"))) {
-      throw new ForbiddenException("An assigned Creator in collaborative mode is required");
-    }
+    if (external ? !isBrand(c) : Permissions.actor().getRole() != Role.CREATOR)
+      throw new ForbiddenException("Use the recording operation for your role");
   }
 
   private String externalDescription(String text) {
     if (text == null || text.isBlank() || text.length() > 2000)
       throw new ValidationException("Describe the external source of this record");
     return text.strip();
+  }
+
+  private java.time.Instant externalReceipt(java.time.Instant receivedAt) {
+    if (receivedAt == null || receivedAt.isAfter(s.now()))
+      throw new ValidationException("A non-future receipt time is required");
+    return receivedAt;
   }
 
   Map<String, Object> initial(UUID id) {
@@ -145,7 +146,7 @@ public class CollaborationExecution {
     }
     var result = select(snapshot, "id", "campaignId", "campaignStatus", "status", "agreedFee",
         "currency", "executionSource", "executionRevision", "managementMode", "completionMethod",
-        "terminatedAt", "terminationReason", "terminationEvidence", "exitRequests");
+        "terminatedAt", "terminationReason", "terminationEvidence", "terminationMethod", "terminationAgreedAt", "exitRequests");
     result.put("videoSubmissionRequired", videos.required());
     var deliverables = result.putArray("deliverables");
     snapshot.path("deliverables").forEach(unit -> {
@@ -159,7 +160,7 @@ public class CollaborationExecution {
           "decision", "checklist", "reason", "createdAt")));
       var publications = row.putArray("publications");
       unit.path("publications").forEach(publication -> publications.add(select(publication, "id",
-          "submissionRevision", "url", "earlyPublication", "exceptionAcknowledged", "source", "sourceDescription")));
+          "submissionRevision", "url", "earlyPublication", "exceptionAcknowledged", "source", "sourceDescription", "receivedAt")));
       deliverables.add(row);
     });
     var acceptances = result.putArray("acceptances");
@@ -172,7 +173,7 @@ public class CollaborationExecution {
       outcome.path("payload").path("posts").forEach(post -> posts.add(select(post,
           "deliverableId", "submissionRevision", "periodStart", "periodEnd", "views", "clicks",
           "likes", "comments", "shares", "unavailableMetrics", "evidenceUrl",
-          "collectionId", "metricSources", "collectedAt", "sourceDescription")));
+          "collectionId", "metricSources", "collectedAt", "sourceDescription", "receivedAt", "recorderSource")));
       row.set("calculation", select(outcome.path("calculation"), "metricSource", "views", "clicks",
           "likes", "comments", "shares"));
       outcomes.add(row);
@@ -330,8 +331,7 @@ public class CollaborationExecution {
       boolean external, java.time.Instant receivedAt) {
     var c = lock(id, false, Permission.MANAGE_OWN_COLLABORATION);
     requireRecorder(c, external);
-    if (external && (receivedAt == null || receivedAt.isAfter(s.now())))
-      throw new ValidationException("A non-future receipt time is required");
+    if (external) externalReceipt(receivedAt);
     String scope = "submission:" + d;
     Object request = external ? Map.of("submission", r, "receivedAt", receivedAt) : r;
     var old = replay(scope, key, request);
@@ -430,17 +430,17 @@ public class CollaborationExecution {
 
   @Transactional
   public JsonNode publish(UUID id, UUID d, ExecutionDtos.Publication r, String key) {
-    return publishRecorded(id, d, r, key, false, null);
+    return publishRecorded(id, d, r, key, false, null, null);
   }
 
   @Transactional
   public JsonNode publishExternal(UUID id, UUID d, FlexibleDtos.ExternalPublication r, String key) {
     return publishRecorded(id, d, new ExecutionDtos.Publication(r.expectedRevision(), r.submissionRevision(),
-        r.url(), null, false, null), key, true, externalDescription(r.sourceDescription()));
+        r.url(), null, false, null), key, true, externalDescription(r.sourceDescription()), externalReceipt(r.receivedAt()));
   }
 
   private JsonNode publishRecorded(UUID id, UUID d, ExecutionDtos.Publication r, String key,
-      boolean external, String description) {
+      boolean external, String description, java.time.Instant receivedAt) {
     var c = lock(id, false, Permission.MANAGE_OWN_COLLABORATION);
     if (external || !isBrand(c)) requireRecorder(c, external);
     boolean brand = isBrand(c) && !external;
@@ -448,7 +448,7 @@ public class CollaborationExecution {
         && !r.exceptionReason().isBlank()))
       throw new ForbiddenException("Creator records publication and Brand acknowledges exceptions");
     String scope = "publication:" + d;
-    Object request = external ? Map.of("publication", r, "sourceDescription", description) : r;
+    Object request = external ? Map.of("publication", r, "sourceDescription", description, "receivedAt", receivedAt) : r;
     var old = replay(scope, key, request);
     if (old != null) return old;
     progress(c);
@@ -489,8 +489,7 @@ public class CollaborationExecution {
     } else {
       if (brand) throw conflict("Creator must record the publication first");
       insertPublication(id, d, r.submissionRevision(), url, postKey(platform, url, r.postId()), early);
-      if (external) s.db.update("update collaboration_publication set source='BRAND_EXTERNAL',source_description=?"
-          + " where deliverable_id=? and submission_revision=?", description, d, r.submissionRevision());
+      if (external) tagExternalPublication(d, r.submissionRevision(), description, receivedAt);
     }
     s.db.update("update collaboration_deliverable set revision=revision+1 where id=?", d);
     changed(
@@ -550,11 +549,16 @@ public class CollaborationExecution {
   private static final List<String> FINANCE_FIELDS = List.of("costs", "currency", "gmv", "revenue",
       "periodStart", "periodEnd", "financialEvidence", "financialConfirmed");
 
+  private void tagExternalPublication(UUID deliverable, long revision, String description, java.time.Instant receivedAt) {
+    s.db.update("update collaboration_publication set source='BRAND_EXTERNAL',source_description=?,received_at=?"
+        + " where deliverable_id=? and submission_revision=?", description, java.sql.Timestamp.from(receivedAt), deliverable, revision);
+  }
+
   private static final List<String> METRICS = List.of("views", "clicks", "likes", "comments", "shares");
   private static final Set<String> MEASUREMENT_FIELDS = Set.of(
       "deliverableId", "submissionRevision", "periodStart", "periodEnd", "evidenceUrl",
       "views", "clicks", "likes", "comments", "shares", "unavailableMetrics",
-      "collectionId", "metricSources", "collectedAt", "sourceDescription");
+      "collectionId", "metricSources", "collectedAt", "sourceDescription", "receivedAt", "recordedBy", "recorderSource");
 
   @Transactional
   public JsonNode deliverableOutcome(UUID id, UUID deliverableId, JsonNode request, String key) {
@@ -569,17 +573,24 @@ public class CollaborationExecution {
   private JsonNode deliverableOutcomeRecorded(UUID id, UUID deliverableId, JsonNode request, String key, boolean external) {
     var c = lock(id, false, Permission.RECORD_OWN_OUTCOME);
     requireRecorder(c, external);
+    java.time.Instant receivedAt = null;
     if (external) {
       Permissions.require(Permission.MANAGE_OWN_COLLABORATION);
       deals.fresh(Permission.MANAGE_OWN_COLLABORATION);
       if (!request.path("sourceDescription").isTextual()) throw new ValidationException("External source description required");
       externalDescription(request.path("sourceDescription").asText());
+      try {
+        receivedAt = externalReceipt(java.time.Instant.parse(request.path("receivedAt").asText()));
+      } catch (java.time.format.DateTimeParseException ex) {
+        throw new ValidationException("A valid non-future receipt time is required");
+      }
     }
     var body = canonical(request);
     String scope = "deliverable-outcome:" + id + ":" + deliverableId;
     if (body.toString().length() > 1000000) throw new ValidationException("Invalid outcome body");
     var allowed = new HashSet<>(MEASUREMENT_FIELDS);
-    allowed.remove("deliverableId");
+    allowed.removeAll(Set.of("deliverableId", "metricSources", "collectedAt", "recordedBy", "recorderSource"));
+    if (!external) allowed.removeAll(Set.of("sourceDescription", "receivedAt"));
     allowed.addAll(List.of("expectedRevision", "url", "reason"));
     fields(body, allowed);
     var old = replay(scope, key, body);
@@ -595,6 +606,8 @@ public class CollaborationExecution {
     var oldPayload = outcomePayload(previous);
     var post = s.json.createObjectNode().put("deliverableId", deliverableId.toString());
     copyFields(body, post, MEASUREMENT_FIELDS);
+    if (external) post.put("sourceDescription", externalDescription(body.path("sourceDescription").asText()))
+        .put("receivedAt", receivedAt.toString());
     requireCompleteMetrics(post);
     boolean editing = hasMeasurement(oldPayload, post);
     String reason = outcomeReason(body, editing, "Ghi nhận kết quả bài đăng lần đầu");
@@ -606,8 +619,7 @@ public class CollaborationExecution {
       String platform = s.one("select platform from creator where id=?", unit.get("creator_id"))
           .get("platform").toString();
       insertPublication(id, deliverableId, submission, url, postKey(platform, url, null), false);
-      if (external) s.db.update("update collaboration_publication set source='BRAND_EXTERNAL',source_description=?"
-          + " where deliverable_id=? and submission_revision=?", request.path("sourceDescription").asText(), deliverableId, submission);
+      if (external) tagExternalPublication(deliverableId, submission, post.path("sourceDescription").asText(), receivedAt);
       s.db.update("update collaboration_deliverable set revision=revision+1 where id=?", deliverableId);
       changed(id, "PUBLICATION_RECORDED", Map.of("deliverableId", deliverableId, "submissionRevision", submission));
     } else if (body.has("url")
@@ -619,7 +631,7 @@ public class CollaborationExecution {
     copyFields(oldPayload, payload, FINANCE_FIELDS);
     copyFields(oldPayload, payload, List.of("resultNote"));
     mergeMeasurements(id, payload, oldPayload, List.of(post));
-    return persistOutcome(id, previous, payload, reason, false, scope, key, body);
+    return persistOutcome(id, previous, payload, reason, false, Set.of(deliverableId), scope, key, body);
   }
 
   @Transactional
@@ -663,10 +675,16 @@ public class CollaborationExecution {
     if (!finance && (!payload.path("posts").isArray() || payload.path("posts").isEmpty()))
       throw new ValidationException("Publication measurements required");
     boolean editing = finance && FINANCE_FIELDS.stream().anyMatch(oldPayload::has);
+    var modifiedUnits = new HashSet<UUID>();
     if (!finance) {
       for (var post : payload.path("posts")) {
         requireCompleteMetrics(post);
-        var unit = deliverable(id, measurementUnit(post));
+        UUID unitId = measurementUnit(post);
+        modifiedUnits.add(unitId);
+        var allowedPost = new HashSet<>(MEASUREMENT_FIELDS);
+        allowedPost.removeAll(Set.of("metricSources", "collectedAt", "recordedBy", "recorderSource", "sourceDescription", "receivedAt"));
+        fields(post, allowedPost);
+        var unit = deliverable(id, unitId);
         if (!"APPROVED".equals(unit.get("status")))
           throw conflict("Deliverable must be approved before recording KPI");
         editing |= hasMeasurement(oldPayload, post);
@@ -677,7 +695,7 @@ public class CollaborationExecution {
     }
     String reason = outcomeReason(body, editing,
         finance ? "Ghi nhận tài chính lần đầu" : "Ghi nhận kết quả bài đăng lần đầu");
-    return persistOutcome(id, previous, payload, reason, finance, scope, key, body);
+    return persistOutcome(id, previous, payload, reason, finance, modifiedUnits, scope, key, body);
   }
 
   private Optional<Map<String, Object>> latestOutcome(UUID id) {
@@ -760,7 +778,9 @@ public class CollaborationExecution {
   }
 
   private JsonNode persistOutcome(UUID id, Optional<Map<String, Object>> previous, ObjectNode payload,
-      String reason, boolean finance, String scope, String key, JsonNode body) {
+      String reason, boolean finance, Set<UUID> modifiedUnits, String scope, String key, JsonNode body) {
+    var oldPayload = outcomePayload(previous);
+    var recordedSources = new HashSet<String>();
     Set<String> posts = new HashSet<>();
     Set<UUID> units = new HashSet<>();
     for (var p : payload.path("posts")) {
@@ -772,7 +792,12 @@ public class CollaborationExecution {
         throw conflict("Measurement refers to a superseded submission");
       var publication = publication(d, submission)
           .orElseThrow(() -> conflict("Publication must be recorded before KPI"));
-      applyMetricProvenance(id, publication, (ObjectNode) p, finance);
+      if (modifiedUnits.contains(d)) {
+        applyMetricProvenance(id, publication, (ObjectNode) p, priorMeasurement(oldPayload, p));
+      }
+      p.path("metricSources").forEach(source -> recordedSources.add(source.asText()));
+      if (!p.path("metricSources").elements().hasNext() && p.hasNonNull("recorderSource"))
+        recordedSources.add(p.path("recorderSource").asText());
       if (!units.add(d) || !posts.add(publication.get("post_key").toString()))
         throw new ValidationException("Duplicate publication measurement");
       if (p.hasNonNull("evidenceUrl")) https(p.path("evidenceUrl").asText());
@@ -781,8 +806,10 @@ public class CollaborationExecution {
     if (payload.has("financialConfirmed") && !payload.path("financialConfirmed").isBoolean())
       throw new ValidationException("financialConfirmed must be boolean");
     var calculation = OutcomeFinance.calculate(s.json, payload);
-    if ("BRAND_MANAGED".equals(initial(id).get("management_mode")))
-      calculation.put("metricSource", "BRAND_EXTERNAL_REPORTED");
+    String priorSource = previous.map(row -> row.get("source").toString()).orElse("SELF_REPORTED");
+    String metricSource = recordedSources.size() > 1 ? "MIXED"
+        : recordedSources.stream().findFirst().orElse(priorSource);
+    calculation.put("metricSource", metricSource);
     if (finance && payload.path("financialConfirmed").asBoolean()
         && (!calculation.path("actualCost").isNumber()
             || calculation.path("actualCost").decimalValue().signum() <= 0))
@@ -800,7 +827,7 @@ public class CollaborationExecution {
         actor(),
         reason,
         s.time(),
-        "BRAND_MANAGED".equals(initial(id).get("management_mode")) ? "BRAND_EXTERNAL_REPORTED" : "SELF_REPORTED");
+        "BRAND_EXTERNAL_REPORTED".equals(metricSource) ? metricSource : "SELF_REPORTED");
     changed(id, finance ? "OUTCOME_FINANCE_RECORDED" : "OUTCOME_RECORDED", Map.of("outcomeRevision", rev));
     return deals.remembered(scope, key, body, view(id));
   }
@@ -809,13 +836,31 @@ public class CollaborationExecution {
     for (var field : fields) if (source.has(field)) target.set(field, source.get(field));
   }
 
-  private void applyMetricProvenance(UUID collaboration, Map<String, Object> publication, ObjectNode post, boolean finance) {
-    var priorSources = post.path("metricSources").deepCopy();
+  private JsonNode priorMeasurement(JsonNode payload, JsonNode post) {
+    for (var prior : payload.path("posts")) {
+      if (prior.path("deliverableId").equals(post.path("deliverableId"))
+          && prior.path("submissionRevision").asLong() == post.path("submissionRevision").asLong())
+        return prior;
+    }
+    return s.json.nullNode();
+  }
+
+  private void applyMetricProvenance(UUID collaboration, Map<String, Object> publication, ObjectNode post, JsonNode prior) {
+    String recorderSource = Permissions.actor().getRole() == Role.BRAND ? "BRAND_EXTERNAL_REPORTED" : "SELF_REPORTED";
+    post.put("recordedBy", actor().toString()).put("recorderSource", recorderSource);
     var sources = post.putObject("metricSources");
     post.remove("collectedAt");
-    for (String metric : METRICS) if (post.hasNonNull(metric)) sources.put(metric,
-        finance && priorSources.path(metric).isTextual() ? priorSources.path(metric).asText()
-          : Permissions.actor().getRole() == Role.BRAND ? "BRAND_EXTERNAL_REPORTED" : "SELF_REPORTED");
+    boolean samePeriod = prior.path("periodStart").equals(post.path("periodStart"))
+        && prior.path("periodEnd").equals(post.path("periodEnd"));
+    for (String metric : METRICS) {
+      if (!post.hasNonNull(metric)) continue;
+      var priorSource = prior.path("metricSources").path(metric);
+      boolean sameValue = post.path(metric).equals(prior.path(metric));
+      boolean sameObservation = !"PUBLIC_POST_CRAWL".equals(priorSource.asText())
+          || prior.path("collectionId").equals(post.path("collectionId"));
+      sources.put(metric, samePeriod && sameValue && sameObservation && priorSource.isTextual()
+          ? priorSource.asText() : recorderSource);
+    }
     if (!post.hasNonNull("collectionId")) return;
     UUID collection;
     try { collection = UUID.fromString(post.path("collectionId").asText()); }
@@ -1002,7 +1047,7 @@ public class CollaborationExecution {
         .put("outcomeRevision", outcomeRevision)
         .put("reviewerAuthenticated", review != null)
         .put("brandAccepted", true)
-        .put("metricSource", Objects.toString(outcomeRevisionRow.get("source"), "SELF_REPORTED"));
+        .put("metricSource", calculation.path("metricSource").asText(Objects.toString(outcomeRevisionRow.get("source"), "SELF_REPORTED")));
     proof.set("outcome", s.decode(outcomeRevisionRow.get("payload")));
     proof.set("calculation", calculation);
 

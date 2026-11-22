@@ -101,9 +101,9 @@ public class FlexibleExecution {
           s.time(), execution.actor(), r.reason().strip(), r.requestId());
     } else {
       s.db.update("update collaboration set status='TERMINATED',terminated_at=?,termination_reason=?,"
-              + "termination_evidence=? where id=?",
+              + "termination_evidence=?,termination_method='PORTAL',terminated_by=? where id=?",
           s.time(), request.get("reason"), request.get("evidence_url") != null
-              ? request.get("evidence_url") : r.evidenceUrl(), id);
+              ? request.get("evidence_url") : r.evidenceUrl(), execution.actor(), id);
       s.db.update("update collaboration_exit_request set resolved_at=?,resolved_by=?,resolution='TERMINATED',resolution_reason=? where id=?",
           s.time(), execution.actor(), r.reason().strip(), r.requestId());
       // Work, expenses, agreed commitment and payment status remain unchanged.
@@ -111,6 +111,49 @@ public class FlexibleExecution {
     }
     execution.changed(id, decline ? "TERMINATION_REQUEST_DECLINED" : "COLLABORATION_TERMINATED",
         Map.of("reason", r.reason().strip(), "requestId", r.requestId()));
+    return deals.remembered(scope, key, r, execution.view(id));
+  }
+
+  @Transactional
+  public JsonNode terminateExternal(UUID id, FlexibleDtos.ExternalTermination r, String key) {
+    var c = execution.lock(id, true, Permission.MANAGE_OWN_COLLABORATION);
+    String scope = "terminate-external:" + id;
+    var old = deals.replay(scope, key, r);
+    if (old != null) return old;
+    execution.progress(c);
+    if (!"BRAND_MANAGED".equals(c.get("management_mode")))
+      throw conflict("External termination requires Brand-managed collaboration");
+    execution.revision(c, "execution_revision", r.expectedRevision());
+    if (r.agreedAt().isAfter(s.now())) throw new ValidationException("Agreement time cannot be in the future");
+    String evidenceUrl = CollaborationExecution.https(r.evidenceUrl().strip());
+    String reason = r.reason().strip();
+    var now = s.time();
+    s.db.update("update collaboration set status='TERMINATED',terminated_at=?,termination_reason=?,"
+            + "termination_evidence=?,termination_method='BRAND_EXTERNAL',termination_agreed_at=?,terminated_by=? where id=?",
+        now, reason, evidenceUrl, java.sql.Timestamp.from(r.agreedAt()), execution.actor(), id);
+    s.db.update("update collaboration_exit_request set resolved_at=?,resolved_by=?,"
+            + "resolution='TERMINATED_EXTERNAL',resolution_reason=? where collaboration_id=? and resolved_at is null",
+        now, execution.actor(), reason, id);
+    execution.changed(id, "COLLABORATION_TERMINATED_EXTERNAL", Map.of("agreedAt", r.agreedAt().toString()));
+    return deals.remembered(scope, key, r, execution.view(id));
+  }
+
+  @Transactional
+  public JsonNode withdraw(UUID id, UUID requestId, FlexibleDtos.Withdrawal r, String key) {
+    var c = execution.lock(id, false, Permission.MANAGE_OWN_COLLABORATION);
+    String scope = "withdraw-termination:" + id + ":" + requestId;
+    var old = deals.replay(scope, key, r);
+    if (old != null) return old;
+    execution.progress(c);
+    execution.revision(c, "execution_revision", r.expectedRevision());
+    var pending = s.optional("select requested_by from collaboration_exit_request where id=? and collaboration_id=?"
+            + " and resolved_at is null for update", requestId, id)
+        .orElseThrow(() -> conflict("Termination request is no longer pending"));
+    if (!execution.actor().equals(uuid(pending.get("requested_by"))))
+      throw new com.influencermatch.backend.exception.ForbiddenException("Only the requester can withdraw the request");
+    s.db.update("update collaboration_exit_request set resolved_at=?,resolved_by=?,resolution='WITHDRAWN' where id=?",
+        s.time(), execution.actor(), requestId);
+    execution.changed(id, "TERMINATION_REQUEST_WITHDRAWN", Map.of("requestId", requestId));
     return deals.remembered(scope, key, r, execution.view(id));
   }
 

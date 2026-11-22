@@ -41,10 +41,8 @@ public class CreatorAvatarController {
       @PathVariable UUID id,
       @RequestPart("file") MultipartFile file) {
 
-    Creator creator = creatorRepository.findById(id)
+    Creator creator = creatorRepository.findLockedById(id)
         .orElseThrow(() -> new NotFoundException("Creator not found with id: " + id));
-
-    String oldStorageKey = creator.getAvatarStorageKey();
 
     String prefix = creator.getUserName() != null ? creator.getUserName() : id.toString();
     StoredMedia stored = cloudinaryStorageService.uploadFile(
@@ -59,11 +57,6 @@ public class CreatorAvatarController {
     creator.setAvatarSizeBytes(stored.sizeBytes());
     creator.setAvatarUpdatedAt(stored.updatedAt());
     creatorRepository.save(creator);
-
-    // Clean up previous cloud file if exists
-    if (oldStorageKey != null && !oldStorageKey.isBlank() && !oldStorageKey.equals(stored.storageKey())) {
-      cloudinaryStorageService.deleteFile(oldStorageKey);
-    }
 
     log.info("Successfully updated avatar for creator {}: url={}", creator.getUserName(), stored.url());
     return ApiResponse.ok(stored);

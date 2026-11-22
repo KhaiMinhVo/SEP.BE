@@ -32,6 +32,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class CampaignService {
   private final CampaignRepository campaigns;
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.storage.ImageAssetService imageAssets;
 
   @org.springframework.beans.factory.annotation.Autowired
   private com.influencermatch.backend.brand.repository.BrandContextRepository brandContexts;
@@ -192,6 +194,7 @@ public class CampaignService {
                                   .platformPostId(p.getPlatformPostId())
                                   .postUrl(p.getPostUrl())
                                   .caption(p.getCaption())
+                                  .thumbnailUrl(p.getThumbnailUrl())
                                   .views(p.getViews())
                                   .likes(p.getLikes())
                                   .comments(p.getComments())
@@ -455,7 +458,25 @@ public class CampaignService {
     c.setLocations(strings(r.locations()));
     c.setFollowerMin(r.followerMin());
     c.setFollowerMax(r.followerMax());
-    c.setImageUrl(r.imageUrl());
+    if (!java.util.Objects.equals(c.getImageUrl(), r.imageUrl())
+        || (r.imageUrl() != null && c.getImageStorageKey() == null)) {
+      if (r.imageUrl() == null || r.imageUrl().isBlank()) {
+        c.setImageUrl(null);
+        c.setImageStorageKey(null);
+        c.setImageMimeType(null);
+        c.setImageSizeBytes(null);
+        c.setImageUpdatedAt(null);
+      } else {
+        var image = imageAssets.importImage(c.getBrandProfile().getId(),
+            com.influencermatch.backend.storage.ImageAssetService.CAMPAIGN,
+            com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CAMPAIGN_COVER, r.imageUrl());
+        c.setImageUrl(image.url());
+        c.setImageStorageKey(image.storageKey());
+        c.setImageMimeType(image.mimeType());
+        c.setImageSizeBytes(image.sizeBytes());
+        c.setImageUpdatedAt(image.updatedAt());
+      }
+    }
     c.setBrief(BrandContextData.text(r.brief()));
     c.setCreatorMode(r.creatorMode());
     c.setTargetCreatorCount(r.targetCreatorCount());

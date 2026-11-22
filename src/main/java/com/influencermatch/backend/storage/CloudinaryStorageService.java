@@ -46,7 +46,7 @@ public class CloudinaryStorageService {
     this.cloudinary = cloudinary;
     this.httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
-        .followRedirects(HttpClient.Redirect.NORMAL)
+        .followRedirects(HttpClient.Redirect.NEVER)
         .build();
   }
 
@@ -88,7 +88,7 @@ public class CloudinaryStorageService {
    */
   public Optional<StoredMedia> uploadFromUrl(String remoteUrl, String folder, String filenamePrefix) {
     if (!isConfigured()) {
-      log.warn("Cloudinary not configured; skipping cloud sync for remote URL: {}", remoteUrl);
+      log.warn("Cloudinary not configured; skipping remote image sync");
       return Optional.empty();
     }
 
@@ -96,43 +96,62 @@ public class CloudinaryStorageService {
       return Optional.empty();
     }
 
-    // If already hosted on Cloudinary, skip re-uploading
-    if (remoteUrl.contains("res.cloudinary.com")) {
-      log.debug("Remote URL is already a Cloudinary asset: {}", remoteUrl);
-      return Optional.empty();
-    }
-
     try {
-      log.info("Downloading remote image from {} for upload to {}", remoteUrl, folder);
-      HttpRequest request = HttpRequest.newBuilder()
-          .uri(URI.create(remoteUrl))
-          .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-          .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-          .header("Accept-Language", "en-US,en;q=0.9,vi;q=0.8")
-          .timeout(Duration.ofSeconds(15))
-          .GET()
-          .build();
-
-      HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
-      if (response.statusCode() != 200 || response.body() == null || response.body().length == 0) {
-        log.warn("Failed to download image from {}: HTTP status {}", remoteUrl, response.statusCode());
-        return Optional.empty();
-      }
-
-      byte[] bytes = response.body();
-      if (bytes.length > MAX_IMAGE_BYTES) {
-        log.warn("Downloaded image exceeds max limit of {} bytes (got {})", MAX_IMAGE_BYTES, bytes.length);
-        return Optional.empty();
-      }
-
+      byte[] bytes = downloadImage(remoteUrl);
       String format = validateImage(bytes);
       String publicId = generatePublicId(filenamePrefix);
 
       StoredMedia stored = executeUpload(bytes, folder, publicId, format);
       return Optional.of(stored);
     } catch (Exception ex) {
-      log.warn("Error uploading remote image from URL: {} to Cloudinary: {}", remoteUrl, ex.getMessage());
+      log.warn("Remote image download/upload failed ({}); keeping previous image", ex.getClass().getSimpleName());
+      if (ex instanceof InterruptedException) Thread.currentThread().interrupt();
       return Optional.empty();
+    }
+  }
+
+  /** Validate every redirect and bound downloaded bytes before decoding untrusted images. */
+  private byte[] downloadImage(String url) throws IOException, InterruptedException {
+    URI target = URI.create(url);
+    for (int redirects = 0; redirects <= 3; redirects++) {
+      validateRemoteUri(target);
+      var request = HttpRequest.newBuilder(target)
+          .header("User-Agent", "Mozilla/5.0")
+          .header("Accept", "image/png,image/jpeg,image/webp")
+          .timeout(Duration.ofSeconds(15)).GET().build();
+      var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+      try (var body = response.body()) {
+        if (response.statusCode() >= 300 && response.statusCode() < 400) {
+          target = target.resolve(response.headers().firstValue("location")
+              .orElseThrow(() -> new IOException("Missing image redirect")));
+          continue;
+        }
+        if (response.statusCode() != 200) throw new IOException("Remote image unavailable");
+        if (response.headers().firstValueAsLong("content-length").orElse(0) > MAX_IMAGE_BYTES)
+          throw new IOException("Image too large");
+        byte[] bytes = body.readNBytes((int) MAX_IMAGE_BYTES + 1);
+        if (bytes.length == 0 || bytes.length > MAX_IMAGE_BYTES) throw new IOException("Invalid image size");
+        return bytes;
+      }
+    }
+    throw new IOException("Too many image redirects");
+  }
+
+  static void validateRemoteUri(URI uri) throws IOException {
+    if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null
+        || uri.getUserInfo() != null || uri.getFragment() != null
+        || (uri.getPort() != -1 && uri.getPort() != 443)) {
+      throw new IOException("A public HTTPS image URL is required");
+    }
+    for (var address : java.net.InetAddress.getAllByName(uri.getHost())) {
+      byte[] ip = address.getAddress();
+      if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
+          || address.isSiteLocalAddress() || address.isMulticastAddress()
+          || (ip.length == 16 && (ip[0] & 0xfe) == 0xfc)
+          || (ip.length == 4 && ((ip[0] & 0xff) == 0 || (ip[0] & 0xff) >= 224
+              || ((ip[0] & 0xff) == 100 && (ip[1] & 0xff) >= 64 && (ip[1] & 0xff) <= 127)))) {
+        throw new IOException("Private image addresses are not allowed");
+      }
     }
   }
 
@@ -165,6 +184,9 @@ public class CloudinaryStorageService {
 
       String secureUrl = (String) result.get("secure_url");
       String key = (String) result.get("public_id");
+      if (secureUrl == null || !secureUrl.startsWith("https://") || key == null || key.isBlank()) {
+        throw new BusinessException(ErrorCode.INTERNAL_ERROR, "Cloud storage did not confirm the uploaded image.");
+      }
       String resFormat = (String) result.getOrDefault("format", format);
       Number sizeNum = (Number) result.getOrDefault("bytes", bytes.length);
       Number widthNum = (Number) result.get("width");
@@ -179,7 +201,7 @@ public class CloudinaryStorageService {
           sizeNum.longValue(),
           widthNum != null ? widthNum.intValue() : null,
           heightNum != null ? heightNum.intValue() : null,
-          LocalDateTime.now()
+          LocalDateTime.now(java.time.ZoneOffset.UTC)
       );
     } catch (IOException e) {
       log.error("Cloudinary upload failed: {}", e.getMessage(), e);
@@ -198,13 +220,33 @@ public class CloudinaryStorageService {
   }
 
   public static String validateImage(byte[] bytes) {
-    if (bytes == null || bytes.length == 0 || bytes.length > MAX_IMAGE_BYTES) {
+    if (bytes == null || bytes.length < 12 || bytes.length > MAX_IMAGE_BYTES) {
       throw new ValidationException("Image exceeds allowed size (up to 10 MB).");
     }
+
+    // 1. Detect WebP by magic bytes: 'R' 'I' 'F' 'F' ... 'W' 'E' 'B' 'P'
+    if (bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F'
+        && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P') {
+      return "webp";
+    }
+
+    // 2. Detect GIF by magic bytes: 'G' 'I' 'F'
+    if (bytes[0] == 'G' && bytes[1] == 'I' && bytes[2] == 'F') {
+      return "gif";
+    }
+
+    // 3. For PNG / JPEG, validate via ImageIO
     try (var input = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
       var readers = ImageIO.getImageReaders(input);
       if (!readers.hasNext()) {
-        throw new ValidationException("Only valid image formats (JPG, PNG, WEBP) are supported.");
+        // Fallback magic bytes for JPEG (FF D8 FF) and PNG (89 50 4E 47)
+        if ((bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xD8) {
+          return "jpg";
+        }
+        if ((bytes[0] & 0xFF) == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) {
+          return "png";
+        }
+        throw new ValidationException("Only valid image formats (JPG, PNG, WEBP, GIF) are supported.");
       }
       var reader = readers.next();
       try {
@@ -218,7 +260,7 @@ public class CloudinaryStorageService {
           throw new ValidationException("Image must not exceed 25 megapixels.");
         }
         reader.read(0); // Validate decodability
-        return format.equals("png") ? "png" : (format.equals("webp") ? "webp" : "jpg");
+        return format.equals("png") ? "png" : "jpg";
       } finally {
         reader.dispose();
       }

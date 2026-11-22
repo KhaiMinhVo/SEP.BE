@@ -293,6 +293,32 @@ public class BrandService {
     return complete(auth, null);
   }
 
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.storage.CloudinaryStorageService imageStorage;
+
+  @Transactional
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('UPDATE_BRAND_PROFILE')")
+  public BrandResponse uploadImage(boolean logo, org.springframework.web.multipart.MultipartFile file,
+      Authentication auth, String revision) {
+    Permissions.require(Permission.UPDATE_BRAND_PROFILE);
+    var existing = profiles.findByUserId(actor(auth).getId())
+        .orElseThrow(() -> notFound("Brand profile not found"));
+    var p = locked(existing.getId(), auth);
+    BrandRevision.require(revision, p.getId(), p.getProfileRevision());
+    var media = imageStorage.uploadFile(file, logo ? "influencermatch/brands/logos" : "influencermatch/brands/covers",
+        p.getId().toString());
+    if (logo) {
+      p.setLogoUrl(media.url()); p.setLogoStorageKey(media.storageKey());
+      p.setLogoMimeType(media.mimeType()); p.setLogoSizeBytes(media.sizeBytes()); p.setLogoUpdatedAt(media.updatedAt());
+    } else {
+      p.setCoverImageUrl(media.url()); p.setCoverImageStorageKey(media.storageKey());
+      p.setCoverImageMimeType(media.mimeType()); p.setCoverImageSizeBytes(media.sizeBytes()); p.setCoverImageUpdatedAt(media.updatedAt());
+    }
+    p.setProfileRevision(p.getProfileRevision() + 1);
+    profiles.save(p);
+    return loadResponse(p);
+  }
+
   private void validateComplete(BrandProfile p) {
     var missing = new LinkedHashMap<String, List<String>>();
     if (p.getBusinessName() == null || p.getBusinessName().isBlank())
@@ -410,7 +436,7 @@ public class BrandService {
         view.status(),
         view.model(),
         view.modelVersion(),
-        view.readyAt());
+        view.readyAt(), p.getLogoUrl(), p.getCoverImageUrl());
   }
 
   private BusinessException notFound(String detail) {

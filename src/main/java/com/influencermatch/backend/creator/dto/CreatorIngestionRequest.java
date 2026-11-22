@@ -16,6 +16,7 @@ public class CreatorIngestionRequest {
   private String externalId;
   private String userName;
   private String displayName;
+  @com.fasterxml.jackson.annotation.JsonAlias("avatar_url")
   private String avatarUrl;
   private String creatorType;
   private String location;

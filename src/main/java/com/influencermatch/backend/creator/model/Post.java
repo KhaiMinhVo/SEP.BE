@@ -49,7 +49,7 @@ public class Post {
   @Column(name = "posted_at", length = 100)
   private String postedAt;
 
-  @Column(name = "thumbnail_url", length = 1000)
+  @Column(name = "thumbnail_url", length = 2048)
   private String thumbnailUrl;
 
   @Column(name = "thumbnail_storage_key", length = 500)
@@ -60,6 +60,8 @@ public class Post {
 
   @Column(name = "thumbnail_size_bytes")
   private Long thumbnailSizeBytes;
+
+  private LocalDateTime thumbnailUpdatedAt;
 
   @CreationTimestamp
   @Column(name = "created_at", nullable = false, updatable = false)

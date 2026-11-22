@@ -110,6 +110,13 @@ public class CollaborationController {
         com.influencermatch.backend.common.dto.ApiResponse.ok(service.getCollaborationDetail(id)));
   }
 
+  @PostMapping(value = "/collaborations/{id}/evidence/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION')")
+  public com.influencermatch.backend.common.dto.ApiResponse<EvidenceAssetResponse> uploadImage(
+      @PathVariable UUID id, @RequestPart("file") org.springframework.web.multipart.MultipartFile file) {
+    return com.influencermatch.backend.common.dto.ApiResponse.ok(service.uploadEvidenceImage(id, file));
+  }
+
   @PostMapping("/collaborations/{id}/evidence")
   @PreAuthorize("hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION')")
   @Operation(

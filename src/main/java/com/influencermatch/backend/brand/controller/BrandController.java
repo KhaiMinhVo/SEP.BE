@@ -73,6 +73,16 @@ public class BrandController {
     return ok(service.get(id, auth));
   }
 
+  @PostMapping(value = "/me/images/{kind}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+  @PreAuthorize("hasAuthority('UPDATE_BRAND_PROFILE')")
+  public ResponseEntity<ApiResponse<BrandResponse>> uploadImage(
+      @PathVariable String kind, @RequestPart("file") org.springframework.web.multipart.MultipartFile file,
+      Authentication auth, @RequestHeader(value = "If-Match", required = false) String revision) {
+    if (!java.util.Set.of("logo", "cover").contains(kind))
+      throw new com.influencermatch.backend.exception.ValidationException("Unknown brand image type");
+    return ok(service.uploadImage("logo".equals(kind), file, auth, revision));
+  }
+
   @PostMapping("/me/onboarding/complete")
   @PreAuthorize("hasAuthority('UPDATE_BRAND_PROFILE')")
   @Operation(summary = "Complete onboarding; current If-Match required")

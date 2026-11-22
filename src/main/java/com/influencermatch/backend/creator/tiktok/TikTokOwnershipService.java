@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
 
 /** Fresh TikTok proof is applied here; no provider HTTP or token storage in this transaction. */
+@lombok.extern.slf4j.Slf4j
 @Service
 @RequiredArgsConstructor
 public class TikTokOwnershipService {
@@ -35,6 +36,9 @@ public class TikTokOwnershipService {
   private final Clock clock;
   private final TikTokIdentityResolver resolver;
   @PersistenceContext private EntityManager em;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.storage.CloudinaryStorageService cloudinaryStorageService;
 
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public TikTokSessionStore.Result<TikTokDtos.Callback> apply(
@@ -162,7 +166,7 @@ public class TikTokOwnershipService {
     creator.setUserName(username);
     creator.setProfileUrl("https://www.tiktok.com/@" + username);
     if (identity.displayName() != null) creator.setDisplayName(identity.displayName());
-    if (identity.avatarUrl() != null) creator.setAvatarUrl(identity.avatarUrl());
+    if (identity.avatarUrl() != null) applyCreatorAvatar(creator, identity.avatarUrl(), username);
     boolean alreadyOwned = creator.getMaster() != null;
     var master = masters.findByUserId(user.getId()).orElse(null);
     if (master == null)
@@ -282,5 +286,45 @@ public class TikTokOwnershipService {
     session.setOpenId(null);
     session.setUsername(null);
     session.setDisplayName(null);
+  }
+
+  private void applyCreatorAvatar(Creator creator, String rawAvatarUrl, String username) {
+    if (rawAvatarUrl == null || rawAvatarUrl.isBlank()) return;
+    String candidate = rawAvatarUrl.trim();
+    try {
+      var uri = java.net.URI.create(candidate);
+      if (!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))
+          || uri.getHost() == null || uri.getUserInfo() != null || candidate.length() > 2048) return;
+    } catch (IllegalArgumentException invalid) {
+      return;
+    }
+    if (candidate.equals(creator.getAvatarUrl()) && creator.getAvatarStorageKey() != null) return;
+    if (cloudinaryStorageService != null && cloudinaryStorageService.isConfigured()) {
+      try {
+        var uploaded = cloudinaryStorageService.uploadFromUrl(candidate,
+            com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CREATOR_AVATAR,
+            username != null ? username : "creator");
+        if (uploaded.isPresent()) {
+          var stored = uploaded.get();
+          creator.setAvatarUrl(stored.url());
+          creator.setAvatarStorageKey(stored.storageKey());
+          creator.setAvatarMimeType(stored.mimeType());
+          creator.setAvatarSizeBytes(stored.sizeBytes());
+          creator.setAvatarUpdatedAt(stored.updatedAt());
+          return;
+        }
+      } catch (Exception failure) {
+        log.warn("Avatar cloud sync failed; preserving the existing image for creator {}", creator.getId());
+      }
+    }
+    // Best effort cloud persistence must not leave a newly crawled creator without an image.
+    // Never associate a temporary crawler URL with metadata belonging to another cloud asset.
+    if (creator.getAvatarUrl() == null || creator.getAvatarUrl().isBlank()) {
+      creator.setAvatarUrl(candidate);
+      creator.setAvatarStorageKey(null);
+      creator.setAvatarMimeType(null);
+      creator.setAvatarSizeBytes(null);
+      creator.setAvatarUpdatedAt(null);
+    }
   }
 }

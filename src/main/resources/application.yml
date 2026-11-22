@@ -24,8 +24,8 @@ server:
 spring:
   servlet:
     multipart:
-      max-file-size: 5MB
-      max-request-size: 6MB
+      max-file-size: 10MB
+      max-request-size: 11MB
   mail:
     host: ${SMTP_HOST:}
     port: ${SMTP_PORT:587}
@@ -246,3 +246,13 @@ gemini:
   base-url: https://generativelanguage.googleapis.com/v1beta/models
   max-output-tokens: 2048
   temperature: 0.3
+
+# ------------------------------------------------------------------------------------
+#  Cloudinary Storage (Avatars, Campaign Covers, Deliverables & Crawled Media)
+# ------------------------------------------------------------------------------------
+cloudinary:
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+  api-key: ${CLOUDINARY_API_KEY:}
+  api-secret: ${CLOUDINARY_API_SECRET:}
+  url: ${CLOUDINARY_URL:}
+

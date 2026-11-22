@@ -33,6 +33,8 @@ public class CreatorClaimResolutionService {
   @org.springframework.beans.factory.annotation.Autowired private java.time.Clock clock;
   @org.springframework.beans.factory.annotation.Autowired(required = false)
   private com.influencermatch.backend.creator.client.CrawlerServiceClient crawlerServiceClient;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.storage.CloudinaryStorageService cloudinaryStorageService;
   @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager em;
   private final CreatorRepository creatorRepository;
   private final CreatorMasterRepository creatorMasterRepository;
@@ -136,7 +138,7 @@ public class CreatorClaimResolutionService {
                 creator.setDisplayName(resolveRes.getCreatorInfo().getDisplayName());
               }
               if (resolveRes.getCreatorInfo().getAvatarUrl() != null && !resolveRes.getCreatorInfo().getAvatarUrl().isBlank()) {
-                creator.setAvatarUrl(resolveRes.getCreatorInfo().getAvatarUrl());
+                applyCreatorAvatar(creator, resolveRes.getCreatorInfo().getAvatarUrl());
               }
             }
           }
@@ -252,5 +254,45 @@ public class CreatorClaimResolutionService {
         .canonicalName(master.getCanonicalName())
         .status("AUTHORIZED")
         .build();
+  }
+
+  private void applyCreatorAvatar(Creator creator, String rawAvatarUrl) {
+    if (rawAvatarUrl == null || rawAvatarUrl.isBlank()) return;
+    String candidate = rawAvatarUrl.trim();
+    try {
+      var uri = java.net.URI.create(candidate);
+      if (!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))
+          || uri.getHost() == null || uri.getUserInfo() != null || candidate.length() > 2048) return;
+    } catch (IllegalArgumentException invalid) {
+      return;
+    }
+    if (candidate.equals(creator.getAvatarUrl()) && creator.getAvatarStorageKey() != null) return;
+    if (cloudinaryStorageService != null && cloudinaryStorageService.isConfigured()) {
+      try {
+        var uploaded = cloudinaryStorageService.uploadFromUrl(candidate,
+            com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CREATOR_AVATAR,
+            creator.getUserName() != null ? creator.getUserName() : "creator");
+        if (uploaded.isPresent()) {
+          var stored = uploaded.get();
+          creator.setAvatarUrl(stored.url());
+          creator.setAvatarStorageKey(stored.storageKey());
+          creator.setAvatarMimeType(stored.mimeType());
+          creator.setAvatarSizeBytes(stored.sizeBytes());
+          creator.setAvatarUpdatedAt(stored.updatedAt());
+          return;
+        }
+      } catch (Exception failure) {
+        log.warn("Avatar cloud sync failed; preserving the existing image for creator {}", creator.getId());
+      }
+    }
+    // Best effort cloud persistence must not leave a newly crawled creator without an image.
+    // Never associate a temporary crawler URL with metadata belonging to another cloud asset.
+    if (creator.getAvatarUrl() == null || creator.getAvatarUrl().isBlank()) {
+      creator.setAvatarUrl(candidate);
+      creator.setAvatarStorageKey(null);
+      creator.setAvatarMimeType(null);
+      creator.setAvatarSizeBytes(null);
+      creator.setAvatarUpdatedAt(null);
+    }
   }
 }

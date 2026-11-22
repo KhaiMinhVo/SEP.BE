@@ -49,6 +49,20 @@ public class Post {
   @Column(name = "posted_at", length = 100)
   private String postedAt;
 
+  @Column(name = "thumbnail_url", length = 2048)
+  private String thumbnailUrl;
+
+  @Column(name = "thumbnail_storage_key", length = 500)
+  private String thumbnailStorageKey;
+
+  @Column(name = "thumbnail_mime_type", length = 100)
+  private String thumbnailMimeType;
+
+  @Column(name = "thumbnail_size_bytes")
+  private Long thumbnailSizeBytes;
+
+  private LocalDateTime thumbnailUpdatedAt;
+
   @CreationTimestamp
   @Column(name = "created_at", nullable = false, updatable = false)
   private LocalDateTime createdAt;

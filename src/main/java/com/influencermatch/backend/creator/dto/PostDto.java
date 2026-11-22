@@ -18,4 +18,6 @@ public class PostDto {
   private Long comments;
   private Long shares;
   private String postedAt;
+  @com.fasterxml.jackson.annotation.JsonAlias({"thumbnail_url", "cover_url", "coverUrl"})
+  private String thumbnailUrl;
 }

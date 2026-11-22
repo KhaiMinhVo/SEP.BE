@@ -27,6 +27,9 @@ public class CampaignImageStorage {
   private final String bucket;
   private final String publicBase;
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.storage.CloudinaryStorageService cloudinaryStorageService;
+
   public CampaignImageStorage(
       @Value("${CAMPAIGN_IMAGE_R2_ENDPOINT:${COLLABORATION_VIDEO_R2_ENDPOINT:}}") String endpoint,
       @Value("${CAMPAIGN_IMAGE_R2_BUCKET:}") String bucket,
@@ -52,9 +55,31 @@ public class CampaignImageStorage {
         .build();
   }
 
-  public record Image(String imageUrl) {}
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.storage.ImageAssetService assets;
 
+  public record Image(String imageUrl, String storageKey, String mimeType, long sizeBytes,
+      java.time.LocalDateTime updatedAt) {}
+
+  private Image remember(UUID brandId, com.influencermatch.backend.storage.StoredMedia stored) {
+    assets.remember(brandId, com.influencermatch.backend.storage.ImageAssetService.CAMPAIGN, stored);
+    return new Image(stored.url(), stored.storageKey(), stored.mimeType(), stored.sizeBytes(), stored.updatedAt());
+  }
+
+  @org.springframework.transaction.annotation.Transactional
   public Image upload(UUID brandId, MultipartFile file) {
+    if (file == null || file.isEmpty() || file.getSize() > MAX_BYTES) {
+      throw new ValidationException("Choose an image up to 5 MB.");
+    }
+    if (cloudinaryStorageService != null && cloudinaryStorageService.isConfigured()) {
+      var stored = cloudinaryStorageService.uploadFile(
+          file,
+          com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CAMPAIGN_COVER,
+          brandId.toString()
+      );
+      return remember(brandId, stored);
+    }
+
     byte[] bytes;
     if (file == null || file.isEmpty() || file.getSize() > MAX_BYTES) {
       throw new ValidationException("Choose a JPG or PNG image up to 5 MB.");
@@ -69,42 +94,23 @@ public class CampaignImageStorage {
     String key = "campaign-images/" + brandId + "/" + UUID.randomUUID() + "." + format;
     try {
       client.putObject(r -> r.bucket(bucket).key(key)
-          .contentType(format.equals("png") ? "image/png" : "image/jpeg")
+          .contentType(format.equals("jpg") ? "image/jpeg" : "image/" + format)
           .cacheControl("public, max-age=31536000, immutable"), RequestBody.fromBytes(bytes));
     } catch (RuntimeException e) {
       throw unavailable();
     }
-    return new Image(publicBase + "/" + key);
+    return remember(brandId, new com.influencermatch.backend.storage.StoredMedia(
+        publicBase + "/" + key, key, format.equals("jpg") ? "image/jpeg" : "image/" + format,
+        bytes.length, null, null, java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)));
   }
 
   static String validateImage(byte[] bytes) {
-    if (bytes.length == 0 || bytes.length > MAX_BYTES) throw new ValidationException("Image exceeds 5 MB.");
-    try (var input = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
-      var readers = ImageIO.getImageReaders(input);
-      if (!readers.hasNext()) throw new ValidationException("Only JPG and PNG images are supported.");
-      var reader = readers.next();
-      try {
-        String format = reader.getFormatName().toLowerCase(java.util.Locale.ROOT);
-        if (!format.equals("png") && !format.equals("jpeg") && !format.equals("jpg")) {
-          throw new ValidationException("Only JPG and PNG images are supported.");
-        }
-        reader.setInput(input);
-        int width = reader.getWidth(0), height = reader.getHeight(0);
-        if (width < 1 || height < 1 || (long) width * height > 20_000_000) {
-          throw new ValidationException("Image must not exceed 20 megapixels.");
-        }
-        reader.read(0); // Validate decodability, not just filename or declared MIME type.
-        return format.equals("png") ? "png" : "jpg";
-      } finally {
-        reader.dispose();
-      }
-    } catch (IOException e) {
-      throw new ValidationException("Image file is damaged or invalid.");
-    }
+    if (bytes == null || bytes.length > MAX_BYTES) throw new ValidationException("Image exceeds 5 MB.");
+    return com.influencermatch.backend.storage.CloudinaryStorageService.validateImage(bytes);
   }
 
   private BusinessException unavailable() {
-    return new BusinessException(ErrorCode.CAMPAIGN_IMAGE_UNAVAILABLE, "Campaign image storage is not available. You can use an HTTPS image link instead.");
+    return new BusinessException(ErrorCode.CAMPAIGN_IMAGE_UNAVAILABLE, "Campaign image storage is not available. Try again later.");
   }
 
   @PreDestroy

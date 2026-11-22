@@ -10,6 +10,7 @@ import com.influencermatch.backend.common.BaseEntity;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
@@ -35,6 +36,19 @@ public class Campaign extends BaseEntity {
 
   @Column(length = 2048)
   private String imageUrl;
+
+
+  @Column(name = "image_storage_key", length = 500)
+  private String imageStorageKey;
+
+  @Column(name = "image_mime_type", length = 100)
+  private String imageMimeType;
+
+  @Column(name = "image_size_bytes")
+  private Long imageSizeBytes;
+
+  @Column(name = "image_updated_at")
+  private LocalDateTime imageUpdatedAt;
 
   @Column(length = 500)
   private String productService;

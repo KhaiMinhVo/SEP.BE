@@ -26,6 +26,9 @@ public class CreatorIngestionService {
   private final jakarta.persistence.EntityManager entityManager;
   private final ShortlistNotificationService shortlistNotificationService;
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.storage.CloudinaryStorageService cloudinaryStorageService;
+
   @Autowired private org.springframework.context.ApplicationEventPublisher shortlistEvents;
 
   @Autowired
@@ -109,7 +112,7 @@ public class CreatorIngestionService {
       creator.setDisplayName(request.getDisplayName());
     }
     if (request.getAvatarUrl() != null) {
-      creator.setAvatarUrl(request.getAvatarUrl());
+      applyCreatorAvatar(creator, request.getAvatarUrl());
     }
     if (request.getLocation() != null) {
       creator.setLocation(request.getLocation());
@@ -217,6 +220,8 @@ public class CreatorIngestionService {
     metric = metricRepository.save(metric);
 
     if (request.getRecentPosts() != null && !request.getRecentPosts().isEmpty()) {
+      var previousPosts = postRepository.findByCreatorId(savedCreator.getId()).stream()
+          .collect(java.util.stream.Collectors.toMap(Post::getPlatformPostId, p -> p, (a, b) -> a));
       postRepository.deleteByCreatorId(savedCreator.getId());
       java.util.Set<String> seenPostIds = new java.util.HashSet<>();
       int count = 0;
@@ -241,6 +246,26 @@ public class CreatorIngestionService {
                 .shares(dto.getShares())
                 .postedAt(dto.getPostedAt())
                 .build();
+        var previous = previousPosts.get(pid);
+        if (previous != null) {
+          post.setThumbnailUrl(previous.getThumbnailUrl());
+          post.setThumbnailStorageKey(previous.getThumbnailStorageKey());
+          post.setThumbnailMimeType(previous.getThumbnailMimeType());
+          post.setThumbnailSizeBytes(previous.getThumbnailSizeBytes());
+          post.setThumbnailUpdatedAt(previous.getThumbnailUpdatedAt());
+        }
+        if (dto.getThumbnailUrl() != null && !dto.getThumbnailUrl().isBlank()
+            && !dto.getThumbnailUrl().equals(post.getThumbnailUrl()) && cloudinaryStorageService != null) {
+          cloudinaryStorageService.uploadFromUrl(dto.getThumbnailUrl(),
+              com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_POST_THUMBNAIL, pid)
+              .ifPresent(media -> {
+                post.setThumbnailUrl(media.url());
+                post.setThumbnailStorageKey(media.storageKey());
+                post.setThumbnailMimeType(media.mimeType());
+                post.setThumbnailSizeBytes(media.sizeBytes());
+                post.setThumbnailUpdatedAt(media.updatedAt());
+              });
+        }
         postRepository.save(post);
         count++;
         if (count >= MAX_RECENT_POSTS) {
@@ -285,5 +310,45 @@ public class CreatorIngestionService {
         .message("REJECTED".equals(metric.getCreatorType()) || "BRAND".equals(metric.getCreatorType())
             ? "Creator remains excluded by manager review" : "Creator data ingested successfully")
         .build();
+  }
+
+  private void applyCreatorAvatar(Creator creator, String rawAvatarUrl) {
+    if (rawAvatarUrl == null || rawAvatarUrl.isBlank()) return;
+    String candidate = rawAvatarUrl.trim();
+    try {
+      var uri = java.net.URI.create(candidate);
+      if (!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))
+          || uri.getHost() == null || uri.getUserInfo() != null || candidate.length() > 2048) return;
+    } catch (IllegalArgumentException invalid) {
+      return;
+    }
+    if (candidate.equals(creator.getAvatarUrl()) && creator.getAvatarStorageKey() != null) return;
+    if (cloudinaryStorageService != null && cloudinaryStorageService.isConfigured()) {
+      try {
+        var uploaded = cloudinaryStorageService.uploadFromUrl(candidate,
+            com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CREATOR_AVATAR,
+            creator.getUserName() != null ? creator.getUserName() : "creator");
+        if (uploaded.isPresent()) {
+          var stored = uploaded.get();
+          creator.setAvatarUrl(stored.url());
+          creator.setAvatarStorageKey(stored.storageKey());
+          creator.setAvatarMimeType(stored.mimeType());
+          creator.setAvatarSizeBytes(stored.sizeBytes());
+          creator.setAvatarUpdatedAt(stored.updatedAt());
+          return;
+        }
+      } catch (Exception failure) {
+        log.warn("Avatar cloud sync failed; preserving the existing image for creator {}", creator.getId());
+      }
+    }
+    // Best effort cloud persistence must not leave a newly crawled creator without an image.
+    // Never associate a temporary crawler URL with metadata belonging to another cloud asset.
+    if (creator.getAvatarUrl() == null || creator.getAvatarUrl().isBlank()) {
+      creator.setAvatarUrl(candidate);
+      creator.setAvatarStorageKey(null);
+      creator.setAvatarMimeType(null);
+      creator.setAvatarSizeBytes(null);
+      creator.setAvatarUpdatedAt(null);
+    }
   }
 }

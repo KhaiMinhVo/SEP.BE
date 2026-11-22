@@ -543,6 +543,33 @@ public class CollaborationService {
         deals != null ? deals.channels(c.getId()) : Collections.emptyList());
   }
 
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.storage.CloudinaryStorageService imageStorage;
+
+  @Transactional
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION')")
+  public EvidenceAssetResponse uploadEvidenceImage(UUID collaborationId,
+      org.springframework.web.multipart.MultipartFile file) {
+    if (Permissions.actor().getRole() != Role.CREATOR)
+      throw new ForbiddenException("Only Creator may attach collaboration evidence");
+    execution.progress(execution.lock(collaborationId, false, Permission.RESPOND_OWN_COOPERATION));
+    var c = collaborations.findById(collaborationId)
+        .orElseThrow(() -> new NotFoundException("Collaboration not found"));
+    requireCollaborationAccess(c);
+    var media = imageStorage.uploadFile(file,
+        com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CAMPAIGN_DELIVERABLE,
+        collaborationId.toString());
+    var asset = EvidenceAsset.builder().collaboration(c)
+        .outcome(outcomes.findByCollaborationId(collaborationId).orElse(null))
+        .assetType("INSIGHTS_SCREENSHOT").storageUrl(media.url()).source("CREATOR_SUBMITTED")
+        .storageKey(media.storageKey()).mimeType(media.mimeType()).sizeBytes(media.sizeBytes())
+        .imageUpdatedAt(media.updatedAt()).uploadedAt(media.updatedAt()).build();
+    asset = evidenceAssets.save(asset);
+    return new EvidenceAssetResponse(asset.getId(), collaborationId,
+        asset.getOutcome() == null ? null : asset.getOutcome().getId(), asset.getAssetType(),
+        asset.getStorageUrl(), asset.getSource(), asset.getUploadedAt());
+  }
+
   @Transactional
   public EvidenceAssetResponse submitEvidence(UUID collaborationId, SubmitEvidenceRequest request) {
     validate(request);

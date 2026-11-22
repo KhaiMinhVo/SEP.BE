@@ -12,6 +12,9 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.influencermatch.site
 
     steps:
       - name: SSH and Deploy to VPS

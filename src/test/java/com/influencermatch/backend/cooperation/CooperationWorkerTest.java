@@ -22,11 +22,14 @@ class CooperationWorkerTest {
             new ClaimEmailCipher.Payload(
                 "booking@example.test",
                 "https://frontend.example/cooperation-invitations?token=private"));
+    when(delivery.currentInvitationLink(anyString()))
+        .thenReturn("https://frontend.example/cooperation-invitations?token=private");
     doThrow(new IllegalStateException("private SMTP response"))
         .when(sender)
         .sendCooperationInvitation(anyString(), anyString());
     assertThatCode(() -> new CooperationWorker(delivery, cipher, sender).process(id))
         .doesNotThrowAnyException();
+    verify(sender).sendCooperationInvitation(anyString(), anyString());
     verify(delivery).finish(work, false);
   }
 

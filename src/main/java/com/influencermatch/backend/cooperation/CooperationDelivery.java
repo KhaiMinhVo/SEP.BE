@@ -6,6 +6,7 @@ import com.influencermatch.backend.auth.service.VerificationEmailSender;
 import com.influencermatch.backend.creator.email.ClaimEmailCipher;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.security.permission.*;
+import java.net.URI;
 import java.security.SecureRandom;
 import java.time.*;
 import java.util.*;
@@ -63,6 +64,10 @@ public class CooperationDelivery {
   @Value("${application.auth.creator-invitation.frontend-base-url:http://localhost:5173}")
   String frontend;
 
+  private static final String INVITATION_PATH = "/cooperation-invitations";
+  private static final String TOKEN_PARAMETER = "token=";
+  private static final Pattern TOKEN = Pattern.compile("[a-f0-9]{64}");
+
   static final Pattern EMAIL =
       Pattern.compile(
           "[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\\.[A-Za-z]{2,}");
@@ -109,19 +114,11 @@ public class CooperationDelivery {
     String emailStatus = sendEmail ? "QUEUED" : "MANUAL_LINK".equals(method) ? "MANUAL_REQUIRED" : "NOT_REQUESTED";
     cipher.requireConfigured();
     if (sendEmail) sender.requireConfigured();
-    var base = java.net.URI.create(frontend);
-    if (!Set.of("http", "https").contains(base.getScheme())
-        || base.getHost() == null
-        || base.getUserInfo() != null
-        || base.getRawQuery() != null
-        || base.getRawFragment() != null)
-      throw new BusinessException(
-          ErrorCode.EMAIL_DELIVERY_UNAVAILABLE, "Cooperation frontend URL is unavailable");
     byte[] bytes = new byte[32];
     new SecureRandom().nextBytes(bytes);
     String token = HexFormat.of().formatHex(bytes);
     UUID invitation = UUID.randomUUID(), job = UUID.randomUUID();
-    String link = frontend.replaceAll("/+$", "") + "/cooperation-invitations?token=" + token;
+    String link = invitationLink(token);
     store.db.update(
         "insert into cooperation_invitation values(?,?,?,?,'PENDING',?,?)",
         invitation,
@@ -208,9 +205,51 @@ public class CooperationDelivery {
     return (Instant) value;
   }
 
+  private String invitationLink(String token) {
+    URI base = parseInvitationUri(frontend);
+    String scheme = base.getScheme();
+    if ((!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
+        || base.getHost() == null
+        || base.getRawUserInfo() != null
+        || base.getRawQuery() != null
+        || base.getRawFragment() != null)
+      throw new BusinessException(
+          ErrorCode.EMAIL_DELIVERY_UNAVAILABLE, "Cooperation frontend URL is unavailable");
+    return base.toString().replaceAll("/+$", "") + INVITATION_PATH + "?" + TOKEN_PARAMETER + token;
+  }
+
+  String currentInvitationLink(String storedLink) {
+    URI stored = parseInvitationUri(storedLink);
+    String query = stored.getRawQuery();
+    if (stored.getRawPath() == null
+        || !stored.getRawPath().endsWith(INVITATION_PATH)
+        || stored.getRawFragment() != null
+        || query == null
+        || !query.startsWith(TOKEN_PARAMETER))
+      throw invalidStoredLink();
+    String token = query.substring(TOKEN_PARAMETER.length());
+    if (!TOKEN.matcher(token).matches()) throw invalidStoredLink();
+    return invitationLink(token);
+  }
+
+  private static URI parseInvitationUri(String value) {
+    if (value == null) throw invalidStoredLink();
+    try {
+      return URI.create(value);
+    } catch (IllegalArgumentException e) {
+      // URI parsing errors may contain the invitation token.
+      throw invalidStoredLink();
+    }
+  }
+
+  private static BusinessException invalidStoredLink() {
+    return new BusinessException(
+        ErrorCode.EMAIL_DELIVERY_UNAVAILABLE, "Cooperation invitation URL is unavailable");
+  }
+
   @Transactional(readOnly = true)
   public Object preview(String token) {
-    if (token == null || !token.matches("[a-f0-9]{64}"))
+    if (token == null || !TOKEN.matcher(token).matches())
       throw new ValidationException("Invalid cooperation invitation");
     var i =
         store.one(
@@ -244,7 +283,7 @@ public class CooperationDelivery {
         "invitationId",
         invitation,
         "link",
-        cipher.decrypt(j.get("payload").toString()).link(),
+        currentInvitationLink(cipher.decrypt(j.get("payload").toString()).link()),
         "expiresAt",
         i.get("expires_at"));
   }
@@ -386,7 +425,10 @@ public class CooperationDelivery {
     if ("PROCESSING".equals(j.get("status")) && instant(j.get("lease_until")).isAfter(store.now()))
       return null;
     if (!valid(i)) {
-      terminate(id, instant(i.get("expires_at")).isAfter(store.now()) ? "CANCELLED" : "EXPIRED");
+      String status = "SENT".equals(j.get("status"))
+          ? "SENT"
+          : instant(i.get("expires_at")).isAfter(store.now()) ? "CANCELLED" : "EXPIRED";
+      terminate(id, status);
       return null;
     }
     boolean due =
@@ -431,8 +473,10 @@ public class CooperationDelivery {
         || !instant(j.get("lease_until")).isAfter(store.now())) return;
     if (success) {
       store.db.update(
-          "update cooperation_email_job set status='SENT',sent_at=?,next_attempt_at=null,lease_until=null,processing_token=null where id=?",
-          store.time(), work.id());
+          "update cooperation_email_job set status='SENT',sent_at=?,next_attempt_at=null,"
+              + " lease_until=null,processing_token=null where id=?",
+          store.time(),
+          work.id());
     } else {
       int attempts = ((Number) j.get("cycle_attempts")).intValue();
       store.db.update(

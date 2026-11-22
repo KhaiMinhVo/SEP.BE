@@ -3,6 +3,10 @@
 #  Environment: Development (default)
 # --------------------------------------------------------------------------------------------------------------------------
 
+creator-activity:
+  warning-days: ${CREATOR_ACTIVITY_WARNING_DAYS:30}
+  max-data-age-days: ${CREATOR_ACTIVITY_MAX_DATA_AGE_DAYS:7}
+
 server:
   port: 8080
   forward-headers-strategy: native

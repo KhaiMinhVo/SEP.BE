@@ -66,6 +66,10 @@ public class CreatorDiscoveryService {
             campaign.getNiches() == null ? "" : String.join(" ", campaign.getNiches()),
             firstText(req.getKeyword())).trim();
         if (hasText(req.getKeyword())) queryText = req.getKeyword().trim();
+        req.setRelevanceQuery(DiscoveryRelevanceQuery.build(
+            campaign.getProductService(), campaign.getBrief(),
+            campaign.getNiches() == null ? "" : String.join(" ", campaign.getNiches()),
+            req.getKeyword()));
         if (!queryText.isBlank()) {
             try {
                 var vector = aiServiceClient.getEmbedding(queryText);

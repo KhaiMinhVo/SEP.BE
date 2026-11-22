@@ -1,6 +1,7 @@
 package com.influencermatch.backend.creator.client;
 
 import com.influencermatch.backend.creator.dto.CrawlerResolveAuthorResponse;
+import com.influencermatch.backend.creator.dto.PostMetricsDto;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -364,6 +365,31 @@ public class CrawlerServiceClient {
       throw new com.influencermatch.backend.exception.BusinessException(
           com.influencermatch.backend.exception.ErrorCode.TIKTOK_IDENTITY_RESOLUTION_FAILED,
           "Unable to verify TikTok identity; start a new connection");
+    }
+  }
+
+  /**
+   * Bóc tách chỉ số thời gian thực của bài đăng qua Python Crawler (WF-03 Post Metrics).
+   * Gọi tới endpoint POST /api/v1/crawl/post-metrics.
+   */
+  public Optional<PostMetricsDto.PostMetricsResponse> fetchPostMetrics(String postUrl) {
+    if (postUrl == null || postUrl.isBlank()) {
+      return Optional.empty();
+    }
+    String cleanUrl = postUrl.trim();
+    try {
+      PostMetricsDto.PostMetricsResponse response =
+          restClient
+              .post()
+              .uri("/post-metrics")
+              .contentType(MediaType.APPLICATION_JSON)
+              .body(Map.of("post_url", cleanUrl))
+              .retrieve()
+              .body(PostMetricsDto.PostMetricsResponse.class);
+      return Optional.ofNullable(response);
+    } catch (Exception e) {
+      log.warn("Failed to fetch post metrics from crawler for {}: {}", cleanUrl, e.getMessage());
+      return Optional.empty();
     }
   }
 }

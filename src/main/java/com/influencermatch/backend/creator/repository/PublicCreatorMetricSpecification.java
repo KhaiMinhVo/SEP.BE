@@ -16,7 +16,9 @@ import org.springframework.data.jpa.domain.Specification;
 public class PublicCreatorMetricSpecification {
 
     public static Specification<PublicCreatorMetric> isFresh() {
-        return (root, query, cb) -> cb.equal(root.get("freshnessStatus").as(String.class), "FRESH");
+        return (root, query, cb) -> cb.and(
+            cb.equal(root.get("freshnessStatus").as(String.class), "FRESH"),
+            cb.isFalse(root.get("creator").get("discoveryHidden")));
     }
 
     public static Specification<PublicCreatorMetric> hasFollowersBetween(Long min, Long max) {

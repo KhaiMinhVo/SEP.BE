@@ -14,6 +14,7 @@ public class CreatorDiscoverySpecification {
     public static Specification<PublicCreatorMetric> buildHybridSpec(DiscoveryContext ctx, DiscoverySearchRequest req) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.isFalse(root.get("creator").get("discoveryHidden")));
 
             // 1. BUOC 1: EP DIEU KIEN CUNG TU CAMPAIGN (M3)
             if (ctx.getPlatforms() != null && !ctx.getPlatforms().isEmpty()) {

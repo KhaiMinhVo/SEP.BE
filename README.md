@@ -859,6 +859,7 @@ CRM progression is CONTACTED -> NEGOTIATING -> CONFIRMED, with DECLINED/CANCELLE
 - Effective permission `RESPOND_OWN_COOPERATION` defaults to CREATOR; access also requires ACTIVE, verified email and current ownership of **all** member channels. Old owners and unrelated accounts cannot read private terms after a transfer. Collaboration detail/list responses include `channels`; primary creator/relationship fields remain for compatibility.
 - `GET /creators/portal/notifications` reads the recipient's persisted cooperation notifications. `POST /creators/portal/notifications/{id}/read` marks only their own notification as read; invitation creation never marks it read.
 - Frontend route is `${CREATOR_INVITATION_FRONTEND_BASE_URL}/cooperation-invitations?token=...`. `GET /cooperation-invitations/preview?token=...` is public and returns only Brand/Campaign names, invitation message and expiry. It does not return fee, email, private terms or ownership and cannot accept a Deal or log in a user.
+- The VPS deployment sets CREATOR_INVITATION_FRONTEND_BASE_URL to https://www.influencermatch.site for production. Manual link retrieval and each email attempt use the current setting with the original invitation token and expiry.
 - Tokens use 32 random bytes, only SHA-256 hashes persist outside encrypted delivery payload. TTL is 7 days. Manual-link retrieval requires the sending Brand at `GET /cooperation-invitations/{invitationId}/manual-link`; only valid MANUAL_REQUIRED invitations expose the link there. Never log or publish these URLs.
 
 ### Outreach and delivery
@@ -872,8 +873,8 @@ Cooperation email uses a separate V28 job table and existing SMTP, TLS/timeouts 
 - States: QUEUED/PROCESSING/SENT/FAILED, MANUAL_REQUIRED, CANCELLED/EXPIRED.
 - Bounded shared mail executor: 2 threads, queue 100; recovery scan every 10 seconds.
 - Lease 2 minutes with processing token; old/expired workers cannot overwrite a newer result.
-- Five attempts per cycle, 15/30/60/120 second backoff. Replaced/expired/cancelled invitations do not dispatch; payload is erased at terminal state. FAILED retains ciphertext until retry or expiry.
-- `GET /cooperation-invitations/{id}/email-delivery` returns safe state/attempts/timing/canRetry. `POST .../{id}/retry-email` retries a valid FAILED job, minimum 60 seconds since last attempt, max five successful manual retry requests/hour/invitation. Same token and expiry remain.
+- Five attempts per cycle, 15/30/60/120 second backoff. Replaced, expired and cancelled invitations do not dispatch and their payload is erased. SENT and FAILED email jobs keep encrypted payload until the invitation expires or is invalidated to support resend and retry.
+- `GET /cooperation-invitations/{id}/email-delivery` returns delivery status, timing, canRetry and canResend. A valid FAILED email can use `POST .../{id}/retry-email` and a valid SENT email with retained payload can use `POST .../{id}/resend-email`. Both keep the same token and expiry, with at least 60 seconds between attempts and a shared limit of five manual requests per hour per invitation.
 - Delivery is at-least-once: SMTP may accept a message before a response is lost. Do not promise exactly-once or equate QUEUED with SENT.
 
 ### Budget, compatibility and deployment
@@ -1067,6 +1068,35 @@ The new password must contain 8–72 characters, fit within 72 UTF-8 bytes for B
 On success: `204 No Content`, BCrypt password update, authVersion increment, all sessions/refresh tokens revoked, and refresh cookie cleared atomically. Log in again on every device.
 Incorrect current password or invalid new password returns 400; unauthenticated/revoked sessions return 401; missing/invalid CSRF returns 403. Passwordless Google accounts must first use the existing password-setup flow.
 This source change does not deploy the endpoint or change any account password by itself.
+
+### Creator inactivity review (Data Manager)
+
+V46 adds creator discovery visibility and an audit trail. Only `DATA_MANAGER` may use
+`GET /api/v1/data/creator-activity?page=0&size=20&status=INACTIVE` (optional `hidden=true/false`).
+Pagination is zero based, with size 1..100. Omit `status` to inspect all accounts;
+`INACTIVE` sorts first, followed by `UNKNOWN` and `ACTIVE`.
+Each item includes creator identity, profile URL, last post date, days since last post,
+last observation date, crawl freshness, activity status, and current visibility.
+
+`CREATOR_ACTIVITY_WARNING_DAYS` defaults to 30 and `CREATOR_ACTIVITY_MAX_DATA_AGE_DAYS`
+defaults to 7, configured under `creator-activity` in application.yml. Assessment runs
+on every list request, so no scheduled scan or persisted warning can become outdated.
+Missing/invalid/future post dates, failed refreshes, or outdated observations produce
+`UNKNOWN`; recrawl before deciding whether the creator is inactive. ISO dates/timestamps
+and Unix seconds/milliseconds are supported; timestamps without a zone use UTC.
+New ingestion collection times and missing observation-time defaults are written in UTC.
+
+`PATCH /api/v1/data/creator-activity/{creatorId}/visibility` accepts
+`{"hidden":true,"reason":"No recent posts; reviewed crawl evidence"}`.
+Use `hidden:false` to restore. A nonblank reason of at most 500 characters is required.
+Changes are atomic and audit the Data Manager, reason, action, and time. Repeating the
+same visibility is idempotent. Existing authentication/session/CSRF requirements apply.
+Hidden accounts are excluded from creator listing, semantic/discovery search, and new
+recommendation candidate retrieval, including existing shortlist candidates. Profiles,
+shortlists, cooperation history, and past recommendation snapshots remain available.
+Crawling does not override a manager's visibility decision; restoration is manual.
+This repository supplies backend APIs only; the Data Manager frontend must consume
+the list and visibility endpoints to render warnings and action buttons.
 
 ### Managed niche migration after merging develop
 

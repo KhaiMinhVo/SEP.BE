@@ -19,6 +19,10 @@ import org.hibernate.annotations.UpdateTimestamp;
 @AllArgsConstructor
 @Builder
 public class Creator {
+  @Builder.Default
+  @Column(name = "discovery_hidden", nullable = false)
+  private boolean discoveryHidden = false;
+
   @ManyToOne(fetch = FetchType.LAZY)
   @JoinColumn(name = "master_id")
   @com.fasterxml.jackson.annotation.JsonIgnore

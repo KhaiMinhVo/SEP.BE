@@ -20,7 +20,10 @@ public final class CreatorClaimDtos {
   }
   public record ClaimResponse(UUID id,UUID creatorId,UUID claimantId,List<String> evidenceUrls,String note,
       CreatorClaimStatus status,UUID reviewerId,String reason,LocalDateTime reviewedAt,
-      UUID revokedById,String revokeReason,LocalDateTime revokedAt,LocalDateTime createdAt,LocalDateTime updatedAt) {}
+      UUID revokedById,String revokeReason,LocalDateTime revokedAt,LocalDateTime createdAt,LocalDateTime updatedAt,
+      String creatorHandle,String creatorName,String creatorPlatform,String creatorAvatar,
+      String claimantName,String claimantEmail,boolean linkedToClaimant,
+      com.influencermatch.backend.creator.portal.PortalDtos.Verification verification) {}
   public record ClaimChannel(UUID id, String platform, String externalId, String userName,
       String displayName, String profileUrl) {}
   public record PublicCreator(UUID id,String platform,String externalId,String userName,String displayName,

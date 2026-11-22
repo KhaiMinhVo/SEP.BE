@@ -20,6 +20,36 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class TikTokOAuthPostgresIntegrationTest extends TikTokTestSupport {
+  @Test
+  void cancelIsOwnerOnlyIdempotentAndBlocksCallback() throws Exception {
+    var s = start(Map.of("creatorId", channel.getId()));
+    String path = "/creators/portal/accounts/connect/tiktok/sessions/" + s.id() + "/cancel";
+    call(account(Role.CREATOR), post(path), null, 404);
+    String before = businessRows();
+    assertThat(call(actor, post(path), null, 200).path("data").path("status").asText()).isEqualTo("FAILED");
+    call(actor, post(path), null, 200);
+    callback(s, 409);
+    verify(provider, never()).verify(anyString());
+    assertThat(businessRows()).isEqualTo(before);
+  }
+
+  @Test
+  void cancellationDuringProviderExchangeCannotGrantOwnership() throws Exception {
+    var s = start(Map.of());
+    String before = businessRows();
+    when(provider.verify(anyString())).thenAnswer(i -> {
+      try (var pool = Executors.newSingleThreadExecutor()) {
+        pool.submit(() -> {
+          call(actor, post("/creators/portal/accounts/connect/tiktok/sessions/" + s.id() + "/cancel"), null, 200);
+          return null;
+        }).get(15, TimeUnit.SECONDS);
+      }
+      return new VerifiedAccount("id", "name", "Display");
+    });
+    callback(s, 409);
+    assertThat(businessRows()).isEqualTo(before);
+    assertThat(row(s.id())).contains("FAILED").doesNotContain("Display");
+  }
   @org.springframework.beans.factory.annotation.Autowired
   com.influencermatch.backend.auth.service.AuthSessionStore loginSessions;
 

@@ -258,6 +258,21 @@ public class TikTokSessionStore {
     return sessions.expire(clock.instant());
   }
 
+  @Transactional
+  public Result<TikTokDtos.Session> cancel(UUID id) {
+    var user = actor();
+    var session = sessions.lockById(id)
+        .filter(s -> s.getUser().getId().equals(user.getId()))
+        .orElseThrow(() -> new NotFoundException("TikTok session not found"));
+    em.refresh(session);
+    assertSession(session);
+    if (!"COMPLETED".equals(session.getStatus())) {
+      clear(session, "FAILED");
+      em.flush();
+    }
+    return view(id);
+  }
+
   private void clear(TikTokOAuthSession session, String status) {
     session.setStatus(status);
     session.setOpenId(null);

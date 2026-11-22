@@ -28,6 +28,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class CreatorClaimService {
+  @org.springframework.beans.factory.annotation.Autowired
+  private com.influencermatch.backend.creator.portal.CreatorPortalProjection verificationProjection;
   @org.springframework.beans.factory.annotation.Autowired private CreatorConflictAudit conflicts;
 
   @org.springframework.beans.factory.annotation.Autowired
@@ -122,12 +124,41 @@ public class CreatorClaimService {
 
   private PageResponse<ClaimResponse> list(
       CreatorClaimStatus status, UUID creatorId, UUID claimantId, int page, int size) {
+    return list(status, creatorId, claimantId, page, size, null);
+  }
+
+  @Transactional(readOnly = true)
+  @PreAuthorize("hasAuthority('REVIEW_CREATOR_CLAIM')")
+  public PageResponse<ClaimResponse> search(CreatorClaimStatus status, UUID creatorId,
+      UUID claimantId, int page, int size, String query) {
+    guard.read(Permission.REVIEW_CREATOR_CLAIM);
+    if (query != null && query.length() > 255) throw new ValidationException("Search is too long");
+    return list(status, creatorId, claimantId, page, size, query);
+  }
+
+  private PageResponse<ClaimResponse> list(
+      CreatorClaimStatus status, UUID creatorId, UUID claimantId, int page, int size, String query) {
     Specification<CreatorClaim> filter =
         (r, q, cb) -> {
           List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
           if (status != null) predicates.add(cb.equal(r.get("status"), status));
           if (creatorId != null) predicates.add(cb.equal(r.get("creator").get("id"), creatorId));
           if (claimantId != null) predicates.add(cb.equal(r.get("claimant").get("id"), claimantId));
+          if (query != null && !query.isBlank()) {
+            String term = query.trim().toLowerCase(Locale.ROOT);
+            String pattern = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+            var matches = new ArrayList<jakarta.persistence.criteria.Predicate>();
+            matches.add(cb.like(cb.lower(r.get("creator").get("userName")), pattern, '\\'));
+            matches.add(cb.like(cb.lower(r.get("creator").get("displayName")), pattern, '\\'));
+            matches.add(cb.like(cb.lower(r.get("claimant").get("fullName")), pattern, '\\'));
+            matches.add(cb.like(cb.lower(r.get("claimant").get("email")), pattern, '\\'));
+            try {
+              var id = UUID.fromString(term);
+              matches.add(cb.equal(r.get("creator").get("id"), id));
+              matches.add(cb.equal(r.get("claimant").get("id"), id));
+            } catch (IllegalArgumentException ignored) { /* Text search. */ }
+            predicates.add(cb.or(matches.toArray(jakarta.persistence.criteria.Predicate[]::new)));
+          }
           return cb.and(predicates.toArray(jakarta.persistence.criteria.Predicate[]::new));
         };
     return PageResponse.from(
@@ -349,6 +380,9 @@ public class CreatorClaimService {
   }
 
   private ClaimResponse response(CreatorClaim c) {
+    var channel = c.getCreator();
+    var projected = verificationProjection == null ? null
+        : verificationProjection.project(List.of(channel.getId()), false).get(channel.getId());
     return new ClaimResponse(
         c.getId(),
         c.getCreator().getId(),
@@ -363,7 +397,11 @@ public class CreatorClaimService {
         c.getRevokeReason(),
         c.getRevokedAt(),
         c.getCreatedAt(),
-        c.getUpdatedAt());
+        c.getUpdatedAt(),
+        channel.getUserName(), channel.getDisplayName(), channel.getPlatform(), channel.getAvatarUrl(),
+        c.getClaimant().getFullName(), c.getClaimant().getEmail(),
+        channel.getOwner() != null && channel.getOwner().getId().equals(c.getClaimant().getId()),
+        projected == null ? null : projected.verification());
   }
 
   private void validate(Object request) {

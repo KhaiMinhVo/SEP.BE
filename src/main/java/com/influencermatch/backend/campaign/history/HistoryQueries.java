@@ -184,15 +184,18 @@ public class HistoryQueries {
         local(r.get("updated_at")),
         number(r.get("accepted_outcome_revision")),
         "LEGACY".equals(r.get("execution_source")) ? "LEGACY_UNVERIFIED"
-          : "BRAND_MANAGED".equals(r.get("management_mode")) ? "BRAND_EXTERNAL_REPORTED" : "SELF_REPORTED",
+          : (String) r.get("outcome_metric_source"),
         "CURRENT_PROFILE",
         channels);
   }
 
   static final String COLLABORATIONS =
-      "select c.*,d.id deal_id,coalesce(a.outcome_revision,r.accepted_outcome_revision) accepted_outcome_revision from collaboration c left join"
+      "select c.*,d.id deal_id,coalesce(a.outcome_revision,r.accepted_outcome_revision) accepted_outcome_revision,latest.outcome_metric_source from collaboration c left join"
           + " cooperation_deal d on d.collaboration_id=c.id left join creator_review r on"
-          + " r.collaboration_id=c.id left join collaboration_outcome_acceptance a on a.collaboration_id=c.id and a.reopened_at is null where c.campaign_id=?";
+          + " r.collaboration_id=c.id left join collaboration_outcome_acceptance a on a.collaboration_id=c.id and a.reopened_at is null"
+          + " left join lateral (select coalesce(o.calculation->>'metricSource',o.source) outcome_metric_source"
+          + " from collaboration_outcome_revision o where o.collaboration_id=c.id"
+          + " and (a.outcome_revision is null or o.revision=a.outcome_revision) order by o.revision desc limit 1) latest on true where c.campaign_id=?";
 
   Report report(UUID campaign) {
     var publications = new HashMap<UUID, Map<String, String>>();

@@ -58,6 +58,10 @@ public class ShortlistServiceImpl implements ShortlistService {
   @Autowired private ShortlistItemWriter writer;
   @Autowired private ShortlistProjectionService projection;
   @Autowired private com.influencermatch.backend.campaign.service.CampaignWriteLock writeLocks;
+  private void requireOpenCampaign(UUID id) {
+    if (writeLocks.owned(id).getStatus() == com.influencermatch.backend.campaign.enums.CampaignStatus.CLOSED)
+      throw new BusinessException(ErrorCode.INVALID_CAMPAIGN_TRANSITION, "Closed campaign is read only");
+  }
 
   @Autowired
   public ShortlistServiceImpl(
@@ -291,7 +295,7 @@ public class ShortlistServiceImpl implements ShortlistService {
       UUID campaignId, UUID shortlistItemId, UpdateShortlistItemRequest request) {
     Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
     ownership.requireOwned(campaignId);
-    writeLocks.owned(campaignId);
+    requireOpenCampaign(campaignId);
 
     ShortlistItem item =
         shortlistItemRepository
@@ -331,7 +335,7 @@ public class ShortlistServiceImpl implements ShortlistService {
       UUID campaignId, BatchUpdateStatusRequest request) {
     Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
     ownership.requireOwned(campaignId);
-    writeLocks.owned(campaignId);
+    requireOpenCampaign(campaignId);
 
     List<ShortlistItem> items =
         shortlistItemRepository.findByCampaignIdAndIdIn(campaignId, request.getItemIds()).stream()
@@ -354,7 +358,7 @@ public class ShortlistServiceImpl implements ShortlistService {
   public void removeCreatorFromShortlist(UUID campaignId, UUID shortlistItemId) {
     Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
     ownership.requireOwned(campaignId);
-    writeLocks.owned(campaignId);
+    requireOpenCampaign(campaignId);
 
     ShortlistItem item =
         shortlistItemRepository

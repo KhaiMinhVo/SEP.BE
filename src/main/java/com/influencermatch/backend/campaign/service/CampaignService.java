@@ -350,6 +350,8 @@ public class CampaignService {
   public void prepareForRecommendation(UUID id, String revision) {
     Permissions.require(Permission.RUN_RECOMMENDATION);
     Campaign campaign = writeLocks.owned(id);
+    if (campaign.getStatus() == CampaignStatus.CLOSED)
+      throw new ConflictException(ErrorCode.INVALID_CAMPAIGN_TRANSITION, "Closed campaign is read only");
     if (campaign.getStatus() != CampaignStatus.DRAFT) return;
     Permissions.require(Permission.CHANGE_CAMPAIGN_STATUS);
     CampaignRevision.require(revision, id, campaign.getCampaignRevision());

@@ -77,7 +77,7 @@ public class CampaignM3ContextService {
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public CampaignContext prepare(UUID id) {
     var c = locks.owned(id);
-    if (c.getStatus() == CampaignStatus.DRAFT || c.getStatus() == CampaignStatus.ARCHIVED)
+    if (c.getStatus() == CampaignStatus.DRAFT || c.getStatus() == CampaignStatus.ARCHIVED || c.getStatus() == CampaignStatus.CLOSED)
       throw new ConflictException(
           ErrorCode.CAMPAIGN_CONTEXT_NOT_READY,
           "Campaign must be READY_FOR_DISCOVERY, ACTIVE or COMPLETED");

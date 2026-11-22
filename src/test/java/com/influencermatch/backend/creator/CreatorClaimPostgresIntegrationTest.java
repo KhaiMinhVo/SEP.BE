@@ -128,6 +128,31 @@ class CreatorClaimPostgresIntegrationTest {
   }
 
   @Test
+  void reviewerSearchesAllClaimsAndReadsCurrentOwnershipProjection() throws Exception {
+    var owner = user(Role.CREATOR, true);
+    var reviewer = user(Role.DATA_MANAGER, true);
+    var c = channel();
+    String id = claim(owner, c);
+    var page = json.readTree(call(reviewer, get("/data/creator-claims")
+        .param("q", owner.getEmail()).param("size", "1"), null, 200).getResponse().getContentAsString()).path("data");
+    assertThat(page.path("totalElements").asInt()).isEqualTo(1);
+    var item = page.path("items").get(0);
+    assertThat(item.path("creatorHandle").asText()).isEqualTo(c.getUserName());
+    assertThat(item.path("claimantEmail").asText()).isEqualTo(owner.getEmail());
+    assertThat(item.path("linkedToClaimant").asBoolean()).isFalse();
+    var approved = json.readTree(call(reviewer, patch("/data/creator-claims/" + id + "/review"),
+        "{\"decision\":\"APPROVED\",\"reason\":\"Checked evidence\"}", 200)
+        .getResponse().getContentAsString()).path("data");
+    assertThat(approved.path("linkedToClaimant").asBoolean()).isTrue();
+    assertThat(approved.path("verification").path("environment").asText()).isEqualTo("MANUAL");
+    var revoked = json.readTree(call(reviewer, post("/data/creator-claims/" + id + "/revoke"),
+        "{\"reason\":\"Evidence withdrawn\"}", 200).getResponse().getContentAsString()).path("data");
+    assertThat(revoked.path("linkedToClaimant").asBoolean()).isFalse();
+    assertThat(revoked.path("verification").path("status").asText()).isEqualTo("UNVERIFIED");
+    call(user(Role.BRAND, true), get("/data/creator-claims").param("q", owner.getEmail()), null, 403);
+  }
+
+  @Test
   void lookupReturnsExactUnclaimedChannelsOnlyToEligibleCreators() throws Exception {
     var claimant = user(Role.CREATOR, true);
     var brand = user(Role.BRAND, true);

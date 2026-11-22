@@ -20,8 +20,9 @@ public class CreatorClaimReviewController {
   @GetMapping @Operation(summary="List claims for review")
   public ApiResponse<PageResponse<ClaimResponse>> list(@RequestParam(required=false) CreatorClaimStatus status,
       @RequestParam(required=false) UUID creatorId,@RequestParam(required=false) UUID claimantId,
-      @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) {
-    return ApiResponse.ok(service.pending(status,creatorId,claimantId,page,size));
+      @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size,
+      @RequestParam(required=false) String q) {
+    return ApiResponse.ok(service.search(status,creatorId,claimantId,page,size,q));
   }
   @GetMapping("/{id}") @Operation(summary="Read private claim evidence")
   public ApiResponse<ClaimResponse> detail(@PathVariable UUID id) {return ApiResponse.ok(service.detail(id));}

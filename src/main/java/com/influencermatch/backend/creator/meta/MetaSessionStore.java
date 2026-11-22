@@ -299,6 +299,20 @@ public class MetaSessionStore {
         session.getOauthFlow());
   }
 
+  /** Serializes cancellation with callback/confirmation; completed ownership is never undone. */
+  @Transactional
+  public MetaDtos.Session cancel(UUID id) {
+    owned(id);
+    var session = sessions.lockById(id).orElseThrow(() -> new NotFoundException("Meta session not found"));
+    em.refresh(session);
+    if (!"COMPLETED".equals(session.getStatus())) {
+      session.setStatus("FAILED");
+      session.setPayloadCiphertext(null);
+      em.flush();
+    }
+    return view(id);
+  }
+
   @Transactional(readOnly = true)
   public Selection selection(UUID id, String accountId) {
     var session = owned(id);

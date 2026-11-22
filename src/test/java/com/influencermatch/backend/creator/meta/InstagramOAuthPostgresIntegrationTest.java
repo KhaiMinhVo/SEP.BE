@@ -16,6 +16,14 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class InstagramOAuthPostgresIntegrationTest extends DirectInstagramTestSupport {
   @Test
+  void directInstagramUsesSharedCancellationWithoutGrantingOwnership() throws Exception {
+    var s = readyDirect();
+    call(creator, post(path(s) + "/cancel"), null, 200);
+    assertThat(sessions.findById(s.id()).orElseThrow().getPayloadCiphertext()).isNull();
+    confirm(s, channel.getExternalId(), 409);
+    assertThat(creators.findById(channel.getId()).orElseThrow().getMaster()).isNull();
+  }
+  @Test
   void worksWithoutFacebookAndPurgesSecretsAfterGrantAndReplay() throws Exception {
     var s = readyDirect();
     var view = call(creator, get(path(s)), null, 200).path("data");

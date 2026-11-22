@@ -36,6 +36,49 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
       "application.meta.cleanup-enabled=false"
     })
 class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
+  @Test
+  void cancelIsOwnerOnlyAndBlocksLateCallback() throws Exception {
+    var s = start(creator, Map.of("platform", "FACEBOOK"));
+    String path = "/creators/portal/accounts/connect/meta/sessions/" + s.id() + "/cancel";
+    call(other, post(path), null, 404);
+    assertThat(call(creator, post(path), null, 200).path("data").path("status").asText()).isEqualTo("FAILED");
+    call(creator, post(path), null, 200);
+    callback(s, 409);
+    verify(graph, never()).exchange(anyString(), anyString());
+    assertThat(creators.findById(channel.getId()).orElseThrow().getMaster()).isNull();
+  }
+
+  @Test
+  void cancelReadyPurgesProofAndCannotUndoCompletedOwnership() throws Exception {
+    var s = ready(creator);
+    String path = "/creators/portal/accounts/connect/meta/sessions/" + s.id();
+    call(creator, post(path + "/cancel"), null, 200);
+    assertThat(sessions.findById(s.id()).orElseThrow().getPayloadCiphertext()).isNull();
+    call(creator, post(path + "/confirm"), Map.of("accountId", channel.getExternalId()), 409);
+    var completed = ready(creator);
+    String completedPath = "/creators/portal/accounts/connect/meta/sessions/" + completed.id();
+    call(creator, post(completedPath + "/confirm"), Map.of("accountId", channel.getExternalId()), 200);
+    assertThat(call(creator, post(completedPath + "/cancel"), null, 200).path("data").path("status").asText())
+        .isEqualTo("COMPLETED");
+    assertThat(creators.findById(channel.getId()).orElseThrow().getMaster()).isNotNull();
+  }
+
+  @Test
+  void cancellationDuringExchangePreventsReadyProof() throws Exception {
+    var s = start(creator, Map.of("platform", "FACEBOOK"));
+    when(graph.exchange(anyString(), anyString())).thenAnswer(i -> {
+      try (var pool = Executors.newSingleThreadExecutor()) {
+        pool.submit(() -> {
+          call(creator, post("/creators/portal/accounts/connect/meta/sessions/" + s.id() + "/cancel"), null, 200);
+          return null;
+        }).get(15, TimeUnit.SECONDS);
+      }
+      return proof();
+    });
+    callback(s, 409);
+    assertThat(sessions.findById(s.id()).orElseThrow().getPayloadCiphertext()).isNull();
+    assertThat(creators.findById(channel.getId()).orElseThrow().getMaster()).isNull();
+  }
   @MockBean MetaGraphClient graph;
   @MockBean Clock clock;
   @Autowired MetaOAuthSessionRepository sessions;

@@ -50,7 +50,8 @@ public class DealService {
     brand();
     var c = locks.owned(campaign);
     if (java.util.Set.of(com.influencermatch.backend.campaign.enums.CampaignStatus.COMPLETED,
-        com.influencermatch.backend.campaign.enums.CampaignStatus.ARCHIVED).contains(c.getStatus()))
+        com.influencermatch.backend.campaign.enums.CampaignStatus.ARCHIVED,
+        com.influencermatch.backend.campaign.enums.CampaignStatus.CLOSED).contains(c.getStatus()))
       throw conflict("Campaign is read only");
     fresh(Permission.MANAGE_OWN_RELATIONSHIP);
     return c;
@@ -583,7 +584,7 @@ public class DealService {
     fresh(Permission.RESPOND_OWN_COOPERATION);
     var d = store.deal(id);
     var campaign = store.one("select id,status from campaign where id=? for update", d.get("campaign_id"));
-    if (Set.of("COMPLETED", "ARCHIVED").contains(campaign.get("status"))) throw conflict("Campaign is read only");
+    if (Set.of("COMPLETED", "ARCHIVED", "CLOSED").contains(campaign.get("status"))) throw conflict("Campaign is read only");
     d = lockMembersAndDeal(d);
     portalAccess(d);
     return d;

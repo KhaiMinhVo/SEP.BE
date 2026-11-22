@@ -339,28 +339,8 @@ public class AiRecommendationService {
       String m4HistoryReadStatus = "READ_FAILED";
       if (jdbcTemplate != null && brandProfileId != null) {
         try {
-          brandReviews = jdbcTemplate.query(
-              """
-              select r.id as review_id, ca.brand_profile_id, c.id as creator_id, c.master_id, c.platform,
-                     coalesce((select m.niche from public_creator_metric m where m.creator_id=c.id and m.collected_at<=r.reviewed_at order by m.collected_at desc,m.id desc limit 1),'') as niche,
-                     r.brand_fit_rating
-              from creator_review r
-              join collaboration l on l.id=r.collaboration_id
-              join campaign ca on ca.id=l.campaign_id
-              join creator c on c.id=l.creator_id
-              where ca.brand_profile_id=? and l.status='COMPLETED'
-              order by r.id
-              """,
-              (rs, rowNum) -> new com.influencermatch.backend.recommendation.engine.memory.LearnedM4Evaluator.BrandReviewRecord(
-                  rs.getObject("review_id", UUID.class),
-                  rs.getObject("brand_profile_id", UUID.class),
-                  rs.getObject("creator_id", UUID.class),
-                  rs.getObject("master_id", UUID.class),
-                  rs.getString("platform"),
-                  rs.getString("niche"),
-                  rs.getInt("brand_fit_rating")
-              ),
-              brandProfileId);
+          brandReviews = com.influencermatch.backend.recommendation.engine.memory.M4ReviewHistory.select(
+              jdbcTemplate, brandProfileId, campaignId, scoringAsOf);
           m4HistoryReadStatus = brandReviews.isEmpty() ? "EMPTY" : "AVAILABLE";
         } catch (Exception ex) {
           log.warn("Could not query brandReviews for M4 evaluation: {}", ex.getMessage());
@@ -705,6 +685,11 @@ public class AiRecommendationService {
       runMetadata.put("historySelectionPolicyVersion", "historical-evidence-asof-v1");
       runMetadata.put("m1PolicyVersion", "m1-strict-complete-case-v1");
       runMetadata.put("m4PolicyVersion", "m4-evidence-v1");
+      runMetadata.put("m4HistorySelectionPolicyVersion", com.influencermatch.backend.recommendation.engine.memory.M4ReviewHistory.POLICY);
+      runMetadata.put("m4HistoryWindowMonths", com.influencermatch.backend.recommendation.engine.memory.M4ReviewHistory.WINDOW_MONTHS);
+      runMetadata.put("m4HistoryCutoff", historyCutoff.toString());
+      runMetadata.put("m4ExcludedCampaignId", campaignId.toString());
+      runMetadata.put("m4ReviewEvidenceCount", brandReviews.size());
       runMetadata.put("m4HistoryReadStatus", m4HistoryReadStatus);
       ArrayNode m1WNode = runMetadata.putArray("m1Weights");
       m1WNode.add(com.influencermatch.backend.recommendation.engine.memory.M1HistoricalScorer.WEIGHT_R)

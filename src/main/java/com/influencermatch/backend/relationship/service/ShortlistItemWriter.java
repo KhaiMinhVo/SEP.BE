@@ -39,6 +39,8 @@ public class ShortlistItemWriter {
     Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
     ownership.requireOwned(campaignId);
     var campaign = locks.owned(campaignId);
+    if (campaign.getStatus() == com.influencermatch.backend.campaign.enums.CampaignStatus.CLOSED)
+      throw new ConflictException(ErrorCode.INVALID_CAMPAIGN_TRANSITION, "Closed campaign is read only");
     var actor = Permissions.actor();
     if (request == null || request.getEffectiveCreatorId() == null)
       throw new ValidationException("Creator ID is required");

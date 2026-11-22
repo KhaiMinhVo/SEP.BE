@@ -30,7 +30,7 @@ public class CreatorDiscoveryService {
             .orElseThrow(() -> new ResourceNotFoundException("Campaign", "id", campaignId));
         if (!campaign.getBrandProfile().getUser().getId().equals(Permissions.actor().getId()))
             throw new ForbiddenException("Campaign belongs to another brand");
-        if (campaign.getStatus() == CampaignStatus.ARCHIVED)
+        if (campaign.getStatus() == CampaignStatus.ARCHIVED || campaign.getStatus() == CampaignStatus.CLOSED)
             throw new ConflictException(ErrorCode.CAMPAIGN_CONTEXT_NOT_READY,
                 "Cannot run discovery on an ARCHIVED campaign.");
         if (req == null) req = new DiscoverySearchRequest();

@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 
 abstract class ExecutionScenarioSupport extends PostgresApiTestSupport {
+  boolean startImmediately() { return true; }
   @Autowired CreatorRepository creators;
   @Autowired CreatorMasterRepository masters;
   @SpyBean AuditService audit;
@@ -54,6 +55,7 @@ abstract class ExecutionScenarioSupport extends PostgresApiTestSupport {
                     .build())
             .getId();
     verifyChannel(channel, owner.getId(), "TIKTOK_OAUTH_SANDBOX");
+    evaluatedShortlist(brand, campaign, List.of(channel));
     var rel =
         call(
                 brand,
@@ -122,7 +124,7 @@ abstract class ExecutionScenarioSupport extends PostgresApiTestSupport {
             200);
     collaboration = UUID.fromString(result.path("collaborationId").asText());
     root = "/collaborations/" + collaboration;
-    request(
+    if (startImmediately()) request(
         brand,
         "/campaigns/" + campaign + "/deals/" + deal + "/start",
         Map.of("expectedRevision", 3),

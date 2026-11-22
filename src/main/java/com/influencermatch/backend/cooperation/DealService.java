@@ -414,23 +414,18 @@ public class DealService {
   }
 
   Object proposalView(Map<String, Object> p) {
-    return Map.of(
-        "id",
-        p.get("id"),
-        "revision",
-        p.get("revision"),
-        "kind",
-        p.get("kind"),
-        "fee",
-        p.get("fee"),
-        "currency",
-        p.get("currency"),
-        "terms",
-        p.get("terms"),
-        "deliverables",
-        store.decode(p.get("deliverables")),
-        "createdAt",
-        p.get("created_at"));
+    var view = new LinkedHashMap<String, Object>();
+    view.put("id", p.get("id"));
+    view.put("revision", p.get("revision"));
+    view.put("kind", p.get("kind"));
+    view.put("fee", p.get("fee"));
+    view.put("currency", p.get("currency"));
+    view.put("terms", p.get("terms"));
+    view.put("deliverables", store.decode(p.get("deliverables")));
+    view.put("kpiType", p.get("kpi_type"));
+    view.put("kpiTarget", p.get("kpi_target"));
+    view.put("createdAt", p.get("created_at"));
+    return view;
   }
 
   @Transactional(readOnly = true)
@@ -475,7 +470,9 @@ public class DealService {
         || p.terms().length() > 4000
         || p.deliverables() == null
         || p.deliverables().isEmpty()
-        || p.deliverables().size() > 100)
+        || p.deliverables().size() > 100
+        || ((p.kpiType() == null) != (p.kpiTarget() == null))
+        || (p.kpiTarget() != null && p.kpiTarget() <= 0))
       throw new ValidationException("Positive VND fee, terms and deliverables required");
     var expected =
         new HashSet<>(store.members(id).stream().map(m -> uuid(m.get("creator_id"))).toList());
@@ -533,7 +530,8 @@ public class DealService {
     long revision = store.revision(d) + 1;
     invalidate(id);
     store.db.update(
-        "insert into cooperation_proposal values(?,?,?,?,?,?,?,?::jsonb,?,?)",
+        "insert into cooperation_proposal(id,deal_id,revision,author_id,kind,fee,currency,deliverables,terms,created_at,kpi_type,kpi_target)"
+            + " values(?,?,?,?,?,?,?,?::jsonb,?,?,?,?)",
         UUID.randomUUID(),
         id,
         revision,
@@ -543,7 +541,9 @@ public class DealService {
         request.currency(),
         store.encode(request.deliverables()),
         request.terms().trim(),
-        store.time());
+        store.time(),
+        request.kpiType(),
+        request.kpiTarget());
     store.db.update(
         "update cooperation_deal set"
             + " revision=?,status='NEGOTIATING',accepted_revision=null,accepted_by=null,accepted_at=null,updated_at=?"
@@ -759,8 +759,8 @@ public class DealService {
     UUID collaboration = UUID.randomUUID();
     store.db.update(
         "insert into"
-            + " collaboration(id,relationship_id,campaign_id,creator_id,master_id,agreed_fee,currency,status,payment_status,note,updated_at)"
-            + " values(?,?,?,?,?,?,?,'PLANNED','PENDING',?,?)",
+            + " collaboration(id,relationship_id,campaign_id,creator_id,master_id,agreed_fee,currency,status,payment_status,note,updated_at,committed_kpi_type,committed_kpi_target)"
+            + " values(?,?,?,?,?,?,?,'PLANNED','PENDING',?,?,?,?)",
         collaboration,
         primary.get("relationship_id"),
         campaign,
@@ -769,7 +769,9 @@ public class DealService {
         fee,
         "VND",
         p.get("terms"),
-        store.time());
+        store.time(),
+        p.get("kpi_type"),
+        p.get("kpi_target"));
     for (var m : members)
       store.db.update(
           "insert into collaboration_channel values(?,?,?)",
@@ -931,11 +933,15 @@ public class DealService {
         throw conflict("Campaign must be ACTIVE");
       var c =
           store.one(
-              "select status from collaboration where id=? for update", d.get("collaboration_id"));
+              "select status,management_mode from collaboration where id=? for update", d.get("collaboration_id"));
       if (!"PLANNED".equals(c.get("status")))
         throw conflict("Only PLANNED collaboration may start");
-      if (!"READY".equals(assignmentStatus(uuid(d.get("collaboration_id")), d)))
+      if (!"BRAND_MANAGED".equals(c.get("management_mode"))
+          && !"READY".equals(assignmentStatus(uuid(d.get("collaboration_id")), d)))
         throw conflict("An eligible Creator must confirm the assignment before start");
+      if (store.db.queryForObject("select count(*) from collaboration_deliverable where collaboration_id=?",
+          Long.class, d.get("collaboration_id")) == 0)
+        throw conflict("An execution plan is required before start");
       store.db.update(
           "update collaboration set status='IN_PROGRESS',start_at=?,updated_at=? where id=?",
           store.time(),
@@ -1102,7 +1108,7 @@ public class DealService {
             "select d.*,c.id collaboration_id,ca.name campaign_name,b.business_name brand_name"
                 + " from collaboration c join cooperation_deal d on d.collaboration_id=c.id"
                 + " join campaign ca on ca.id=c.campaign_id join brand_profile b on b.id=ca.brand_profile_id"
-                + " where c.status='PLANNED' and c.master_id is null and d.status='CONFIRMED'"
+                + " where c.status='PLANNED' and c.management_mode='COLLABORATIVE' and c.master_id is null and d.status='CONFIRMED'"
                 + " and d.master_id is null and exists(select 1 from collaboration_channel cc"
                 + " join creator cr on cr.id=cc.creator_id join creator_master m on m.id=cr.master_id"
                 + " where cc.collaboration_id=c.id and m.user_id=?) order by d.updated_at desc,d.id",
@@ -1111,14 +1117,24 @@ public class DealService {
           UUID collaboration = uuid(d.get("collaboration_id"));
           if (executionRecipient(collaboration).filter(r -> actor().equals(r.userId())).isEmpty())
             return java.util.stream.Stream.empty();
-          return confirmedProposal(uuid(d.get("id"))).stream().map(p -> Map.<String, Object>of(
-              "collaborationId", collaboration, "dealRevision", store.revision(d),
-              "proposalRevision", store.revision(p), "campaignName", d.get("campaign_name"),
-              "brandName", d.get("brand_name"), "channels", channels(collaboration).stream()
-                  .map(ch -> Map.of("creatorId", ch.creatorId(), "platform", ch.platform(),
-                      "username", Objects.toString(ch.username(), ""))).toList(),
-              "deliverables", store.decode(p.get("deliverables")), "fee", p.get("fee"),
-              "currency", p.get("currency"), "terms", p.get("terms")));
+          return confirmedProposal(uuid(d.get("id"))).stream().<Map<String, Object>>map(p -> {
+            var assignment = new LinkedHashMap<String, Object>();
+            assignment.put("collaborationId", collaboration);
+            assignment.put("dealRevision", store.revision(d));
+            assignment.put("proposalRevision", store.revision(p));
+            assignment.put("campaignName", d.get("campaign_name"));
+            assignment.put("brandName", d.get("brand_name"));
+            assignment.put("channels", channels(collaboration).stream()
+                .map(ch -> Map.of("creatorId", ch.creatorId(), "platform", ch.platform(),
+                    "username", Objects.toString(ch.username(), ""))).toList());
+            assignment.put("deliverables", store.decode(p.get("deliverables")));
+            assignment.put("fee", p.get("fee"));
+            assignment.put("currency", p.get("currency"));
+            assignment.put("terms", p.get("terms"));
+            assignment.put("kpiType", p.get("kpi_type"));
+            assignment.put("kpiTarget", p.get("kpi_target"));
+            return assignment;
+          });
         }).toList();
   }
 
@@ -1147,6 +1163,8 @@ public class DealService {
     String scope = "collaboration-assignment:" + collaboration;
     var old = replay(scope, key, request);
     if (old != null) return old;
+    if (!"COLLABORATIVE".equals(store.one("select management_mode from collaboration where id=?", collaboration).get("management_mode")))
+      throw conflict("Brand-managed work does not accept Portal assignments");
     if (!"PLANNED".equals(row.get("status")) || !"CONFIRMED".equals(d.get("status"))
         || row.get("master_id") != null || d.get("master_id") != null)
       throw conflict("Collaboration is not awaiting Creator assignment");

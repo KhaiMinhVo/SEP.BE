@@ -183,15 +183,16 @@ public class HistoryQueries {
         local(r.get("completed_at")),
         local(r.get("updated_at")),
         number(r.get("accepted_outcome_revision")),
-        "LEGACY".equals(r.get("execution_source")) ? "LEGACY_UNVERIFIED" : "SELF_REPORTED",
+        "LEGACY".equals(r.get("execution_source")) ? "LEGACY_UNVERIFIED"
+          : "BRAND_MANAGED".equals(r.get("management_mode")) ? "BRAND_EXTERNAL_REPORTED" : "SELF_REPORTED",
         "CURRENT_PROFILE",
         channels);
   }
 
   static final String COLLABORATIONS =
-      "select c.*,d.id deal_id,r.accepted_outcome_revision from collaboration c left join"
+      "select c.*,d.id deal_id,coalesce(a.outcome_revision,r.accepted_outcome_revision) accepted_outcome_revision from collaboration c left join"
           + " cooperation_deal d on d.collaboration_id=c.id left join creator_review r on"
-          + " r.collaboration_id=c.id where c.campaign_id=?";
+          + " r.collaboration_id=c.id left join collaboration_outcome_acceptance a on a.collaboration_id=c.id and a.reopened_at is null where c.campaign_id=?";
 
   Report report(UUID campaign) {
     var publications = new HashMap<UUID, Map<String, String>>();
@@ -212,14 +213,16 @@ public class HistoryQueries {
         db.queryForList(
             """
 select c.id,c.status,c.agreed_fee,c.currency,c.execution_source,o.payload,o.calculation,
- case when r.accepted_outcome_revision is not null and a.id is not null and o.id is not null
- and r.reviewed_by_user_id=b.user_id and a.actor_id=b.user_id and compat.id is not null
- and o.source='SELF_REPORTED' and c.execution_source<>'LEGACY' then true else false end eligible
+ case when a.id is not null and o.id is not null
+ and ((r.reviewed_by_user_id=b.user_id and r.outcome_id=compat.id and r.accepted_outcome_revision=a.outcome_revision)
+      or c.completion_method='WITHOUT_REVIEW')
+ and a.actor_id=b.user_id and compat.id is not null
+ and o.source in ('SELF_REPORTED','BRAND_EXTERNAL_REPORTED') and c.execution_source<>'LEGACY' then true else false end eligible
 from collaboration c join campaign ca on ca.id=c.campaign_id join brand_profile b on b.id=ca.brand_profile_id
 left join creator_review r on r.collaboration_id=c.id
-left join campaign_outcome compat on compat.id=r.outcome_id and compat.collaboration_id=c.id
-left join collaboration_outcome_revision o on o.collaboration_id=c.id and o.revision=r.accepted_outcome_revision
-left join collaboration_outcome_acceptance a on a.collaboration_id=c.id and a.outcome_revision=r.accepted_outcome_revision and a.reopened_at is null
+left join collaboration_outcome_acceptance a on a.collaboration_id=c.id and a.reopened_at is null
+left join campaign_outcome compat on compat.collaboration_id=c.id
+left join collaboration_outcome_revision o on o.collaboration_id=c.id and o.revision=a.outcome_revision
 where c.campaign_id=? order by c.id
 """,
             campaign))

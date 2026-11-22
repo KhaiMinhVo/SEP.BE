@@ -280,31 +280,54 @@ class PostCampaignLearningIntegrationTest {
   @DisplayName("Phase 2: M1 R/T/K Scorer & Minimum Evidence Gate Tests")
   class M1ScorerTests {
 
-    private HistoricalCampaign buildCollab(UUID brandId, int rating, boolean onTime, double kpiAttainment,
-        String quality, LocalDateTime time) {
-      ObjectNode proof = objectMapper.createObjectNode()
-          .put("overallRating", rating)
-          .put("brandFitRating", rating)
-          .put("allDeliverablesOnTime", onTime)
-          .put("kpiAttainment", kpiAttainment)
-          .put("wouldCollaborateAgain", rating >= 4);
-
-      Collaboration collab = Collaboration.builder()
-          .id(UUID.randomUUID())
-          .campaign(
-              Campaign.builder().id(UUID.randomUUID()).brandProfile(BrandProfile.builder().id(brandId).build()).build())
-          .build();
-
+    private HistoricalCampaign buildObservation(
+        UUID brandId, ObjectNode proof, String quality, LocalDateTime time) {
+      var campaign = Campaign.builder().id(UUID.randomUUID())
+          .brandProfile(brandId == null ? null : BrandProfile.builder().id(brandId).build()).build();
+      Collaboration collab = Collaboration.builder().id(UUID.randomUUID()).campaign(campaign).build();
+      if (brandId != null) proof.put("brandProfileId", brandId.toString());
       return HistoricalCampaign.builder()
           .id(UUID.randomUUID())
           .evidenceRootId(UUID.randomUUID())
           .revisionNumber(1L)
           .status("ACTIVE")
+          .evidenceType("COLLABORATION_COMPLETION")
           .collaboration(collab)
           .evidenceValue(proof)
           .quality(quality)
           .recordedAt(time)
+          .businessOccurredAt(time)
           .build();
+    }
+
+    private HistoricalCampaign buildCollab(UUID brandId, int rating, boolean onTime,
+        double kpiAttainment, String quality, LocalDateTime time) {
+      ObjectNode proof = objectMapper.createObjectNode()
+          .put("evidenceSchemaVersion", "collaboration-completion-evidence-v1")
+          .put("brandAccepted", true)
+          .put("completionMethod", "WITH_REVIEW")
+          .put("managementMode", "COLLABORATIVE")
+          .put("outcomeRevision", 1)
+          .put("overallRating", rating)
+          .put("brandFitRating", rating)
+          .put("wouldCollaborateAgain", rating >= 4)
+          .put("kpiStatus", "AVAILABLE")
+          .put("kpiType", "VIEWS")
+          .put("kpiTarget", 1000)
+          .put("kpiActual", Math.round(kpiAttainment * 1000))
+          .put("kpiEvidenceQuality", quality);
+      proof.putArray("deliverables").addObject()
+          .put("submissionSource", "CREATOR_PORTAL")
+          .put("submittedAt", onTime ? time.minusMinutes(1).toString() : time.plusMinutes(1).toString())
+          .put("dueAt", time.toString());
+      return buildObservation(brandId, proof, quality, time);
+    }
+
+    private HistoricalCampaign withoutReview(UUID brandId, LocalDateTime time) {
+      var source = buildCollab(brandId, 5, true, 1.0, "VERIFIED", time);
+      var proof = ((ObjectNode) source.getEvidenceValue()).deepCopy();
+      proof.remove(List.of("overallRating", "brandFitRating", "wouldCollaborateAgain"));
+      return buildObservation(brandId, proof, "VERIFIED", time);
     }
 
     @Test
@@ -357,7 +380,7 @@ class PostCampaignLearningIntegrationTest {
       assertThat(result.rScore()).isNotNull().isBetween(0.0, 1.0);
       assertThat(result.tScore()).isNotNull().isEqualTo(1.0); // all on time
       assertThat(result.kScore()).isNotNull().isBetween(0.8, 1.0);
-      assertThat(result.m1LearnedScore()).isNotNull().isBetween(50.0, 100.0);
+      assertThat(result.m1LearnedScore()).isCloseTo(90.17, org.assertj.core.data.Offset.offset(0.01));
     }
 
     @Test
@@ -379,16 +402,12 @@ class PostCampaignLearningIntegrationTest {
     }
 
     @Test
-    @DisplayName("KPI Attainment K: Raw attainment is preserved without mutation; q_K adjusts aggregation contribution")
+    @DisplayName("KPI Attainment K: Raw attainment is preserved without quality shrinkage")
     void testKpiAttainment_SelfReportedDiscount() {
       UUID brandA = UUID.randomUUID();
       UUID brandB = UUID.randomUUID();
       LocalDateTime now = LocalDateTime.now();
 
-      // With self-reported quality, K raw attainment of 1.0 is preserved in kScore
-      // (1.00)
-      // while effectiveK in sm1Norm is adjusted by qK = 0.50 ((0.50 * 1.0) + (0.50 *
-      // 0.50) = 0.75)
       List<HistoricalCampaign> pastSelfReported = List.of(
           buildCollab(brandA, 5, true, 1.0, "SELF_REPORTED", now.minusMonths(1)),
           buildCollab(brandA, 5, true, 1.0, "SELF_REPORTED", now.minusMonths(2)),
@@ -396,8 +415,6 @@ class PostCampaignLearningIntegrationTest {
 
       M1HistoricalScorer.M1Result resSelf = m1Scorer.evaluate(pastSelfReported, "AWARENESS", now);
 
-      // With verified quality (qK = 1.0), K raw attainment is 1.00 and effectiveK is
-      // 1.00
       List<HistoricalCampaign> pastVerified = List.of(
           buildCollab(brandA, 5, true, 1.0, "VERIFIED", now.minusMonths(1)),
           buildCollab(brandA, 5, true, 1.0, "VERIFIED", now.minusMonths(2)),
@@ -408,8 +425,9 @@ class PostCampaignLearningIntegrationTest {
       assertThat(resSelf.kScore()).isCloseTo(1.00, org.assertj.core.data.Offset.offset(0.01));
       assertThat(resVer.kScore()).isCloseTo(1.00, org.assertj.core.data.Offset.offset(0.01));
 
-      // But effective contribution in sm1Norm is discounted for SELF_REPORTED
-      assertThat(resSelf.sm1Norm()).isLessThan(resVer.sm1Norm());
+      // Evidence quality remains separate metadata and does not shrink raw attainment.
+      assertThat(resSelf.sm1Norm()).isEqualTo(resVer.sm1Norm());
+      assertThat(resSelf.warnings()).anyMatch(w -> w.contains("K_SELF_REPORTED"));
     }
 
     @Test
@@ -441,12 +459,9 @@ class PostCampaignLearningIntegrationTest {
       LocalDateTime now = LocalDateTime.now();
       // 3 collaborations with null brand profile
       List<HistoricalCampaign> past = List.of(
-          HistoricalCampaign.builder().id(UUID.randomUUID()).evidenceRootId(UUID.randomUUID()).revisionNumber(1L)
-              .status("ACTIVE").recordedAt(now.minusMonths(1)).build(),
-          HistoricalCampaign.builder().id(UUID.randomUUID()).evidenceRootId(UUID.randomUUID()).revisionNumber(1L)
-              .status("ACTIVE").recordedAt(now.minusMonths(2)).build(),
-          HistoricalCampaign.builder().id(UUID.randomUUID()).evidenceRootId(UUID.randomUUID()).revisionNumber(1L)
-              .status("ACTIVE").recordedAt(now.minusMonths(3)).build());
+          buildCollab(null, 5, true, 1.0, "VERIFIED", now.minusMonths(1)),
+          buildCollab(null, 5, true, 1.0, "VERIFIED", now.minusMonths(2)),
+          buildCollab(null, 5, true, 1.0, "VERIFIED", now.minusMonths(3)));
 
       M1HistoricalScorer.M1Result result = m1Scorer.evaluate(past, "AWARENESS", now);
       assertThat(result.isAvailable()).isFalse();
@@ -469,34 +484,46 @@ class PostCampaignLearningIntegrationTest {
 
       // Collab 3: Missing timeliness fields entirely!
       ObjectNode noTimeProof = objectMapper.createObjectNode()
+          .put("evidenceSchemaVersion", "collaboration-completion-evidence-v1")
+          .put("brandAccepted", true)
+          .put("completionMethod", "WITHOUT_REVIEW")
+          .put("managementMode", "COLLABORATIVE")
+          .put("outcomeRevision", 1)
           .put("overallRating", 5)
-          .put("kpiAttainment", 1.0);
-      Collaboration col3 = Collaboration.builder()
-          .id(UUID.randomUUID())
-          .campaign(
-              Campaign.builder().id(UUID.randomUUID()).brandProfile(BrandProfile.builder().id(brandA).build()).build())
-          .build();
-      HistoricalCampaign c3 = HistoricalCampaign.builder()
-          .id(UUID.randomUUID())
-          .evidenceRootId(UUID.randomUUID())
-          .revisionNumber(1L)
-          .status("ACTIVE")
-          .collaboration(col3)
-          .evidenceValue(noTimeProof)
-          .quality("VERIFIED")
-          .recordedAt(now.minusMonths(3))
-          .build();
+          .put("kpiStatus", "AVAILABLE")
+          .put("kpiTarget", 1000)
+          .put("kpiActual", 1000);
+      HistoricalCampaign c3 = buildObservation(brandA, noTimeProof, "VERIFIED", now.minusMonths(3));
 
       M1HistoricalScorer.M1Result result = m1Scorer.evaluate(List.of(c1, c2, c3), "AWARENESS", now);
-      assertThat(result.isAvailable()).isTrue();
+      assertThat(result.isAvailable()).isFalse();
       // Timeliness has missing reliable timestamps -> tScore MUST BE NULL
       // (UNAVAILABLE)!
       assertThat(result.tScore()).isNull();
       // But R and K are valid
       assertThat(result.rScore()).isNotNull();
       assertThat(result.kScore()).isNotNull();
-      // Aggregation normalizes over R (0.50) and K (0.20)
-      assertThat(result.sm1Norm()).isGreaterThan(0.0);
+      // Missing T leaves the fixed-weight composite unavailable; ranking uses the neutral prior.
+      assertThat(result.sm1Norm()).isEqualTo(0.50);
+    }
+
+    @Test
+    @DisplayName("Final Review is optional and never synthesized into R")
+    void testMissingReviewKeepsRUnavailable() {
+      UUID brandA = UUID.randomUUID();
+      UUID brandB = UUID.randomUUID();
+      LocalDateTime now = LocalDateTime.now();
+      var noReview = withoutReview(brandA, now.minusMonths(1));
+      var second = withoutReview(brandA, now.minusMonths(2));
+      var third = withoutReview(brandB, now.minusMonths(3));
+
+      M1HistoricalScorer.M1Result result =
+          m1Scorer.evaluate(List.of(noReview, second, third), "AWARENESS", now);
+
+      assertThat(result.rScore()).isNull();
+      assertThat(result.tScore()).isNotNull();
+      assertThat(result.kScore()).isNotNull();
+      assertThat(result.m1Availability()).isEqualTo("UNAVAILABLE");
     }
 
     @Test
@@ -515,32 +542,25 @@ class PostCampaignLearningIntegrationTest {
       // Collab 3: MEASUREMENT_PENDING with kpiActual = 0 (post-campaign metric
       // collection in progress)
       ObjectNode pendingProof = objectMapper.createObjectNode()
+          .put("evidenceSchemaVersion", "collaboration-completion-evidence-v1")
+          .put("brandAccepted", true)
+          .put("completionMethod", "WITH_REVIEW")
+          .put("managementMode", "COLLABORATIVE")
+          .put("outcomeRevision", 1)
           .put("overallRating", 5)
-          .put("allDeliverablesOnTime", true)
           .put("kpiStatus", "MEASUREMENT_PENDING")
           .put("kpiActual", 0)
           .put("kpiTarget", 1000);
-      Collaboration col3 = Collaboration.builder()
-          .id(UUID.randomUUID())
-          .campaign(
-              Campaign.builder().id(UUID.randomUUID()).brandProfile(BrandProfile.builder().id(brandA).build()).build())
-          .build();
-      HistoricalCampaign c3 = HistoricalCampaign.builder()
-          .id(UUID.randomUUID())
-          .evidenceRootId(UUID.randomUUID())
-          .revisionNumber(1L)
-          .status("ACTIVE")
-          .collaboration(col3)
-          .evidenceValue(pendingProof)
-          .quality("VERIFIED")
-          .recordedAt(now.minusMonths(3))
-          .build();
+      pendingProof.putArray("deliverables").addObject()
+          .put("submissionSource", "CREATOR_PORTAL")
+          .put("submittedAt", now.minusMonths(3).minusMinutes(1).toString())
+          .put("dueAt", now.minusMonths(3).toString());
+      HistoricalCampaign c3 = buildObservation(brandA, pendingProof, "VERIFIED", now.minusMonths(3));
 
       M1HistoricalScorer.M1Result result = m1Scorer.evaluate(List.of(c1, c2, c3), "AWARENESS", now);
-      assertThat(result.isAvailable()).isTrue();
-      // Raw attainment average of 1.0 and 0.8 is 0.90 (Collab 3 was skipped, NOT
-      // counted as 0.0!)
-      assertThat(result.kScore()).isCloseTo(0.90, org.assertj.core.data.Offset.offset(0.01));
+      assertThat(result.isAvailable()).isFalse();
+      assertThat(result.kScore()).isNull();
+      assertThat(result.kAvailability()).isEqualTo("UNAVAILABLE");
     }
   }
 
@@ -781,10 +801,23 @@ class PostCampaignLearningIntegrationTest {
       UUID b1 = UUID.randomUUID(), b2 = UUID.randomUUID();
       LocalDateTime now = LocalDateTime.now();
       ObjectNode proof = objectMapper.createObjectNode()
+          .put("evidenceSchemaVersion", "collaboration-completion-evidence-v1")
+          .put("brandAccepted", true)
+          .put("completionMethod", "WITH_REVIEW")
+          .put("managementMode", "COLLABORATIVE")
+          .put("outcomeRevision", 1)
           .put("overallRating", 5)
           .put("brandFitRating", 5)
-          .put("allDeliverablesOnTime", true)
-          .put("kpiAttainment", 1.0);
+          .put("wouldCollaborateAgain", true)
+          .put("kpiStatus", "AVAILABLE")
+          .put("kpiType", "VIEWS")
+          .put("kpiTarget", 1000)
+          .put("kpiActual", 1000)
+          .put("kpiEvidenceQuality", "VERIFIED");
+      proof.putArray("deliverables").addObject()
+          .put("submissionSource", "CREATOR_PORTAL")
+          .put("submittedAt", now.minusDays(2).toString())
+          .put("dueAt", now.minusDays(1).toString());
 
       Collaboration col1 = Collaboration.builder().id(UUID.randomUUID())
           .campaign(
@@ -801,11 +834,11 @@ class PostCampaignLearningIntegrationTest {
 
       List<HistoricalCampaign> mainHistory = List.of(
           HistoricalCampaign.builder().id(UUID.randomUUID()).evidenceRootId(UUID.randomUUID()).revisionNumber(1L)
-              .status("ACTIVE").collaboration(col1).evidenceValue(proof).recordedAt(now.minusMonths(2)).build(),
+              .status("ACTIVE").evidenceType("COLLABORATION_COMPLETION").collaboration(col1).evidenceValue(proof).recordedAt(now.minusMonths(2)).businessOccurredAt(now.minusMonths(2)).build(),
           HistoricalCampaign.builder().id(UUID.randomUUID()).evidenceRootId(UUID.randomUUID()).revisionNumber(1L)
-              .status("ACTIVE").collaboration(col2).evidenceValue(proof).recordedAt(now.minusMonths(3)).build(),
+              .status("ACTIVE").evidenceType("COLLABORATION_COMPLETION").collaboration(col2).evidenceValue(proof).recordedAt(now.minusMonths(3)).businessOccurredAt(now.minusMonths(3)).build(),
           HistoricalCampaign.builder().id(UUID.randomUUID()).evidenceRootId(UUID.randomUUID()).revisionNumber(1L)
-              .status("ACTIVE").collaboration(col3).evidenceValue(proof).recordedAt(now.minusMonths(4)).build());
+              .status("ACTIVE").evidenceType("COLLABORATION_COMPLETION").collaboration(col3).evidenceValue(proof).recordedAt(now.minusMonths(4)).businessOccurredAt(now.minusMonths(4)).build());
       when(historicalCampaignRepository.findByCreatorId(kocMainId)).thenReturn(mainHistory);
 
       // kocProv has 0 historical campaigns -> fails M1 Gate
@@ -827,7 +860,7 @@ class PostCampaignLearningIntegrationTest {
       CreatorRecommendationItemDto provItem = response.getProvisionalRecommendations().get(0);
       assertThat(provItem.getCreatorId()).isEqualTo(kocProvId);
       assertThat(provItem.getRecommendationTier()).isEqualTo("LIMITED_HISTORY");
-      assertThat(provItem.getIsScoreReady()).isTrue();
+      assertThat(provItem.getIsScoreReady()).isFalse();
       assertThat(provItem.getIsProvisional()).isTrue();
       assertThat(provItem.getScoreBreakdown().getM1Availability()).isEqualTo("UNAVAILABLE");
       assertThat(provItem.getScoreBreakdown().getM1Score()).isEqualTo(50.0);
@@ -851,7 +884,7 @@ class PostCampaignLearningIntegrationTest {
       verify(recommendationRunRepository).save(runCaptor.capture());
       RecommendationRun savedRun = runCaptor.getValue();
 
-      assertThat(savedRun.getScoringPolicyVersion()).isEqualTo("m4-evidence-v1");
+      assertThat(savedRun.getScoringPolicyVersion()).isEqualTo("sp01-evidence-v2");
       assertThat(savedRun.getStatus()).isEqualTo("COMPLETED");
 
       JsonNode snapshot = savedRun.getScoringSnapshot();

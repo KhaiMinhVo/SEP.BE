@@ -13,7 +13,8 @@ public enum CampaignStatus {
   READY_FOR_DISCOVERY,
   ACTIVE,
   COMPLETED,
-  ARCHIVED;
+  ARCHIVED,
+  CLOSED;
 
   public void requireEditable() {
     if (this != DRAFT)
@@ -25,9 +26,9 @@ public enum CampaignStatus {
     boolean allowed =
         switch (this) {
           case DRAFT -> target == READY_FOR_DISCOVERY || target == ARCHIVED;
-          case READY_FOR_DISCOVERY -> target == ACTIVE;
-          case ACTIVE -> target == COMPLETED;
-          case COMPLETED, ARCHIVED -> false;
+          case READY_FOR_DISCOVERY -> target == ACTIVE || target == CLOSED;
+          case ACTIVE -> target == COMPLETED || target == CLOSED;
+          case COMPLETED, ARCHIVED, CLOSED -> false;
         };
     if (!allowed) {
       throw new ConflictException(

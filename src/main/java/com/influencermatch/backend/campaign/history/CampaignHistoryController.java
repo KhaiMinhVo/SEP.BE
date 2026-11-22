@@ -63,6 +63,20 @@ public class CampaignHistoryController {
     return ApiResponse.ok(service.detail(id, auth));
   }
 
+  @PostMapping("/campaigns/{id}/history/financial-summary")
+  @PreAuthorize("hasRole('BRAND') and hasAuthority('VIEW_OWN_CAMPAIGN')"
+      + " and hasAuthority('VIEW_OWN_HISTORY_AND_INSIGHTS') and hasAuthority('RECORD_OWN_OUTCOME')")
+  @Operation(
+      summary = "Append Brand-reported Campaign-level GMV and revenue",
+      description = "This is a separate Campaign aggregate from Creator-level outcomes. Requires"
+          + " source, measurement period and Idempotency-Key; it is not summed with per-collaboration GMV/revenue.")
+  public ApiResponse<CampaignFinancialSummary> financialSummary(
+      @PathVariable UUID id,
+      @Valid @RequestBody CampaignFinancialSummaryRequest body,
+      @RequestHeader("Idempotency-Key") String key) {
+    return ApiResponse.ok(service.recordFinancialSummary(id, body, key));
+  }
+
   @GetMapping("/campaigns/{id}/history/contexts")
   public ApiResponse<PageResponse<Context>> contexts(
       @PathVariable UUID id,

@@ -70,6 +70,50 @@ class CampaignHistoryPostgresIntegrationTest extends ExecutionScenarioSupport {
   }
 
   @Test
+  void campaignFinancialSummaryIsSeparateVersionedAndCalculatesOnlyOnMatchingPeriod()
+      throws Exception {
+    finish();
+    var body = Map.of(
+        "expectedRevision", 0,
+        "gmv", 9000,
+        "revenue", 4000,
+        "periodStart", "2026-11-01T00:00:00Z",
+        "periodEnd", "2026-11-02T00:00:00Z",
+        "sourceDescription", "TikTok Shop campaign report");
+    String key = UUID.randomUUID().toString();
+    var first = request(brand, history() + "/financial-summary", body, 200, key);
+    assertThat(first.path("revision").asInt()).isEqualTo(1);
+    assertThat(first.path("gmv").asInt()).isEqualTo(9000);
+    assertThat(first.path("roas").decimalValue()).isEqualByComparingTo("9");
+    assertThat(first.path("roi").decimalValue()).isEqualByComparingTo("3");
+    assertThat(request(brand, history() + "/financial-summary", body, 200, key)).isEqualTo(first);
+    assertThat(jdbc.queryForObject(
+        "select count(*) from campaign_financial_summary_revision where campaign_id=?",
+        Long.class, campaign)).isEqualTo(1);
+    var report = read(history());
+    assertThat(report.path("campaignFinancialSummaries").size()).isEqualTo(1);
+    assertThat(report.path("report").path("metrics").path("gmv").path("value").asInt())
+        .isEqualTo(5000);
+
+    var changed = new LinkedHashMap<String,Object>(body);
+    changed.put("expectedRevision", 1);
+    changed.put("gmv", 10000);
+    changed.put("reason", "Corrected from final platform reconciliation");
+    var second = request(brand, history() + "/financial-summary", changed, 200);
+    assertThat(second.path("revision").asInt()).isEqualTo(2);
+    assertThat(read(history()).path("campaignFinancialSummaries").size()).isEqualTo(2);
+
+    changed.put("expectedRevision", 2);
+    changed.put("periodStart", "2026-11-03T00:00:00Z");
+    changed.put("periodEnd", "2026-11-04T00:00:00Z");
+    changed.put("reason", "Period correction");
+    var mismatched = request(brand, history() + "/financial-summary", changed, 200);
+    assertThat(mismatched.path("roas").isNull()).isTrue();
+    assertThat(mismatched.path("unavailableReasons").path("roas").toString())
+        .contains("INCONSISTENT_FINANCIAL_PERIOD");
+  }
+
+  @Test
   void readsDoNotPrepareContextOrCreateDomainWrites() throws Exception {
     var before = counts();
     read(history());
@@ -420,6 +464,7 @@ class CampaignHistoryPostgresIntegrationTest extends ExecutionScenarioSupport {
                     .build())
             .getId();
     verifyChannel(second, owner.getId(), "INSTAGRAM_OAUTH");
+    evaluatedShortlist(brand, otherCampaign, List.of(channel, second));
     var relationshipIds = new ArrayList<String>();
     for (UUID creator : List.of(channel, second))
       relationshipIds.add(

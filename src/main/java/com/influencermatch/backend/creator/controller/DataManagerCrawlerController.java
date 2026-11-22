@@ -2,8 +2,10 @@ package com.influencermatch.backend.creator.controller;
 
 import com.influencermatch.backend.common.dto.ApiResponse;
 import com.influencermatch.backend.creator.client.CrawlerServiceClient;
+import com.influencermatch.backend.creator.dto.PostMetricsDto;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +56,30 @@ public class DataManagerCrawlerController {
         .orElseGet(() -> ResponseEntity.badRequest().body(Map.of(
             "status", "error",
             "message", "Thực thi cào hàng loạt thất bại."
+        )));
+  }
+
+  @PostMapping("/post-metrics")
+  @Operation(summary = "Bóc tách chỉ số thời gian thực của bài đăng (WF-03 Post Metrics)")
+  public ResponseEntity<Map<String, Object>> getPostMetrics(
+      @RequestBody Map<String, Object> request) {
+    String postUrl = (String) request.getOrDefault("postUrl", request.get("post_url"));
+    if (postUrl == null || postUrl.isBlank()) {
+      return ResponseEntity.badRequest().body(Map.of(
+          "status", "error",
+          "message", "post_url hoặc postUrl không được để trống"
+      ));
+    }
+
+    var metricsOpt = crawlerServiceClient.fetchPostMetrics(postUrl);
+    return metricsOpt
+        .map(metrics -> ResponseEntity.ok(Map.<String, Object>of(
+            "status", "success",
+            "crawlerResponse", metrics
+        )))
+        .orElseGet(() -> ResponseEntity.badRequest().body(Map.of(
+            "status", "error",
+            "message", "Không thể lấy số liệu bài đăng từ URL: " + postUrl
         )));
   }
 

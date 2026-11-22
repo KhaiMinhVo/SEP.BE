@@ -183,10 +183,13 @@ public class CreatorIngestionService {
       metric.setNiche(request.getNiche());
     }
     metric.setContentSummary(request.getContentSummary());
-    metric.setCollectedAt(LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+    // Activity assessment compares crawler evidence in UTC, independent of the server timezone.
+    var collectedAt = LocalDateTime.now(java.time.ZoneOffset.UTC)
+        .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+    metric.setCollectedAt(collectedAt);
     metric.setCrawlRunId(request.getCrawlRunId());
     metric.setObservedAt(
-        request.getObservedAt() != null ? request.getObservedAt() : LocalDateTime.now());
+        request.getObservedAt() != null ? request.getObservedAt() : collectedAt);
     if (metric.getQualityReviewedAt() == null) {
       metric.setCreatorType(request.getCreatorType());
     }

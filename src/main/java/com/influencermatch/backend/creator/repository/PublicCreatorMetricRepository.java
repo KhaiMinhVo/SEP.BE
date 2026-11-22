@@ -79,7 +79,8 @@ public interface PublicCreatorMetricRepository
                              '#[^[:space:]#]+', ' ', 'g')) @@ plainto_tsquery('simple', term))), 0.0) AS topicConsistency
               FROM post p WHERE p.creator_id = c.id
           ) post_evidence ON true
-          WHERE m.creator_type IN ('KOL', 'KOC') AND m.freshness_status = 'FRESH'
+          WHERE c.discovery_hidden = false
+            AND m.creator_type IN ('KOL', 'KOC') AND m.freshness_status = 'FRESH'
             AND (m.quality_reviewed_at IS NOT NULL OR (
               (m.data_confidence IS NULL OR m.data_confidence >= 0.7)
               AND ((NULLIF(BTRIM(m.niche), '') IS NOT NULL AND UPPER(BTRIM(m.niche)) <> 'UNKNOWN')
@@ -211,7 +212,8 @@ public interface PublicCreatorMetricRepository
                  (1.0 - (c.embedding <=> CAST(:briefVector AS vector))) AS semanticScore
           FROM creator c
           JOIN public_creator_metric m ON c.id = m.creator_id
-          WHERE (:hasExcludedIds = false OR c.id NOT IN (:excludedIds))
+          WHERE c.discovery_hidden = false
+            AND (:hasExcludedIds = false OR c.id NOT IN (:excludedIds))
             AND (:hasPlatforms = false OR c.platform IN (:platforms))
             AND (:followerMin IS NULL OR m.followers >= :followerMin)
             AND (:followerMax IS NULL OR m.followers <= :followerMax)
@@ -267,7 +269,7 @@ public interface PublicCreatorMetricRepository
               ORDER BY m2.collected_at DESC, m2.id DESC
               LIMIT 1
           )
-          WHERE s.campaign_id = :campaignId
+          WHERE c.discovery_hidden = false AND s.campaign_id = :campaignId
             AND s.status != 'REMOVED'
             AND (m.id IS NULL OR (m.creator_type IN ('KOL', 'KOC') AND m.freshness_status = 'FRESH'))
             AND (m.id IS NULL OR m.quality_reviewed_at IS NOT NULL OR (

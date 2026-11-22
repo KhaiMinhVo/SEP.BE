@@ -67,7 +67,8 @@ class CreatorIngestionServiceTest {
 
   @Test
   void recrawlCannotOverwriteManagerRejection() {
-    var creator = Creator.builder().id(UUID.randomUUID()).platform("TIKTOK").externalId("reviewed").build();
+    var creator = Creator.builder().id(UUID.randomUUID()).platform("TIKTOK").externalId("reviewed")
+        .discoveryHidden(true).build();
     var reviewedAt = java.time.LocalDateTime.now();
     var metric = PublicCreatorMetric.builder().id(UUID.randomUUID()).creator(creator)
         .creatorType("REJECTED").niche("Music").qualityReviewedAt(reviewedAt).build();
@@ -75,11 +76,16 @@ class CreatorIngestionServiceTest {
     when(creatorRepository.save(any())).thenReturn(creator);
     when(metricRepository.findByCreatorId(creator.getId())).thenReturn(Optional.of(metric));
     when(metricRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    var before = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusSeconds(1);
     service.ingestCreatorData(CreatorIngestionRequest.builder().platform("TIKTOK").externalId("reviewed")
         .userName("reviewed").creatorType("KOL").niche("Beauty").followers(100000L).build());
     assertThat(metric.getCreatorType()).isEqualTo("REJECTED");
     assertThat(metric.getNiche()).isEqualTo("Music");
     assertThat(metric.getQualityReviewedAt()).isEqualTo(reviewedAt);
+    assertThat(creator.isDiscoveryHidden()).isTrue();
+    assertThat(metric.getCollectedAt()).isBetween(before,
+        java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(1));
+    assertThat(metric.getObservedAt()).isEqualTo(metric.getCollectedAt());
   }
 
   @Test

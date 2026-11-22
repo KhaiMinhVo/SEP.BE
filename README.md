@@ -1069,6 +1069,35 @@ On success: `204 No Content`, BCrypt password update, authVersion increment, all
 Incorrect current password or invalid new password returns 400; unauthenticated/revoked sessions return 401; missing/invalid CSRF returns 403. Passwordless Google accounts must first use the existing password-setup flow.
 This source change does not deploy the endpoint or change any account password by itself.
 
+### Creator inactivity review (Data Manager)
+
+V46 adds creator discovery visibility and an audit trail. Only `DATA_MANAGER` may use
+`GET /api/v1/data/creator-activity?page=0&size=20&status=INACTIVE` (optional `hidden=true/false`).
+Pagination is zero based, with size 1..100. Omit `status` to inspect all accounts;
+`INACTIVE` sorts first, followed by `UNKNOWN` and `ACTIVE`.
+Each item includes creator identity, profile URL, last post date, days since last post,
+last observation date, crawl freshness, activity status, and current visibility.
+
+`CREATOR_ACTIVITY_WARNING_DAYS` defaults to 30 and `CREATOR_ACTIVITY_MAX_DATA_AGE_DAYS`
+defaults to 7, configured under `creator-activity` in application.yml. Assessment runs
+on every list request, so no scheduled scan or persisted warning can become outdated.
+Missing/invalid/future post dates, failed refreshes, or outdated observations produce
+`UNKNOWN`; recrawl before deciding whether the creator is inactive. ISO dates/timestamps
+and Unix seconds/milliseconds are supported; timestamps without a zone use UTC.
+New ingestion collection times and missing observation-time defaults are written in UTC.
+
+`PATCH /api/v1/data/creator-activity/{creatorId}/visibility` accepts
+`{"hidden":true,"reason":"No recent posts; reviewed crawl evidence"}`.
+Use `hidden:false` to restore. A nonblank reason of at most 500 characters is required.
+Changes are atomic and audit the Data Manager, reason, action, and time. Repeating the
+same visibility is idempotent. Existing authentication/session/CSRF requirements apply.
+Hidden accounts are excluded from creator listing, semantic/discovery search, and new
+recommendation candidate retrieval, including existing shortlist candidates. Profiles,
+shortlists, cooperation history, and past recommendation snapshots remain available.
+Crawling does not override a manager's visibility decision; restoration is manual.
+This repository supplies backend APIs only; the Data Manager frontend must consume
+the list and visibility endpoints to render warnings and action buttons.
+
 ### Managed niche migration after merging develop
 
 The managed niche catalogue migration is V35__managed_niche_catalog.sql. Develop owns V33 (collaboration confirmation source) and V34 (creator fee/discovery keywords); their SQL is unchanged. Fresh databases apply each version once. If a database has already applied this branch's former V33__managed_niche_catalog.sql, reconcile its Flyway history with the deployment owner before upgrading; this source rename does not rewrite any existing database history.

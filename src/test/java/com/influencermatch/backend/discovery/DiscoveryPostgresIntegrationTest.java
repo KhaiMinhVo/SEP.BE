@@ -102,6 +102,20 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
     verify(ai, never()).getExplanation(any());
   }
 
+  @Test void managerHiddenCreatorIsExcludedFromBothDiscoveryRoutesUntilRestored() throws Exception {
+    var c = creator("Activity review", "BEAUTY", "Review " + topic, "KOC");
+    var manager = account(Role.DATA_MANAGER);
+    String visibility = "/data/creator-activity/" + c.getId() + "/visibility";
+    call(manager, patch(visibility), Map.of("hidden", true, "reason", "Inactive creator"), 200);
+    for (var route : List.of("discover", "discovery"))
+      assertThat(ids(call(owner, get("/campaigns/" + campaign + "/" + route), null, 200).path("data")))
+          .doesNotContain(c.getId().toString());
+    call(manager, patch(visibility), Map.of("hidden", false, "reason", "Activity reviewed"), 200);
+    for (var route : List.of("discover", "discovery"))
+      assertThat(ids(call(owner, get("/campaigns/" + campaign + "/" + route), null, 200).path("data")))
+          .contains(c.getId().toString());
+  }
+
   @Test void productWithoutNicheNeverDumpsUnrelatedCatalogOnEitherEndpoint() throws Exception {
     var skincare = creator("Skincare", "BEAUTY", "Honest review " + topic, "KOC");
     creator("Pets", "PETS", "Pet care and household products", "KOC");

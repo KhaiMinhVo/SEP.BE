@@ -61,7 +61,7 @@ public interface CreatorRepository extends JpaRepository<Creator, UUID> {
               + "c.profile_url AS profileUrl, "
               + "1 - (c.embedding <=> cast(:queryVector as vector)) AS similarity "
               + "FROM creator c "
-              + "WHERE c.embedding IS NOT NULL "
+              + "WHERE c.embedding IS NOT NULL AND c.discovery_hidden = false "
               + "ORDER BY c.embedding <=> cast(:queryVector as vector) ASC "
               + "LIMIT :limit",
       nativeQuery = true)

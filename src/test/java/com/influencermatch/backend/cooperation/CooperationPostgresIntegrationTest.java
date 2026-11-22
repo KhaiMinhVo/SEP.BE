@@ -23,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.*;
 
 @org.springframework.context.annotation.Import(CooperationPostgresIntegrationTest.EventConfig.class)
+@org.springframework.test.context.TestPropertySource(properties = "application.auth.email-verification.secret=test-email-otp-secret-at-least-32-characters")
 class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
   @org.springframework.boot.test.context.TestConfiguration
   static class EventConfig {
@@ -205,6 +206,92 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
   long count(String table) {
     return jdbc.queryForObject(
         "select count(*) from " + table + " where campaign_id=?", Long.class, campaign);
+  }
+
+  record OnboardingFixture(UUID deal, UUID invitation, String token) {}
+
+  OnboardingFixture onboardingInvitation(Creator channel) throws Exception {
+    UUID id = prepared(List.of(channel), 100000);
+    var sent = call(brand, post(root() + "/" + id + "/invitations")
+        .header("Idempotency-Key", UUID.randomUUID().toString()), Map.of("expectedRevision", 2), 200).path("data");
+    UUID invitation = UUID.fromString(sent.path("invitationId").asText());
+    String payload = jdbc.queryForObject("select payload from cooperation_email_job where invitation_id=?", String.class, invitation);
+    String token = java.net.URI.create(invitationCipher.decrypt(payload).link()).getQuery().substring("token=".length());
+    return new OnboardingFixture(id, invitation, token);
+  }
+
+  @Test
+  void invitedNewCreatorRegistersVerifiesEmailAndResumesOnlyAfterChannelVerification() throws Exception {
+    var channel = channel(false);
+    var fixture = onboardingInvitation(channel);
+    String email = UUID.randomUUID() + "@creator.test";
+    call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 202);
+    var link = org.mockito.ArgumentCaptor.forClass(String.class);
+    verify(sender).sendCreatorInvitation(eq(email), link.capture());
+    var params = org.springframework.web.util.UriComponentsBuilder.fromUriString(link.getValue()).build().getQueryParams();
+    String registrationToken = params.getFirst("token");
+    assertThat(params.getFirst("cooperationToken")).isEqualTo(fixture.token());
+    call(null, post("/auth/creator/register"), Map.of("invitationToken", registrationToken, "fullName", "Invited Creator",
+        "password", "Password123!", "policyAcceptance", TestAuthHttp.acceptance()), 201);
+    var newCreator = users.findByEmail(email).orElseThrow();
+    assertThat(newCreator.getRole()).isEqualTo(Role.CREATOR);
+    assertThat(jdbc.queryForObject("select master_id from creator where id=?", UUID.class, channel.getId())).isNull();
+    var otp = org.mockito.ArgumentCaptor.forClass(String.class);
+    verify(sender).send(eq(email), otp.capture());
+    call(null, post("/auth/verify-email"), Map.of("email", email, "otp", otp.getValue()), 200);
+    newCreator = users.findByEmail(email).orElseThrow();
+    login(newCreator);
+    assertThat(call(newCreator, post("/cooperation-invitations/context"), Map.of("token", fixture.token()), 200)
+        .path("data").path("status").asText()).isEqualTo("NEEDS_CHANNEL_VERIFICATION");
+    call(newCreator, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 403);
+    UUID newMaster = jdbc.queryForObject("select id from creator_master where user_id=?", UUID.class, newCreator.getId());
+    // Verification boundary has its own OAuth/Claim tests; only persisted verified ownership unlocks continuation.
+    jdbc.update("update creator set master_id=?,source_type='AUTHORIZED',authorized_at=now() where id=?", newMaster, channel.getId());
+    call(newCreator, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 403);
+    jdbc.update("insert into creator_account_verification(id,creator_id,verified_by_user_id,verification_method,status,verified_at,created_at,updated_at)"
+        + " values(gen_random_uuid(),?,?,'TIKTOK_OAUTH_SANDBOX','ACTIVE',now(),now(),now())", channel.getId(), newCreator.getId());
+    call(null, get("/cooperation-invitations/preview").param("token", fixture.token()), null, 200);
+    for (int attempt=0; attempt<2; attempt++) {
+      assertThat(call(newCreator, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 200)
+          .path("data").path("dealId").asText()).isEqualTo(fixture.deal().toString());
+    }
+    var deal = jdbc.queryForMap("select master_id,revision,accepted_revision,collaboration_id from cooperation_deal where id=?", fixture.deal());
+    assertThat(deal.get("master_id")).isEqualTo(newMaster);
+    assertThat(((Number) deal.get("revision")).intValue()).isEqualTo(3);
+    assertThat(deal.get("accepted_revision")).isNull();
+    assertThat(deal.get("collaboration_id")).isNull();
+    var detail = call(newCreator, get("/creators/portal/cooperation-deals/" + fixture.deal()), null, 200).path("data");
+    call(newCreator, post("/creators/portal/cooperation-deals/" + fixture.deal() + "/accept"), Map.of("expectedRevision", 3), 200);
+    assertThat(jdbc.queryForObject("select accepted_revision from cooperation_deal where id=?", Integer.class, fixture.deal()))
+        .isEqualTo(detail.path("proposal").path("revision").asInt());
+    call(creator, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 403);
+  }
+
+  @Test
+  void registrationUsesDeliveredRecipientSnapshotAndRateLimitsRequests() throws Exception {
+    var fixture = onboardingInvitation(channel(false));
+    String email = UUID.randomUUID() + "@creator.test";
+    jdbc.update("update cooperation_email_job set delivery_method='EMAIL_ONLY',payload=? where invitation_id=?",
+        invitationCipher.encrypt(email, "https://example.test/cooperation-invitations?token=" + fixture.token()), fixture.invitation());
+    call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", "someoneelse@creator.test"), 202);
+    verify(sender, never()).sendCreatorInvitation(anyString(), anyString());
+    assertThat(call(creator, post("/cooperation-invitations/context"), Map.of("token", fixture.token()), 200)
+        .path("data").path("status").asText()).isEqualTo("ACCOUNT_MISMATCH");
+    call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 202);
+    call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 429);
+    verify(sender, times(1)).sendCreatorInvitation(eq(email), anyString());
+    call(null, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 401);
+    call(brand, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 403);
+  }
+
+  @Test
+  void expiredInvitationCannotRegisterOrResume() throws Exception {
+    var fixture = onboardingInvitation(channel(false));
+    jdbc.update("update cooperation_invitation set expires_at=now()-interval '1 second' where id=?", fixture.invitation());
+    call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", "nobody@creator.test"), 409);
+    call(creator, post("/cooperation-invitations/context"), Map.of("token", fixture.token()), 409);
+    call(creator, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 409);
+    verifyNoInteractions(sender);
   }
 
   @Test
@@ -419,6 +506,38 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
         Map.of("expectedRevision", 2, "agreementSource", "PORTAL"),
         200);
     assertThat(count("collaboration")).isOne();
+  }
+
+  @Test
+  void acceptedProposalKpiCommitmentIsFrozenOnCollaboration() throws Exception {
+    var c = channel(true);
+    UUID relation = relationship(c);
+    var created = create(List.of(relation));
+    UUID id = UUID.fromString(created.path("id").asText());
+    var offer = new LinkedHashMap<String, Object>(proposal(1, List.of(c), 100000));
+    offer.put("kpiType", "VIEWS");
+    offer.put("kpiTarget", 5000L);
+
+    var proposed = call(
+        brand,
+        post(root() + "/" + id + "/proposals").header("Idempotency-Key", "kpi-offer"),
+        offer,
+        200).path("data");
+    assertThat(proposed.path("proposal").path("kpiType").asText()).isEqualTo("VIEWS");
+    assertThat(proposed.path("proposal").path("kpiTarget").asLong()).isEqualTo(5000L);
+    call(creator, post("/creators/portal/cooperation-deals/" + id + "/accept"),
+        Map.of("expectedRevision", 2), 200);
+    var confirmed = call(brand, post(root() + "/" + id + "/confirm")
+        .header("Idempotency-Key", "kpi-confirm"),
+        Map.of("expectedRevision", 2, "agreementSource", "PORTAL"), 200).path("data");
+    UUID collaboration = UUID.fromString(confirmed.path("collaborationId").asText());
+
+    assertThat(jdbc.queryForObject(
+        "select committed_kpi_type from collaboration where id=?", String.class, collaboration))
+        .isEqualTo("VIEWS");
+    assertThat(jdbc.queryForObject(
+        "select committed_kpi_target from collaboration where id=?", Long.class, collaboration))
+        .isEqualTo(5000L);
   }
 
   @Test
@@ -717,6 +836,36 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
         post(root() + "/" + id + "/confirm").header("Idempotency-Key", "bad-proof"),
         evidence,
         400);
+    assertThat(count("collaboration")).isZero();
+  }
+
+  @Test
+  void brandCanCancelDraftWithRevisionAndOwnershipWithoutCreatingReview() throws Exception {
+    var c = channel(false);
+    UUID rel = relationship(c);
+    UUID id = UUID.fromString(create(List.of(rel)).path("id").asText());
+    var url = root() + "/" + id + "/cancel";
+    call(account(Role.BRAND), post(url), Map.of("expectedRevision", 1, "reason", "Not proceeding"), 404);
+    call(brand, post(url), Map.of("expectedRevision", 99, "reason", "Not proceeding"), 409);
+    call(brand, post(url), Map.of("expectedRevision", 1, "reason", " "), 400);
+    var closed = call(brand, post(url), Map.of("expectedRevision", 1, "reason", "Brand decided not to contact"), 200).path("data");
+    assertThat(closed.path("status").asText()).isEqualTo("CANCELLED");
+    assertThat(call(brand, get(root() + "/" + id), null, 200).path("data").path("status").asText()).isEqualTo("CANCELLED");
+    assertThat(count("collaboration")).isZero();
+    assertThat(jdbc.queryForObject("select count(*) from cooperation_history where deal_id=? and action='DEAL_CANCEL'", Long.class, id)).isEqualTo(1);
+  }
+
+  @Test
+  void withdrawalInvalidatesInvitationAndCreatorDeclineDoesNotCreateCollaboration() throws Exception {
+    UUID id = prepared(List.of(channel(true)), 100000);
+    var sent = call(brand, post(root() + "/" + id + "/invitations").header("Idempotency-Key", "withdraw-invite"), Map.of("expectedRevision", 2, "deliveryMethod", "PORTAL_ONLY"), 200).path("data");
+    UUID invitation = UUID.fromString(sent.path("invitationId").asText());
+    call(brand, post(root() + "/" + id + "/cancel"), Map.of("expectedRevision", 2, "reason", "Withdraw before agreement"), 200);
+    assertThat(call(brand, get("/cooperation-invitations/" + invitation + "/email-delivery"), null, 200).path("data").path("active").asBoolean()).isFalse();
+    call(creator, post("/creators/portal/cooperation-deals/" + id + "/accept"), Map.of("expectedRevision", 2), 409);
+    UUID other = prepared(List.of(channel(true)), 100000);
+    var declined = call(creator, post("/creators/portal/cooperation-deals/" + other + "/decline"), Map.of("expectedRevision", 2), 200).path("data");
+    assertThat(declined.path("status").asText()).isEqualTo("DECLINED");
     assertThat(count("collaboration")).isZero();
   }
 
@@ -1107,6 +1256,12 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
             jdbc.queryForObject(
                 "select payload from cooperation_email_job where id=?", String.class, committed))
         .isNotBlank();
+    // A scheduler/event duplicate must not resend an already successful job.
+    worker.process(committed);
+    assertThat(
+            jdbc.queryForObject(
+                "select attempts from cooperation_email_job where id=?", Integer.class, committed))
+        .isEqualTo(1);
   }
 
   @Test

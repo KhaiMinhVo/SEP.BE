@@ -39,6 +39,7 @@ public class SecurityConfig {
     "/integrations/instagram/callback",
     "/integrations/tiktok/callback",
     "/cooperation-invitations/preview",
+    "/cooperation-invitations/registration",
     "/auth/csrf",
     "/auth/policies",
     "/auth/logout",
@@ -152,7 +153,7 @@ public class SecurityConfig {
                     .hasAuthority("REVIEW_CREATOR_CLASSIFICATION")
                     .requestMatchers("/admin/crawler/**")
                     .denyAll()
-                    .requestMatchers("/data/crawler/**")
+                    .requestMatchers("/data/crawler/**", "/data/creator-activity/**")
                     .hasRole("DATA_MANAGER")
                     .requestMatchers(
                         org.springframework.http.HttpMethod.GET, "/admin/recommendation-config")

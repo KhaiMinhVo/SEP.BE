@@ -3,6 +3,10 @@
 #  Environment: Development (default)
 # --------------------------------------------------------------------------------------------------------------------------
 
+creator-activity:
+  warning-days: ${CREATOR_ACTIVITY_WARNING_DAYS:30}
+  max-data-age-days: ${CREATOR_ACTIVITY_MAX_DATA_AGE_DAYS:7}
+
 server:
   port: 8080
   forward-headers-strategy: native
@@ -122,7 +126,7 @@ application:
     app-secret: ${META_APP_SECRET:}
     login-config-id: ${META_LOGIN_CONFIG_ID:}
     graph-api-version: ${META_GRAPH_API_VERSION:}
-    redirect-uri: ${META_REDIRECT_URI:}
+    redirect-uri: ${META_REDIRECT_URI:https://www.influencermatch.site/api/v1/integrations/meta/callback}
     encryption-key: ${META_OAUTH_ENCRYPTION_KEY:}
     cleanup-enabled: true
   claim-email:
@@ -135,7 +139,7 @@ application:
       from: ${SMTP_FROM:}
       secret: ${EMAIL_OTP_SECRET:}
     creator-invitation:
-      frontend-base-url: ${CREATOR_INVITATION_FRONTEND_BASE_URL:http://localhost:5173}
+      frontend-base-url: ${CREATOR_INVITATION_FRONTEND_BASE_URL:https://www.influencermatch.site}
     social-proof-mock:
       enabled: ${SOCIAL_PROOF_MOCK_ENABLED:false}
     creator-mock:
@@ -241,3 +245,13 @@ gemini:
   base-url: https://generativelanguage.googleapis.com/v1beta/models
   max-output-tokens: 2048
   temperature: 0.3
+
+# ------------------------------------------------------------------------------------
+#  Cloudinary Storage (Avatars, Campaign Covers, Deliverables & Crawled Media)
+# ------------------------------------------------------------------------------------
+cloudinary:
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+  api-key: ${CLOUDINARY_API_KEY:}
+  api-secret: ${CLOUDINARY_API_SECRET:}
+  url: ${CLOUDINARY_URL:}
+

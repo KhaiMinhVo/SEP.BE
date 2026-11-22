@@ -350,6 +350,27 @@ class ExecutionContractPostgresIntegrationTest extends ExecutionScenarioSupport 
   }
 
   @Test
+  void noFinalReviewLeavesAcceptedOutcomeAwaitingReviewWithoutInventingHistory() throws Exception {
+    ready(); accept();
+    assertThat(state().path("status").asText()).isEqualTo("AWAITING_REVIEW");
+    assertThat(jdbc.queryForObject("select count(*) from creator_review where collaboration_id=?", Long.class, collaboration)).isZero();
+    assertThat(jdbc.queryForObject("select count(*) from historical_campaign where collaboration_id=?", Long.class, collaboration)).isZero();
+    long campaignRevision = jdbc.queryForObject("select campaign_revision from campaign where id=?", Long.class, campaign);
+    call(brand, patch("/campaigns/" + campaign + "/status").header("If-Match", "\"campaign:" + campaign + ":r" + campaignRevision + "\""), Map.of("status", "COMPLETED"), 409);
+    assertThat(state().path("status").asText()).isEqualTo("AWAITING_REVIEW");
+  }
+
+  @Test
+  void actorSeparationPreventsBrandKpiAndCreatorApprovalWithoutWrites() throws Exception {
+    long initial = revision();
+    request(brand, root + "/outcome", Map.of("expectedRevision", initial, "posts", List.of()), 403);
+    request(brand, root + "/deliverables/" + unit() + "/outcome", Map.of("expectedRevision", initial), 403);
+    request(owner, root + "/deliverables/" + unit() + "/review", Map.of("expectedRevision", 1, "submissionRevision", 1, "decision", "APPROVE", "completedChecklist", List.of("Brand safe")), 403);
+    assertThat(revision()).isEqualTo(initial);
+    assertThat(jdbc.queryForObject("select count(*) from collaboration_outcome_revision where collaboration_id=?", Long.class, collaboration)).isZero();
+  }
+
+  @Test
   void swaggerDocumentsTheProtectedExecutionOperations() throws Exception {
     var doc = call(null, get("/api-docs"), null, 200);
     for (String suffix :

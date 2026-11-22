@@ -33,6 +33,8 @@ public class CreatorClaimResolutionService {
   @org.springframework.beans.factory.annotation.Autowired private java.time.Clock clock;
   @org.springframework.beans.factory.annotation.Autowired(required = false)
   private com.influencermatch.backend.creator.client.CrawlerServiceClient crawlerServiceClient;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.storage.CloudinaryStorageService cloudinaryStorageService;
   @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager em;
   private final CreatorRepository creatorRepository;
   private final CreatorMasterRepository creatorMasterRepository;
@@ -136,7 +138,7 @@ public class CreatorClaimResolutionService {
                 creator.setDisplayName(resolveRes.getCreatorInfo().getDisplayName());
               }
               if (resolveRes.getCreatorInfo().getAvatarUrl() != null && !resolveRes.getCreatorInfo().getAvatarUrl().isBlank()) {
-                creator.setAvatarUrl(resolveRes.getCreatorInfo().getAvatarUrl());
+                applyCreatorAvatar(creator, resolveRes.getCreatorInfo().getAvatarUrl());
               }
             }
           }
@@ -252,5 +254,36 @@ public class CreatorClaimResolutionService {
         .canonicalName(master.getCanonicalName())
         .status("AUTHORIZED")
         .build();
+  }
+
+  private void applyCreatorAvatar(Creator creator, String rawAvatarUrl) {
+    if (rawAvatarUrl == null || rawAvatarUrl.isBlank()) {
+      return;
+    }
+    if (cloudinaryStorageService != null && cloudinaryStorageService.isConfigured()) {
+      if (rawAvatarUrl.contains("res.cloudinary.com")) {
+        creator.setAvatarUrl(rawAvatarUrl);
+        return;
+      }
+      var uploaded = cloudinaryStorageService.uploadFromUrl(
+          rawAvatarUrl,
+          com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CREATOR_AVATAR,
+          creator.getUserName() != null ? creator.getUserName() : "creator"
+      );
+      if (uploaded.isPresent()) {
+        var stored = uploaded.get();
+        creator.setAvatarUrl(stored.url());
+        creator.setAvatarStorageKey(stored.storageKey());
+        creator.setAvatarMimeType(stored.mimeType());
+        creator.setAvatarSizeBytes(stored.sizeBytes());
+        creator.setAvatarUpdatedAt(stored.updatedAt());
+      } else if (creator.getAvatarUrl() == null || creator.getAvatarUrl().isBlank()) {
+        creator.setAvatarUrl(rawAvatarUrl);
+      } else {
+        log.info("Keeping existing avatar for creator '{}' because cloud upload failed/skipped", creator.getUserName());
+      }
+    } else {
+      creator.setAvatarUrl(rawAvatarUrl);
+    }
   }
 }

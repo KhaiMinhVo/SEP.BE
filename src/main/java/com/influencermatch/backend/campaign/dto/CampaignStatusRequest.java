@@ -8,4 +8,7 @@ import com.influencermatch.backend.campaign.repository.*;
 import com.influencermatch.backend.campaign.service.*;
 import jakarta.validation.constraints.NotNull;
 
-public record CampaignStatusRequest(@NotNull CampaignStatus status) {}
+public record CampaignStatusRequest(@NotNull CampaignStatus status,
+    @jakarta.validation.constraints.Size(max=2000) String reason) {
+  public CampaignStatusRequest(CampaignStatus status) { this(status, null); }
+}

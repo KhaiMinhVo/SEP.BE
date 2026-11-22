@@ -72,6 +72,14 @@ public abstract class PostgresApiTestSupport {
   @Autowired protected UserRepository users;
   @Autowired protected PasswordEncoder encoder;
   @Autowired protected JwtTokenProvider jwt;
+
+  protected void evaluatedShortlist(User brand, UUID campaign, List<UUID> creators) throws Exception {
+    for (UUID creator : creators)
+      jdbc.update("insert into shortlist_item(id,campaign_id,creator_id,user_id,priority,added_at,status,source) values(gen_random_uuid(),?,?,?,'MEDIUM',now(),'SAVED','MANUAL_DISCOVERY') on conflict(campaign_id,creator_id) do update set status='SAVED'", campaign, creator, brand.getId());
+    var ids = jdbc.queryForList("select creator_id from shortlist_item where campaign_id=? and status<>'REMOVED'", UUID.class, campaign);
+    var snapshot = json.writeValueAsString(Map.of("candidates", ids.stream().map(id -> Map.of("creatorId", id, "recommendationTier", "HISTORY_SUPPORTED")).toList()));
+    jdbc.update("insert into recommendation_run(id,campaign_id,brand_profile_id,context_version,status,candidates_count,created_at,scoring_snapshot) values(gen_random_uuid(),?,(select brand_profile_id from campaign where id=?),1,'COMPLETED',?,now(),?::jsonb)", campaign, campaign, ids.size(), snapshot);
+  }
   @Autowired protected JdbcTemplate jdbc;
 
   @org.junit.jupiter.api.BeforeEach

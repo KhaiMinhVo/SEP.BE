@@ -19,6 +19,10 @@ import org.hibernate.annotations.UpdateTimestamp;
 @AllArgsConstructor
 @Builder
 public class Creator {
+  @Builder.Default
+  @Column(name = "discovery_hidden", nullable = false)
+  private boolean discoveryHidden = false;
+
   @ManyToOne(fetch = FetchType.LAZY)
   @JoinColumn(name = "master_id")
   @com.fasterxml.jackson.annotation.JsonIgnore
@@ -91,6 +95,18 @@ public class Creator {
 
   @Column(name = "avatar_url", length = 1000)
   private String avatarUrl;
+
+  @Column(name = "avatar_storage_key", length = 500)
+  private String avatarStorageKey;
+
+  @Column(name = "avatar_mime_type", length = 100)
+  private String avatarMimeType;
+
+  @Column(name = "avatar_size_bytes")
+  private Long avatarSizeBytes;
+
+  @Column(name = "avatar_updated_at")
+  private LocalDateTime avatarUpdatedAt;
 
   @CreationTimestamp
   @Column(name = "created_at", nullable = false, updatable = false)

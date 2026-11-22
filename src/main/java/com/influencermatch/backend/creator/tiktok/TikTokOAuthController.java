@@ -70,4 +70,10 @@ public class TikTokOAuthController {
   public ApiResponse<TikTokDtos.Session> view(@PathVariable UUID id) {
     return ApiResponse.ok(store.view(id).unwrap());
   }
+
+  @PostMapping("/creators/portal/accounts/connect/tiktok/sessions/{id}/cancel")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
+  public ApiResponse<TikTokDtos.Session> cancel(@PathVariable UUID id) {
+    return ApiResponse.ok(store.cancel(id).unwrap());
+  }
 }

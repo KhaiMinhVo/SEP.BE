@@ -910,11 +910,21 @@ API prefix `/api/v1`. Authenticated endpoints under `/collaborations/{id}`:
 - `POST /outcome/reopen`: collaboration expectedRevision and reason; only AWAITING_REVIEW can reopen to IN_PROGRESS. The previous acceptance remains in history and is marked reopened. COMPLETED cannot reopen.
 - `POST /review`: collaboration expectedRevision, accepted outcomeRevision, integer overallRating/brandFitRating (1-5), wouldCollaborateAgain boolean, note and reviewTags. Final review completes execution atomically with historical evidence and audit. Final reviews are immutable.
 
+#### Mixed recording and closing work
+
+COLLABORATIVE is the default. The owning Brand may change the mode while the confirmed Collaboration is PLANNED. COLLABORATIVE requires a ready assignment at start. BRAND_MANAGED can start while the Creator is working outside the Portal. Both require an ACTIVE Campaign. Already assigned Creators retain execution permissions in either mode while they have verified ownership of every channel. Assignment acceptance remains limited to a PLANNED collaborative deal.
+
+- The owning Brand can use the per-deliverable POST endpoints /external-submissions, /external-publication and /external-outcome in either mode. Supply sourceDescription and receivedAt (an ISO instant at or before server time). The authenticated Brand is recorded as the recorder. Older records can have a missing receipt time. Process the pending draft before submitting the next version. Publication and KPI remain tied to the current submission revision.
+- KPI revisions keep per-metric provenance. Editing one counter or recording finance preserves the provenance of other counters. MIXED is a display classification for results that contain more than one metric source. Adoption of a collected observation still requires a successful observation of the current publication.
+- POST /complete-without-review completes the currently accepted Outcome, creates completion evidence and leaves the collaboration without a Creator rating.
+- POST /termination-requests/{requestId}/withdraw accepts expectedRevision from the requester of an open request. The pending request is resolved as WITHDRAWN. The other participant can still approve or decline pending requests via the existing Portal actions.
+- POST /terminate-external accepts expectedRevision, reason, agreedAt (a non-future ISO instant) and evidenceUrl (HTTPS). The owning Brand may record external mutual consent for an IN_PROGRESS Brand-managed Collaboration in an ACTIVE Campaign. This records the Brand's action and preserves delivery history, outcome revisions, cost and payment status. An open request is resolved as TERMINATED_EXTERNAL. No response leaves the request pending until it is resolved or withdrawn.
+
 All POST execution operations require `Idempotency-Key` (1-100 safe characters). Same actor/key/scope/body returns the stored response; changed body or stale revision returns 409. Unit mutations also increment the collaboration executionRevision. Keys are scoped to operations, not shared with authentication tokens. Brand writes use existing Collaboration/Outcome/Review permissions; Creator execution uses effective RESPOND_OWN_COOPERATION and current ownership of **every** Deal channel. Losing ownership removes access. No new public/magic-link access to execution data is introduced.
 
 Creator responses use a field allowlist for execution reads, write responses and idempotency replays. Internal costs, revenue, financial evidence, financial ratios and the final internal review are available only to the authorized Brand. Legacy evidence attachments are supplementary and leave the official post URL and submission unchanged.
 
-For a confirmed PLANNED collaboration with an immutable proposal and no assigned Master, Brand waits for verified ownership and Creator consent. Creator reads `GET /creators/portal/collaborations/pending-assignments` and submits `POST /creators/portal/collaborations/{id}/accept-assignment` with `expectedRevision` (Deal), `proposalRevision` and `Idempotency-Key`. Acceptance keeps the Deal and Collaboration IDs and agreed terms. Brand starts once the campaign is ACTIVE and the assigned Creator has verified ownership of every channel. A pending collaboration can be cancelled before start.
+For a confirmed PLANNED COLLABORATIVE collaboration with an immutable proposal and no assigned Master, Brand waits for verified ownership and Creator consent. Creator reads `GET /creators/portal/collaborations/pending-assignments` and submits `POST /creators/portal/collaborations/{id}/accept-assignment` with `expectedRevision` (Deal), `proposalRevision` and `Idempotency-Key`. Acceptance keeps the Deal and Collaboration IDs and agreed terms. Brand starts once the campaign is ACTIVE and the assigned Creator has verified ownership of every channel. A pending collaboration can be cancelled before start.
 
 Financial policy `outcome-finance-v1`: ROAS=GMV/actualCost, ROI=(revenue-actualCost)/actualCost, CPM=actualCost/views*1000, CPE=actualCost/(likes+comments+shares). ROI is not full accounting profit. Calculations use BigDecimal; missing inputs/zero denominator/inconsistent measurement periods return null with an unavailable reason. No absent metric is filled with zero. Raw revision calculations remain authoritative; a ratio outside the legacy numeric ROI column range is not truncated into that column.
 
@@ -1068,6 +1078,35 @@ The new password must contain 8–72 characters, fit within 72 UTF-8 bytes for B
 On success: `204 No Content`, BCrypt password update, authVersion increment, all sessions/refresh tokens revoked, and refresh cookie cleared atomically. Log in again on every device.
 Incorrect current password or invalid new password returns 400; unauthenticated/revoked sessions return 401; missing/invalid CSRF returns 403. Passwordless Google accounts must first use the existing password-setup flow.
 This source change does not deploy the endpoint or change any account password by itself.
+
+### Creator inactivity review (Data Manager)
+
+V46 adds creator discovery visibility and an audit trail. Only `DATA_MANAGER` may use
+`GET /api/v1/data/creator-activity?page=0&size=20&status=INACTIVE` (optional `hidden=true/false`).
+Pagination is zero based, with size 1..100. Omit `status` to inspect all accounts;
+`INACTIVE` sorts first, followed by `UNKNOWN` and `ACTIVE`.
+Each item includes creator identity, profile URL, last post date, days since last post,
+last observation date, crawl freshness, activity status, and current visibility.
+
+`CREATOR_ACTIVITY_WARNING_DAYS` defaults to 30 and `CREATOR_ACTIVITY_MAX_DATA_AGE_DAYS`
+defaults to 7, configured under `creator-activity` in application.yml. Assessment runs
+on every list request, so no scheduled scan or persisted warning can become outdated.
+Missing/invalid/future post dates, failed refreshes, or outdated observations produce
+`UNKNOWN`; recrawl before deciding whether the creator is inactive. ISO dates/timestamps
+and Unix seconds/milliseconds are supported; timestamps without a zone use UTC.
+New ingestion collection times and missing observation-time defaults are written in UTC.
+
+`PATCH /api/v1/data/creator-activity/{creatorId}/visibility` accepts
+`{"hidden":true,"reason":"No recent posts; reviewed crawl evidence"}`.
+Use `hidden:false` to restore. A nonblank reason of at most 500 characters is required.
+Changes are atomic and audit the Data Manager, reason, action, and time. Repeating the
+same visibility is idempotent. Existing authentication/session/CSRF requirements apply.
+Hidden accounts are excluded from creator listing, semantic/discovery search, and new
+recommendation candidate retrieval, including existing shortlist candidates. Profiles,
+shortlists, cooperation history, and past recommendation snapshots remain available.
+Crawling does not override a manager's visibility decision; restoration is manual.
+This repository supplies backend APIs only; the Data Manager frontend must consume
+the list and visibility endpoints to render warnings and action buttons.
 
 ### Managed niche migration after merging develop
 

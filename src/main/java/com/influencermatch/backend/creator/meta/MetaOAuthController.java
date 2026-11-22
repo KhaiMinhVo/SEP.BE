@@ -79,6 +79,12 @@ public class MetaOAuthController {
     return ApiResponse.ok(store.view(id));
   }
 
+  @PostMapping("/creators/portal/accounts/connect/meta/sessions/{id}/cancel")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
+  public ApiResponse<MetaDtos.Session> cancel(@PathVariable UUID id) {
+    return ApiResponse.ok(store.cancel(id));
+  }
+
   @PostMapping("/creators/portal/accounts/connect/meta/sessions/{id}/confirm")
   @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
   @SecurityRequirement(name = "BearerAuth")

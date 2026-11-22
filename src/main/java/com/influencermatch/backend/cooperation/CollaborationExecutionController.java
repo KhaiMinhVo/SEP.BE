@@ -21,6 +21,23 @@ import org.springframework.web.bind.annotation.*;
     description = "Revision-aware execution; submitted metrics are SELF_REPORTED")
 public class CollaborationExecutionController {
   private final CollaborationExecution execution;
+  private final PostMetricCollections postMetrics;
+
+  @GetMapping("/deliverables/{deliverableId}/post-metrics")
+  public ResponseEntity<ApiResponse<JsonNode>> postMetricsHistory(
+      @PathVariable UUID id, @PathVariable UUID deliverableId) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(ApiResponse.ok(postMetrics.history(id, deliverableId)));
+  }
+
+  @PostMapping("/deliverables/{deliverableId}/post-metrics")
+  public ResponseEntity<ApiResponse<JsonNode>> collectPostMetrics(
+      @PathVariable UUID id, @PathVariable UUID deliverableId,
+      @RequestBody PostMetricCollections.Request body,
+      @RequestHeader("Idempotency-Key") String key) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(ApiResponse.ok(postMetrics.collect(id, deliverableId, body, key)));
+  }
 
   @PostMapping("/deliverables/{deliverableId}/submission-uploads")
   @PreAuthorize("hasRole('CREATOR') and hasAuthority('RESPOND_OWN_COOPERATION')")

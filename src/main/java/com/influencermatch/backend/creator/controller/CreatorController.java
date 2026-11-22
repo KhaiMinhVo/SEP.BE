@@ -73,7 +73,8 @@ public class CreatorController {
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getAllCreators() {
         List<PublicCreatorMetric> metrics = metricRepository.findAll();
         
-        List<Map<String, Object>> result = metrics.stream().map(m -> {
+        List<Map<String, Object>> result = metrics.stream()
+            .filter(m -> m.getCreator() != null && !m.getCreator().isDiscoveryHidden()).map(m -> {
             Map<String, Object> map = new HashMap<>();
             map.put("id", m.getId());
             map.put("followers", m.getFollowers());

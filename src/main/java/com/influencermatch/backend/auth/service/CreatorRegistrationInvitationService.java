@@ -77,9 +77,20 @@ public class CreatorRegistrationInvitationService {
   @PreAuthorize("hasAuthority('INVITE_CREATOR')")
   public InvitationResponse invite(InvitationRequest request) {
     Permissions.require(Permission.INVITE_CREATOR);
+    return issue(request.email(), Permissions.actor().getId(), null);
+  }
+
+  /** Called only after a live cooperation invitation and its recipient have been checked. */
+  @Transactional
+  public void inviteFromCooperation(String email, UUID sponsor, String cooperationToken) {
+    if (users.existsByEmail(email)) return; // Public response must not enumerate accounts.
+    issue(email, sponsor, cooperationToken);
+  }
+
+  private InvitationResponse issue(String email, UUID sponsor, String cooperationToken) {
     sender.requireConfigured();
-    String email = request.email();
     users.lockRegistrationEmail(email);
+    if (users.existsByEmail(email) && cooperationToken != null) return null;
     if (users.existsByEmail(email))
       throw new BusinessException(
           ErrorCode.EMAIL_ALREADY_EXISTS, "This email already has an account");
@@ -99,23 +110,23 @@ public class CreatorRegistrationInvitationService {
     invitation.setConsumedAt(null);
     invitation.setExpiresAt(now.plusSeconds(48 * 3600));
     invitation.setLastSentAt(now);
-    invitation.setInvitedBy(Permissions.actor().getId());
+    invitation.setInvitedBy(sponsor);
     invitations.save(invitation);
     deliveries.deleteByEmailAndSentAtBefore(email, now.minusSeconds(3600));
     deliveries.save(new CreatorRegistrationInvitationDelivery(UUID.randomUUID(), email, now));
-    audit.record(
+    audit.recordAs(
+        cooperationToken == null ? sponsor : null,
         "INVITE_CREATOR",
         "CreatorRegistrationInvitation",
         invitation.getId(),
         null,
         Map.of("email", email, "expiresAt", invitation.getExpiresAt().toString()),
-        "Gửi thư mời đăng ký tài khoản Creator");
-    String link =
-        UriComponentsBuilder.fromUriString(frontend + "/auth/creator/register")
-            .queryParam("token", token)
-            .build()
-            .encode()
-            .toUriString();
+        cooperationToken == null ? "Gửi thư mời đăng ký tài khoản Creator"
+            : "Người nhận lời mời hợp tác yêu cầu email đăng ký Creator");
+    var builder = UriComponentsBuilder.fromUriString(frontend + "/auth/creator/register")
+        .queryParam("token", token);
+    if (cooperationToken != null) builder.queryParam("cooperationToken", cooperationToken);
+    String link = builder.build().encode().toUriString();
     sender.sendCreatorInvitation(email, link);
     return response(invitation);
   }

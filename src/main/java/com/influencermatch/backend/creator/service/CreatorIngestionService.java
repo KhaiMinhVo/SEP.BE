@@ -26,6 +26,9 @@ public class CreatorIngestionService {
   private final jakarta.persistence.EntityManager entityManager;
   private final ShortlistNotificationService shortlistNotificationService;
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.storage.CloudinaryStorageService cloudinaryStorageService;
+
   @Autowired private org.springframework.context.ApplicationEventPublisher shortlistEvents;
 
   @Autowired
@@ -109,7 +112,7 @@ public class CreatorIngestionService {
       creator.setDisplayName(request.getDisplayName());
     }
     if (request.getAvatarUrl() != null) {
-      creator.setAvatarUrl(request.getAvatarUrl());
+      applyCreatorAvatar(creator, request.getAvatarUrl());
     }
     if (request.getLocation() != null) {
       creator.setLocation(request.getLocation());
@@ -183,10 +186,13 @@ public class CreatorIngestionService {
       metric.setNiche(request.getNiche());
     }
     metric.setContentSummary(request.getContentSummary());
-    metric.setCollectedAt(LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+    // Activity assessment compares crawler evidence in UTC, independent of the server timezone.
+    var collectedAt = LocalDateTime.now(java.time.ZoneOffset.UTC)
+        .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+    metric.setCollectedAt(collectedAt);
     metric.setCrawlRunId(request.getCrawlRunId());
     metric.setObservedAt(
-        request.getObservedAt() != null ? request.getObservedAt() : LocalDateTime.now());
+        request.getObservedAt() != null ? request.getObservedAt() : collectedAt);
     if (metric.getQualityReviewedAt() == null) {
       metric.setCreatorType(request.getCreatorType());
     }
@@ -282,5 +288,36 @@ public class CreatorIngestionService {
         .message("REJECTED".equals(metric.getCreatorType()) || "BRAND".equals(metric.getCreatorType())
             ? "Creator remains excluded by manager review" : "Creator data ingested successfully")
         .build();
+  }
+
+  private void applyCreatorAvatar(Creator creator, String rawAvatarUrl) {
+    if (rawAvatarUrl == null || rawAvatarUrl.isBlank()) {
+      return;
+    }
+    if (cloudinaryStorageService != null && cloudinaryStorageService.isConfigured()) {
+      if (rawAvatarUrl.contains("res.cloudinary.com")) {
+        creator.setAvatarUrl(rawAvatarUrl);
+        return;
+      }
+      var uploaded = cloudinaryStorageService.uploadFromUrl(
+          rawAvatarUrl,
+          com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CREATOR_AVATAR,
+          creator.getUserName() != null ? creator.getUserName() : "creator"
+      );
+      if (uploaded.isPresent()) {
+        var stored = uploaded.get();
+        creator.setAvatarUrl(stored.url());
+        creator.setAvatarStorageKey(stored.storageKey());
+        creator.setAvatarMimeType(stored.mimeType());
+        creator.setAvatarSizeBytes(stored.sizeBytes());
+        creator.setAvatarUpdatedAt(stored.updatedAt());
+      } else if (creator.getAvatarUrl() == null || creator.getAvatarUrl().isBlank()) {
+        creator.setAvatarUrl(rawAvatarUrl);
+      } else {
+        log.info("Keeping existing avatar for creator '{}' because cloud upload failed/skipped", creator.getUserName());
+      }
+    } else {
+      creator.setAvatarUrl(rawAvatarUrl);
+    }
   }
 }

@@ -2,8 +2,6 @@ package com.influencermatch.backend.recommendation.engine.memory;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.influencermatch.backend.campaign.model.HistoricalCampaign;
-import com.influencermatch.backend.collaboration.model.CampaignOutcome;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -13,12 +11,12 @@ import java.util.*;
  * Components:
  * - R: Historical Review Reputation (Bayesian smoothing on verified reviews).
  * - T: Timeliness (STRICT_ALL_REQUIRED_DELIVERABLES_ON_TIME).
- * - K: KPI Attainment (attainment vs target with qK = 0.50 for SELF_REPORTED).
+ * - K: Raw attainment against the KPI committed in the accepted proposal.
  *
  * Target Weights: R = 0.50, T = 0.30, K = 0.20.
  *
  * Gate: Minimum 3 collaborations from at least 2 distinct brands within 24 months.
- * If gate is not met: m1Availability = UNAVAILABLE, m1LearnedScore = null.
+ * The composite is available only when the evidence gate and R/T/K are all available.
  */
 public class M1HistoricalScorer {
 
@@ -36,6 +34,9 @@ public class M1HistoricalScorer {
       Double rScore,                 // [0, 1] or null
       Double tScore,                 // [0, 1] or null
       Double kScore,                 // [0, 1] or null
+      String rAvailability,
+      String tAvailability,
+      String kAvailability,
       int eligibleCollaborations,    // Count of eligible collaborations evaluated
       int distinctBrandCount,        // Distinct brands count
       double maxBrandShare,          // Ratio of most dominant brand [0, 1]
@@ -62,6 +63,7 @@ public class M1HistoricalScorer {
           null,
           "UNAVAILABLE",
           null, null, null,
+          "UNAVAILABLE", "UNAVAILABLE", "UNAVAILABLE",
           0, 0, 0.0,
           List.of("M1_UNAVAILABLE: Chưa có lịch sử hợp tác nào được ghi nhận.")
       );
@@ -73,8 +75,15 @@ public class M1HistoricalScorer {
       if (h == null) continue;
       if ("REVOKED".equalsIgnoreCase(h.getStatus())) continue;
       if (h.getRecordedAt() != null && h.getRecordedAt().isAfter(scoringAsOf)) continue;
+      JsonNode evidence = h.getEvidenceValue();
+      if (!"COLLABORATION_COMPLETION".equals(h.getEvidenceType())
+          || evidence == null
+          || !"collaboration-completion-evidence-v1".equals(
+              evidence.path("evidenceSchemaVersion").asText())
+          || !evidence.path("brandAccepted").asBoolean(false)
+          || !evidence.path("outcomeRevision").canConvertToLong()) continue;
 
-      LocalDateTime eventTime = h.getBusinessOccurredAt() != null ? h.getBusinessOccurredAt() : h.getRecordedAt();
+      LocalDateTime eventTime = h.getBusinessOccurredAt();
       if (eventTime == null || eventTime.isAfter(scoringAsOf) || eventTime.isBefore(cutoff24m)) continue;
 
       String key = (h.getCollaboration() != null && h.getCollaboration().getId() != null)
@@ -118,21 +127,13 @@ public class M1HistoricalScorer {
     }
 
     // 3. Minimum Evidence Gate: >= 3 Collaborations from >= 2 Brands
-    boolean gatePassed = (eligibleCount >= 3 && distinctBrands >= 2);
+    boolean gatePassed = eligibleCount >= 3 && distinctBrands >= 2;
     if (!gatePassed) {
       warnings.add(String.format(
           Locale.ROOT,
           "M1_GATE_FAILED: Cần tối thiểu 3 hợp tác từ 2 thương hiệu khác nhau trong 24 tháng (Hiện có: %d hợp tác, %d thương hiệu).",
           eligibleCount, distinctBrands));
 
-      return new M1Result(
-          DEFAULT_PRIOR_MEAN,
-          null,
-          "UNAVAILABLE",
-          null, null, null,
-          eligibleCount, distinctBrands, maxBrandShare,
-          warnings
-      );
     }
 
     // 4. Component R: Historical Review Reputation
@@ -172,172 +173,86 @@ public class M1HistoricalScorer {
       double avgRatingNorm = (ratingCount > 0) ? (ratingSumNorm / ratingCount) : pHat;
       rScore = Math.max(0.0, Math.min(1.0, 0.60 * pHat + 0.40 * avgRatingNorm));
     }
+    String rAvailability = rScore == null ? "UNAVAILABLE" : "AVAILABLE";
 
-    // 5. Component T: Timeliness (STRICT_ALL_REQUIRED_DELIVERABLES_ON_TIME)
+    // 5. T is available only when every eligible collaboration has portal timestamp evidence.
     double tSum = 0.0;
-    int tCount = 0;
-    boolean hasUnreliableTimeliness = false;
+    boolean allTimelinessAvailable = !eligible.isEmpty();
 
     for (HistoricalCampaign h : eligible) {
-      Boolean collabOnTime = null;
       JsonNode ev = h.getEvidenceValue();
-
-      if (ev != null && !ev.isNull()) {
-        if (ev.has("deliverables") && ev.get("deliverables").isArray() && !ev.get("deliverables").isEmpty()) {
-          boolean allDelivOnTime = true;
-          boolean deliverableFound = false;
-
-          for (JsonNode deliv : ev.get("deliverables")) {
-            deliverableFound = true;
-            LocalDateTime submittedAt = parseTimestamp(deliv, "submittedAt");
-            LocalDateTime approvedRevisionDeadline = parseTimestamp(deliv, "approvedRevisionDeadline");
-            LocalDateTime initialDueDate = parseTimestamp(deliv, "initialDueDate");
-            if (initialDueDate == null) {
-              initialDueDate = parseTimestamp(deliv, "dueAt");
-            }
-            if (initialDueDate == null) {
-              initialDueDate = parseTimestamp(deliv, "deadline");
-            }
-
-            LocalDateTime effectiveDeadline = approvedRevisionDeadline != null ? approvedRevisionDeadline : initialDueDate;
-
-            if (submittedAt == null || effectiveDeadline == null) {
-              hasUnreliableTimeliness = true;
-              allDelivOnTime = false;
-              break;
-            }
-
-            if (submittedAt.isAfter(effectiveDeadline)) {
-              allDelivOnTime = false;
-            }
-          }
-
-          if (deliverableFound && !hasUnreliableTimeliness) {
-            collabOnTime = allDelivOnTime;
-          }
-        } else if (ev.has("initialDueDate") || ev.has("approvedRevisionDeadline") || ev.has("submittedAt")) {
-          LocalDateTime submittedAt = parseTimestamp(ev, "submittedAt");
-          LocalDateTime approvedRevisionDeadline = parseTimestamp(ev, "approvedRevisionDeadline");
-          LocalDateTime initialDueDate = parseTimestamp(ev, "initialDueDate");
-          if (initialDueDate == null) {
-            initialDueDate = parseTimestamp(ev, "dueAt");
-          }
-          if (initialDueDate == null) {
-            initialDueDate = parseTimestamp(ev, "deadline");
-          }
-          LocalDateTime effectiveDeadline = approvedRevisionDeadline != null ? approvedRevisionDeadline : initialDueDate;
-
-          if (submittedAt == null || effectiveDeadline == null) {
-            hasUnreliableTimeliness = true;
-          } else {
-            collabOnTime = !submittedAt.isAfter(effectiveDeadline);
-          }
-        } else if (ev.has("allDeliverablesOnTime")) {
-          collabOnTime = ev.get("allDeliverablesOnTime").asBoolean();
-        } else if (ev.has("allOnTime")) {
-          collabOnTime = ev.get("allOnTime").asBoolean();
-        } else if (ev.has("delays") || ev.has("delayDays")) {
-          int delays = ev.has("delays") ? ev.get("delays").asInt() : ev.get("delayDays").asInt();
-          collabOnTime = (delays == 0);
-        } else if (ev.has("onTime")) {
-          collabOnTime = ev.get("onTime").asBoolean();
-        } else {
-          hasUnreliableTimeliness = true;
-        }
-      } else {
-        hasUnreliableTimeliness = true;
-      }
-
-      if (collabOnTime != null && !hasUnreliableTimeliness) {
-        tSum += collabOnTime ? 1.0 : 0.0;
-        tCount++;
-      }
-    }
-
-    Double tScore = (!hasUnreliableTimeliness && tCount == eligibleCount && tCount > 0) ? (tSum / tCount) : null;
-
-    // 6. Component K: KPI Attainment
-    double rawKSum = 0.0;
-    double effectiveKSum = 0.0;
-    int kCount = 0;
-
-    for (HistoricalCampaign h : eligible) {
-      // Check for pending measurement: skip from sample, do NOT treat as 0 or failure
-      boolean isPending = false;
-      if (h.getEvidenceValue() != null) {
-        JsonNode ev = h.getEvidenceValue();
-        if (ev.path("measurementPending").asBoolean(false)
-            || "MEASUREMENT_PENDING".equalsIgnoreCase(ev.path("kpiStatus").asText())
-            || "PENDING".equalsIgnoreCase(ev.path("kpiStatus").asText())
-            || "MEASUREMENT_PENDING".equalsIgnoreCase(ev.path("status").asText())) {
-          isPending = true;
-        }
-      }
-      if (isPending) {
+      boolean allDeliverablesOnTime = true;
+      JsonNode deliverables = ev.path("deliverables");
+      if ("BRAND_MANAGED".equals(ev.path("managementMode").asText())
+          || !deliverables.isArray()
+          || deliverables.isEmpty()) {
+        allTimelinessAvailable = false;
         continue;
       }
-
-      Double rawAttainment = null;
-      double qK = "VERIFIED".equalsIgnoreCase(h.getQuality()) ? 1.00 : 0.50; // 0.50 for SELF_REPORTED
-
-      if (h.getOutcome() != null) {
-        CampaignOutcome o = h.getOutcome();
-        if (o.getRoi() != null) {
-          rawAttainment = Math.max(0.0, Math.min(1.0, o.getRoi().doubleValue() / 2.0));
-        } else if (o.getKpiTarget() != null && o.getKpiActual() != null && o.getKpiTarget().doubleValue() > 0) {
-          double actual = o.getKpiActual().doubleValue();
-          double target = o.getKpiTarget().doubleValue();
-          rawAttainment = Math.max(0.0, Math.min(1.0, actual / target));
+      for (JsonNode deliverable : deliverables) {
+        LocalDateTime submittedAt = parseTimestamp(deliverable, "submittedAt");
+        LocalDateTime dueAt = parseTimestamp(deliverable, "dueAt");
+        if (!"CREATOR_PORTAL".equals(deliverable.path("submissionSource").asText())
+            || submittedAt == null
+            || dueAt == null) {
+          allTimelinessAvailable = false;
+          break;
         }
+        if (submittedAt.isAfter(dueAt)) allDeliverablesOnTime = false;
       }
-
-      if (rawAttainment == null && h.getEvidenceValue() != null && !h.getEvidenceValue().isNull()) {
-        JsonNode ev = h.getEvidenceValue();
-        if (ev.has("kpiAttainment") && !ev.get("kpiAttainment").isNull()) {
-          rawAttainment = Math.max(0.0, Math.min(1.0, ev.get("kpiAttainment").asDouble()));
-        } else if (ev.has("kpiActual") && ev.has("kpiTarget") && ev.get("kpiTarget").asDouble() > 0) {
-          rawAttainment = Math.max(0.0, Math.min(1.0, ev.get("kpiActual").asDouble() / ev.get("kpiTarget").asDouble()));
-        }
-      }
-
-      if (rawAttainment != null) {
-        rawKSum += rawAttainment;
-        double adjustedK = (qK * rawAttainment) + ((1.0 - qK) * DEFAULT_PRIOR_MEAN);
-        effectiveKSum += adjustedK;
-        kCount++;
-      }
+      if (allTimelinessAvailable) tSum += allDeliverablesOnTime ? 1.0 : 0.0;
     }
 
-    Double kScore = (kCount > 0) ? (rawKSum / kCount) : null;
-    Double effectiveK = (kCount > 0) ? (effectiveKSum / kCount) : null;
+    Double tScore = allTimelinessAvailable ? tSum / eligibleCount : null;
+    String tAvailability = tScore == null ? "UNAVAILABLE" : "AVAILABLE";
+    if (tScore == null) warnings.add("T_UNAVAILABLE: Thiếu timestamp nộp Portal hoặc hạn bàn giao; dữ liệu Brand-managed không dùng để suy ra T.");
 
-    // 7. Aggregation with Availability Adjustment strictly adhering to fixed weights 0.50 / 0.30 / 0.20
-    double sm1Norm;
-    if (rScore != null && tScore != null && effectiveK != null) {
-      sm1Norm = (WEIGHT_R * rScore) + (WEIGHT_T * tScore) + (WEIGHT_K * effectiveK);
-    } else if (rScore != null && tScore != null) {
-      sm1Norm = ((WEIGHT_R * rScore) + (WEIGHT_T * tScore)) / (WEIGHT_R + WEIGHT_T);
-    } else if (rScore != null && effectiveK != null) {
-      sm1Norm = ((WEIGHT_R * rScore) + (WEIGHT_K * effectiveK)) / (WEIGHT_R + WEIGHT_K);
-    } else if (tScore != null && effectiveK != null) {
-      sm1Norm = ((WEIGHT_T * tScore) + (WEIGHT_K * effectiveK)) / (WEIGHT_T + WEIGHT_K);
-    } else if (rScore != null) {
-      sm1Norm = rScore;
-    } else if (tScore != null) {
-      sm1Norm = tScore;
-    } else if (effectiveK != null) {
-      sm1Norm = effectiveK;
-    } else {
+    // 6. K uses raw attainment; quality is retained as a warning, not blended with the prior.
+    double rawKSum = 0.0;
+    boolean allKAvailable = !eligible.isEmpty();
+    boolean kNotApplicable = false;
+
+    for (HistoricalCampaign h : eligible) {
+      JsonNode ev = h.getEvidenceValue();
+      String status = ev.path("kpiStatus").asText();
+      if ("NOT_APPLICABLE".equals(status)) {
+        kNotApplicable = true;
+        allKAvailable = false;
+        continue;
+      }
+      if (!"AVAILABLE".equals(status)
+          || !ev.path("kpiActual").isNumber()
+          || !ev.path("kpiTarget").isNumber()
+          || ev.path("kpiTarget").asDouble() <= 0) {
+        allKAvailable = false;
+        continue;
+      }
+      rawKSum += Math.max(0.0, Math.min(1.0,
+          ev.path("kpiActual").asDouble() / ev.path("kpiTarget").asDouble()));
+      if (!"VERIFIED".equalsIgnoreCase(ev.path("kpiEvidenceQuality").asText()))
+        warnings.add("K_SELF_REPORTED: KPI đạt được dùng giá trị raw; nguồn tự báo cáo không được xem là đã xác minh.");
+    }
+
+    Double kScore = allKAvailable ? rawKSum / eligibleCount : null;
+    String kAvailability = kScore != null ? "AVAILABLE" : kNotApplicable ? "NOT_APPLICABLE" : "UNAVAILABLE";
+    if (kScore == null && !kNotApplicable) warnings.add("K_UNAVAILABLE: KPI đã cam kết nhưng thiếu actual hợp lệ.");
+    if (kNotApplicable) warnings.add("K_NOT_APPLICABLE: Có hợp tác không cam kết KPI; composite M1 không được tái chuẩn hóa.");
+
+    // 7. Strict complete case: never renormalize missing components.
+    if (!gatePassed || rScore == null || tScore == null || kScore == null) {
+      if (rScore == null) warnings.add("R_UNAVAILABLE: Chưa có Final Review hợp lệ.");
       return new M1Result(
           DEFAULT_PRIOR_MEAN,
           null,
           "UNAVAILABLE",
-          null, null, null,
+          rScore, tScore, kScore,
+          rAvailability, tAvailability, kAvailability,
           eligibleCount, distinctBrands, maxBrandShare,
-          List.of("M1_UNAVAILABLE: Tất cả các thành phần R, T, K đều không khả dụng.")
+          warnings
       );
     }
 
+    double sm1Norm = (WEIGHT_R * rScore) + (WEIGHT_T * tScore) + (WEIGHT_K * kScore);
     sm1Norm = Math.max(0.0, Math.min(1.0, sm1Norm));
     double score100 = sm1Norm * 100.0;
 
@@ -348,6 +263,9 @@ public class M1HistoricalScorer {
         rScore,
         tScore,
         kScore,
+        rAvailability,
+        tAvailability,
+        kAvailability,
         eligibleCount,
         distinctBrands,
         maxBrandShare,

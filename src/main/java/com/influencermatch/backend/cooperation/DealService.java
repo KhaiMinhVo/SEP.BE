@@ -29,6 +29,7 @@ public class DealService {
   final CooperationDelivery delivery;
   final ExecutionHistoryReader historyReader;
   final CreatorPortalProjection creatorProjection;
+  @org.springframework.beans.factory.annotation.Autowired RecommendationContactPolicy contactPolicy;
   @jakarta.persistence.PersistenceContext jakarta.persistence.EntityManager em;
 
   UUID actor() {
@@ -48,6 +49,9 @@ public class DealService {
   Campaign owned(UUID campaign) {
     brand();
     var c = locks.owned(campaign);
+    if (java.util.Set.of(com.influencermatch.backend.campaign.enums.CampaignStatus.COMPLETED,
+        com.influencermatch.backend.campaign.enums.CampaignStatus.ARCHIVED).contains(c.getStatus()))
+      throw conflict("Campaign is read only");
     fresh(Permission.MANAGE_OWN_RELATIONSHIP);
     return c;
   }
@@ -156,9 +160,10 @@ public class DealService {
         id);
     store.db.update(
         "update cooperation_email_job j set"
-            + " status='CANCELLED',payload=null,processing_token=null,lease_until=null,next_attempt_at=null"
+            + " status=case when j.status='SENT' then 'SENT' else 'CANCELLED' end,"
+            + " payload=null,processing_token=null,lease_until=null,next_attempt_at=null"
             + " where invitation_id in(select id from cooperation_invitation where deal_id=?) and"
-            + " status<>'SENT'",
+            + " (j.status<>'SENT' or j.payload is not null)",
         id);
   }
 
@@ -229,6 +234,7 @@ public class DealService {
             .sorted(Comparator.comparing(UUID::toString))
             .toList();
     for (UUID c : channels) store.one("select id from creator where id=? for update", c);
+    UUID evaluatedRun = contactPolicy.requireEvaluated(campaign, channels, request.recommendationRunId());
     for (UUID id : ids.stream().sorted(Comparator.comparing(UUID::toString)).toList())
       store.one("select id from relationship where id=? for update", id);
     UUID master = null;
@@ -286,7 +292,7 @@ public class DealService {
           r.get("id"),
           r.get("creator_id"));
     stages(id, "CONTACTED");
-    record(id, "DEAL_CREATED", 1, Map.of("channelCount", channels.size()));
+    record(id, "DEAL_CREATED", 1, Map.of("channelCount", channels.size(), "recommendationRunId", evaluatedRun));
     return remembered(scope, key, request, view(store.deal(id)));
   }
 
@@ -317,6 +323,12 @@ public class DealService {
 
   Map<String, Object> view(Map<String, Object> d) {
     var v = new LinkedHashMap<String, Object>();
+    var info = store.one("select c.name,c.status,b.business_name from campaign c join brand_profile b on b.id=c.brand_profile_id where c.id=?", d.get("campaign_id"));
+    v.put("campaignName", info.get("name"));
+    v.put("campaignStatus", info.get("status"));
+    v.put("brandName", info.get("business_name"));
+    v.put("plannedContactChannel", delivery.plannedContactChannel(d));
+    v.put("availableDeliveryMethods", delivery.availableDeliveryMethods(d));
     for (String k :
         List.of(
             "id",
@@ -517,6 +529,7 @@ public class DealService {
     mutable(d);
     currentOwnership(d);
     validateProposal(id, request);
+    contactPolicy.requirePreviouslyEvaluated(uuid(d.get("campaign_id")), store.members(id).stream().map(row -> uuid(row.get("creator_id"))).toList());
     long revision = store.revision(d) + 1;
     invalidate(id);
     store.db.update(
@@ -553,7 +566,9 @@ public class DealService {
     mutable(d);
     currentOwnership(d);
     var proposal = store.latest(id);
-    var result = delivery.enqueue(d, proposal);
+    if (!"OFFER".equals(proposal.get("kind"))) throw conflict("Issue a Brand OFFER before sending an invitation");
+    contactPolicy.requirePreviouslyEvaluated(campaign, store.members(id).stream().map(row -> uuid(row.get("creator_id"))).toList());
+    var result = delivery.enqueue(d, proposal, request.deliveryMethod());
     record(
         id,
         "INVITATION_CREATED",
@@ -567,7 +582,8 @@ public class DealService {
     lockUser();
     fresh(Permission.RESPOND_OWN_COOPERATION);
     var d = store.deal(id);
-    store.one("select id from campaign where id=? for update", d.get("campaign_id"));
+    var campaign = store.one("select id,status from campaign where id=? for update", d.get("campaign_id"));
+    if (Set.of("COMPLETED", "ARCHIVED").contains(campaign.get("status"))) throw conflict("Campaign is read only");
     d = lockMembersAndDeal(d);
     portalAccess(d);
     return d;

@@ -48,6 +48,9 @@ public interface PublicCreatorMetricRepository
                  c.profile_url AS profileUrl, m.followers, m.avg_views AS avgViews,
                  m.avg_likes AS avgLikes, m.niche, m.category,
                  m.engagement_rate AS engagementRate, m.content_summary AS contentSummary,
+                 to_tsvector('simple', COALESCE(m.content_summary, '') || ' ' || COALESCE(m.niche, ''))
+                     || post_evidence.search_vector AS contentVector,
+                 post_evidence.topicConsistency,
                  CASE WHEN c.master_id IS NOT NULL THEN 'LINKED_PROFILE' ELSE 'PUBLIC_PROFILE' END AS claimStatus,
                  COALESCE('MASTER:' || c.master_id::text, 'ACCOUNT:' || c.id::text) AS groupKey,
                  ts_rank(COALESCE(m.search_vector, ''::tsvector) || post_evidence.search_vector || to_tsvector('simple', COALESCE(c.display_name, '') || ' ' || COALESCE(c.user_name, '')),
@@ -66,7 +69,14 @@ public interface PublicCreatorMetricRepository
           JOIN creator c ON m.creator_id = c.id
           LEFT JOIN creator_master cm ON c.master_id = cm.id
           LEFT JOIN LATERAL (
-              SELECT to_tsvector('simple', COALESCE(string_agg(p.caption, ' '), '')) AS search_vector
+              SELECT to_tsvector('simple', COALESCE(string_agg(
+                         regexp_replace(COALESCE(p.caption, ''), '#[^[:space:]#]+', ' ', 'g'), ' '), '')) AS search_vector,
+                     COALESCE(AVG((SELECT COUNT(*)::double precision / GREATEST(cardinality(
+                         tsvector_to_array(to_tsvector('simple', COALESCE(CAST(:#{#filters.relevanceQuery} AS text), '')))), 1)
+                         FROM unnest(tsvector_to_array(to_tsvector('simple',
+                             COALESCE(CAST(:#{#filters.relevanceQuery} AS text), '')))) AS term
+                         WHERE to_tsvector('simple', regexp_replace(COALESCE(p.caption, ''),
+                             '#[^[:space:]#]+', ' ', 'g')) @@ plainto_tsquery('simple', term))), 0.0) AS topicConsistency
               FROM post p WHERE p.creator_id = c.id
           ) post_evidence ON true
           WHERE m.creator_type IN ('KOL', 'KOC') AND m.freshness_status = 'FRESH'
@@ -133,10 +143,27 @@ public interface PublicCreatorMetricRepository
                       ELSE NULL END AS semanticScore,
                  CASE WHEN CAST(:queryVector AS text) IS NULL THEN 'LEXICAL' ELSE 'VECTOR_HYBRID' END AS retrievalMethod
           FROM filtered f JOIN creator c ON c.id = f.creatorId
+      ), term_weights AS (
+          -- Rare campaign terms distinguish subtopics within the same broad category.
+          SELECT term, LN(1.0 + (SELECT COUNT(*) FROM retrieved)::double precision /
+              (1.0 + COUNT(*) FILTER (WHERE r.contentVector @@ plainto_tsquery('simple', term)))) AS weight
+          FROM unnest(tsvector_to_array(to_tsvector('simple',
+              COALESCE(CAST(:#{#filters.relevanceQuery} AS text), '')))) AS term
+          LEFT JOIN retrieved r ON true GROUP BY term
+      ), scored AS (
+          SELECT r.*, COALESCE((SELECT SUM(weight) FILTER (
+              WHERE r.contentVector @@ plainto_tsquery('simple', term)) / NULLIF(SUM(weight), 0)
+              FROM term_weights), 0.0) AS contentScore
+          FROM retrieved r
       ), ranked AS (
-          SELECT *, CASE WHEN CAST(:queryVector AS text) IS NULL THEN ftsScore
-                         ELSE 0.6 * COALESCE(GREATEST(0.0, semanticScore), 0.0) + 0.4 * ftsScore END AS hybridScore
-          FROM retrieved
+          SELECT *, CASE WHEN COALESCE(BTRIM(CAST(:#{#filters.relevanceQuery} AS text)), '') = ''
+                    THEN CASE WHEN CAST(:queryVector AS text) IS NULL THEN ftsScore
+                         ELSE 0.6 * COALESCE(GREATEST(0.0, semanticScore), 0.0) + 0.4 * ftsScore END
+                    ELSE 0.15 * ftsScore + 0.15 * topicConsistency
+                         + CASE WHEN CAST(:queryVector AS text) IS NULL THEN 0.7 * contentScore
+                             ELSE 0.45 * contentScore + 0.25 * COALESCE(GREATEST(0.0, semanticScore), 0.0) END
+                    END AS hybridScore
+          FROM scored
       ), grouped AS (
           SELECT DISTINCT ON (groupKey) * FROM ranked
           ORDER BY groupKey, hybridScore DESC, followers DESC NULLS LAST, creatorId

@@ -20,6 +20,7 @@ public class CooperationOutreachService {
   final RelationshipService relationships;
   final CampaignOwnershipService ownership;
   final PlatformTransactionManager manager;
+  @org.springframework.beans.factory.annotation.Autowired RecommendationContactPolicy contactPolicy;
 
   public ShortlistOutreachResponse outreach(UUID campaign, ShortlistOutreachRequest body) {
     Permissions.require(Permission.MANAGE_OWN_SHORTLIST);
@@ -105,6 +106,7 @@ public class CooperationOutreachService {
   List<ShortlistOutreachResponse.OutreachItemResult> process(
       UUID campaign, List<Map<String, Object>> group, ShortlistOutreachRequest body) {
     deals.owned(campaign);
+    contactPolicy.requireEvaluated(campaign, group.stream().map(row -> (UUID) row.get("creator_id")).toList(), body.getRecommendationRunId());
     var rels = new ArrayList<UUID>();
     for (var r : group) {
       var rel =
@@ -112,6 +114,7 @@ public class CooperationOutreachService {
               campaign,
               CreateRelationshipRequest.builder()
                   .creatorId((UUID) r.get("creator_id"))
+                  .recommendationRunId(body.getRecommendationRunId())
                   .shortlistItemId((UUID) r.get("id"))
                   .contactMethod(body.getContactMethod())
                   .notes(body.getOutreachMessage())
@@ -148,7 +151,7 @@ public class CooperationOutreachService {
     }
     var created =
         deals.create(
-            campaign, new CooperationDtos.Create(rels), "outreach-create:" + UUID.randomUUID());
+            campaign, new CooperationDtos.Create(rels, body.getRecommendationRunId()), "outreach-create:" + UUID.randomUUID());
     id = UUID.fromString(created.path("id").asText());
     UUID invitation = null;
     String status = "NEEDS_PROPOSAL";

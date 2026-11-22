@@ -11,6 +11,9 @@ import jakarta.persistence.EntityManager;
 import jakarta.validation.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -74,9 +77,27 @@ public class DataQualityService {
     if (approvedNiche == null || approvedNiche.isBlank() || "UNKNOWN".equalsIgnoreCase(approvedNiche.trim())) {
       throw new BadRequestException("Cần xác định ngành hàng cụ thể trước khi duyệt");
     }
-    var approved = niches.findByNameIgnoreCaseAndActiveTrue(approvedNiche.trim())
-        .orElseThrow(() -> new BadRequestException("Ngành hàng không thuộc danh mục đang bật. Vui lòng chọn lại."));
-    metric.setNiche(approved.getName());
+    List<String> rawParts = Arrays.stream(approvedNiche.split(","))
+        .map(String::trim)
+        .filter(s -> !s.isBlank())
+        .distinct()
+        .toList();
+    if (rawParts.isEmpty()) {
+      throw new BadRequestException("Cần xác định ngành hàng cụ thể trước khi duyệt");
+    }
+    List<String> canonicalNames = new ArrayList<>();
+    for (String part : rawParts) {
+      var approved = niches.findByNameIgnoreCaseAndActiveTrue(part)
+          .orElseThrow(() -> new BadRequestException("Ngành hàng '" + part + "' không thuộc danh mục đang bật. Vui lòng chọn lại."));
+      if (!canonicalNames.contains(approved.getName())) {
+        canonicalNames.add(approved.getName());
+      }
+    }
+    String joinedNiches = String.join(", ", canonicalNames);
+    metric.setNiche(joinedNiches);
+    if (!canonicalNames.isEmpty()) {
+      metric.setCategory(canonicalNames.get(0));
+    }
     metric.setQualityReviewedBy(Permissions.actor());
     metric.setQualityReviewedAt(LocalDateTime.now());
     metrics.flush();

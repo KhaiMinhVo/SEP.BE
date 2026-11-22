@@ -9,7 +9,9 @@ import java.util.*;
 public final class CooperationDtos {
   private CooperationDtos() {}
 
-  public record Create(@NotEmpty @Size(max = 100) List<@NotNull UUID> relationshipIds) {}
+  public record Create(@NotEmpty @Size(max = 100) List<@NotNull UUID> relationshipIds, UUID recommendationRunId) {
+    public Create(List<UUID> relationshipIds) { this(relationshipIds, null); }
+  }
 
   public record Deliverable(
       @NotNull UUID creatorId,
@@ -44,7 +46,10 @@ public final class CooperationDtos {
 
   public record Revision(@Min(1) long expectedRevision) {}
 
-  public record Send(@Min(1) long expectedRevision) {}
+  public record Send(@Min(1) long expectedRevision,
+      @Pattern(regexp = "PORTAL_EMAIL|PORTAL_ONLY|EMAIL_ONLY|MANUAL_LINK") String deliveryMethod) {
+    public Send(long expectedRevision) { this(expectedRevision, null); }
+  }
 
   public record Confirm(
       @Min(1) long expectedRevision,

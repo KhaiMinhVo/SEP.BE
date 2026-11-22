@@ -45,4 +45,5 @@ public record CampaignResponse(
     String embeddingStatus,
     String embeddingModel,
     String embeddingModelVersion,
-    java.time.Instant embeddingReadyAt) {}
+    java.time.Instant embeddingReadyAt,
+    String imageUrl) {}

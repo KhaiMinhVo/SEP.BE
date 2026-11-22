@@ -128,6 +128,39 @@ class CreatorClaimPostgresIntegrationTest {
   }
 
   @Test
+  void lookupReturnsExactUnclaimedChannelsOnlyToEligibleCreators() throws Exception {
+    var claimant = user(Role.CREATOR, true);
+    var brand = user(Role.BRAND, true);
+    var reviewer = user(Role.DATA_MANAGER, true);
+    var linked = call(claimant, get("/creators/portal/accounts"), null, 200);
+    assertThat(json.readTree(linked.getResponse().getContentAsString()).path("data")).isEmpty();
+    String handle = "Lookup" + UUID.randomUUID().toString().substring(0, 8);
+    var target = creators.saveAndFlush(Creator.builder()
+        .platform("FACEBOOK").externalId(UUID.randomUUID().toString()).userName("@" + handle).build());
+    var owned = creators.saveAndFlush(Creator.builder()
+        .platform("FACEBOOK").externalId(UUID.randomUUID().toString()).userName(handle).build());
+    creators.saveAndFlush(Creator.builder()
+        .platform("INSTAGRAM").externalId(UUID.randomUUID().toString()).userName(handle).build());
+    String claimId = claim(claimant, owned);
+    call(reviewer, patch("/data/creator-claims/" + claimId + "/review"),
+        "{\"decision\":\"APPROVED\",\"reason\":\"Verified ownership\"}", 200);
+
+    String path = "/creator-claims/channels/lookup";
+    var found = call(claimant, get(path).param("platform", "facebook").param("q", "@" + handle.toLowerCase(Locale.ROOT)), null, 200);
+    assertThat(found.getResponse().getHeader("Cache-Control")).contains("no-store");
+    var matches = json.readTree(found.getResponse().getContentAsString()).path("data");
+    assertThat(matches).hasSize(1);
+    assertThat(matches.get(0).path("id").asText()).isEqualTo(target.getId().toString());
+    assertThat(matches.get(0).has("owner")).isFalse();
+    var exactId = call(claimant, get(path).param("platform", "FACEBOOK").param("q", target.getExternalId()), null, 200);
+    assertThat(json.readTree(exactId.getResponse().getContentAsString()).path("data")).hasSize(1);
+    var partial = call(claimant, get(path).param("platform", "FACEBOOK").param("q", handle.substring(0, 5)), null, 200);
+    assertThat(json.readTree(partial.getResponse().getContentAsString()).path("data")).isEmpty();
+    call(brand, get(path).param("platform", "FACEBOOK").param("q", handle), null, 403);
+    call(reviewer, get(path).param("platform", "FACEBOOK").param("q", handle), null, 403);
+  }
+
+  @Test
   void completeFlowCompetingClaimsIngestionAndRevocation() throws Exception {
     var owner = user(Role.CREATOR, true);
     var other = user(Role.CREATOR, true);

@@ -34,6 +34,11 @@ public class DiscoverySearchRequest {
     private java.math.BigDecimal maxFee;
     private String sortBy;
 
+    // Server-built campaign context for deterministic retrieval scoring, before AI review.
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @io.swagger.v3.oas.annotations.media.Schema(hidden = true)
+    private String relevanceQuery;
+
     // Internal retrieval mode. The service always resets client-provided values.
     @com.fasterxml.jackson.annotation.JsonIgnore
     @io.swagger.v3.oas.annotations.media.Schema(hidden = true)

@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.*;
@@ -16,6 +17,16 @@ import org.springframework.web.bind.annotation.*;
 @SecurityRequirement(name="BearerAuth")
 public class CreatorClaimController {
   private final CreatorClaimService service;
+  @GetMapping("/creator-claims/channels/lookup")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
+  @Operation(summary="Find an existing unclaimed channel by platform and exact username or channel ID",
+      description="Active email-verified Creators only. Returns at most 20 public channel matches. Choosing a channel does not grant ownership.")
+  public ResponseEntity<ApiResponse<List<ClaimChannel>>> lookupChannels(
+      @RequestParam String platform, @RequestParam String q) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(ApiResponse.ok(service.lookupChannels(platform, q)));
+  }
+
   @PostMapping("/creators/{id}/claim") @PreAuthorize("hasAuthority('CLAIM_CREATOR_PROFILE')")
   @Operation(summary="Submit channel ownership evidence",description="Creates PENDING claim, not authorization. Requires an active CREATOR with verified email. Evidence is private and URLs are not fetched.")
   public ResponseEntity<ApiResponse<ClaimResponse>> claim(@PathVariable UUID id,@Valid @RequestBody ClaimRequest request) {

@@ -6,6 +6,7 @@ import com.influencermatch.backend.auth.service.VerificationEmailSender;
 import com.influencermatch.backend.creator.email.ClaimEmailCipher;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.security.permission.*;
+import java.net.URI;
 import java.security.SecureRandom;
 import java.time.*;
 import java.util.*;
@@ -23,6 +24,36 @@ public class CooperationDelivery {
 
   public record Work(UUID id, UUID token, String payload) {}
 
+  public String plannedContactChannel(Map<String, Object> deal) {
+    if (deal.get("master_id") != null) return "IN_APP_PORTAL";
+    return publicContactEmail(deal) == null ? "MANUAL_SOCIAL_LINK" : "SYSTEM_EMAIL_OUTBOX";
+  }
+
+  public List<String> availableDeliveryMethods(Map<String, Object> deal) {
+    if (deal.get("master_id") != null) {
+      var user = store.optional("select u.email,u.role,u.status,u.email_verified from creator_master m join \"user\" u on u.id=m.user_id where m.id=?", deal.get("master_id"));
+      if (user.isEmpty() || !"CREATOR".equals(user.get().get("role")) || !"ACTIVE".equals(user.get().get("status")) || !Boolean.TRUE.equals(user.get().get("email_verified"))) return List.of();
+      var methods = new ArrayList<String>();
+      if (user.get().get("email") != null && EMAIL.matcher(user.get().get("email").toString()).matches()) methods.add("PORTAL_EMAIL");
+      methods.add("PORTAL_ONLY");
+      if (methods.contains("PORTAL_EMAIL")) methods.add("EMAIL_ONLY");
+      methods.add("MANUAL_LINK");
+      return methods;
+    }
+    return publicContactEmail(deal) == null ? List.of("MANUAL_LINK") : List.of("EMAIL_ONLY", "MANUAL_LINK");
+  }
+
+  private String publicContactEmail(Map<String, Object> deal) {
+    var members = store.members(uuid(deal.get("id")));
+    if (members.isEmpty()) return null;
+    var metric = store.optional(
+        "select contact from public_creator_metric where creator_id=? order by collected_at desc,id desc limit 1",
+        uuid(members.getFirst().get("creator_id")));
+    if (metric.isEmpty() || metric.get().get("contact") == null) return null;
+    var matcher = EMAIL.matcher(metric.get().get("contact").toString());
+    return matcher.find() ? matcher.group() : null;
+  }
+
   final DealStore store;
   final ClaimEmailCipher cipher;
   final VerificationEmailSender sender;
@@ -33,12 +64,21 @@ public class CooperationDelivery {
   @Value("${application.auth.creator-invitation.frontend-base-url:http://localhost:5173}")
   String frontend;
 
+  private static final String INVITATION_PATH = "/cooperation-invitations";
+  private static final String TOKEN_PARAMETER = "token=";
+  private static final Pattern TOKEN = Pattern.compile("[a-f0-9]{64}");
+
   static final Pattern EMAIL =
       Pattern.compile(
           "[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\\.[A-Za-z]{2,}");
 
   @Transactional(propagation = Propagation.MANDATORY)
   public Map<String, Object> enqueue(Map<String, Object> d, Map<String, Object> p) {
+    return enqueue(d, p, null);
+  }
+
+  @Transactional(propagation = Propagation.MANDATORY)
+  public Map<String, Object> enqueue(Map<String, Object> d, Map<String, Object> p, String requestedMethod) {
     UUID id = uuid(d.get("id"));
     long revision = ((Number) p.get("revision")).longValue();
     if (store
@@ -62,34 +102,23 @@ public class CooperationDelivery {
           || !Boolean.TRUE.equals(u.get("email_verified")))
         throw conflict("Recipient account is not available");
       owner = uuid(u.get("id"));
-      email = u.get("email").toString();
+      email = u.get("email") == null ? null : u.get("email").toString();
+      if (email != null && !EMAIL.matcher(email).matches()) email = null;
     } else {
-      UUID channel = uuid(store.members(id).getFirst().get("creator_id"));
-      var metric =
-          store.optional(
-              "select contact from public_creator_metric where creator_id=? order by collected_at"
-                  + " desc,id desc limit 1",
-              channel);
-      if (metric.isPresent() && metric.get().get("contact") != null) {
-        var matcher = EMAIL.matcher(metric.get().get("contact").toString());
-        if (matcher.find()) email = matcher.group();
-      }
+      email = publicContactEmail(d);
     }
+    String method = requestedMethod == null ? owner != null ? "PORTAL_EMAIL" : email != null ? "EMAIL_ONLY" : "MANUAL_LINK" : requestedMethod;
+    validateDeliveryMethod(method, owner != null, email != null);
+    boolean sendEmail = Set.of("PORTAL_EMAIL", "EMAIL_ONLY").contains(method);
+    boolean notifyPortal = Set.of("PORTAL_EMAIL", "PORTAL_ONLY").contains(method);
+    String emailStatus = sendEmail ? "QUEUED" : "MANUAL_LINK".equals(method) ? "MANUAL_REQUIRED" : "NOT_REQUESTED";
     cipher.requireConfigured();
-    if (email != null) sender.requireConfigured();
-    var base = java.net.URI.create(frontend);
-    if (!Set.of("http", "https").contains(base.getScheme())
-        || base.getHost() == null
-        || base.getUserInfo() != null
-        || base.getRawQuery() != null
-        || base.getRawFragment() != null)
-      throw new BusinessException(
-          ErrorCode.EMAIL_DELIVERY_UNAVAILABLE, "Cooperation frontend URL is unavailable");
+    if (sendEmail) sender.requireConfigured();
     byte[] bytes = new byte[32];
     new SecureRandom().nextBytes(bytes);
     String token = HexFormat.of().formatHex(bytes);
     UUID invitation = UUID.randomUUID(), job = UUID.randomUUID();
-    String link = frontend.replaceAll("/+$", "") + "/cooperation-invitations?token=" + token;
+    String link = invitationLink(token);
     store.db.update(
         "insert into cooperation_invitation values(?,?,?,?,'PENDING',?,?)",
         invitation,
@@ -99,14 +128,14 @@ public class CooperationDelivery {
         java.sql.Timestamp.from(store.now().plus(Duration.ofDays(7))),
         store.time());
     store.db.update(
-        "insert into cooperation_email_job(id,invitation_id,status,next_attempt_at,payload)"
-            + " values(?,?,?,?,?)",
+        "insert into cooperation_email_job(id,invitation_id,status,next_attempt_at,payload,delivery_method)"
+            + " values(?,?,?,?,?,?)",
         job,
         invitation,
-        email == null ? "MANUAL_REQUIRED" : "QUEUED",
-        email == null ? null : store.time(),
-        cipher.encrypt(email == null ? "" : email, link));
-    if (owner != null) {
+        emailStatus,
+        sendEmail ? store.time() : null,
+        cipher.encrypt(sendEmail ? email : "", link), method);
+    if (notifyPortal) {
       if (notificationService != null) {
         notificationService.createAndDispatch(
             owner,
@@ -127,7 +156,7 @@ public class CooperationDelivery {
             store.time());
       }
     }
-    if (email != null) events.publishEvent(new Queued(job));
+    if (sendEmail) events.publishEvent(new Queued(job));
     return Map.of(
         "invitationId",
         invitation,
@@ -136,9 +165,17 @@ public class CooperationDelivery {
         "proposalRevision",
         revision,
         "emailStatus",
-        email == null ? "MANUAL_REQUIRED" : "QUEUED",
+        emailStatus,
         "portalNotificationCreated",
-        owner != null);
+        notifyPortal,
+        "deliveryMethod", method);
+  }
+
+  static void validateDeliveryMethod(String method, boolean portal, boolean email) {
+    if (!Set.of("PORTAL_EMAIL", "PORTAL_ONLY", "EMAIL_ONLY", "MANUAL_LINK").contains(method)
+        || (Set.of("PORTAL_EMAIL", "PORTAL_ONLY").contains(method) && !portal)
+        || (Set.of("PORTAL_EMAIL", "EMAIL_ONLY").contains(method) && !email))
+      throw conflict("Selected delivery method is not available for this recipient");
   }
 
   Map<String, Object> owned(UUID invitation) {
@@ -168,9 +205,51 @@ public class CooperationDelivery {
     return (Instant) value;
   }
 
+  private String invitationLink(String token) {
+    URI base = parseInvitationUri(frontend);
+    String scheme = base.getScheme();
+    if ((!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
+        || base.getHost() == null
+        || base.getRawUserInfo() != null
+        || base.getRawQuery() != null
+        || base.getRawFragment() != null)
+      throw new BusinessException(
+          ErrorCode.EMAIL_DELIVERY_UNAVAILABLE, "Cooperation frontend URL is unavailable");
+    return base.toString().replaceAll("/+$", "") + INVITATION_PATH + "?" + TOKEN_PARAMETER + token;
+  }
+
+  String currentInvitationLink(String storedLink) {
+    URI stored = parseInvitationUri(storedLink);
+    String query = stored.getRawQuery();
+    if (stored.getRawPath() == null
+        || !stored.getRawPath().endsWith(INVITATION_PATH)
+        || stored.getRawFragment() != null
+        || query == null
+        || !query.startsWith(TOKEN_PARAMETER))
+      throw invalidStoredLink();
+    String token = query.substring(TOKEN_PARAMETER.length());
+    if (!TOKEN.matcher(token).matches()) throw invalidStoredLink();
+    return invitationLink(token);
+  }
+
+  private static URI parseInvitationUri(String value) {
+    if (value == null) throw invalidStoredLink();
+    try {
+      return URI.create(value);
+    } catch (IllegalArgumentException e) {
+      // URI parsing errors may contain the invitation token.
+      throw invalidStoredLink();
+    }
+  }
+
+  private static BusinessException invalidStoredLink() {
+    return new BusinessException(
+        ErrorCode.EMAIL_DELIVERY_UNAVAILABLE, "Cooperation invitation URL is unavailable");
+  }
+
   @Transactional(readOnly = true)
   public Object preview(String token) {
-    if (token == null || !token.matches("[a-f0-9]{64}"))
+    if (token == null || !TOKEN.matcher(token).matches())
       throw new ValidationException("Invalid cooperation invitation");
     var i =
         store.one(
@@ -204,7 +283,7 @@ public class CooperationDelivery {
         "invitationId",
         invitation,
         "link",
-        cipher.decrypt(j.get("payload").toString()).link(),
+        currentInvitationLink(cipher.decrypt(j.get("payload").toString()).link()),
         "expiresAt",
         i.get("expires_at"));
   }
@@ -219,11 +298,17 @@ public class CooperationDelivery {
   Object statusView(Map<String, Object> i, Map<String, Object> j) {
     var result = new LinkedHashMap<String, Object>();
     result.put("invitationId", i.get("id"));
+    result.put("invitationStatus", i.get("status"));
+    result.put("expiresAt", i.get("expires_at"));
+    result.put("active", valid(i));
     result.put("emailStatus", j.get("status"));
+    result.put("deliveryMethod", j.get("delivery_method"));
+    if (j.get("delivery_method") != null) result.put("portalNotificationCreated", Set.of("PORTAL_EMAIL", "PORTAL_ONLY").contains(j.get("delivery_method")));
     result.put("attempts", j.get("attempts"));
     result.put("nextAttemptAt", j.get("next_attempt_at"));
     result.put("sentAt", j.get("sent_at"));
     result.put("canRetry", canRetry(i, j));
+    result.put("canResend", canResend(i, j));
     return result;
   }
 
@@ -235,8 +320,17 @@ public class CooperationDelivery {
 
   boolean canRetry(Map<String, Object> i, Map<String, Object> j) {
     return "FAILED".equals(j.get("status"))
-        && j.get("payload") != null
+        && canRequestEmail(i, j);
+  }
+
+  boolean canResend(Map<String, Object> i, Map<String, Object> j) {
+    return "SENT".equals(j.get("status")) && canRequestEmail(i, j);
+  }
+
+  private boolean canRequestEmail(Map<String, Object> i, Map<String, Object> j) {
+    return j.get("payload") != null
         && valid(i)
+        && !Objects.equals(store.deal(uuid(i.get("deal_id"))).get("accepted_revision"), i.get("proposal_revision"))
         && j.get("last_attempt_at") != null
         && !instant(j.get("last_attempt_at")).plusSeconds(60).isAfter(store.now())
         && retries(j).stream().filter(t -> t.isAfter(store.now().minusSeconds(3600))).count() < 5;
@@ -244,6 +338,15 @@ public class CooperationDelivery {
 
   @Transactional
   public Object retry(UUID invitation) {
+    return requeueEmail(invitation, "FAILED");
+  }
+
+  @Transactional
+  public Object resend(UUID invitation) {
+    return requeueEmail(invitation, "SENT");
+  }
+
+  private Object requeueEmail(UUID invitation, String expectedStatus) {
     var i = owned(invitation);
     store.one("select id from \"user\" where id=? for update", Permissions.actor().getId());
     var d = store.deal(uuid(i.get("deal_id")));
@@ -252,9 +355,9 @@ public class CooperationDelivery {
     var j =
         store.one(
             "select * from cooperation_email_job where invitation_id=? for update", invitation);
-    if (!"FAILED".equals(j.get("status")) || !valid(i) || j.get("payload") == null)
+    if (!expectedStatus.equals(j.get("status")) || !valid(i) || j.get("payload") == null)
       throw conflict("Invitation email cannot be retried");
-    if (!canRetry(i, j))
+    if (!canRequestEmail(i, j))
       throw new BusinessException(
           ErrorCode.CLAIM_EMAIL_RATE_LIMITED, "Cooperation retry limit exceeded");
     sender.requireConfigured();
@@ -304,7 +407,10 @@ public class CooperationDelivery {
     if ("PROCESSING".equals(j.get("status")) && instant(j.get("lease_until")).isAfter(store.now()))
       return null;
     if (!valid(i)) {
-      terminate(id, instant(i.get("expires_at")).isAfter(store.now()) ? "CANCELLED" : "EXPIRED");
+      String status = "SENT".equals(j.get("status"))
+          ? "SENT"
+          : instant(i.get("expires_at")).isAfter(store.now()) ? "CANCELLED" : "EXPIRED";
+      terminate(id, status);
       return null;
     }
     boolean due =
@@ -349,8 +455,10 @@ public class CooperationDelivery {
         || !instant(j.get("lease_until")).isAfter(store.now())) return;
     if (success) {
       store.db.update(
-          "update cooperation_email_job set sent_at=? where id=?", store.time(), work.id());
-      terminate(work.id(), "SENT");
+          "update cooperation_email_job set status='SENT',sent_at=?,next_attempt_at=null,"
+              + " lease_until=null,processing_token=null where id=?",
+          store.time(),
+          work.id());
     } else {
       int attempts = ((Number) j.get("cycle_attempts")).intValue();
       store.db.update(

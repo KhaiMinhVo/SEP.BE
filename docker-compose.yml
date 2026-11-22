@@ -50,6 +50,7 @@ services:
         required: false
     environment:
       SPRING_PROFILES_ACTIVE: dev
+      CREATOR_INVITATION_FRONTEND_BASE_URL: ${CREATOR_INVITATION_FRONTEND_BASE_URL:-http://localhost:5173}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-influencermatch_dev}
       SPRING_DATASOURCE_USERNAME: ${DB_USER:-influencermatch_user}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASS:-12345}

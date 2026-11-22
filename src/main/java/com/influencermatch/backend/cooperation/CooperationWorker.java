@@ -27,7 +27,7 @@ public class CooperationWorker {
     boolean sent = false;
     try {
       var payload = cipher.decrypt(work.payload());
-      sender.sendCooperationInvitation(payload.email(), payload.link());
+      sender.sendCooperationInvitation(payload.email(), delivery.currentInvitationLink(payload.link()));
       sent = true;
     } catch (Exception failure) {
       log.warn("Cooperation email attempt failed, jobId={}", id);

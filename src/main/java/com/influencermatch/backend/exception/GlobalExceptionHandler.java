@@ -120,6 +120,16 @@ public class GlobalExceptionHandler {
     return response(ErrorCode.INTERNAL_ERROR, "An unexpected error occurred", req, Map.of());
   }
 
+  @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+  ResponseEntity<ProblemDetail> oversizedUpload(Exception ex, HttpServletRequest req) {
+    return response(ErrorCode.UPLOAD_TOO_LARGE, "Uploaded file exceeds the configured size limit", req, Map.of());
+  }
+
+  @ExceptionHandler(org.springframework.web.multipart.support.MissingServletRequestPartException.class)
+  ResponseEntity<ProblemDetail> missingUploadPart(Exception ex, HttpServletRequest req) {
+    return response(ErrorCode.VALIDATION_ERROR, "Required file part is missing", req, Map.of());
+  }
+
   private ResponseEntity<ProblemDetail> response(
       ErrorCode code, String detail, HttpServletRequest req, Map<String, List<String>> fields) {
     ProblemDetail p = ProblemDetail.forStatusAndDetail(code.status(), detail);

@@ -24,7 +24,6 @@ import com.influencermatch.backend.recommendation.dto.*;
 import com.influencermatch.backend.recommendation.engine.FourMemoryTopsisEngine;
 import com.influencermatch.backend.recommendation.engine.confidence.model.ConfidenceAssessment;
 import com.influencermatch.backend.recommendation.engine.phase0.Phase0Orchestrator;
-import com.influencermatch.backend.recommendation.engine.phase0.enums.ScoringReadiness;
 import com.influencermatch.backend.recommendation.engine.phase0.model.NormalizedCandidateContext;
 import com.influencermatch.backend.recommendation.engine.presentation.DeterministicReasoningGenerator;
 import com.influencermatch.backend.recommendation.engine.presentation.DisplaySorter;
@@ -349,13 +348,6 @@ public class AiRecommendationService {
               join campaign ca on ca.id=l.campaign_id
               join creator c on c.id=l.creator_id
               where ca.brand_profile_id=? and l.status='COMPLETED'
-                and r.reviewed_at <= ?
-                and not exists (
-                  select 1 from historical_campaign h
-                  where h.source_review_id = r.id
-                    and h.status = 'REVOKED'
-                    and (h.recorded_at is null or h.recorded_at <= ?)
-                )
               order by r.id
               """,
               (rs, rowNum) -> new com.influencermatch.backend.recommendation.engine.memory.LearnedM4Evaluator.BrandReviewRecord(
@@ -367,9 +359,7 @@ public class AiRecommendationService {
                   rs.getString("niche"),
                   rs.getInt("brand_fit_rating")
               ),
-              brandProfileId,
-              scoringAsOf,
-              scoringAsOf);
+              brandProfileId);
         } catch (Exception ex) {
           log.warn("Could not query brandReviews for M4 evaluation: {}", ex.getMessage());
         }
@@ -674,10 +664,6 @@ public class AiRecommendationService {
             && shortlistItemOpt.get().getStatus() != ShortlistStatus.REMOVED;
         ShortlistStatus itemStatus = shortlistItemOpt.map(ShortlistItem::getStatus).orElse(null);
 
-        NormalizedCandidateContext p0 = phase0Map.get(item.candidate().getCreatorId());
-        boolean isPublicReady = (p0 != null && p0.scoringReadiness() == ScoringReadiness.SCORE_READY);
-        String recTier = isPublicReady ? "LIMITED_HISTORY" : "LIMITED_STABILITY";
-
         provisionalItems.add(
             CreatorRecommendationItemDto.builder()
                 .creatorId(item.candidate().getCreatorId())
@@ -703,9 +689,9 @@ public class AiRecommendationService {
                 .scoreBreakdown(breakdown)
                 .reasoning(reasoning)
                 .priceStatus(item.priceStatus())
-                .isScoreReady(isPublicReady)
+                .isScoreReady(false)
                 .isProvisional(true)
-                .recommendationTier(recTier)
+                .recommendationTier("LIMITED_HISTORY")
                 .build());
       }
 
@@ -741,6 +727,12 @@ public class AiRecommendationService {
       runMetadata.put("mainPoolSize", recommendationItems.size());
       runMetadata.put("provisionalPoolSize", provisionalItems.size());
       runMetadata.put("excludedCount", excludedCandidates.size());
+      // Coverage is independent of top-N display and Master deduplication. No hidden scores are published.
+      var evaluatedIds = new java.util.LinkedHashSet<UUID>();
+      evaluatedReadyList.forEach(item -> evaluatedIds.add(item.candidate().getCreatorId()));
+      evaluatedProvisionalList.forEach(item -> evaluatedIds.add(item.candidate().getCreatorId()));
+      runMetadata.set("evaluatedCreatorIds", objectMapper.valueToTree(evaluatedIds));
+      runMetadata.put("evaluatedCount", evaluatedIds.size());
 
       List<CreatorRecommendationItemDto> allSnapshotItems = new ArrayList<>(recommendationItems);
       allSnapshotItems.addAll(provisionalItems);

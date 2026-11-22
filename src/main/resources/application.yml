@@ -18,6 +18,10 @@ server:
     include-stacktrace: never          # Never expose internal error messages to clients
 
 spring:
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
   mail:
     host: ${SMTP_HOST:}
     port: ${SMTP_PORT:587}
@@ -233,7 +237,7 @@ crawler:
 # ------------------------------------------------------------------------------------
 gemini:
   api-key: ${GEMINI_API_KEY:}
-  model: ${GEMINI_MODEL:gemini-3.5-flash}
+  model: ${GEMINI_MODEL:gemini-flash-lite-latest}
   base-url: https://generativelanguage.googleapis.com/v1beta/models
   max-output-tokens: 2048
   temperature: 0.3

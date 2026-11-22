@@ -33,6 +33,9 @@ public class Campaign extends BaseEntity {
   @Column(nullable = false, length = 200)
   private String name;
 
+  @Column(length = 2048)
+  private String imageUrl;
+
   @Column(length = 500)
   private String productService;
 

@@ -155,6 +155,12 @@ public class DealController {
     return ApiResponse.ok(delivery.retry(id));
   }
 
+  @PostMapping("/cooperation-invitations/{id}/resend-email")
+  @PreAuthorize("hasAuthority('MANAGE_OWN_RELATIONSHIP')")
+  public ApiResponse<?> resend(@PathVariable UUID id) {
+    return ApiResponse.ok(delivery.resend(id));
+  }
+
   @GetMapping("/creators/portal/cooperation-deals")
   @PreAuthorize("hasAuthority('RESPOND_OWN_COOPERATION')")
   public ApiResponse<?> portalList() {

@@ -126,7 +126,7 @@ application:
     app-secret: ${META_APP_SECRET:}
     login-config-id: ${META_LOGIN_CONFIG_ID:}
     graph-api-version: ${META_GRAPH_API_VERSION:}
-    redirect-uri: ${META_REDIRECT_URI:}
+    redirect-uri: ${META_REDIRECT_URI:https://www.influencermatch.site/api/v1/integrations/meta/callback}
     encryption-key: ${META_OAUTH_ENCRYPTION_KEY:}
     cleanup-enabled: true
   claim-email:
@@ -139,7 +139,7 @@ application:
       from: ${SMTP_FROM:}
       secret: ${EMAIL_OTP_SECRET:}
     creator-invitation:
-      frontend-base-url: ${CREATOR_INVITATION_FRONTEND_BASE_URL:http://localhost:5173}
+      frontend-base-url: ${CREATOR_INVITATION_FRONTEND_BASE_URL:https://www.influencermatch.site}
     social-proof-mock:
       enabled: ${SOCIAL_PROOF_MOCK_ENABLED:false}
     creator-mock:

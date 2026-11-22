@@ -254,7 +254,15 @@ public class CooperationDelivery {
     var i =
         store.one(
             "select * from cooperation_invitation where token_hash=?", DealService.hash(token));
-    if (!valid(i)) throw conflict("Invitation is expired or replaced");
+    // An unowned channel may have been claimed since delivery. Minimal public preview
+    // remains available; authenticated continuation separately verifies its current owner.
+    var d = store.deal(uuid(i.get("deal_id")));
+    var p = store.latest(uuid(i.get("deal_id")));
+    if (!"PENDING".equals(i.get("status")) || !instant(i.get("expires_at")).isAfter(store.now())
+        || !Set.of("CONTACTED", "NEGOTIATING").contains(d.get("status"))
+        || !p.get("revision").equals(i.get("proposal_revision"))
+        || d.get("master_id") != null && !valid(i))
+      throw conflict("Invitation is expired or replaced");
     var data =
         store.one(
             "select c.name,b.business_name from cooperation_deal d join campaign c on"

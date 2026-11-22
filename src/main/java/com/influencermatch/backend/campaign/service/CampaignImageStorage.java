@@ -27,6 +27,9 @@ public class CampaignImageStorage {
   private final String bucket;
   private final String publicBase;
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.storage.CloudinaryStorageService cloudinaryStorageService;
+
   public CampaignImageStorage(
       @Value("${CAMPAIGN_IMAGE_R2_ENDPOINT:${COLLABORATION_VIDEO_R2_ENDPOINT:}}") String endpoint,
       @Value("${CAMPAIGN_IMAGE_R2_BUCKET:}") String bucket,
@@ -55,6 +58,15 @@ public class CampaignImageStorage {
   public record Image(String imageUrl) {}
 
   public Image upload(UUID brandId, MultipartFile file) {
+    if (cloudinaryStorageService != null && cloudinaryStorageService.isConfigured()) {
+      var stored = cloudinaryStorageService.uploadFile(
+          file,
+          com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CAMPAIGN_COVER,
+          brandId.toString()
+      );
+      return new Image(stored.url());
+    }
+
     byte[] bytes;
     if (file == null || file.isEmpty() || file.getSize() > MAX_BYTES) {
       throw new ValidationException("Choose a JPG or PNG image up to 5 MB.");

@@ -36,6 +36,9 @@ public class TikTokOwnershipService {
   private final TikTokIdentityResolver resolver;
   @PersistenceContext private EntityManager em;
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.influencermatch.backend.storage.CloudinaryStorageService cloudinaryStorageService;
+
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public TikTokSessionStore.Result<TikTokDtos.Callback> apply(
       UUID id, VerifiedAccount proof, TikTokIdentityResolver.Identity identity) {
@@ -172,7 +175,7 @@ public class TikTokOwnershipService {
     creator.setUserName(username);
     creator.setProfileUrl("https://www.tiktok.com/@" + username);
     if (identity.displayName() != null) creator.setDisplayName(identity.displayName());
-    if (identity.avatarUrl() != null) creator.setAvatarUrl(identity.avatarUrl());
+    if (identity.avatarUrl() != null) applyCreatorAvatar(creator, identity.avatarUrl(), username);
     boolean alreadyOwned = creator.getMaster() != null;
     var master = masters.findByUserId(user.getId()).orElse(null);
     if (master == null)
@@ -266,5 +269,34 @@ public class TikTokOwnershipService {
     session.setOpenId(null);
     session.setUsername(null);
     session.setDisplayName(null);
+  }
+
+  private void applyCreatorAvatar(Creator creator, String rawAvatarUrl, String username) {
+    if (rawAvatarUrl == null || rawAvatarUrl.isBlank()) {
+      return;
+    }
+    if (cloudinaryStorageService != null && cloudinaryStorageService.isConfigured()) {
+      if (rawAvatarUrl.contains("res.cloudinary.com")) {
+        creator.setAvatarUrl(rawAvatarUrl);
+        return;
+      }
+      var uploaded = cloudinaryStorageService.uploadFromUrl(
+          rawAvatarUrl,
+          com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CREATOR_AVATAR,
+          username != null ? username : "creator"
+      );
+      if (uploaded.isPresent()) {
+        var stored = uploaded.get();
+        creator.setAvatarUrl(stored.url());
+        creator.setAvatarStorageKey(stored.storageKey());
+        creator.setAvatarMimeType(stored.mimeType());
+        creator.setAvatarSizeBytes(stored.sizeBytes());
+        creator.setAvatarUpdatedAt(stored.updatedAt());
+      } else if (creator.getAvatarUrl() == null || creator.getAvatarUrl().isBlank()) {
+        creator.setAvatarUrl(rawAvatarUrl);
+      }
+    } else {
+      creator.setAvatarUrl(rawAvatarUrl);
+    }
   }
 }

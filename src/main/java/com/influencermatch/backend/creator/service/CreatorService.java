@@ -70,6 +70,8 @@ public class CreatorService {
         .displayName(c.getDisplayName())
         .profileUrl(c.getProfileUrl())
         .avatarUrl(c.getAvatarUrl())
+        .avatarStorageKey(c.getAvatarStorageKey())
+        .avatarUpdatedAt(c.getAvatarUpdatedAt())
         .location(c.getLocation())
         .sourceType(c.getSourceType())
         .verifiedByInfluencerMatch(verified)

@@ -22,6 +22,8 @@ public class CreatorDetailResponse {
     private String displayName;
     private String profileUrl;
     private String avatarUrl;
+    private String avatarStorageKey;
+    private LocalDateTime avatarUpdatedAt;
     private String location;
     private CreatorSourceType sourceType;
     private boolean verifiedByInfluencerMatch;

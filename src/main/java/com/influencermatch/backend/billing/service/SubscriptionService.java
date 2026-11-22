@@ -153,10 +153,6 @@ public class SubscriptionService {
             .orElse(null);
 
     if (sub == null) {
-      if (planRepository.count() == 0) {
-        log.warn("No billing plans configured in system; bypassing quota guard for brand {}", brandProfileId);
-        return;
-      }
       throw new ForbiddenException("No active subscription found. Please subscribe to create campaigns.");
     }
 
@@ -182,10 +178,6 @@ public class SubscriptionService {
             .orElse(null);
 
     if (sub == null) {
-      if (planRepository.count() == 0) {
-        log.warn("No billing plans configured in system; bypassing recommendation quota guard for brand {}", brandProfileId);
-        return null;
-      }
       throw new ForbiddenException("No active subscription found. Please subscribe to use AI recommendations.");
     }
 

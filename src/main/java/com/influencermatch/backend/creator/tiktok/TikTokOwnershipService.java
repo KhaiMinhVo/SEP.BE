@@ -93,9 +93,10 @@ public class TikTokOwnershipService {
       throw new BusinessException(
           ErrorCode.TIKTOK_ALREADY_PROCESSED, "TikTok callback already processed");
     String match =
-        session.getTargetCreator() != null
-                && (creator == null || !session.getTargetCreator().getId().equals(creator.getId()))
-            ? "TARGET_MISMATCH"
+        session.getTargetCreator() == null
+                || creator == null
+                || !session.getTargetCreator().getId().equals(creator.getId())
+            ? "UNMATCHED"
             : "MATCHED";
     // Only guard failures are converted to committed failure results; mutation/audit errors roll
     // back.
@@ -162,17 +163,6 @@ public class TikTokOwnershipService {
       clearProfile(session);
       return new TikTokSessionStore.Result<>(null, rejected);
     }
-    if (creator == null) {
-      creator =
-          creators.saveAndFlush(
-              Creator.builder()
-                  .platform("TIKTOK")
-                  .externalId(identity.authorId())
-                  .userName(username)
-                  .isStableId(true)
-                  .sourceType(CreatorSourceType.PUBLIC)
-                  .build());
-    }
     creator.setUserName(username);
     creator.setProfileUrl("https://www.tiktok.com/@" + username);
     if (identity.displayName() != null) creator.setDisplayName(identity.displayName());
@@ -230,7 +220,7 @@ public class TikTokOwnershipService {
             .details(
                 Map.of(
                     "matchMethod",
-                    "CRAWLER_AUTHOR_ID",
+                    "CRAWLER_EXPECTED_EXTERNAL_ID_MATCH",
                     "authorId",
                     identity.authorId(),
                     "observedAt",
@@ -250,6 +240,32 @@ public class TikTokOwnershipService {
     em.flush();
     return new TikTokSessionStore.Result<>(
         new TikTokDtos.Callback(id, "AUTHORIZED", creator.getId(), master.getId()), null);
+  }
+
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public TikTokSessionStore.Result<TikTokDtos.Callback> manualResolution(
+      UUID id, VerifiedAccount proof) {
+    var session = sessions.lockById(id).orElseThrow();
+    em.refresh(session);
+    if (!"EXCHANGING".equals(session.getStatus()))
+      throw new BusinessException(
+          ErrorCode.TIKTOK_ALREADY_PROCESSED, "TikTok callback already processed");
+    try {
+      if (!session.getExpiresAt().isAfter(clock.instant()))
+        throw new BusinessException(
+            ErrorCode.TIKTOK_SESSION_EXPIRED, "TikTok session expired; start again");
+      store.assertSession(session);
+    } catch (BusinessException ex) {
+      session.setStatus(ex.code() == ErrorCode.TIKTOK_SESSION_EXPIRED ? "EXPIRED" : "FAILED");
+      clearProfile(session);
+      return new TikTokSessionStore.Result<>(null, ex);
+    }
+    session.setStatus("READY");
+    session.setOpenId(proof.openId());
+    session.setUsername(proof.username());
+    session.setDisplayName(proof.displayName());
+    session.setMatchStatus("UNMATCHED");
+    return new TikTokSessionStore.Result<>(new TikTokDtos.Callback(id, "READY"), null);
   }
 
   private CreatorOwnershipConflictException rejection(

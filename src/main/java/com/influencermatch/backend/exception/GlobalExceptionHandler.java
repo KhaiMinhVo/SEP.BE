@@ -30,6 +30,12 @@ public class GlobalExceptionHandler {
             ex instanceof ProfileIncompleteException p ? p.fields() : Map.of());
     if (ex instanceof CampaignEmbeddingPendingException pending)
       result.getBody().setProperty("embeddingStatus", pending.status());
+    if (ex instanceof EmailRequestRateLimitedException limited) {
+      result.getBody().setProperty("retryAfterSeconds", limited.retryAfterSeconds());
+      return ResponseEntity.status(result.getStatusCode())
+          .header(HttpHeaders.RETRY_AFTER, Long.toString(limited.retryAfterSeconds()))
+          .body(result.getBody());
+    }
     return result;
   }
 

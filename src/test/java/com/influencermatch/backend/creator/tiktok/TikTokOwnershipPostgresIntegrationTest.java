@@ -158,11 +158,11 @@ class TikTokOwnershipPostgresIntegrationTest extends TikTokTestSupport {
     openId = "oid_" + UUID.randomUUID();
     channel.setUserName(" \t@" + username.toUpperCase(Locale.ROOT) + "\r\n");
     creators.saveAndFlush(channel);
-    when(crawler.resolveTikTokIdentity(anyString()))
+    when(crawler.resolveTikTokIdentity(anyString(), anyString()))
         .thenAnswer(
             i -> {
               assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-              return resolved(channel.getExternalId(), i.getArgument(0));
+              return resolved(i.getArgument(1), i.getArgument(0));
             });
     when(provider.verify(anyString()))
         .thenAnswer(
@@ -302,7 +302,7 @@ class TikTokOwnershipPostgresIntegrationTest extends TikTokTestSupport {
   }
 
   @Test
-  void wrongTargetRemainsReadyWithoutBusinessWrites() throws Exception {
+  void unstableTargetRemainsReadyWithoutBusinessWrites() throws Exception {
     var target =
         creators.saveAndFlush(
             Creator.builder()
@@ -313,7 +313,7 @@ class TikTokOwnershipPostgresIntegrationTest extends TikTokTestSupport {
     String before = businessRows();
     var s = start(Map.of("creatorId", target.getId()));
     callback(s, 200);
-    assertThat(row(s.id())).contains("TARGET_MISMATCH");
+    assertThat(row(s.id())).contains("UNMATCHED");
     assertThat(businessRows()).isEqualTo(before);
     assertThat(count("tiktok_account_binding")).isZero();
   }
@@ -531,14 +531,8 @@ class TikTokOwnershipPostgresIntegrationTest extends TikTokTestSupport {
                 .build());
     second.setExternalId("8" + channel.getExternalId());
     creators.saveAndFlush(second);
-    when(crawler.resolveTikTokIdentity(anyString()))
-        .thenAnswer(
-            i ->
-                resolved(
-                    username.equals(i.getArgument(0))
-                        ? channel.getExternalId()
-                        : second.getExternalId(),
-                    i.getArgument(0)));
+    when(crawler.resolveTikTokIdentity(anyString(), anyString()))
+        .thenAnswer(i -> resolved(i.getArgument(1), i.getArgument(0)));
     var a = start(Map.of("creatorId", channel.getId()));
     var b = start(Map.of("creatorId", second.getId()));
     var barrier = new CountDownLatch(2);
@@ -615,7 +609,7 @@ class TikTokOwnershipPostgresIntegrationTest extends TikTokTestSupport {
   }
 
   @Test
-  void legacyMockIdentityCannotBypassResolverFailure() throws Exception {
+  void legacyMockIdentityCannotBypassResolverAndFallsBackToManualResolution() throws Exception {
     identities.saveAndFlush(
         CreatorProviderIdentity.builder()
             .creator(channel)
@@ -627,13 +621,12 @@ class TikTokOwnershipPostgresIntegrationTest extends TikTokTestSupport {
     channel.setUserName("renamed_" + UUID.randomUUID());
     creators.saveAndFlush(channel);
     String before = businessRows();
-    when(crawler.resolveTikTokIdentity(anyString())).thenReturn(null);
+    when(crawler.resolveTikTokIdentity(anyString(), anyString())).thenReturn(null);
     var s = start(Map.of());
-    assertThat(callback(s, 502).path("code").asText())
-        .isEqualTo("TIKTOK_IDENTITY_RESOLUTION_FAILED");
+    assertThat(callback(s, 200).path("data").path("status").asText()).isEqualTo("READY");
     assertThat(businessRows()).isEqualTo(before);
     assertThat(count("tiktok_account_binding")).isZero();
-    assertThat(row(s.id())).contains("FAILED");
+    assertThat(row(s.id())).contains("READY", "UNMATCHED");
   }
 
   @Test

@@ -93,6 +93,8 @@ public class MetaOwnershipService {
             .findFirst()
             .orElseThrow(() -> unmatched());
     var master = masters.findByUserId(user.getId()).orElse(null);
+    if ("FACEBOOK".equals(session.getPlatform()) && creator.getMaster() == null)
+      throw unmatched();
     if (creator.getMaster() != null
         && (master == null || !creator.getMaster().getId().equals(master.getId())))
       throw conflicts.reject(

@@ -7,6 +7,10 @@ public interface VerificationEmailSender {
 
   void sendCreatorInvitation(String email, String link);
 
+  default void sendCooperationAccountAccess(String email, String link, boolean creatorAccount) {
+    throw new IllegalStateException("Account access email sender unavailable");
+  }
+
   void sendCreatorClaimInvitation(String email, String link);
 
   default void sendCooperationInvitation(String email, String link) {

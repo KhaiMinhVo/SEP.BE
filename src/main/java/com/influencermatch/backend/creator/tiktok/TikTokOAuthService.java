@@ -24,8 +24,18 @@ public class TikTokOAuthService {
         throw new BusinessException(
             ErrorCode.TIKTOK_AUTHORIZATION_REJECTED, "TikTok authorization was denied");
       var proof = provider.verify(code);
-      var identity = resolver.resolve(proof);
-      return ownership.apply(id, proof, identity).unwrap();
+      var expectedExternalId = store.expectedExternalId(id);
+      var identity = java.util.Optional.<TikTokIdentityResolver.Identity>empty();
+      if (expectedExternalId != null) {
+        try {
+          identity = resolver.resolve(proof, expectedExternalId);
+        } catch (BusinessException ex) {
+          if (ex.code() != ErrorCode.TIKTOK_IDENTITY_RESOLUTION_FAILED) throw ex;
+        }
+      }
+      return identity
+          .map(value -> ownership.apply(id, proof, value).unwrap())
+          .orElseGet(() -> ownership.manualResolution(id, proof).unwrap());
     } catch (RuntimeException ex) {
       store.fail(id);
       throw ex;

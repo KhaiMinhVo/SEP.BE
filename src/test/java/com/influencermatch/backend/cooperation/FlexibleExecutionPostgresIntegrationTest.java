@@ -240,15 +240,55 @@ class FlexibleExecutionPostgresIntegrationTest extends ExecutionScenarioSupport 
     request(brand, external, Map.of("expectedRevision", revision(), "reason", "Agreed by email", "agreedAt", agreedAt), 400);
     var termination = Map.of("expectedRevision", revision(), "reason", "Agreed by email", "agreedAt", agreedAt,
         "evidenceUrl", "https://evidence.test/external-consent");
+    var future = new LinkedHashMap<String,Object>(termination);
+    future.put("agreedAt", Instant.now().plusSeconds(3600).toString());
+    request(brand, external, future, 400);
+    var insecure = new LinkedHashMap<String,Object>(termination);
+    insecure.put("evidenceUrl", "http://evidence.test/consent");
+    request(brand, external, insecure, 400);
+    var stale = new LinkedHashMap<String,Object>(termination);
+    stale.put("expectedRevision", revision() - 1);
+    request(brand, external, stale, 409);
+    request(account(Role.BRAND), external, termination, 403);
     request(owner, external, termination, 403);
-    request(brand, external, termination, 200);
+    long beforeTermination = revision();
+    String terminationKey = UUID.randomUUID().toString();
+    request(brand, external, termination, 200, terminationKey);
+    request(brand, external, termination, 200, terminationKey);
+    assertThat(revision()).isEqualTo(beforeTermination + 1);
     var view = state();
     assertThat(view.path("status").asText()).isEqualTo("TERMINATED");
     assertThat(view.path("terminationMethod").asText()).isEqualTo("BRAND_EXTERNAL");
+    assertThat(Instant.parse(view.path("terminationAgreedAt").asText()))
+        .isEqualTo(Instant.parse(agreedAt).truncatedTo(java.time.temporal.ChronoUnit.MILLIS));
+    assertThat(view.path("terminationEvidence").asText()).isEqualTo("https://evidence.test/external-consent");
     assertThat(view.path("exitRequests").get(1).path("resolution").asText()).isEqualTo("TERMINATED_EXTERNAL");
     assertThat(latestOutcome()).isEqualTo(savedOutcome);
     assertThat(view.path("paymentStatus").asText()).isEqualTo("PENDING");
     campaignStatus("CLOSED", "Mutual consent", 200);
+  }
+
+  @Test void externalTerminationDoesNotRequireCreatorPortalAccountOrPendingRequest() throws Exception {
+    jdbc.update("update creator set master_id=null,source_type='PUBLIC',authorized_at=null where id=?", channel);
+    jdbc.update("update collaboration set master_id=null where id=?", collaboration);
+    jdbc.update("update cooperation_deal set master_id=null where id=?", deal);
+    mode("BRAND_MANAGED"); start();
+    request(brand, root + "/terminate-external", Map.of("expectedRevision", revision(),
+        "reason", "Both parties agreed outside the Portal", "agreedAt", Instant.now().minusSeconds(30).toString(),
+        "evidenceUrl", "https://evidence.test/email-consent"), 200);
+    var view = state();
+    assertThat(view.path("status").asText()).isEqualTo("TERMINATED");
+    assertThat(view.path("terminationMethod").asText()).isEqualTo("BRAND_EXTERNAL");
+    assertThat(view.path("exitRequests").isEmpty()).isTrue();
+    assertThat(view.path("paymentStatus").asText()).isEqualTo("PENDING");
+  }
+
+  @Test void collaborativeModeCannotRecordExternalTermination() throws Exception {
+    start();
+    request(brand, root + "/terminate-external", Map.of("expectedRevision", revision(),
+        "reason", "External agreement", "agreedAt", Instant.now().minusSeconds(30).toString(),
+        "evidenceUrl", "https://evidence.test/email-consent"), 409);
+    assertThat(state().path("status").asText()).isEqualTo("IN_PROGRESS");
   }
 
   @Test void closingCampaignRequiresReasonAndNoOpenWork() throws Exception {

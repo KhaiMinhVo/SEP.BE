@@ -273,15 +273,51 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
     String email = UUID.randomUUID() + "@creator.test";
     jdbc.update("update cooperation_email_job set delivery_method='EMAIL_ONLY',payload=? where invitation_id=?",
         invitationCipher.encrypt(email, "https://example.test/cooperation-invitations?token=" + fixture.token()), fixture.invitation());
-    call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", "someoneelse@creator.test"), 202);
+    var mismatch = call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", "someoneelse@creator.test"), 202);
+    assertThat(mismatch.path("data").path("status").asText()).isEqualTo("RECIPIENT_EMAIL_MISMATCH");
+    assertThat(mismatch.toString()).doesNotContain(email);
     verify(sender, never()).sendCreatorInvitation(anyString(), anyString());
     assertThat(call(creator, post("/cooperation-invitations/context"), Map.of("token", fixture.token()), 200)
         .path("data").path("status").asText()).isEqualTo("ACCOUNT_MISMATCH");
     call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 202);
-    call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 429);
+    var limited = call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 429);
+    assertThat(limited.path("retryAfterSeconds").asLong()).isBetween(1L, 61L);
     verify(sender, times(1)).sendCreatorInvitation(eq(email), anyString());
     call(null, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 401);
     call(brand, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 403);
+  }
+
+  @Test
+  void existingAccountsGetPrivateGuidanceWithoutExposingRoleOrCreatingNewAccount() throws Exception {
+    for (var user : List.of(creator, brand)) {
+      var fixture = onboardingInvitation(channel(false));
+      var result = call(null, post("/cooperation-invitations/registration"),
+          Map.of("token", fixture.token(), "email", user.getEmail()), 202);
+      assertThat(result.path("data").path("status").asText()).isEqualTo("EMAIL_SUBMITTED");
+      assertThat(result.toString()).doesNotContain(user.getRole().name(), user.getEmail());
+      var limited = call(null, post("/cooperation-invitations/registration"),
+          Map.of("token", fixture.token(), "email", user.getEmail()), 429);
+      assertThat(limited.path("retryAfterSeconds").asLong()).isBetween(1L, 61L);
+      verify(sender).sendCooperationAccountAccess(eq(user.getEmail()), contains("token=" + fixture.token()), eq(user.getRole() == Role.CREATOR));
+      assertThat(jdbc.queryForObject("select count(*) from creator_registration_invitation where email=?", Long.class, user.getEmail())).isZero();
+      assertThat(users.findByEmail(user.getEmail()).orElseThrow().getRole()).isEqualTo(user.getRole());
+    }
+    verify(sender, never()).sendCreatorInvitation(anyString(), anyString());
+  }
+
+  @Test
+  void registrationSmtpFailureIsNotReportedAsSubmittedAndCanBeRetried() throws Exception {
+    var fixture = onboardingInvitation(channel(false));
+    String email = UUID.randomUUID() + "@creator.test";
+    doThrow(new com.influencermatch.backend.exception.BusinessException(
+        com.influencermatch.backend.exception.ErrorCode.EMAIL_DELIVERY_UNAVAILABLE, "Cannot send email"))
+        .when(sender).sendCreatorInvitation(eq(email), anyString());
+    var failure = call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 503);
+    assertThat(failure.path("code").asText()).isEqualTo("EMAIL_DELIVERY_UNAVAILABLE");
+    assertThat(jdbc.queryForObject("select count(*) from audit_log where action='REQUEST_CREATOR_REGISTRATION' and entity_id=?", Long.class, fixture.invitation())).isZero();
+    doNothing().when(sender).sendCreatorInvitation(eq(email), anyString());
+    assertThat(call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 202)
+        .path("data").path("status").asText()).isEqualTo("EMAIL_SUBMITTED");
   }
 
   @Test

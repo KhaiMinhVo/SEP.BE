@@ -59,7 +59,7 @@ public class MetaGraphClient {
   }
 
   public MetaDtos.Proof exchange(String code, String platform) {
-    config.requireConfigured();
+    config.requireConfigured(platform);
     try {
       if (code == null || code.isBlank() || code.length() > 4096) throw rejected();
       var body = new LinkedMultiValueMap<String, String>();
@@ -86,7 +86,7 @@ public class MetaGraphClient {
   }
 
   public MetaDtos.Proof verify(String token, String platform) {
-    config.requireConfigured();
+    config.requireConfigured(platform);
     try {
       var debug =
           get(
@@ -126,16 +126,18 @@ public class MetaGraphClient {
         String fields =
             platform.equals("INSTAGRAM")
                 ? "id,name,tasks,instagram_business_account{id,username,name}"
-                : "id,name,tasks";
+                : "id,tasks";
         var uri = endpoint("/me/accounts").queryParam("fields", fields).queryParam("limit", 100);
         if (after != null) uri.queryParam("after", after);
         var result = get(uri.build().encode().toUri(), token);
         if (result == null || !result.path("data").isArray()) throw failed();
         for (var item : result.path("data")) {
           String pageId = item.path("id").asText();
-          if (!pageId.matches("[0-9]{1,255}")
-              || !item.path("tasks").isArray()
-              || item.path("tasks").isEmpty()) continue;
+          if (!pageId.matches("[0-9]{1,255}") || !item.path("tasks").isArray()) continue;
+          var tasks = new HashSet<String>();
+          item.path("tasks").forEach(task -> {
+            if (task.isTextual()) tasks.add(task.asText());
+          });
           var account =
               platform.equals("INSTAGRAM") ? item.path("instagram_business_account") : item;
           String id = account.path("id").asText();
@@ -146,7 +148,8 @@ public class MetaGraphClient {
                   id,
                   pageId,
                   account.path("name").asText(""),
-                  account.path("username").asText("")));
+                  account.path("username").asText(""),
+                  Set.copyOf(tasks)));
         }
         if (result.path("paging").path("next").asText().isBlank())
           return new MetaDtos.Proof(

@@ -3,6 +3,7 @@ package com.influencermatch.backend.creator.tiktok;
 import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.creator.service.CreatorInvitationService;
+import com.influencermatch.backend.cooperation.CooperationOnboarding;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.security.permission.*;
 import com.influencermatch.backend.security.permission.repository.RolePermissionOverrideRepository;
@@ -36,6 +37,7 @@ public class TikTokSessionStore {
   private final UserRepository users;
   private final RolePermissionOverrideRepository overrides;
   private final TikTokLoginProperties config;
+  private final CooperationOnboarding cooperationOnboarding;
   private final Clock clock;
   private final com.influencermatch.backend.auth.service.AuthSessionStore authSessions;
   private final SecureRandom random = new SecureRandom();
@@ -119,6 +121,7 @@ public class TikTokSessionStore {
       checkTarget(session.getTargetCreator(), session.getUser());
     if (session.getInvitation() != null && !"COMPLETED".equals(session.getStatus()))
       checkInvitation(session.getInvitation(), session.getUser());
+    assertCooperationTarget(session);
   }
 
   @Transactional(noRollbackFor = CreatorOwnershipConflictException.class)
@@ -138,6 +141,8 @@ public class TikTokSessionStore {
                 .findById(request.creatorId())
                 .orElseThrow(() -> new NotFoundException("Creator not found"));
     CreatorInvitation invitation = null;
+    if (hasText(request.invitationToken()) && hasText(request.cooperationInvitationToken()))
+      throw new ValidationException("Use one invitation type per OAuth session");
     if (request.invitationToken() != null && !request.invitationToken().isBlank()) {
       invitation =
           invitations
@@ -149,6 +154,14 @@ public class TikTokSessionStore {
       target = invitation.getTargetCreator();
     }
     if (target != null) checkTarget(target, user);
+    UUID cooperationInvitationId = null;
+    if (hasText(request.cooperationInvitationToken())) {
+      if (target == null)
+        throw new ValidationException("A target channel is required for a cooperation invitation");
+      cooperationInvitationId =
+          cooperationOnboarding.validateOAuthTarget(
+              request.cooperationInvitationToken().trim(), target.getId(), "TIKTOK", user);
+    }
     byte[] bytes = new byte[32];
     random.nextBytes(bytes);
     String state = HexFormat.of().formatHex(bytes);
@@ -165,9 +178,35 @@ public class TikTokSessionStore {
                 .expiresAt(clock.instant().plusSeconds(600))
                 .targetCreator(target)
                 .invitation(invitation)
+                .cooperationInvitationId(cooperationInvitationId)
                 .build());
     return new TikTokDtos.Started(
         session.getId(), config.authorizationUrl(state), session.getExpiresAt());
+  }
+
+  @Transactional(readOnly = true)
+  public String expectedExternalId(UUID id) {
+    var session =
+        sessions.findById(id).orElseThrow(() -> new NotFoundException("TikTok session not found"));
+    var target = session.getTargetCreator();
+    return target != null && Boolean.TRUE.equals(target.getIsStableId())
+        ? target.getExternalId()
+        : null;
+  }
+
+  public void assertCooperationTarget(TikTokOAuthSession session) {
+    if (session.getCooperationInvitationId() == null) return;
+    if (session.getTargetCreator() == null)
+      throw new ValidationException("Cooperation OAuth session has no target channel");
+    cooperationOnboarding.assertOAuthTarget(
+        session.getCooperationInvitationId(),
+        session.getTargetCreator().getId(),
+        "TIKTOK",
+        session.getUser());
+  }
+
+  private boolean hasText(String value) {
+    return value != null && !value.isBlank();
   }
 
   @Transactional(propagation = Propagation.REQUIRES_NEW)

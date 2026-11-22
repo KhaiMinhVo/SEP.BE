@@ -35,7 +35,7 @@ public class MetaPayloadCipher {
       instagram.requireConfigured();
       return instagram.encryptionKey();
     }
-    properties.requireConfigured();
+    properties.requireApplicationConfigured();
     return properties.encryptionKey();
   }
 

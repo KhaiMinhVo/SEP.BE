@@ -88,6 +88,8 @@ class TikTokOAuthPostgresIntegrationTest extends TikTokTestSupport {
   void targetMismatchNeverChangesBusinessData() throws Exception {
     var invitation = invitation(actor.getEmail(), now.plusSeconds(600));
     String before = businessRows();
+    when(crawler.resolveTikTokIdentity(anyString(), anyString()))
+        .thenAnswer(i -> resolved("9" + i.getArgument(1), i.getArgument(0)));
     var s =
         start(
             Map.of(
@@ -102,7 +104,7 @@ class TikTokOAuthPostgresIntegrationTest extends TikTokTestSupport {
     assertThat(view.path("platform").asText()).isEqualTo("TIKTOK");
     assertThat(view.path("account").path("openId").asText()).isEqualTo("app-scoped-id");
     assertThat(view.path("account").path("username").asText()).isEqualTo("real_username");
-    assertThat(view.path("account").path("matchStatus").asText()).isEqualTo("TARGET_MISMATCH");
+    assertThat(view.path("account").path("matchStatus").asText()).isEqualTo("UNMATCHED");
     assertThat(row(s.id()))
         .doesNotContain(
             s.state(),
@@ -387,6 +389,8 @@ class TikTokOAuthPostgresIntegrationTest extends TikTokTestSupport {
     channel.setAuthorizedAt(LocalDateTime.ofInstant(now, ZoneOffset.UTC));
     creators.saveAndFlush(channel);
     String before = businessRows();
+    when(crawler.resolveTikTokIdentity(anyString(), anyString()))
+        .thenAnswer(i -> resolved("9" + i.getArgument(1), i.getArgument(0)));
     var s = start(Map.of("creatorId", channel.getId()));
     callback(s, 200);
     assertThat(
@@ -395,7 +399,7 @@ class TikTokOAuthPostgresIntegrationTest extends TikTokTestSupport {
                 .path("account")
                 .path("matchStatus")
                 .asText())
-        .isEqualTo("TARGET_MISMATCH");
+        .isEqualTo("UNMATCHED");
     assertThat(businessRows()).isEqualTo(before);
   }
 

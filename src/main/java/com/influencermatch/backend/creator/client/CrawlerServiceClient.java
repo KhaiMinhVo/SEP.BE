@@ -351,21 +351,15 @@ public class CrawlerServiceClient {
     }
   }
 
-  /** Strict identity-only request used by OAuth; never queues crawl or changes staging. */
-  public CrawlerResolveAuthorResponse resolveTikTokIdentity(String username) {
-    try {
-      return restClient
-          .post()
-          .uri("/tiktok/resolve-author")
-          .contentType(MediaType.APPLICATION_JSON)
-          .body(Map.of("username", username, "auto_update_staging", false))
-          .retrieve()
-          .body(CrawlerResolveAuthorResponse.class);
-    } catch (Exception ex) {
-      throw new com.influencermatch.backend.exception.BusinessException(
-          com.influencermatch.backend.exception.ErrorCode.TIKTOK_IDENTITY_RESOLUTION_FAILED,
-          "Unable to verify TikTok identity; start a new connection");
-    }
+  /** OAuth resolution must be checked against an already-known stable channel ID. */
+  public CrawlerResolveAuthorResponse resolveTikTokIdentity(
+      String username, String expectedExternalId) {
+    return resolveTikTokAuthor(username, expectedExternalId)
+        .orElseThrow(
+            () ->
+                new com.influencermatch.backend.exception.BusinessException(
+                    com.influencermatch.backend.exception.ErrorCode.TIKTOK_IDENTITY_RESOLUTION_FAILED,
+                    "Unable to verify TikTok identity; use manual channel resolution"));
   }
 
   /**

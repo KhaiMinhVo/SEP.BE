@@ -81,13 +81,13 @@ public class CreatorPortalController {
                 "FACEBOOK",
                 "FACEBOOK_LOGIN",
                 "OFFICIAL_API",
-                meta::requireConfigured,
+                () -> meta.requireConfigured("FACEBOOK"),
                 List.of("FACEBOOK_PAGE", "EXISTING_STABLE_ID")),
             option(
                 "INSTAGRAM",
                 "FACEBOOK_LOGIN",
                 "OFFICIAL_API",
-                meta::requireConfigured,
+                () -> meta.requireConfigured("INSTAGRAM"),
                 List.of("PROFESSIONAL_ACCOUNT", "LINKED_FACEBOOK_PAGE", "EXISTING_STABLE_ID")),
             option(
                 "INSTAGRAM",

@@ -15,6 +15,7 @@ import org.springframework.test.context.TestPropertySource;
       "application.meta.app-id=123",
       "application.meta.app-secret=fb-secret",
       "application.meta.login-config-id=456",
+      "application.meta.instagram-page-login-config-id=789",
       "application.meta.graph-api-version=v26.0",
       "application.meta.redirect-uri=http://localhost:8080/api/v1/integrations/meta/callback",
       "application.meta.encryption-key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="

@@ -31,6 +31,7 @@ public final class CampaignHistoryCalculator {
     var eligible = completed.stream().filter(Source::eligible).toList();
     var missing = completed.stream().filter(s -> !s.eligible).map(Source::id).sorted().toList();
     int cancelled = (int) sources.stream().filter(s -> "CANCELLED".equals(s.status)).count();
+    int terminated = (int) sources.stream().filter(s -> "TERMINATED".equals(s.status)).count();
     Set<String> common = new TreeSet<>();
     if (completed.isEmpty()) common.add("NO_COMPLETED_COLLABORATIONS");
     if (!missing.isEmpty()) common.add("MISSING_ACCEPTED_REVIEWED_SOURCE");
@@ -199,11 +200,12 @@ public final class CampaignHistoryCalculator {
     return new Report(
         POLICY,
         OutcomeFinance.POLICY,
-        "COMPLETED_ACCEPTED_REVIEWED",
-        "SELF_REPORTED",
+        "COMPLETED_ACCEPTED",
+        "ACCEPTED_REPORTED",
         completed.size(),
-        sources.size() - completed.size() - cancelled,
+        sources.size() - completed.size() - cancelled - terminated,
         cancelled,
+        terminated,
         eligible.size(),
         missing,
         result);

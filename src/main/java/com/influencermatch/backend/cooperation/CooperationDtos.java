@@ -42,7 +42,21 @@ public final class CooperationDtos {
           BigDecimal fee,
       @NotNull @Pattern(regexp = "VND") String currency,
       @NotEmpty @Size(max = 100) List<@Valid Deliverable> deliverables,
-      @NotBlank @Size(max = 4000) String terms) {}
+      @NotBlank @Size(max = 4000) String terms,
+      @Pattern(regexp = "VIEWS|CLICKS|LIKES|COMMENTS|SHARES") String kpiType,
+      @Min(1)
+          @com.fasterxml.jackson.databind.annotation.JsonDeserialize(
+              using = com.influencermatch.backend.collaboration.dto.StrictNumbers.LongValue.class)
+          Long kpiTarget) {
+    public Proposal(
+        long expectedRevision,
+        BigDecimal fee,
+        String currency,
+        List<Deliverable> deliverables,
+        String terms) {
+      this(expectedRevision, fee, currency, deliverables, terms, null, null);
+    }
+  }
 
   public record Revision(@Min(1) long expectedRevision) {}
 

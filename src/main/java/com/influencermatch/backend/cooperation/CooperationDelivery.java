@@ -270,6 +270,24 @@ public class CooperationDelivery {
     result.put("sentAt", j.get("sent_at"));
     result.put("canRetry", canRetry(i, j));
     result.put("canResend", canResend(i, j));
+    if ("SENT".equals(j.get("status")) && j.get("payload") == null)
+      result.put("resendUnavailableReason", "PAYLOAD_UNAVAILABLE");
+    else if ("SENT".equals(j.get("status")) && valid(i) && !canResend(i, j)) {
+      if (Objects.equals(store.deal(uuid(i.get("deal_id"))).get("accepted_revision"), i.get("proposal_revision")))
+        result.put("resendUnavailableReason", "PROPOSAL_ACCEPTED");
+      else if (j.get("last_attempt_at") == null)
+        result.put("resendUnavailableReason", "STATE_UNAVAILABLE");
+      else {
+        Instant available = instant(j.get("last_attempt_at")).plusSeconds(60);
+        var recent = retries(j).stream().filter(t -> t.isAfter(store.now().minusSeconds(3600))).sorted().toList();
+        if (recent.size() >= 5) {
+          var hourlyAvailable = recent.get(recent.size() - 5).plusSeconds(3600);
+          if (hourlyAvailable.isAfter(available)) available = hourlyAvailable;
+          result.put("resendUnavailableReason", "HOURLY_LIMIT");
+        } else result.put("resendUnavailableReason", "COOLDOWN");
+        result.put("resendAvailableAt", available.toString());
+      }
+    }
     return result;
   }
 
@@ -413,8 +431,8 @@ public class CooperationDelivery {
         || !instant(j.get("lease_until")).isAfter(store.now())) return;
     if (success) {
       store.db.update(
-          "update cooperation_email_job set sent_at=? where id=?", store.time(), work.id());
-      terminate(work.id(), "SENT");
+          "update cooperation_email_job set status='SENT',sent_at=?,next_attempt_at=null,lease_until=null,processing_token=null where id=?",
+          store.time(), work.id());
     } else {
       int attempts = ((Number) j.get("cycle_attempts")).intValue();
       store.db.update(

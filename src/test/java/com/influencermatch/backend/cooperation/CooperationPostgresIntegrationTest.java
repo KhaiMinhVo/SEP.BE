@@ -410,6 +410,38 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
+  void acceptedProposalKpiCommitmentIsFrozenOnCollaboration() throws Exception {
+    var c = channel(true);
+    UUID relation = relationship(c);
+    var created = create(List.of(relation));
+    UUID id = UUID.fromString(created.path("id").asText());
+    var offer = new LinkedHashMap<String, Object>(proposal(1, List.of(c), 100000));
+    offer.put("kpiType", "VIEWS");
+    offer.put("kpiTarget", 5000L);
+
+    var proposed = call(
+        brand,
+        post(root() + "/" + id + "/proposals").header("Idempotency-Key", "kpi-offer"),
+        offer,
+        200).path("data");
+    assertThat(proposed.path("proposal").path("kpiType").asText()).isEqualTo("VIEWS");
+    assertThat(proposed.path("proposal").path("kpiTarget").asLong()).isEqualTo(5000L);
+    call(creator, post("/creators/portal/cooperation-deals/" + id + "/accept"),
+        Map.of("expectedRevision", 2), 200);
+    var confirmed = call(brand, post(root() + "/" + id + "/confirm")
+        .header("Idempotency-Key", "kpi-confirm"),
+        Map.of("expectedRevision", 2, "agreementSource", "PORTAL"), 200).path("data");
+    UUID collaboration = UUID.fromString(confirmed.path("collaborationId").asText());
+
+    assertThat(jdbc.queryForObject(
+        "select committed_kpi_type from collaboration where id=?", String.class, collaboration))
+        .isEqualTo("VIEWS");
+    assertThat(jdbc.queryForObject(
+        "select committed_kpi_target from collaboration where id=?", Long.class, collaboration))
+        .isEqualTo(5000L);
+  }
+
+  @Test
   void ownershipTransferRevokesPrivateDealAndCollaborationAccess() throws Exception {
     var c = channel(true);
     UUID id = prepared(List.of(c), 100000);
@@ -659,6 +691,7 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
   void batchRelationshipsCommitValidItemsAndRestoreNoMetadataOnRetry() throws Exception {
     var a = channel(false);
     var b = channel(false);
+    evaluatedShortlist(brand, campaign, List.of(a.getId(), b.getId()));
     var response =
         call(
                 brand,
@@ -696,6 +729,36 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
         post(root() + "/" + id + "/confirm").header("Idempotency-Key", "bad-proof"),
         evidence,
         400);
+    assertThat(count("collaboration")).isZero();
+  }
+
+  @Test
+  void brandCanCancelDraftWithRevisionAndOwnershipWithoutCreatingReview() throws Exception {
+    var c = channel(false);
+    UUID rel = relationship(c);
+    UUID id = UUID.fromString(create(List.of(rel)).path("id").asText());
+    var url = root() + "/" + id + "/cancel";
+    call(account(Role.BRAND), post(url), Map.of("expectedRevision", 1, "reason", "Not proceeding"), 404);
+    call(brand, post(url), Map.of("expectedRevision", 99, "reason", "Not proceeding"), 409);
+    call(brand, post(url), Map.of("expectedRevision", 1, "reason", " "), 400);
+    var closed = call(brand, post(url), Map.of("expectedRevision", 1, "reason", "Brand decided not to contact"), 200).path("data");
+    assertThat(closed.path("status").asText()).isEqualTo("CANCELLED");
+    assertThat(call(brand, get(root() + "/" + id), null, 200).path("data").path("status").asText()).isEqualTo("CANCELLED");
+    assertThat(count("collaboration")).isZero();
+    assertThat(jdbc.queryForObject("select count(*) from cooperation_history where deal_id=? and action='DEAL_CANCEL'", Long.class, id)).isEqualTo(1);
+  }
+
+  @Test
+  void withdrawalInvalidatesInvitationAndCreatorDeclineDoesNotCreateCollaboration() throws Exception {
+    UUID id = prepared(List.of(channel(true)), 100000);
+    var sent = call(brand, post(root() + "/" + id + "/invitations").header("Idempotency-Key", "withdraw-invite"), Map.of("expectedRevision", 2, "deliveryMethod", "PORTAL_ONLY"), 200).path("data");
+    UUID invitation = UUID.fromString(sent.path("invitationId").asText());
+    call(brand, post(root() + "/" + id + "/cancel"), Map.of("expectedRevision", 2, "reason", "Withdraw before agreement"), 200);
+    assertThat(call(brand, get("/cooperation-invitations/" + invitation + "/email-delivery"), null, 200).path("data").path("active").asBoolean()).isFalse();
+    call(creator, post("/creators/portal/cooperation-deals/" + id + "/accept"), Map.of("expectedRevision", 2), 409);
+    UUID other = prepared(List.of(channel(true)), 100000);
+    var declined = call(creator, post("/creators/portal/cooperation-deals/" + other + "/decline"), Map.of("expectedRevision", 2), 200).path("data");
+    assertThat(declined.path("status").asText()).isEqualTo("DECLINED");
     assertThat(count("collaboration")).isZero();
   }
 
@@ -1040,7 +1103,10 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
     assertThat(
             jdbc.queryForObject(
                 "select payload from cooperation_email_job where id=?", String.class, committed))
-        .isNull();
+        .isNotBlank();
+    // A scheduler/event duplicate must not resend an already successful job.
+    worker.process(committed);
+    assertThat(jdbc.queryForObject("select attempts from cooperation_email_job where id=?", Integer.class, committed)).isEqualTo(1);
   }
 
   @Test

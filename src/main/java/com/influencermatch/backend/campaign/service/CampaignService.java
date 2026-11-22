@@ -300,7 +300,7 @@ public class CampaignService {
     if (target == CampaignStatus.READY_FOR_DISCOVERY) {
       prepareReady(campaign);
     }
-    if (target == CampaignStatus.COMPLETED) {
+    if (target == CampaignStatus.COMPLETED || target == CampaignStatus.CLOSED) {
       Long completed =
           executionDb.queryForObject(
               "select count(*) from collaboration where campaign_id=? and status='COMPLETED'",
@@ -309,7 +309,7 @@ public class CampaignService {
       Long unfinished =
           executionDb.queryForObject(
               "select count(*) from collaboration where campaign_id=? and status not in"
-                  + " ('COMPLETED','CANCELLED')",
+                  + " ('COMPLETED','CANCELLED','TERMINATED')",
               Long.class,
               id);
       Long openDeals =
@@ -318,10 +318,15 @@ public class CampaignService {
                   + " ('CONTACTED','NEGOTIATING')",
               Long.class,
               id);
-      if (completed == 0 || unfinished > 0 || openDeals > 0)
+      if ((target == CampaignStatus.COMPLETED ? completed == 0 : completed > 0) || unfinished > 0 || openDeals > 0)
         throw new BusinessException(
             ErrorCode.INVALID_COLLABORATION_STATE,
             "Resolve open deals and finish collaborations before closing Campaign");
+      if (target == CampaignStatus.CLOSED) {
+        if (request.reason() == null || request.reason().isBlank())
+          throw new ValidationException("A campaign closure reason is required");
+        executionDb.update("update campaign set closure_reason=?,closed_at=now() where id=?", request.reason().strip(), id);
+      }
     }
     campaign.setStatus(target);
     campaign.setCampaignRevision(campaign.getCampaignRevision() + 1);

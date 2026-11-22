@@ -336,6 +336,7 @@ public class AiRecommendationService {
 
       List<com.influencermatch.backend.recommendation.engine.memory.LearnedM4Evaluator.BrandReviewRecord> brandReviews =
           Collections.emptyList();
+      String m4HistoryReadStatus = "READ_FAILED";
       if (jdbcTemplate != null && brandProfileId != null) {
         try {
           brandReviews = jdbcTemplate.query(
@@ -360,6 +361,7 @@ public class AiRecommendationService {
                   rs.getInt("brand_fit_rating")
               ),
               brandProfileId);
+          m4HistoryReadStatus = brandReviews.isEmpty() ? "EMPTY" : "AVAILABLE";
         } catch (Exception ex) {
           log.warn("Could not query brandReviews for M4 evaluation: {}", ex.getMessage());
         }
@@ -699,6 +701,15 @@ public class AiRecommendationService {
       ObjectNode runMetadata = objectMapper.createObjectNode();
       runMetadata.put("scoringAsOf", scoringAsOf.toString());
       runMetadata.put("historyCutoff", historyCutoff.toString());
+      runMetadata.put("evidencePolicyVersion", "collaboration-completion-evidence-v1");
+      runMetadata.put("historySelectionPolicyVersion", "historical-evidence-asof-v1");
+      runMetadata.put("m1PolicyVersion", "m1-strict-complete-case-v1");
+      runMetadata.put("m4PolicyVersion", "m4-evidence-v1");
+      runMetadata.put("m4HistoryReadStatus", m4HistoryReadStatus);
+      ArrayNode m1WNode = runMetadata.putArray("m1Weights");
+      m1WNode.add(com.influencermatch.backend.recommendation.engine.memory.M1HistoricalScorer.WEIGHT_R)
+          .add(com.influencermatch.backend.recommendation.engine.memory.M1HistoricalScorer.WEIGHT_T)
+          .add(com.influencermatch.backend.recommendation.engine.memory.M1HistoricalScorer.WEIGHT_K);
 
       ArrayNode effWNode = runMetadata.putArray("effectiveWeights");
       effWNode.add(runWeights.w1()).add(runWeights.w2()).add(runWeights.w3()).add(runWeights.w4());
@@ -764,7 +775,7 @@ public class AiRecommendationService {
                           .map(
                               com.influencermatch.backend.brand.model.BrandContext::getContextVersion)
                           .orElse(null))
-              .scoringPolicyVersion("m4-evidence-v1")
+              .scoringPolicyVersion("sp01-evidence-v2")
               .scoringSnapshot(snapshotNode)
               .status("COMPLETED")
               .candidatesCount(allSnapshotItems.size())

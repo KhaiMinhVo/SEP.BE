@@ -26,6 +26,9 @@ public class ScoreBreakdownDto {
   private Double rScore;
   private Double tScore;
   private Double kScore;
+  private String rAvailability;
+  private String tAvailability;
+  private String kAvailability;
   private Integer eligibleEvaluatedCollaborations;
   private Integer distinctBrandCount;
   private Double maxBrandShare;

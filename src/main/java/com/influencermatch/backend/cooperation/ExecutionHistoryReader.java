@@ -31,6 +31,9 @@ public class ExecutionHistoryReader {
     var out = new LinkedHashMap<>(initial(id));
     out.remove("brand_user_id");
     out.put("deliverables", units(id));
+    out.put("exitRequests", s.db.queryForList(
+        "select r.*,u.role requested_by_role from collaboration_exit_request r join \"user\" u"
+            + " on u.id=r.requested_by where r.collaboration_id=? order by r.created_at,r.id", id));
     var outcomes =
         s.db.queryForList(
             "select * from collaboration_outcome_revision where collaboration_id=? order by"
@@ -97,7 +100,7 @@ public class ExecutionHistoryReader {
         group(
             s.db.queryForList(
                 "select a.id,a.deliverable_id,a.revision,a.url,a.actor_id,a.source,a.source_description,"
-                    + "a.created_at,u.file_name video_file_name,u.size_bytes video_size_bytes"
+                    + "a.created_at,a.received_at,u.file_name video_file_name,u.size_bytes video_size_bytes"
                     + " from collaboration_submission a join collaboration_deliverable d on d.id=a.deliverable_id"
                     + " left join collaboration_video_upload u on u.id=a.video_upload_id"
                     + " where d.collaboration_id=? order by"

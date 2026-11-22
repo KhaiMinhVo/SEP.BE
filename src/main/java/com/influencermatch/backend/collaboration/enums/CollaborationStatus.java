@@ -5,5 +5,6 @@ public enum CollaborationStatus {
   IN_PROGRESS,
   AWAITING_REVIEW,
   COMPLETED,
-  CANCELLED
+  CANCELLED,
+  TERMINATED
 }

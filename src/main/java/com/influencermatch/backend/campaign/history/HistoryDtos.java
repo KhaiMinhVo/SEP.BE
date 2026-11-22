@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.influencermatch.backend.campaign.dto.*;
 import com.influencermatch.backend.campaign.enums.*;
 import com.influencermatch.backend.collaboration.enums.CollaborationStatus;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.influencermatch.backend.collaboration.dto.StrictNumbers;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.math.BigDecimal;
@@ -60,9 +62,39 @@ public final class HistoryDtos {
       int completedCount,
       int unfinishedCount,
       int cancelledCount,
+      int terminatedCount,
       int eligibleCount,
       List<UUID> missingSourceCollaborationIds,
       Map<String, Metric> metrics) {}
+
+  public record CampaignFinancialSummaryRequest(
+      @JsonDeserialize(using = StrictNumbers.LongValue.class) @Min(0) long expectedRevision,
+      @DecimalMin("0") BigDecimal gmv,
+      @DecimalMin("0") BigDecimal revenue,
+      @NotNull Instant periodStart,
+      @NotNull Instant periodEnd,
+      @NotBlank @Size(max = 2000) String sourceDescription,
+      @Size(max = 2000) String evidenceUrl,
+      @Size(max = 2000) String reason) {}
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  public record CampaignFinancialSummary(
+      long revision,
+      BigDecimal gmv,
+      BigDecimal revenue,
+      String currency,
+      Instant periodStart,
+      Instant periodEnd,
+      String sourceDescription,
+      String evidenceUrl,
+      UUID actorId,
+      String reason,
+      Instant recordedAt,
+      String formulaVersion,
+      BigDecimal actualCost,
+      BigDecimal roas,
+      BigDecimal roi,
+      Map<String, List<String>> unavailableReasons) {}
 
   public record Detail(
       CampaignResponse currentCampaign,
@@ -71,6 +103,7 @@ public final class HistoryDtos {
       String snapshotAvailability,
       Map<String, Long> dealCounts,
       Report report,
+      List<CampaignFinancialSummary> campaignFinancialSummaries,
       CopyOrigin copyOrigin) {}
 
   public record CollaborationItem(

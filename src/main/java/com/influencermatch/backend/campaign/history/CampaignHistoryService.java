@@ -14,8 +14,13 @@ import com.influencermatch.backend.common.dto.PageResponse;
 import com.influencermatch.backend.cooperation.ExecutionHistoryReader;
 import com.influencermatch.backend.cooperation.CollaborationVideo;
 import com.influencermatch.backend.cooperation.CollaborationVideoStorage;
+import com.influencermatch.backend.cooperation.CollaborationExecution;
+import com.influencermatch.backend.cooperation.OutcomeFinance;
 import com.influencermatch.backend.exception.*;
+import com.influencermatch.backend.security.permission.Permission;
+import com.influencermatch.backend.security.permission.Permissions;
 import jakarta.persistence.EntityManager;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.*;
@@ -124,7 +129,192 @@ public class CampaignHistoryService {
         context == null ? "MISSING" : "AVAILABLE",
         counts,
         q.report(id),
+        financialSummaries(id),
         q.origin(id));
+  }
+
+  @Transactional(readOnly = false, isolation = Isolation.READ_COMMITTED)
+  public CampaignFinancialSummary recordFinancialSummary(
+      UUID id, CampaignFinancialSummaryRequest request, String key) {
+    q.access(false);
+    Permissions.require(Permission.RECORD_OWN_OUTCOME);
+    q.owned(id);
+    q.one("select id from \"user\" where id=? for update", q.actor());
+    var campaign = q.one("select * from campaign where id=? for update", id);
+    q.access(false);
+    q.owned(id);
+    if (!List.of("ACTIVE", "COMPLETED", "CLOSED").contains(campaign.get("status").toString()))
+      throw new ConflictException(
+          ErrorCode.INVALID_CAMPAIGN_TRANSITION,
+          "Campaign financial summary requires an active or finished Campaign");
+    if (key == null || !key.matches("[A-Za-z0-9._:-]{1,100}"))
+      throw new ValidationException("Idempotency-Key required (1-100 safe characters)");
+    if ((request.gmv() == null && request.revenue() == null)
+        || request.periodEnd().isBefore(request.periodStart())
+        || request.sourceDescription().isBlank())
+      throw new ValidationException("Campaign total, source and valid measurement period required");
+    if (request.gmv() != null) OutcomeFinance.amount(q.json.valueToTree(request.gmv()));
+    if (request.revenue() != null) OutcomeFinance.amount(q.json.valueToTree(request.revenue()));
+    if (request.evidenceUrl() != null && !request.evidenceUrl().isBlank())
+      CollaborationExecution.https(request.evidenceUrl());
+
+    var fingerprint = HistoryBrief.canonical(q.json, q.json.valueToTree(request)).toString();
+    String requestHash = hash(fingerprint);
+    var priorRequest = q.optional(
+        "select revision,request_hash from campaign_financial_summary_revision where campaign_id=?"
+            + " and actor_id=? and request_key=?", id, q.actor(), key);
+    if (priorRequest.isPresent()) {
+      if (!requestHash.equals(priorRequest.get().get("request_hash")))
+        throw new ConflictException(
+            ErrorCode.IDEMPOTENCY_CONFLICT, "Idempotency key has different content");
+      var saved = q.one("select * from campaign_financial_summary_revision where campaign_id=? and revision=?",
+          id, priorRequest.get().get("revision"));
+      return financialSummary(id, q.report(id), saved);
+    }
+
+    long currentRevision = q.db.queryForObject(
+        "select coalesce(max(revision),0) from campaign_financial_summary_revision where campaign_id=?",
+        Long.class, id);
+    if (currentRevision != request.expectedRevision())
+      throw new ConflictException(
+          ErrorCode.CAMPAIGN_REVISION_CONFLICT, "Campaign financial summary changed; reload it");
+    String reason = request.reason() == null || request.reason().isBlank()
+        ? currentRevision == 0 ? "Brand ghi nhận tổng Campaign lần đầu" : null
+        : request.reason().strip();
+    if (reason == null)
+      throw new ValidationException("A reason is required when changing a saved Campaign summary");
+
+    var payload = q.json.createObjectNode();
+    if (request.gmv() == null) payload.putNull("gmv"); else payload.put("gmv", request.gmv());
+    if (request.revenue() == null) payload.putNull("revenue"); else payload.put("revenue", request.revenue());
+    payload.put("currency", "VND");
+    payload.put("periodStart", request.periodStart().toString());
+    payload.put("periodEnd", request.periodEnd().toString());
+    payload.put("sourceDescription", request.sourceDescription().strip());
+    if (request.evidenceUrl() == null || request.evidenceUrl().isBlank()) payload.putNull("evidenceUrl");
+    else payload.put("evidenceUrl", CollaborationExecution.https(request.evidenceUrl()));
+    var calculation = calculateCampaignFinancialSummary(id, q.report(id), payload);
+    long revision = currentRevision + 1;
+    q.db.update(
+        "insert into campaign_financial_summary_revision(campaign_id,revision,request_key,request_hash,"
+            + "payload,calculation,actor_id,reason,created_at) values(?,?,?,?,?::jsonb,?::jsonb,?,?,?)",
+        id, revision, key, requestHash, payload.toString(), calculation.toString(),
+        q.actor(), reason, java.sql.Timestamp.from(clock.instant()));
+    audit.record("CAMPAIGN_FINANCIAL_SUMMARY_RECORDED", "Campaign", id, null,
+        Map.of("revision", revision, "sourceDescription", request.sourceDescription().strip()),
+        reason);
+    return financialSummaries(id).getFirst();
+  }
+
+  private List<CampaignFinancialSummary> financialSummaries(UUID id) {
+    var report = q.report(id);
+    return q.db.queryForList(
+        "select * from campaign_financial_summary_revision where campaign_id=?"
+            + " order by revision desc limit 20", id).stream()
+        .map(row -> financialSummary(id, report, row)).toList();
+  }
+
+  private CampaignFinancialSummary financialSummary(
+      UUID id, Report report, Map<String, Object> row) {
+    var payload = q.decode(row.get("payload"));
+    var calculation = q.decode(row.get("calculation"));
+    var unavailable = new LinkedHashMap<String, List<String>>();
+    var reasons = calculation.path("unavailableReasons");
+    if (reasons.isObject()) reasons.fields().forEachRemaining(entry -> {
+      var values = new ArrayList<String>();
+      entry.getValue().forEach(value -> values.add(value.asText()));
+      unavailable.put(entry.getKey(), List.copyOf(values));
+    });
+    return new CampaignFinancialSummary(
+        q.number(row.get("revision")),
+        decimal(payload, "gmv"),
+        decimal(payload, "revenue"),
+        payload.path("currency").asText("VND"),
+        Instant.parse(payload.path("periodStart").asText()),
+        Instant.parse(payload.path("periodEnd").asText()),
+        payload.path("sourceDescription").asText(),
+        payload.path("evidenceUrl").isTextual() ? payload.path("evidenceUrl").asText() : null,
+        q.uuid(row.get("actor_id")),
+        row.get("reason").toString(),
+        q.instant(row.get("created_at")),
+        calculation.path("formulaVersion").asText(),
+        decimal(calculation, "actualCost"),
+        decimal(calculation, "roas"),
+        decimal(calculation, "roi"),
+        unavailable);
+  }
+
+  private ObjectNode calculateCampaignFinancialSummary(UUID id, Report report, JsonNode payload) {
+    var result = q.json.createObjectNode().put("formulaVersion", "campaign-financial-summary-v1");
+    var reasons = q.json.createObjectNode();
+    var cost = report.metrics().get("actualCost");
+    BigDecimal actualCost = cost != null && "AVAILABLE".equals(cost.availability()) ? cost.value() : null;
+    if (actualCost == null) result.putNull("actualCost"); else result.put("actualCost", actualCost);
+    var shared = new TreeSet<String>();
+    if (cost != null && !"AVAILABLE".equals(cost.availability())) shared.addAll(cost.unavailableReasons());
+    if (cost == null) shared.add("MISSING_ACTUAL_COST");
+    if (!campaignPeriodsMatch(id, payload.path("periodStart").asText(), payload.path("periodEnd").asText()))
+      shared.add("INCONSISTENT_FINANCIAL_PERIOD");
+    if (actualCost != null && actualCost.signum() <= 0) shared.add("INVALID_DENOMINATOR");
+
+    var roasReasons = new TreeSet<>(shared);
+    var roiReasons = new TreeSet<>(shared);
+    BigDecimal gmv = decimal(payload, "gmv");
+    BigDecimal revenue = decimal(payload, "revenue");
+    if (gmv == null) roasReasons.add("MISSING_CAMPAIGN_GMV");
+    if (revenue == null) roiReasons.add("MISSING_CAMPAIGN_REVENUE");
+    BigDecimal roas = ratio(gmv, actualCost, roasReasons, false);
+    BigDecimal roi = ratio(revenue, actualCost, roiReasons, true);
+    putNullable(result, "roas", roas);
+    putNullable(result, "roi", roi);
+    reasons.set("roas", q.json.valueToTree(roasReasons));
+    reasons.set("roi", q.json.valueToTree(roiReasons));
+    result.set("unavailableReasons", reasons);
+    return result;
+  }
+
+  private boolean campaignPeriodsMatch(UUID id, String start, String end) {
+    var rows = q.db.queryForList("""
+        select o.payload from collaboration c
+        join campaign ca on ca.id=c.campaign_id join brand_profile b on b.id=ca.brand_profile_id
+        join collaboration_outcome_acceptance a on a.collaboration_id=c.id and a.reopened_at is null
+        join collaboration_outcome_revision o on o.collaboration_id=c.id and o.revision=a.outcome_revision
+        left join creator_review r on r.collaboration_id=c.id
+        join campaign_outcome compat on compat.collaboration_id=c.id
+        where c.campaign_id=? and c.status='COMPLETED' and a.actor_id=b.user_id
+          and ((r.reviewed_by_user_id=b.user_id and r.outcome_id=compat.id
+                and r.accepted_outcome_revision=a.outcome_revision)
+               or c.completion_method='WITHOUT_REVIEW')
+          and o.source in ('SELF_REPORTED','BRAND_EXTERNAL_REPORTED') and c.execution_source<>'LEGACY'
+        """, id);
+    for (var row : rows) {
+      var payload = q.decode(row.get("payload"));
+      try {
+        if (!Instant.parse(start).equals(Instant.parse(payload.path("periodStart").asText()))
+            || !Instant.parse(end).equals(Instant.parse(payload.path("periodEnd").asText())))
+          return false;
+      } catch (RuntimeException e) {
+        return false;
+      }
+    }
+    return !rows.isEmpty();
+  }
+
+  private BigDecimal ratio(BigDecimal numerator, BigDecimal denominator, Set<String> reasons,
+      boolean subtractCost) {
+    if (!reasons.isEmpty() || numerator == null || denominator == null || denominator.signum() <= 0)
+      return null;
+    return (subtractCost ? numerator.subtract(denominator) : numerator)
+        .divide(denominator, 4, java.math.RoundingMode.HALF_UP);
+  }
+
+  private void putNullable(ObjectNode target, String field, BigDecimal value) {
+    if (value == null) target.putNull(field); else target.put(field, value);
+  }
+
+  private BigDecimal decimal(JsonNode node, String field) {
+    var value = node.get(field);
+    return value == null || value.isNull() ? null : value.decimalValue();
   }
 
   public PageResponse<Context> contexts(UUID id, int page, int size) {

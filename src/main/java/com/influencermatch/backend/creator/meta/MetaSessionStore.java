@@ -3,6 +3,7 @@ package com.influencermatch.backend.creator.meta;
 import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.creator.service.CreatorInvitationService;
+import com.influencermatch.backend.cooperation.CooperationOnboarding;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.security.permission.*;
 import com.influencermatch.backend.security.permission.repository.RolePermissionOverrideRepository;
@@ -36,6 +37,7 @@ public class MetaSessionStore {
   private final RolePermissionOverrideRepository overrides;
   private final MetaOAuthProperties config;
   private final InstagramOAuthProperties instagram;
+  private final CooperationOnboarding cooperationOnboarding;
   private final MetaPayloadCipher cipher;
   private final Clock clock;
   private final com.influencermatch.backend.auth.service.AuthSessionStore authSessions;
@@ -82,6 +84,7 @@ public class MetaSessionStore {
 
   public void requireReady(MetaOAuthSession session) {
     authSessions.require(session.getAuthSessionId(), session.getUser(), false);
+    assertCooperationTarget(session);
     if (!session.getExpiresAt().isAfter(now()))
       throw new ConflictException(
           ErrorCode.META_OAUTH_SESSION_EXPIRED, "Meta session expired; start again");
@@ -98,20 +101,28 @@ public class MetaSessionStore {
   @Transactional
   public MetaDtos.Started startInstagram(MetaDtos.InstagramStart request, String browserBinding) {
     return start(
-        new MetaDtos.Start("INSTAGRAM", request.creatorId(), request.invitationToken()),
+        new MetaDtos.Start(
+            "INSTAGRAM",
+            request.creatorId(),
+            request.invitationToken(),
+            request.cooperationInvitationToken()),
         browserBinding,
         OAuthFlow.INSTAGRAM_LOGIN);
   }
 
   public void requireConfigured(OAuthFlow flow) {
+    requireConfigured(flow, "FACEBOOK");
+  }
+
+  public void requireConfigured(OAuthFlow flow, String platform) {
     if (flow == OAuthFlow.INSTAGRAM_LOGIN) instagram.requireConfigured();
-    else config.requireConfigured();
+    else config.requireConfigured(platform);
   }
 
   private MetaDtos.Started start(MetaDtos.Start request, String browserBinding, OAuthFlow flow) {
     var actor = actor();
     long version = actor.getAuthVersion();
-    requireConfigured(flow);
+    requireConfigured(flow, request.platform());
     var user =
         users
             .findById(actor.getId())
@@ -125,6 +136,8 @@ public class MetaSessionStore {
                 .findById(request.creatorId())
                 .orElseThrow(() -> new NotFoundException("Creator not found"));
     CreatorInvitation invitation = null;
+    if (hasText(request.invitationToken()) && hasText(request.cooperationInvitationToken()))
+      throw new ValidationException("Use one invitation type per OAuth session");
     if (request.invitationToken() != null && !request.invitationToken().isBlank()) {
       invitation =
           invitations
@@ -134,6 +147,17 @@ public class MetaSessionStore {
       if (target != null && !target.getId().equals(invitation.getTargetCreator().getId()))
         throw new ValidationException("Invitation target does not match");
       target = invitation.getTargetCreator();
+    }
+    UUID cooperationInvitationId = null;
+    if (hasText(request.cooperationInvitationToken())) {
+      if (target == null)
+        throw new ValidationException("A target channel is required for a cooperation invitation");
+      cooperationInvitationId =
+          cooperationOnboarding.validateOAuthTarget(
+              request.cooperationInvitationToken().trim(),
+              target.getId(),
+              request.platform(),
+              user);
     }
     if (target != null
         && (!request.platform().equals(target.getPlatform())
@@ -158,12 +182,13 @@ public class MetaSessionStore {
                 .expiresAt(now().plusSeconds(600))
                 .targetCreator(target)
                 .invitation(invitation)
+                .cooperationInvitationId(cooperationInvitationId)
                 .build());
     return new MetaDtos.Started(
         session.getId(),
         flow == OAuthFlow.INSTAGRAM_LOGIN
             ? instagram.authorizationUrl(state)
-            : config.authorizationUrl(state),
+            : config.authorizationUrl(state, request.platform()),
         session.getExpiresAt());
   }
 
@@ -179,7 +204,6 @@ public class MetaSessionStore {
 
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public Exchange reserve(String state, Map<String, String> cookies, OAuthFlow callbackFlow) {
-    requireConfigured(callbackFlow);
     if (state == null || !state.matches("[0-9a-f]{64}"))
       throw new BusinessException(ErrorCode.META_OAUTH_INVALID_STATE, "Invalid OAuth state");
     var session =
@@ -193,6 +217,7 @@ public class MetaSessionStore {
     if (session.getOauthFlow() != callbackFlow)
       throw new BusinessException(
           ErrorCode.META_OAUTH_INVALID_STATE, "OAuth callback flow does not match session");
+    requireConfigured(session.getOauthFlow(), session.getPlatform());
     String binding = cookies.get(cookieName(session.getId()));
     if (binding == null
         || !binding.matches("[0-9a-f]{64}")
@@ -210,8 +235,24 @@ public class MetaSessionStore {
     em.refresh(user);
     assertUser(user, session.getAuthVersion());
     authSessions.require(session.getAuthSessionId(), user, false);
+    assertCooperationTarget(session);
     session.setStatus("EXCHANGING");
     return new Exchange(session.getId(), session.getPlatform(), session.getOauthFlow());
+  }
+
+  public void assertCooperationTarget(MetaOAuthSession session) {
+    if (session.getCooperationInvitationId() == null) return;
+    if (session.getTargetCreator() == null)
+      throw new ValidationException("Cooperation OAuth session has no target channel");
+    cooperationOnboarding.assertOAuthTarget(
+        session.getCooperationInvitationId(),
+        session.getTargetCreator().getId(),
+        session.getPlatform(),
+        session.getUser());
+  }
+
+  private boolean hasText(String value) {
+    return value != null && !value.isBlank();
   }
 
   @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -270,7 +311,10 @@ public class MetaSessionStore {
                 .filter(c -> Boolean.TRUE.equals(c.getIsStableId()))
                 .orElse(null);
         String match =
-            channel == null
+            "FACEBOOK".equals(session.getPlatform())
+                    && (channel == null || channel.getMaster() == null)
+                ? "INSUFFICIENT_EVIDENCE"
+                : channel == null
                 ? "UNMATCHED"
                 : channel.getMaster() == null
                     ? "AVAILABLE"
@@ -316,7 +360,7 @@ public class MetaSessionStore {
   @Transactional(readOnly = true)
   public Selection selection(UUID id, String accountId) {
     var session = owned(id);
-    requireConfigured(session.getOauthFlow());
+    requireConfigured(session.getOauthFlow(), session.getPlatform());
     requireReady(session);
     var proof = cipher.decrypt(session.getOauthFlow(), session.getPayloadCiphertext());
     if (!proof.tokenExpiresAt().isAfter(now()))

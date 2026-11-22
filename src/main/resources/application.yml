@@ -125,6 +125,7 @@ application:
     app-id: ${META_APP_ID:}
     app-secret: ${META_APP_SECRET:}
     login-config-id: ${META_LOGIN_CONFIG_ID:}
+    instagram-page-login-config-id: ${META_INSTAGRAM_PAGE_LOGIN_CONFIG_ID:}
     graph-api-version: ${META_GRAPH_API_VERSION:}
     redirect-uri: ${META_REDIRECT_URI:https://www.influencermatch.site/api/v1/integrations/meta/callback}
     encryption-key: ${META_OAUTH_ENCRYPTION_KEY:}

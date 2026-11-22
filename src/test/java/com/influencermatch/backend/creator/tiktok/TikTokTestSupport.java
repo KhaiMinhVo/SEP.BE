@@ -68,11 +68,11 @@ abstract class TikTokTestSupport extends PostgresApiTestSupport {
                 .userName("crawler_name")
                 .isStableId(true)
                 .build());
-    when(crawler.resolveTikTokIdentity(anyString()))
+    when(crawler.resolveTikTokIdentity(anyString(), anyString()))
         .thenAnswer(
             i -> {
               assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-              return resolved("9" + channel.getExternalId(), i.getArgument(0));
+              return resolved(i.getArgument(1), i.getArgument(0));
             });
     when(provider.verify(anyString()))
         .thenAnswer(
@@ -91,8 +91,11 @@ abstract class TikTokTestSupport extends PostgresApiTestSupport {
     return com.influencermatch.backend.creator.dto.CrawlerResolveAuthorResponse.builder()
         .status("success")
         .platform("TIKTOK")
+        .inputUsername(username)
         .idType("TIKTOK_USER_ID")
         .authorId(id)
+        .expectedExternalId(id)
+        .isMatched(true)
         .resolvedUsername(username)
         .observedAt(now)
         .creatorInfo(info)
@@ -100,6 +103,16 @@ abstract class TikTokTestSupport extends PostgresApiTestSupport {
   }
 
   Started start(Map<String, Object> body) throws Exception {
+    var request = new HashMap<>(body);
+    request.putIfAbsent("creatorId", channel.getId());
+    return startRaw(request);
+  }
+
+  Started startWithoutTarget() throws Exception {
+    return startRaw(Map.of());
+  }
+
+  private Started startRaw(Map<String, Object> body) throws Exception {
     var response =
         mvc.perform(
                 post(START)

@@ -7,6 +7,9 @@ import com.influencermatch.backend.audit.service.AuditService;
 import com.influencermatch.backend.creator.email.ClaimEmailCipher;
 import com.influencermatch.backend.exception.*;
 import com.influencermatch.backend.security.permission.*;
+import com.influencermatch.backend.user.enums.Role;
+import com.influencermatch.backend.user.enums.UserStatus;
+import com.influencermatch.backend.user.model.User;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -54,23 +57,31 @@ public class CooperationOnboarding {
   }
 
   @Transactional
-  public void requestRegistration(String token, String email) {
+  public Map<String, Object> requestRegistration(String token, String email) {
     var initial = invitation(token);
     // Serialize public requests and rate-limit by the original invitation, not only by email.
     var i = store.one("select * from cooperation_invitation where id=? for update", initial.get("id"));
     check(i);
     String expected = recipient(i);
-    if (expected != null && !expected.equalsIgnoreCase(email)) return;
-    var counts = store.one("select count(*) total,max(created_at) latest from audit_log where action='REQUEST_CREATOR_REGISTRATION'"
-        + " and entity_id=? and created_at>?", i.get("id"), java.sql.Timestamp.from(store.now().minusSeconds(3600)));
+    if (expected != null && !expected.equalsIgnoreCase(email)) return Map.of("status", "RECIPIENT_EMAIL_MISMATCH");
+    // Persist an explicit UTC instant for throttling; the legacy audit timestamp has no timezone.
+    var counts = store.one("select count(*) total,min((new_value->>'requestedAt')::timestamptz) earliest,"
+        + " max((new_value->>'requestedAt')::timestamptz) latest from audit_log where action='REQUEST_CREATOR_REGISTRATION'"
+        + " and entity_id=? and new_value->>'requestedAt' is not null and (new_value->>'requestedAt')::timestamptz>?",
+        i.get("id"), java.time.OffsetDateTime.ofInstant(store.now().minusSeconds(3600), java.time.ZoneOffset.UTC));
     var latest = counts.get("latest");
-    if (((Number) counts.get("total")).longValue() >= 5 || latest != null
-        && CooperationDelivery.instant(latest).isAfter(store.now().minusSeconds(60)))
-      throw new BusinessException(ErrorCode.EMAIL_OTP_RATE_LIMITED, "Please wait before requesting another registration email");
+    long wait = 0;
+    if (((Number) counts.get("total")).longValue() >= 5)
+      wait = Math.max(wait, java.time.Duration.between(store.now(), CooperationDelivery.instant(counts.get("earliest")).plusSeconds(3600)).getSeconds() + 1);
+    if (latest != null)
+      wait = Math.max(wait, java.time.Duration.between(store.now(), CooperationDelivery.instant(latest).plusSeconds(60)).getSeconds() + 1);
+    if (wait > 0) throw new EmailRequestRateLimitedException(wait);
     audit.recordAs(null, "REQUEST_CREATOR_REGISTRATION", "CooperationInvitation", uuid(i.get("id")),
-        null, Map.of("requested", true), "Requested Creator registration email; ownership unchanged");
+        null, Map.of("requested", true, "requestedAt", store.now().toString()), "Requested Creator registration email; ownership unchanged");
     var d = store.deal(uuid(i.get("deal_id")));
     registration.inviteFromCooperation(email.toLowerCase(Locale.ROOT), uuid(d.get("brand_user_id")), token);
+    // Same public response for existing and new accounts. Private guidance goes only to the inbox owner.
+    return Map.of("status", "EMAIL_SUBMITTED", "retryAfterSeconds", 60);
   }
 
   @Transactional(readOnly = true)
@@ -88,6 +99,54 @@ public class CooperationOnboarding {
     var channels = members.stream().map(m -> Map.of("creatorId", m.get("creator_id"),
         "platform", m.get("platform"), "username", Objects.toString(m.get("user_name"), ""))).toList();
     return Map.of("status", owns ? "READY" : "NEEDS_CHANNEL_VERIFICATION", "channels", channels);
+  }
+
+  public UUID validateOAuthTarget(String token, UUID creatorId, String platform, User user) {
+    if (creatorId == null || token == null || !token.matches("[a-f0-9]{64}"))
+      throw new ValidationException("A cooperation invitation and target channel are required");
+    if (user.getRole() != Role.CREATOR
+        || user.getStatus() != UserStatus.ACTIVE
+        || !user.isEmailVerified())
+      throw new ForbiddenException("An active, verified Creator account is required");
+    var invitation = invitation(token);
+    validateOAuthTarget(invitation, creatorId, platform, user);
+    return uuid(invitation.get("id"));
+  }
+
+  public void assertOAuthTarget(UUID invitationId, UUID creatorId, String platform, User user) {
+    var initial = store.one("select deal_id from cooperation_invitation where id=?", invitationId);
+    var deal = store.deal(uuid(initial.get("deal_id")));
+    store.one("select id from campaign where id=? for update", deal.get("campaign_id"));
+    store.one("select id from cooperation_deal where id=? for update", deal.get("id"));
+    var invitation =
+        store.one("select * from cooperation_invitation where id=? for update", invitationId);
+    check(invitation);
+    validateOAuthTarget(invitation, creatorId, platform, user);
+  }
+
+  private void validateOAuthTarget(
+      Map<String, Object> invitation, UUID creatorId, String platform, User user) {
+    var deal = store.deal(uuid(invitation.get("deal_id")));
+    var target =
+        store.members(uuid(deal.get("id"))).stream()
+            .anyMatch(
+                member ->
+                    creatorId.equals(uuid(member.get("creator_id")))
+                        && platform.equals(member.get("platform")));
+    if (!target) throw new ValidationException("Target channel is not part of this invitation");
+
+    String expectedEmail = recipient(invitation);
+    if (expectedEmail != null && !expectedEmail.equalsIgnoreCase(user.getEmail()))
+      throw new ForbiddenException("Invitation belongs to another account");
+
+    if (deal.get("master_id") != null
+        && store.db
+            .queryForList(
+                "select id from creator_master where id=? and user_id=? and status='ACTIVE'",
+                deal.get("master_id"),
+                user.getId())
+            .isEmpty())
+      throw new ForbiddenException("Invitation belongs to another Creator");
   }
 
   boolean ownsAll(List<Map<String, Object>> members) {

@@ -30,6 +30,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
       "application.meta.app-id=123",
       "application.meta.app-secret=test-secret",
       "application.meta.login-config-id=456",
+      "application.meta.instagram-page-login-config-id=789",
       "application.meta.graph-api-version=v24.0",
       "application.meta.redirect-uri=http://localhost:8080/api/v1/integrations/meta/callback",
       "application.meta.encryption-key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
@@ -55,6 +56,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
     call(creator, post(path + "/cancel"), null, 200);
     assertThat(sessions.findById(s.id()).orElseThrow().getPayloadCiphertext()).isNull();
     call(creator, post(path + "/confirm"), Map.of("accountId", channel.getExternalId()), 409);
+    channel = channel("INSTAGRAM");
     var completed = ready(creator);
     String completedPath = "/creators/portal/accounts/connect/meta/sessions/" + completed.id();
     call(creator, post(completedPath + "/confirm"), Map.of("accountId", channel.getExternalId()), 200);
@@ -234,6 +236,14 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
     assertThat(choices.toString())
         .doesNotContain("private-user-token", "tokenExpiresAt", "subject");
     assertUnowned();
+    if (platform.equals("FACEBOOK")) {
+      assertThat(choices.path("accounts").get(0).path("matchStatus").asText())
+          .isEqualTo("INSUFFICIENT_EVIDENCE");
+      confirm(creator, s, channel.getExternalId(), 409);
+      assertUnowned();
+      assertThat(masters.findByUserId(creator.getId())).isEmpty();
+      return;
+    }
     long before = creators.count();
     var result = confirm(creator, s, channel.getExternalId(), 200).path("data");
     assertThat(result.path("status").asText()).isEqualTo("AUTHORIZED");
@@ -284,6 +294,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
   @Test
   void instagramReusesFacebookMasterAndPreservesExistingFacebookEvidence() throws Exception {
     var facebook = channel;
+    setOwner(creator);
     var facebookSession = ready(creator);
     UUID master =
         UUID.fromString(
@@ -560,6 +571,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
 
   @Test
   void manualReviewAndMetaConfirmationCannotAssignDifferentOwners() throws Exception {
+    channel = channel("INSTAGRAM");
     var s = ready(creator);
     var manager = account(Role.DATA_MANAGER);
     var claimId =
@@ -648,6 +660,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
 
   @Test
   void explicitInvitationIsBoundToTargetEmailAndConsumedWithOwnership() throws Exception {
+    channel = channel("INSTAGRAM");
     String token = UUID.randomUUID().toString();
     var invitation =
         invite(creator.getEmail(), LocalDateTime.ofInstant(now.plusSeconds(3600), ZoneOffset.UTC));
@@ -657,9 +670,9 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
     call(
         other,
         post("/creators/portal/accounts/connect/meta/start"),
-        Map.of("platform", "FACEBOOK", "invitationToken", token),
+        Map.of("platform", channel.getPlatform(), "invitationToken", token),
         403);
-    var s = start(creator, Map.of("platform", "FACEBOOK", "invitationToken", token));
+    var s = start(creator, Map.of("platform", channel.getPlatform(), "invitationToken", token));
     callback(s, 200);
     confirm(creator, s, channel.getExternalId(), 200);
     assertThat(invitations.findById(invitation.getId()).orElseThrow().getStatus())
@@ -727,6 +740,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
 
   @Test
   void concurrentConfirmOnOneSessionHasOneWinnerAndNoDuplicateEvidence() throws Exception {
+    channel = channel("INSTAGRAM");
     var s = ready(creator);
     var ready = new CountDownLatch(2);
     var gate = new CountDownLatch(1);
@@ -764,6 +778,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
 
   @Test
   void secondSessionForSameOwnerUpdatesEvidenceInsteadOfCreatingDuplicateRows() throws Exception {
+    channel = channel("INSTAGRAM");
     var first = ready(creator);
     confirm(creator, first, channel.getExternalId(), 200);
     var second = ready(creator);
@@ -778,10 +793,10 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"FACEBOOK", "INSTAGRAM"})
+  @ValueSource(strings = {"INSTAGRAM"})
   void auditFailureRollsBackMasterOwnershipEvidenceAndSessionConsumption(String platform)
       throws Exception {
-    if (platform.equals("INSTAGRAM")) channel = channel(platform);
+    channel = channel(platform);
     var s = ready(creator);
     String suffix = UUID.randomUUID().toString().replace("-", "");
     String fn = "meta_fail_" + suffix, tr = "meta_fail_tr_" + suffix;
@@ -886,6 +901,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
 
   @Test
   void twoDifferentCreatorsCompetingForOneChannelHaveOneOwner() throws Exception {
+    channel = channel("INSTAGRAM");
     var a = ready(creator);
     var b = ready(other);
     var ready = new CountDownLatch(2);
@@ -939,7 +955,8 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
 
   @Test
   void twoDifferentChannelsConfirmedConcurrentlyReuseOneMaster() throws Exception {
-    var second = channel("FACEBOOK");
+    channel = channel("INSTAGRAM");
+    var second = channel("INSTAGRAM");
     var all =
         new MetaDtos.Proof(
             "meta-user-99",

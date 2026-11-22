@@ -7,7 +7,14 @@ import java.util.UUID;
 public final class TikTokDtos {
   private TikTokDtos() {}
 
-  public record Start(UUID creatorId, @Size(max = 512) String invitationToken) {
+  public record Start(
+      UUID creatorId,
+      @Size(max = 512) String invitationToken,
+      @Size(max = 512) String cooperationInvitationToken) {
+    public Start(UUID creatorId, String invitationToken) {
+      this(creatorId, invitationToken, null);
+    }
+
     @Override
     public String toString() {
       return "TikTokStart[secrets redacted]";

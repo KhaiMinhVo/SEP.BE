@@ -40,22 +40,26 @@ public class SmtpVerificationEmailSender implements VerificationEmailSender {
   }
   @Override
   public void send(String email, String otp) {
-    deliver(
-        email,
-        "InfluencerMatch - Xác thực địa chỉ email của bạn",
-        "Mã xác thực email của bạn là: "
-            + otp
-            + "\nMã này có hiệu lực trong vòng 10 phút. Tuyệt đối không chia sẻ mã này với bất kỳ ai.");
+    deliverHtml(email, EmailVerificationTemplate.SUBJECT, EmailVerificationTemplate.text(otp), EmailVerificationTemplate.html(otp));
   }
 
   @Override
   public void sendCreatorInvitation(String email, String link) {
-    deliver(
-        email,
-        "InfluencerMatch - Lời mời đăng ký tài khoản Creator",
-        "Bạn nhận được lời mời đăng ký tài khoản Creator trên nền tảng InfluencerMatch.\n"
-            + link
-            + "\nLiên kết này có hiệu lực trong 48 giờ và chỉ sử dụng được 1 lần.");
+    deliverHtml(email, CreatorRegistrationEmail.SUBJECT, CreatorRegistrationEmail.text(link), CreatorRegistrationEmail.html(link));
+  }
+
+  @Override
+  public void sendCooperationAccountAccess(String email, String link, boolean creatorAccount) {
+    deliver(email, "InfluencerMatch - Hướng dẫn tiếp tục lời mời hợp tác",
+        creatorAccount
+            ? "Email này đã có tài khoản Creator trên InfluencerMatch. Bạn không cần đăng ký lại.\n"
+                + "Mở lời mời và đăng nhập bằng tài khoản hiện có:\n" + link
+                + "\nNếu quên mật khẩu, chọn Quên mật khẩu tại màn hình đăng nhập."
+                + "\nMở liên kết không tự chấp nhận đề xuất hoặc cấp quyền sở hữu kênh."
+            : "Email này đã gắn với một tài khoản InfluencerMatch có vai trò khác Creator.\n"
+                + "Hệ thống hiện chưa hỗ trợ nhiều vai trò trên cùng tài khoản, nên không tạo thêm tài khoản Creator bằng email này."
+                + "\nVui lòng liên hệ influencermatch.sep491@gmail.com hoặc thương hiệu gửi lời mời để được hỗ trợ."
+                + "\nKhông gửi mật khẩu, OTP hoặc token cho người khác.");
   }
 
   @Override
@@ -71,16 +75,19 @@ public class SmtpVerificationEmailSender implements VerificationEmailSender {
 
   @Override
   public void sendCooperationInvitation(String email, String link) {
+    deliverHtml(email, CooperationInvitationEmail.SUBJECT, CooperationInvitationEmail.text(link), CooperationInvitationEmail.html(link));
+  }
+
+  private void deliverHtml(String email, String subject, String text, String html) {
     requireConfigured();
-    String html = CooperationInvitationEmail.html(link);
     try {
       var message = sender.getObject().createMimeMessage();
       var helper = new MimeMessageHelper(message, true, "UTF-8");
       helper.setFrom(from, "InfluencerMatch");
       helper.setTo(email);
       helper.setReplyTo(CooperationInvitationEmail.SUPPORT);
-      helper.setSubject(CooperationInvitationEmail.SUBJECT);
-      helper.setText(CooperationInvitationEmail.text(link), html);
+      helper.setSubject(subject);
+      helper.setText(text, html);
       sender.getObject().send(message);
     } catch (MailException | jakarta.mail.MessagingException | java.io.UnsupportedEncodingException ex) {
       throw new BusinessException(ErrorCode.EMAIL_DELIVERY_UNAVAILABLE, "Unable to send email. Please try again.");

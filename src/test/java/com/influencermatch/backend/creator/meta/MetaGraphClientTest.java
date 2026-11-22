@@ -26,6 +26,7 @@ class MetaGraphClientTest {
         "123",
         "private-app-secret",
         "456",
+        "789",
         "v24.0",
         "http://localhost:8080/api/v1/integrations/meta/callback",
         KEY);
@@ -102,6 +103,9 @@ class MetaGraphClientTest {
                 MediaType.APPLICATION_JSON));
     var proof = graph.exchange("one-time-code", "FACEBOOK");
     assertThat(proof.assets()).extracting(MetaDtos.Asset::id).containsExactly("100", "101");
+    assertThat(proof.assets())
+        .extracting(MetaDtos.Asset::tasks)
+        .containsExactly(Set.of("ANALYZE"), Set.of("CREATE_CONTENT"));
     assertThat(proof.toString()).doesNotContain("private-user-token");
     server.verify();
   }
@@ -119,7 +123,10 @@ class MetaGraphClientTest {
                 "{\"data\":[{\"id\":\"100\",\"tasks\":[\"MANAGE\"],\"instagram_business_account\":{\"id\":\"200\",\"username\":\"creator\",\"name\":\"IG\"}},{\"id\":\"101\",\"tasks\":[\"MANAGE\"]},{\"id\":\"102\",\"tasks\":[],\"instagram_business_account\":{\"id\":\"202\"}}]}",
                 MediaType.APPLICATION_JSON));
     var proof = graph.verify("private-user-token", "INSTAGRAM");
-    assertThat(proof.assets()).containsExactly(new MetaDtos.Asset("200", "100", "IG", "creator"));
+    assertThat(proof.assets())
+        .containsExactly(
+            new MetaDtos.Asset("200", "100", "IG", "creator", Set.of("MANAGE")),
+            new MetaDtos.Asset("202", "102", "", "", Set.of()));
     server.verify();
   }
 
@@ -172,8 +179,9 @@ class MetaGraphClientTest {
                 MediaType.APPLICATION_JSON));
     assertThat(graph.verify("private-user-token", "INSTAGRAM").assets())
         .containsExactly(
-            new MetaDtos.Asset("200", "100", "Business account", "business"),
-            new MetaDtos.Asset("201", "105", "Creator account", "creator"));
+            new MetaDtos.Asset("200", "100", "Business account", "business", Set.of("MANAGE")),
+            new MetaDtos.Asset("202", "102", "", "", Set.of()),
+            new MetaDtos.Asset("201", "105", "Creator account", "creator", Set.of("ANALYZE")));
     server.verify();
   }
 

@@ -1,6 +1,12 @@
 name: Deploy Backend to VPS
 
 on:
+  workflow_dispatch:
+    inputs:
+      diagnostics_only:
+        description: Read diagnostics without rebuilding or restarting
+        type: boolean
+        default: true
   push:
     branches:
       - develop
@@ -17,7 +23,22 @@ jobs:
       url: https://api.influencermatch.site
 
     steps:
+      - name: Read backend diagnostics only
+        if: github.event_name == 'workflow_dispatch' && inputs.diagnostics_only == true
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            set -eu
+            cd ~/SEP.BE
+            git fetch origin develop
+            command -v python3
+            git show '${{ github.sha }}:ops/deploy_diagnostics.py' | python3 - influencermatch_api
+
       - name: SSH and Deploy to VPS
+        if: github.event_name != 'workflow_dispatch' || inputs.diagnostics_only != true
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -45,7 +66,17 @@ jobs:
               docker compose --project-name "$project_name" --env-file "$repo_dir/.env" -f "$release_dir/docker-compose.yml" "$@"
             }
             export CREATOR_INVITATION_FRONTEND_BASE_URL=https://www.influencermatch.site
-            compose up --build -d
+            diagnostics() {
+              if command -v python3 >/dev/null 2>&1; then
+                python3 "$release_dir/ops/deploy_diagnostics.py" influencermatch_api || true
+              else
+                echo 'Diagnostics unavailable: python3 is missing on VPS.'
+              fi
+            }
+            if ! compose up --build -d; then
+              diagnostics
+              exit 1
+            fi
             api_id=$(compose ps -q api)
             test -n "$api_id"
             actual_commit=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$api_id")
@@ -55,6 +86,7 @@ jobs:
               attempts=$((attempts + 1))
               if [ "$attempts" -ge 60 ]; then
                 echo 'Backend did not become healthy; deployment failed.'
+                diagnostics
                 exit 1
               fi
               sleep 3

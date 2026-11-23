@@ -13,8 +13,9 @@ public class PayOsConfig {
   private String clientId;
   private String apiKey;
   private String checksumKey;
-  private String returnUrl = "https://www.influencermatch.site/subscription";
-  private String cancelUrl = "https://www.influencermatch.site/subscription?payment=cancelled";
+  private String returnUrl = "https://api.influencermatch.site/api/v1/billing/payos/return";
+  private String cancelUrl = "https://api.influencermatch.site/api/v1/billing/payos/return";
+  private String frontendReturnUrl = "https://www.influencermatch.site/subscription";
 
   public boolean isConfigured() {
     return hasText(clientId) && hasText(apiKey) && hasText(checksumKey);

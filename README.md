@@ -204,8 +204,12 @@ Alias đường dẫn billing cũ có prefix lặp vẫn được giữ để t�
 
 Checkout PayOS cần cấu hình `PAYOS_CLIENT_ID`, `PAYOS_API_KEY` và `PAYOS_CHECKSUM_KEY`.
 Đặt webhook của kênh thanh toán PayOS thành
-`https://<backend-host>/api/v1/billing/payos/webhook`; trình duyệt quay về URL trong
-`PAYOS_RETURN_URL` hoặc `PAYOS_CANCEL_URL`. Các khóa PayOS không được gửi xuống frontend.
+`https://<backend-host>/api/v1/billing/payos/webhook`. Đặt cả return/cancel URL của PayOS
+đến `https://<backend-host>/api/v1/billing/payos/return`; backend truy vấn trực tiếp trạng thái
+đơn hàng rồi mới chuyển về frontend. Có thể cấu hình callback bằng `PAYOS_CALLBACK_URL`,
+`PAYOS_CANCEL_CALLBACK_URL` và trang frontend bằng `PAYOS_FRONTEND_RETURN_URL`.
+Giao dịch chưa thanh toán sẽ bị hủy ở PayOS sau 15 phút; job đối soát mỗi phút sẽ ghi nhận
+thanh toán bị lỡ webhook trước khi cập nhật trạng thái hủy. Các khóa PayOS không được gửi xuống frontend.
 
 ### Cấp role và thu hồi token
 

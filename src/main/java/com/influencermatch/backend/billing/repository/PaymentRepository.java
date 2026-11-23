@@ -39,6 +39,21 @@ public interface PaymentRepository
       + "order by p.lastReconciledAt asc nulls first, p.createdAt asc")
   List<Payment> findReconciliationCandidates(@Param("before") java.time.LocalDateTime before, Pageable page);
 
+  @Query("select p from Payment p where p.status = com.influencermatch.backend.billing.enums.PaymentStatus.PENDING "
+      + "and p.paymentGateway = 'PAYOS' and p.transactionCode is not null "
+      + "and p.createdAt < :before and (p.lastReconciledAt is null or p.lastReconciledAt < :before) "
+      + "order by p.lastReconciledAt asc nulls first, p.createdAt asc")
+  List<Payment> findPayOsReconciliationCandidates(
+      @Param("before") java.time.LocalDateTime before, Pageable page);
+
+  @Query("select p from Payment p "
+      + "where p.status = com.influencermatch.backend.billing.enums.PaymentStatus.PENDING "
+      + "and p.paymentGateway != 'PAYOS' "
+      + "and p.createdAt <= :expiredAt "
+      + "order by p.createdAt asc")
+  List<Payment> findExpiredPendingCheckouts(
+      @Param("expiredAt") java.time.LocalDateTime expiredAt, Pageable page);
+
   @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
   @Query("select p from Payment p where p.id = :id")
   Optional<Payment> findLockedById(@Param("id") UUID id);

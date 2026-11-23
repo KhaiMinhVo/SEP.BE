@@ -120,4 +120,51 @@ class PaymentCallbackServiceTest {
         .isEqualTo(PaymentService.CallbackResult.INVALID_AMOUNT);
     verify(settlement, never()).apply(any(), anyBoolean(), any());
   }
+
+  @Test void payOsBrowserReturnQueriesProviderAndSettlesBeforeRedirect() {
+    var payment = Payment.builder()
+        .transactionCode("123")
+        .paymentGateway("PAYOS")
+        .status(com.influencermatch.backend.billing.enums.PaymentStatus.PENDING)
+        .amount(new BigDecimal("100"))
+        .build();
+    when(payments.findByTransactionCode("123")).thenReturn(Optional.of(payment));
+    when(settlement.lock(payment)).thenReturn(payment);
+    when(settlement.apply(payment, true, null)).thenReturn(true);
+    var link = new vn.payos.model.v2.paymentRequests.PaymentLink();
+    link.setId("payment-link");
+    link.setOrderCode(123L);
+    link.setAmount(100L);
+    link.setAmountPaid(100L);
+    link.setAmountRemaining(0L);
+    link.setStatus(vn.payos.model.v2.paymentRequests.PaymentLinkStatus.PAID);
+    when(payOsPaymentClient.getPaymentLink(123L)).thenReturn(link);
+
+    assertThat(service.processPayOsReturn("123"))
+        .isEqualTo(PaymentService.PayOsReturnResult.PAID);
+    verify(settlement).apply(payment, true, null);
+  }
+
+  @Test void payOsBrowserReturnDoesNotTrustReturnUrlPaymentStatus() {
+    var payment = Payment.builder()
+        .transactionCode("123")
+        .paymentGateway("PAYOS")
+        .status(com.influencermatch.backend.billing.enums.PaymentStatus.PENDING)
+        .amount(new BigDecimal("100"))
+        .build();
+    when(payments.findByTransactionCode("123")).thenReturn(Optional.of(payment));
+    when(settlement.lock(payment)).thenReturn(payment);
+    var link = new vn.payos.model.v2.paymentRequests.PaymentLink();
+    link.setId("payment-link");
+    link.setOrderCode(123L);
+    link.setAmount(100L);
+    link.setAmountPaid(0L);
+    link.setAmountRemaining(100L);
+    link.setStatus(vn.payos.model.v2.paymentRequests.PaymentLinkStatus.PENDING);
+    when(payOsPaymentClient.getPaymentLink(123L)).thenReturn(link);
+
+    assertThat(service.processPayOsReturn("123"))
+        .isEqualTo(PaymentService.PayOsReturnResult.PENDING);
+    verify(settlement, never()).apply(any(), anyBoolean(), any());
+  }
 }

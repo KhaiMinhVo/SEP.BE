@@ -63,8 +63,9 @@ services:
       PAYOS_CLIENT_ID: ${PAYOS_CLIENT_ID:-}
       PAYOS_API_KEY: ${PAYOS_API_KEY:-}
       PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-}
-      PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-https://www.influencermatch.site/subscription}
-      PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-https://www.influencermatch.site/subscription?payment=cancelled}
+      PAYOS_CALLBACK_URL: ${PAYOS_CALLBACK_URL:-https://api.influencermatch.site/api/v1/billing/payos/return}
+      PAYOS_CANCEL_CALLBACK_URL: ${PAYOS_CANCEL_CALLBACK_URL:-https://api.influencermatch.site/api/v1/billing/payos/return}
+      PAYOS_FRONTEND_RETURN_URL: ${PAYOS_FRONTEND_RETURN_URL:-https://www.influencermatch.site/subscription}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

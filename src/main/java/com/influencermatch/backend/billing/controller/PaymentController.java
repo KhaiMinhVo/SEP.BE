@@ -2,6 +2,7 @@ package com.influencermatch.backend.billing.controller;
 
 import com.influencermatch.backend.billing.dto.PaymentRequest;
 import com.influencermatch.backend.billing.dto.PaymentResponse;
+import com.influencermatch.backend.config.PayOsConfig;
 import com.influencermatch.backend.billing.service.PaymentService;
 import com.influencermatch.backend.brand.model.BrandProfile;
 import com.influencermatch.backend.brand.repository.BrandProfileRepository;
@@ -37,6 +38,7 @@ public class PaymentController {
   private final PaymentService paymentService;
   private final BrandProfileRepository brandProfileRepository;
   private final VnPayConfig vnPayConfig;
+  private final PayOsConfig payOsConfig;
 
   @Operation(
       summary = "Create checkout payment URL for subscription plan",
@@ -121,6 +123,34 @@ public class PaymentController {
             + "&txnRef="
             + java.net.URLEncoder.encode(fields.getOrDefault("vnp_TxnRef", ""), java.nio.charset.StandardCharsets.UTF_8);
 
+    HttpHeaders headers = new HttpHeaders();
+    headers.setLocation(URI.create(redirectUrl));
+    return new ResponseEntity<>(headers, HttpStatus.FOUND);
+  }
+
+  @Operation(
+      summary = "PayOS browser return",
+      description = "Queries PayOS directly before redirecting the customer to the frontend",
+      security = {})
+  @GetMapping("/payos/return")
+  public ResponseEntity<Void> payOsReturn(
+      @org.springframework.web.bind.annotation.RequestParam(required = false) String orderCode) {
+    var result = paymentService.processPayOsReturn(orderCode);
+    String payment = switch (result) {
+      case PAID -> "success";
+      case FAILED -> "cancelled";
+      case PENDING, NOT_FOUND -> "pending";
+    };
+    String target = payOsConfig.getFrontendReturnUrl();
+    String delimiter = target.contains("?") ? "&" : "?";
+    String redirectUrl =
+        target
+            + delimiter
+            + "payment="
+            + payment
+            + "&txnRef="
+            + java.net.URLEncoder.encode(
+                orderCode == null ? "" : orderCode, java.nio.charset.StandardCharsets.UTF_8);
     HttpHeaders headers = new HttpHeaders();
     headers.setLocation(URI.create(redirectUrl));
     return new ResponseEntity<>(headers, HttpStatus.FOUND);

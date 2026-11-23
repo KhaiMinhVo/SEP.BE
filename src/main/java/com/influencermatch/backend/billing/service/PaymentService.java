@@ -252,6 +252,60 @@ public class PaymentService {
     CONFLICT
   }
 
+  public enum PayOsReturnResult {
+    PAID,
+    FAILED,
+    PENDING,
+    NOT_FOUND
+  }
+
+  @Transactional
+  public PayOsReturnResult processPayOsReturn(String orderCodeValue) {
+    if (orderCodeValue == null || !orderCodeValue.matches("\\d{1,19}"))
+      return PayOsReturnResult.NOT_FOUND;
+
+    Payment existing =
+        paymentRepository.findByTransactionCode(orderCodeValue).orElse(null);
+    if (existing == null || !"PAYOS".equals(existing.getPaymentGateway()))
+      return PayOsReturnResult.NOT_FOUND;
+    if (existing.getStatus() == PaymentStatus.PAID) return PayOsReturnResult.PAID;
+    if (existing.getStatus() == PaymentStatus.FAILED) return PayOsReturnResult.FAILED;
+
+    var link = payOsPaymentClient.getPaymentLink(Long.parseLong(orderCodeValue));
+    if (link == null
+        || link.getOrderCode() == null
+        || link.getOrderCode() != Long.parseLong(orderCodeValue)
+        || link.getAmount() == null
+        || existing.getAmount().compareTo(java.math.BigDecimal.valueOf(link.getAmount())) != 0
+        || link.getAmountPaid() == null
+        || link.getAmountPaid() < 0
+        || link.getAmountPaid() > link.getAmount()) {
+      log.warn("PayOS return query mismatch for orderCode='{}'", orderCodeValue);
+      return PayOsReturnResult.PENDING;
+    }
+
+    Payment payment = settlement.lock(existing);
+    if (payment.getStatus() == PaymentStatus.PAID) return PayOsReturnResult.PAID;
+    if (payment.getStatus() == PaymentStatus.FAILED) return PayOsReturnResult.FAILED;
+
+    if (link.getStatus() == vn.payos.model.v2.paymentRequests.PaymentLinkStatus.PAID
+        && link.getAmountPaid().compareTo(link.getAmount()) == 0) {
+      return settlement.apply(payment, true, null)
+          ? PayOsReturnResult.PAID
+          : PayOsReturnResult.PENDING;
+    }
+
+    if (link.getAmountPaid() == 0L
+        && (link.getStatus() == vn.payos.model.v2.paymentRequests.PaymentLinkStatus.CANCELLED
+            || link.getStatus() == vn.payos.model.v2.paymentRequests.PaymentLinkStatus.EXPIRED
+            || link.getStatus() == vn.payos.model.v2.paymentRequests.PaymentLinkStatus.FAILED)) {
+      return settlement.apply(payment, false, "PAYMENT_CANCELLED")
+          ? PayOsReturnResult.FAILED
+          : PayOsReturnResult.PENDING;
+    }
+    return PayOsReturnResult.PENDING;
+  }
+
   @Transactional
   public CallbackResult processPayOsWebhook(String rawBody) {
     vn.payos.model.webhooks.WebhookData event;

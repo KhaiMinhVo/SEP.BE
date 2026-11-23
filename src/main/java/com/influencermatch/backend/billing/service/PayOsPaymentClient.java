@@ -11,6 +11,7 @@ import vn.payos.exception.PayOSException;
 import vn.payos.exception.WebhookException;
 import vn.payos.model.v2.paymentRequests.CreatePaymentLinkRequest;
 import vn.payos.model.v2.paymentRequests.CreatePaymentLinkResponse;
+import vn.payos.model.v2.paymentRequests.PaymentLink;
 import vn.payos.model.webhooks.WebhookData;
 
 @Component
@@ -56,6 +57,26 @@ public class PayOsPaymentClient {
     } catch (PayOSException exception) {
       log.warn("PayOS webhook could not be verified", exception);
       throw new WebhookException("Invalid webhook data", exception);
+    }
+  }
+
+  public PaymentLink getPaymentLink(long orderCode) {
+    try {
+      return configuredClient().paymentRequests().get(orderCode);
+    } catch (PayOSException exception) {
+      log.warn("PayOS payment-link query failed for orderCode={}", orderCode);
+      throw new IllegalStateException("Unable to query PayOS payment link", exception);
+    }
+  }
+
+  public PaymentLink cancelPaymentLink(long orderCode) {
+    try {
+      return configuredClient()
+          .paymentRequests()
+          .cancel(orderCode, "Payment was not completed within 15 minutes");
+    } catch (PayOSException exception) {
+      log.warn("PayOS payment-link cancellation failed for orderCode={}", orderCode);
+      throw new IllegalStateException("Unable to cancel PayOS payment link", exception);
     }
   }
 

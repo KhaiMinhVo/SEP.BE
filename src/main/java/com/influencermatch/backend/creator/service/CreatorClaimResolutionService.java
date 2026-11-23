@@ -285,14 +285,15 @@ public class CreatorClaimResolutionService {
         log.warn("Avatar cloud sync failed; preserving the existing image for creator {}", creator.getId());
       }
     }
-    // Best effort cloud persistence must not leave a newly crawled creator without an image.
-    // Never associate a temporary crawler URL with metadata belonging to another cloud asset.
-    if (creator.getAvatarUrl() == null || creator.getAvatarUrl().isBlank()) {
-      creator.setAvatarUrl(candidate);
-      creator.setAvatarStorageKey(null);
-      creator.setAvatarMimeType(null);
-      creator.setAvatarSizeBytes(null);
-      creator.setAvatarUpdatedAt(null);
+    // Nếu creator đã có ảnh lưu trên cloud vĩnh viễn, không ghi đè bằng link TikTok tạm
+    if (creator.getAvatarStorageKey() != null && !creator.getAvatarStorageKey().isBlank()) {
+      return;
     }
+    // Chưa có trên cloud -> luôn cập nhật link tươi mới từ crawler như cũ
+    creator.setAvatarUrl(candidate);
+    creator.setAvatarStorageKey(null);
+    creator.setAvatarMimeType(null);
+    creator.setAvatarSizeBytes(null);
+    creator.setAvatarUpdatedAt(null);
   }
 }

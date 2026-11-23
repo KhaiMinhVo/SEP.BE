@@ -49,6 +49,9 @@ public class Payment {
   @Column(length = 255)
   private String transactionCode;
 
+  @Column(length = 1000)
+  private String gatewayPaymentUrl;
+
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 32)
   private PaymentStatus status;

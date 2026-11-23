@@ -51,19 +51,19 @@ public interface PaymentRepository
 
   Optional<Payment> findByTransactionCode(String transactionCode);
 
-  /** Find the most-recent PENDING VNPay checkout for a brand+plan created within the last
-   *  {@code windowMinutes} minutes that has not yet expired at the gateway. */
+  /** Find the most-recent PENDING checkout for a brand+plan created within the reuse window. */
   @Query("select p from Payment p "
       + "join p.subscription s "
       + "where p.brandProfile.id = :brandId "
       + "  and s.plan.id = :planId "
       + "  and p.status = com.influencermatch.backend.billing.enums.PaymentStatus.PENDING "
-      + "  and p.paymentGateway = 'VNPAY' "
+      + "  and p.paymentGateway = :gateway "
       + "  and p.createdAt >= :since "
       + "order by p.createdAt desc")
   List<Payment> findRecentPendingCheckouts(
       @Param("brandId") UUID brandId,
       @Param("planId") UUID planId,
+      @Param("gateway") String gateway,
       @Param("since") java.time.LocalDateTime since,
       Pageable page);
 

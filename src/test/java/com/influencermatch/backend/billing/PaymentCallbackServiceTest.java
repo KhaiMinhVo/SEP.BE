@@ -7,7 +7,10 @@ import com.influencermatch.backend.billing.repository.*;
 import com.influencermatch.backend.billing.service.*;
 import com.influencermatch.backend.billing.utils.VnPayUtil;
 import com.influencermatch.backend.brand.repository.BrandProfileRepository;
+import com.influencermatch.backend.config.PayOsConfig;
 import com.influencermatch.backend.config.VnPayConfig;
+import vn.payos.exception.WebhookException;
+import vn.payos.model.webhooks.WebhookData;
 import java.math.BigDecimal;
 import java.util.*;
 import org.junit.jupiter.api.Test;
@@ -18,8 +21,10 @@ class PaymentCallbackServiceTest {
   final PaymentRepository payments=mock(PaymentRepository.class);
   final PaymentSettlementService settlement=mock(PaymentSettlementService.class);
   final VnPayConfig config=mock(VnPayConfig.class);
+  final PayOsConfig payOsConfig=mock(PayOsConfig.class);
+  final PayOsPaymentClient payOsPaymentClient=mock(PayOsPaymentClient.class);
   final PaymentService service=new PaymentService(mock(PlanRepository.class),mock(SubscriptionRepository.class),payments,config,
-      mock(BrandProfileRepository.class),settlement);
+      payOsConfig,payOsPaymentClient,mock(BrandProfileRepository.class),settlement);
   Map<String,String> params() {
     var p=new HashMap<String,String>();p.put("vnp_TmnCode","TEST");p.put("vnp_TxnRef","TX");p.put("vnp_Amount","10000");
     p.put("vnp_ResponseCode","00");p.put("vnp_TransactionStatus","00");return p;
@@ -53,5 +58,66 @@ class PaymentCallbackServiceTest {
     stored(); var p=params(); p.put("vnp_TransactionStatus",outcome); sign(p);
     assertThat(service.processVnPayCallback(p)).isEqualTo(PaymentService.CallbackResult.PENDING);
     verify(settlement,never()).apply(any(),anyBoolean(),any());
+  }
+
+  @Test void payOsWebhookWithInvalidSignatureNeverLooksUpOrSettlesPayment() {
+    when(payOsPaymentClient.verifyWebhook("invalid")).thenThrow(new WebhookException("bad signature"));
+
+    assertThat(service.processPayOsWebhook("invalid"))
+        .isEqualTo(PaymentService.CallbackResult.INVALID_SIGNATURE);
+    verifyNoInteractions(payments, settlement);
+  }
+
+  @Test void verifiedPayOsWebhookChecksProviderAndAmountBeforeSettlement() {
+    var payment = Payment.builder()
+        .paymentGateway("PAYOS")
+        .amount(new BigDecimal("100"))
+        .build();
+    when(payments.findByTransactionCode("123")).thenReturn(Optional.of(payment));
+    when(settlement.lock(payment)).thenReturn(payment);
+    when(settlement.apply(payment, true, null)).thenReturn(true);
+    when(payOsPaymentClient.verifyWebhook("signed"))
+        .thenReturn(WebhookData.builder()
+            .orderCode(123L)
+            .amount(100L)
+            .currency("VND")
+            .code("00")
+            .description("IM0000123")
+            .accountNumber("123")
+            .reference("reference")
+            .transactionDateTime("2026-11-24 02:00:00")
+            .paymentLinkId("link")
+            .desc("success")
+            .build());
+
+    assertThat(service.processPayOsWebhook("signed"))
+        .isEqualTo(PaymentService.CallbackResult.ACCEPTED);
+    verify(settlement).apply(payment, true, null);
+  }
+
+  @Test void verifiedPayOsWebhookWithWrongAmountDoesNotSettlePayment() {
+    var payment = Payment.builder()
+        .paymentGateway("PAYOS")
+        .amount(new BigDecimal("100"))
+        .build();
+    when(payments.findByTransactionCode("123")).thenReturn(Optional.of(payment));
+    when(settlement.lock(payment)).thenReturn(payment);
+    when(payOsPaymentClient.verifyWebhook("signed"))
+        .thenReturn(WebhookData.builder()
+            .orderCode(123L)
+            .amount(101L)
+            .currency("VND")
+            .code("00")
+            .description("IM0000123")
+            .accountNumber("123")
+            .reference("reference")
+            .transactionDateTime("2026-11-24 02:00:00")
+            .paymentLinkId("link")
+            .desc("success")
+            .build());
+
+    assertThat(service.processPayOsWebhook("signed"))
+        .isEqualTo(PaymentService.CallbackResult.INVALID_AMOUNT);
+    verify(settlement, never()).apply(any(), anyBoolean(), any());
   }
 }

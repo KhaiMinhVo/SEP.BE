@@ -11,6 +11,7 @@ import com.influencermatch.backend.billing.repository.PlanRepository;
 import com.influencermatch.backend.billing.repository.SubscriptionRepository;
 import com.influencermatch.backend.billing.utils.VnPayUtil;
 import com.influencermatch.backend.brand.model.BrandProfile;
+import com.influencermatch.backend.config.PayOsConfig;
 import com.influencermatch.backend.config.VnPayConfig;
 import com.influencermatch.backend.exception.ResourceNotFoundException;
 import com.influencermatch.backend.security.permission.*;
@@ -24,6 +25,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,15 +42,143 @@ public class PaymentService {
   private final SubscriptionRepository subscriptionRepository;
   private final PaymentRepository paymentRepository;
   private final VnPayConfig vnPayConfig;
+  private final PayOsConfig payOsConfig;
+  private final PayOsPaymentClient payOsPaymentClient;
   private final com.influencermatch.backend.brand.repository.BrandProfileRepository brands;
   private final PaymentSettlementService settlement;
 
-  /** VNPay gateway URL is valid for 15 minutes; reuse PENDING checkout within this window. */
+  /** Reuse recent PENDING checkouts to prevent duplicate payments. */
   static final int CHECKOUT_REUSE_WINDOW_MINUTES = 15;
 
   @Transactional
   public PaymentResponse createCheckout(UUID planId, BrandProfile brand, String ipAddress)
       throws UnsupportedEncodingException {
+    Plan plan = validateCheckout(planId, brand);
+    if (vnPayConfig.getHashSecret() == null || vnPayConfig.getHashSecret().isBlank())
+      throw new com.influencermatch.backend.exception.BusinessException(
+          com.influencermatch.backend.exception.ErrorCode.INTERNAL_ERROR,
+          "Payment provider is not configured");
+
+    List<Payment> recent =
+        paymentRepository.findRecentPendingCheckouts(
+            brand.getId(),
+            planId,
+            "VNPAY",
+            LocalDateTime.now().minusMinutes(CHECKOUT_REUSE_WINDOW_MINUTES),
+            org.springframework.data.domain.PageRequest.of(0, 1));
+    if (!recent.isEmpty()) {
+      Payment existing = recent.get(0);
+      if (existing.getGatewayCreateDate() != null && existing.getTransactionCode() != null)
+        return rebuildVnPayCheckoutUrl(existing, plan, ipAddress);
+    }
+
+    Subscription subscription = createPendingSubscription(brand, plan);
+    String txnRef = UUID.randomUUID().toString().replace("-", "").substring(0, 15);
+    Payment payment = createPendingPayment(brand, subscription, plan, "VNPAY", txnRef);
+    paymentRepository.save(payment);
+
+    Map<String, String> params = new HashMap<>();
+    params.put("vnp_Version", "2.1.0");
+    params.put("vnp_Command", "pay");
+    params.put("vnp_TmnCode", vnPayConfig.getTmnCode());
+    params.put("vnp_Amount", VnPayUtil.gatewayAmount(plan.getPrice()));
+    params.put("vnp_CurrCode", "VND");
+    params.put("vnp_TxnRef", txnRef);
+    params.put("vnp_OrderInfo", "Thanh toan don hang " + txnRef);
+    params.put("vnp_OrderType", "other");
+    params.put("vnp_Locale", "vn");
+    params.put("vnp_ReturnUrl", vnPayConfig.getReturnUrl());
+    params.put("vnp_IpAddr", ipAddress);
+
+    LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
+    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    payment.setGatewayCreateDate(now.format(formatter));
+    params.put("vnp_CreateDate", payment.getGatewayCreateDate());
+    params.put("vnp_ExpireDate", now.plusMinutes(15).format(formatter));
+
+    String queryString = encodeVnPayParams(params);
+    queryString += "&vnp_SecureHash=" + VnPayUtil.hashAllFields(params, vnPayConfig.getHashSecret());
+    return new PaymentResponse(vnPayConfig.getPayUrl() + "?" + queryString, txnRef);
+  }
+
+  PaymentResponse rebuildVnPayCheckoutUrl(Payment existing, Plan plan, String ipAddress)
+      throws UnsupportedEncodingException {
+    String txnRef = existing.getTransactionCode();
+    LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
+    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    Map<String, String> params = new HashMap<>();
+    params.put("vnp_Version", "2.1.0");
+    params.put("vnp_Command", "pay");
+    params.put("vnp_TmnCode", vnPayConfig.getTmnCode());
+    params.put("vnp_Amount", VnPayUtil.gatewayAmount(plan.getPrice()));
+    params.put("vnp_CurrCode", "VND");
+    params.put("vnp_TxnRef", txnRef);
+    params.put("vnp_OrderInfo", "Thanh toan don hang " + txnRef);
+    params.put("vnp_OrderType", "other");
+    params.put("vnp_Locale", "vn");
+    params.put("vnp_ReturnUrl", vnPayConfig.getReturnUrl());
+    params.put("vnp_IpAddr", ipAddress);
+    params.put("vnp_CreateDate", existing.getGatewayCreateDate());
+    params.put(
+        "vnp_ExpireDate", now.plusMinutes(CHECKOUT_REUSE_WINDOW_MINUTES).format(formatter));
+    String queryString = encodeVnPayParams(params);
+    queryString += "&vnp_SecureHash=" + VnPayUtil.hashAllFields(params, vnPayConfig.getHashSecret());
+    log.info(
+        "Reusing PENDING VNPay checkout txnRef={} for brand={}",
+        txnRef,
+        existing.getBrandProfile().getId());
+    return new PaymentResponse(vnPayConfig.getPayUrl() + "?" + queryString, txnRef);
+  }
+
+  private String encodeVnPayParams(Map<String, String> params)
+      throws UnsupportedEncodingException {
+    return params.entrySet().stream()
+        .sorted(Map.Entry.comparingByKey())
+        .map(
+            entry ->
+                URLEncoder.encode(entry.getKey(), StandardCharsets.US_ASCII)
+                    + "="
+                    + URLEncoder.encode(entry.getValue(), StandardCharsets.US_ASCII))
+        .collect(java.util.stream.Collectors.joining("&"));
+  }
+
+  @Transactional
+  public PaymentResponse createPayOsCheckout(UUID planId, BrandProfile brand) {
+    Plan plan = validateCheckout(planId, brand);
+    if (!payOsConfig.isConfigured())
+      throw new com.influencermatch.backend.exception.BusinessException(
+          com.influencermatch.backend.exception.ErrorCode.INTERNAL_ERROR,
+          "Payment provider is not configured");
+
+    List<Payment> recent =
+        paymentRepository.findRecentPendingCheckouts(
+            brand.getId(),
+            planId,
+            "PAYOS",
+            LocalDateTime.now().minusMinutes(CHECKOUT_REUSE_WINDOW_MINUTES),
+            org.springframework.data.domain.PageRequest.of(0, 1));
+    if (!recent.isEmpty()) {
+      Payment existing = recent.get(0);
+      if (existing.getGatewayPaymentUrl() != null
+          && !existing.getGatewayPaymentUrl().isBlank()
+          && existing.getTransactionCode() != null)
+        return new PaymentResponse(existing.getGatewayPaymentUrl(), existing.getTransactionCode());
+    }
+    long amount = payOsAmount(plan);
+    Subscription subscription = createPendingSubscription(brand, plan);
+    long orderCode =
+        System.currentTimeMillis() * 1000 + ThreadLocalRandom.current().nextLong(1000);
+    String txnRef = Long.toString(orderCode);
+    Payment payment = createPendingPayment(brand, subscription, plan, "PAYOS", txnRef);
+    paymentRepository.save(payment);
+    String description = "IM" + String.format("%07d", orderCode % 10_000_000);
+    String paymentUrl = payOsPaymentClient.createPaymentLink(orderCode, amount, description);
+    payment.setGatewayPaymentUrl(paymentUrl);
+    paymentRepository.save(payment);
+    return new PaymentResponse(paymentUrl, txnRef);
+  }
+
+  private Plan validateCheckout(UUID planId, BrandProfile brand) {
     Permissions.require(
         Permission.MANAGE_OWN_SUBSCRIPTION);
     if (!brand
@@ -69,24 +200,10 @@ public class PaymentService {
         || plan.getPrice().signum() <= 0)
       throw new com.influencermatch.backend.exception.ValidationException(
           "Checkout requires an active paid VND plan");
-    if (vnPayConfig.getHashSecret() == null || vnPayConfig.getHashSecret().isBlank())
-      throw new com.influencermatch.backend.exception.BusinessException(
-          com.influencermatch.backend.exception.ErrorCode.INTERNAL_ERROR,
-          "Payment provider is not configured");
+    return plan;
+  }
 
-    // Reuse an existing PENDING checkout for the same plan if still within the gateway window.
-    // This prevents duplicate Payment/Subscription rows on double-click or page reload.
-    LocalDateTime reuseWindowStart = LocalDateTime.now().minusMinutes(CHECKOUT_REUSE_WINDOW_MINUTES);
-    List<Payment> recent = paymentRepository.findRecentPendingCheckouts(
-        brand.getId(), planId, reuseWindowStart, org.springframework.data.domain.PageRequest.of(0, 1));
-    if (!recent.isEmpty()) {
-      Payment existing = recent.get(0);
-      // Rebuild the VNPay URL from stored parameters rather than storing the full URL in DB.
-      // If the gateway date is missing the checkout is too stale to rebuild; fall through to create a new one.
-      if (existing.getGatewayCreateDate() != null && existing.getTransactionCode() != null) {
-        return rebuildCheckoutUrl(existing, plan, ipAddress);
-      }
-    }
+  private Subscription createPendingSubscription(BrandProfile brand, Plan plan) {
     Subscription subscription =
         Subscription.builder()
             .brandProfile(brand)
@@ -99,103 +216,69 @@ public class PaymentService {
             .usedRefreshQuota(0)
             .build();
     subscription.capturePlan();
-    subscription = subscriptionRepository.save(subscription);
-
-    String txnRef = UUID.randomUUID().toString().replace("-", "").substring(0, 15);
-
-    Payment payment =
-        Payment.builder()
-            .brandProfile(brand)
-            .subscription(subscription)
-            .amount(plan.getPrice())
-            .currency("VND")
-            .paymentGateway("VNPAY")
-            .transactionCode(txnRef)
-            .status(PaymentStatus.PENDING)
-            .createdAt(LocalDateTime.now())
-            .build();
-    paymentRepository.save(payment);
-
-    // Build VNPay params
-    String amount = VnPayUtil.gatewayAmount(plan.getPrice());
-
-    Map<String, String> vnp_Params = new HashMap<>();
-    vnp_Params.put("vnp_Version", "2.1.0");
-    vnp_Params.put("vnp_Command", "pay");
-    vnp_Params.put("vnp_TmnCode", vnPayConfig.getTmnCode());
-    vnp_Params.put("vnp_Amount", String.valueOf(amount));
-    vnp_Params.put("vnp_CurrCode", "VND");
-    vnp_Params.put("vnp_TxnRef", txnRef);
-    vnp_Params.put("vnp_OrderInfo", "Thanh toan don hang " + txnRef);
-    vnp_Params.put("vnp_OrderType", "other");
-    vnp_Params.put("vnp_Locale", "vn");
-    vnp_Params.put("vnp_ReturnUrl", vnPayConfig.getReturnUrl());
-    vnp_Params.put("vnp_IpAddr", ipAddress);
-
-    LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
-    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
-    payment.setGatewayCreateDate(now.format(formatter));
-    vnp_Params.put("vnp_CreateDate", payment.getGatewayCreateDate());
-    vnp_Params.put("vnp_ExpireDate", now.plusMinutes(15).format(formatter));
-
-    String vnp_SecureHash = VnPayUtil.hashAllFields(vnp_Params, vnPayConfig.getHashSecret());
-    String queryString =
-        vnp_Params.entrySet().stream()
-            .sorted(Map.Entry.comparingByKey())
-            .map(
-                e ->
-                    URLEncoder.encode(e.getKey(), StandardCharsets.US_ASCII)
-                        + "="
-                        + URLEncoder.encode(e.getValue(), StandardCharsets.US_ASCII))
-            .collect(java.util.stream.Collectors.joining("&"));
-    queryString += "&vnp_SecureHash=" + vnp_SecureHash;
-
-    return new PaymentResponse(vnPayConfig.getPayUrl() + "?" + queryString, txnRef);
+    return subscriptionRepository.save(subscription);
   }
 
-  /**
-   * Rebuild a VNPay payment URL for an existing PENDING checkout using the original
-   * txnRef and gateway create-date so that the callback/IPN can still find it.
-   * A fresh ExpireDate (+15 min from now) is used so the link works immediately.
-   */
-  PaymentResponse rebuildCheckoutUrl(Payment existing, Plan plan, String ipAddress)
-      throws UnsupportedEncodingException {
-    String txnRef = existing.getTransactionCode();
-    String amount = VnPayUtil.gatewayAmount(plan.getPrice());
-
-    LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"));
-    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
-
-    Map<String, String> vnp_Params = new HashMap<>();
-    vnp_Params.put("vnp_Version", "2.1.0");
-    vnp_Params.put("vnp_Command", "pay");
-    vnp_Params.put("vnp_TmnCode", vnPayConfig.getTmnCode());
-    vnp_Params.put("vnp_Amount", amount);
-    vnp_Params.put("vnp_CurrCode", "VND");
-    vnp_Params.put("vnp_TxnRef", txnRef);
-    vnp_Params.put("vnp_OrderInfo", "Thanh toan don hang " + txnRef);
-    vnp_Params.put("vnp_OrderType", "other");
-    vnp_Params.put("vnp_Locale", "vn");
-    vnp_Params.put("vnp_ReturnUrl", vnPayConfig.getReturnUrl());
-    vnp_Params.put("vnp_IpAddr", ipAddress);
-    // Keep original CreateDate so callback lookup by txnRef still works at gateway.
-    vnp_Params.put("vnp_CreateDate", existing.getGatewayCreateDate());
-    vnp_Params.put("vnp_ExpireDate", now.plusMinutes(CHECKOUT_REUSE_WINDOW_MINUTES).format(formatter));
-
-    String vnp_SecureHash = VnPayUtil.hashAllFields(vnp_Params, vnPayConfig.getHashSecret());
-    String queryString =
-        vnp_Params.entrySet().stream()
-            .sorted(Map.Entry.comparingByKey())
-            .map(e -> URLEncoder.encode(e.getKey(), StandardCharsets.US_ASCII)
-                + "=" + URLEncoder.encode(e.getValue(), StandardCharsets.US_ASCII))
-            .collect(java.util.stream.Collectors.joining("&"));
-    queryString += "&vnp_SecureHash=" + vnp_SecureHash;
-
-    log.info("Reusing PENDING checkout txnRef={} for brand={}", txnRef, existing.getBrandProfile().getId());
-    return new PaymentResponse(vnPayConfig.getPayUrl() + "?" + queryString, txnRef);
+  private Payment createPendingPayment(
+      BrandProfile brand, Subscription subscription, Plan plan, String gateway, String txnRef) {
+    return Payment.builder()
+        .brandProfile(brand)
+        .subscription(subscription)
+        .amount(plan.getPrice())
+        .currency("VND")
+        .paymentGateway(gateway)
+        .transactionCode(txnRef)
+        .status(PaymentStatus.PENDING)
+        .createdAt(LocalDateTime.now())
+        .build();
   }
 
-  public enum CallbackResult { ACCEPTED, INVALID_SIGNATURE, INVALID_MERCHANT, NOT_FOUND, INVALID_AMOUNT, PENDING, CONFLICT }
+  private long payOsAmount(Plan plan) {
+    if (plan.getPrice().stripTrailingZeros().scale() > 0
+        || plan.getPrice().compareTo(java.math.BigDecimal.valueOf(9_007_199_254_740_991L)) > 0) {
+      throw new com.influencermatch.backend.exception.ValidationException(
+          "PayOS checkout requires a whole VND amount within the supported range");
+    }
+    return plan.getPrice().longValueExact();
+  }
+
+  public enum CallbackResult {
+    ACCEPTED,
+    INVALID_SIGNATURE,
+    INVALID_MERCHANT,
+    NOT_FOUND,
+    INVALID_AMOUNT,
+    PENDING,
+    CONFLICT
+  }
+
+  @Transactional
+  public CallbackResult processPayOsWebhook(String rawBody) {
+    vn.payos.model.webhooks.WebhookData event;
+    try {
+      event = payOsPaymentClient.verifyWebhook(rawBody);
+    } catch (vn.payos.exception.WebhookException exception) {
+      log.warn("PayOS webhook rejected: invalid signature or payload");
+      return CallbackResult.INVALID_SIGNATURE;
+    }
+    String orderCode = event.getOrderCode() == null ? null : event.getOrderCode().toString();
+    Payment existing = paymentRepository.findByTransactionCode(orderCode).orElse(null);
+    if (existing == null || !"PAYOS".equals(existing.getPaymentGateway())) {
+      log.warn("PayOS webhook rejected: transaction not found for orderCode='{}'", orderCode);
+      return CallbackResult.NOT_FOUND;
+    }
+    Payment payment = settlement.lock(existing);
+    if (event.getAmount() == null
+        || payment.getAmount().compareTo(java.math.BigDecimal.valueOf(event.getAmount())) != 0
+        || !"VND".equals(event.getCurrency())) {
+      log.warn("PayOS webhook rejected: amount or currency mismatch for orderCode='{}'", orderCode);
+      return CallbackResult.INVALID_AMOUNT;
+    }
+    if (!"00".equals(event.getCode())) return CallbackResult.PENDING;
+    return settlement.apply(payment, true, null)
+        ? CallbackResult.ACCEPTED
+        : CallbackResult.CONFLICT;
+  }
 
   @Transactional
   public boolean processVnPayReturn(Map<String, String> params) {
@@ -228,7 +311,7 @@ public class PaymentService {
       log.warn("VNPay callback rejected: signature mismatch for txnRef='{}'", txnRef);
       return CallbackResult.INVALID_SIGNATURE;
     }
-    if (!java.util.Objects.equals(vnPayConfig.getTmnCode(), params.get("vnp_TmnCode"))) {
+    if (!Objects.equals(vnPayConfig.getTmnCode(), params.get("vnp_TmnCode"))) {
       log.warn(
           "VNPay callback rejected: merchant code mismatch for txnRef='{}', received='{}'",
           txnRef,

@@ -192,13 +192,20 @@ Các API hiện có đã được bảo vệ:
 - Plan: Brand đọc gói đang hoạt động; Admin quản lý bằng `MANAGE_PLAN`.
 - `/subscriptions`: Brand quản lý subscription của mình; không tự kích hoạt gói trả phí.
 - `/admin/subscriptions`: Admin quản lý subscription với audit, không cho Brand/Data Manager gọi.
-- `/billing/subscribe`: Brand tạo checkout VNPay từ tài khoản trong JWT; callback xác minh chữ ký,
-  merchant, số tiền và giao dịch trước khi thay đổi dữ liệu. Callback lặp được xử lý idempotent.
+- `/billing/subscribe`: Brand tạo checkout VNPay sandbox như luồng test hiện tại.
+- `/billing/subscribe/payos`: Brand tạo checkout PayOS hosted page để test thanh toán QR; webhook
+  xác minh chữ ký, số tiền và giao dịch trước khi kích hoạt subscription. Callback, đối soát và
+  refund VNPay hiện tại vẫn được giữ độc lập.
 - `/admin/audit-logs`: Admin đọc audit có phân trang và lọc actor/action/entity/thời gian.
 - `/creators/ingest`: chỉ service key, không chấp nhận JWT của bất kỳ role nào thay key.
 
 Đường dẫn chuẩn là `/api/v1/plans`, `/api/v1/subscriptions` (context-path đã chứa `/api/v1`).
 Alias đường dẫn billing cũ có prefix lặp vẫn được giữ để tương thích.
+
+Checkout PayOS cần cấu hình `PAYOS_CLIENT_ID`, `PAYOS_API_KEY` và `PAYOS_CHECKSUM_KEY`.
+Đặt webhook của kênh thanh toán PayOS thành
+`https://<backend-host>/api/v1/billing/payos/webhook`; trình duyệt quay về URL trong
+`PAYOS_RETURN_URL` hoặc `PAYOS_CANCEL_URL`. Các khóa PayOS không được gửi xuống frontend.
 
 ### Cấp role và thu hồi token
 

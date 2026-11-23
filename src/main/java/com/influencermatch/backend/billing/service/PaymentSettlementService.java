@@ -11,7 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
 
-/** Shared transaction boundary rules for verified VNPay payment gateway callbacks. */
+/** Shared transaction boundary rules for verified payment gateway callbacks. */
 @Service @RequiredArgsConstructor
 @Transactional(propagation=Propagation.MANDATORY)
 public class PaymentSettlementService {

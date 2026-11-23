@@ -103,6 +103,7 @@ public class CreatorPortalProjection {
         || ("META_OAUTH".equals(e.method)
             && Set.of("FACEBOOK", "INSTAGRAM").contains(c.get("platform")))
         || ("INSTAGRAM_OAUTH".equals(e.method) && "INSTAGRAM".equals(c.get("platform")))
+        || ("INSTAGRAM_UNIFIED_OAUTH".equals(e.method) && "INSTAGRAM".equals(c.get("platform")))
         || ("TIKTOK_OAUTH_SANDBOX".equals(e.method) && "TIKTOK".equals(c.get("platform")));
   }
 

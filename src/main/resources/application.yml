@@ -114,6 +114,14 @@ application:
     graph-api-version: ${INSTAGRAM_GRAPH_API_VERSION:}
     redirect-uri: ${INSTAGRAM_REDIRECT_URI:}
     encryption-key: ${INSTAGRAM_OAUTH_ENCRYPTION_KEY:}
+  instagram-unified:
+    enabled: ${INSTAGRAM_UNIFIED_OAUTH_ENABLED:true}
+    app-id: ${INSTAGRAM_UNIFIED_APP_ID:976403021867954}
+    app-secret: ${INSTAGRAM_UNIFIED_APP_SECRET:02a1cef551f292a7fab79c89204a559e}
+    login-config-id: ${INSTAGRAM_UNIFIED_LOGIN_CONFIG_ID:1176260962020417}
+    graph-api-version: ${INSTAGRAM_UNIFIED_GRAPH_API_VERSION:v26.0}
+    redirect-uri: ${INSTAGRAM_UNIFIED_REDIRECT_URI:https://www.influencermatch.site/api/v1/integrations/instagram-unified/callback}
+    encryption-key: ${INSTAGRAM_UNIFIED_OAUTH_ENCRYPTION_KEY:dqFO4bnR7xkLtujtbD9krtmC1s0FV748MwJLVCu3Q7c=}
   tiktok:
     enabled: ${TIKTOK_SANDBOX_LOGIN_ENABLED:false}
     client-key: ${TIKTOK_SANDBOX_CLIENT_KEY:}
@@ -121,12 +129,12 @@ application:
     redirect-uri: ${TIKTOK_SANDBOX_REDIRECT_URI:}
     scope: ${TIKTOK_SANDBOX_SCOPE:user.info.basic,user.info.profile}
   meta:
-    enabled: ${META_OAUTH_ENABLED:false}
+    enabled: ${META_OAUTH_ENABLED:true}
     app-id: ${META_APP_ID:}
     app-secret: ${META_APP_SECRET:}
     login-config-id: ${META_LOGIN_CONFIG_ID:}
     instagram-page-login-config-id: ${META_INSTAGRAM_PAGE_LOGIN_CONFIG_ID:}
-    graph-api-version: ${META_GRAPH_API_VERSION:}
+    graph-api-version: ${META_GRAPH_API_VERSION:v26.0}
     redirect-uri: ${META_REDIRECT_URI:https://www.influencermatch.site/api/v1/integrations/meta/callback}
     encryption-key: ${META_OAUTH_ENCRYPTION_KEY:}
     cleanup-enabled: true

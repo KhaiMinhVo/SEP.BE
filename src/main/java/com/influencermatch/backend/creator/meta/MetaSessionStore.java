@@ -37,6 +37,7 @@ public class MetaSessionStore {
   private final RolePermissionOverrideRepository overrides;
   private final MetaOAuthProperties config;
   private final InstagramOAuthProperties instagram;
+  private final InstagramUnifiedOAuthProperties instagramUnified;
   private final CooperationOnboarding cooperationOnboarding;
   private final MetaPayloadCipher cipher;
   private final Clock clock;
@@ -110,12 +111,26 @@ public class MetaSessionStore {
         OAuthFlow.INSTAGRAM_LOGIN);
   }
 
+  @Transactional
+  public MetaDtos.Started startInstagramUnified(
+      MetaDtos.InstagramStart request, String browserBinding) {
+    return start(
+        new MetaDtos.Start(
+            "INSTAGRAM",
+            request.creatorId(),
+            request.invitationToken(),
+            request.cooperationInvitationToken()),
+        browserBinding,
+        OAuthFlow.INSTAGRAM_UNIFIED_LOGIN);
+  }
+
   public void requireConfigured(OAuthFlow flow) {
     requireConfigured(flow, "FACEBOOK");
   }
 
   public void requireConfigured(OAuthFlow flow, String platform) {
     if (flow == OAuthFlow.INSTAGRAM_LOGIN) instagram.requireConfigured();
+    else if (flow == OAuthFlow.INSTAGRAM_UNIFIED_LOGIN) instagramUnified.requireConfigured();
     else config.requireConfigured(platform);
   }
 
@@ -188,7 +203,9 @@ public class MetaSessionStore {
         session.getId(),
         flow == OAuthFlow.INSTAGRAM_LOGIN
             ? instagram.authorizationUrl(state)
-            : config.authorizationUrl(state, request.platform()),
+            : flow == OAuthFlow.INSTAGRAM_UNIFIED_LOGIN
+                ? instagramUnified.authorizationUrl(state)
+                : config.authorizationUrl(state, request.platform()),
         session.getExpiresAt());
   }
 
@@ -305,22 +322,28 @@ public class MetaSessionStore {
     if ("READY".equals(status)) {
       for (var asset :
           cipher.decrypt(session.getOauthFlow(), session.getPayloadCiphertext()).assets()) {
+        var channelRecord =
+            creators.findByPlatformAndExternalId(session.getPlatform(), asset.id()).orElse(null);
         var channel =
-            creators
-                .findByPlatformAndExternalId(session.getPlatform(), asset.id())
-                .filter(c -> Boolean.TRUE.equals(c.getIsStableId()))
-                .orElse(null);
-        String match =
-            "FACEBOOK".equals(session.getPlatform())
-                    && (channel == null || channel.getMaster() == null)
-                ? "INSUFFICIENT_EVIDENCE"
-                : channel == null
-                ? "UNMATCHED"
-                : channel.getMaster() == null
-                    ? "AVAILABLE"
-                    : channel.getMaster().getUser().getId().equals(session.getUser().getId())
-                        ? "ALREADY_LINKED"
-                        : "UNAVAILABLE";
+            channelRecord != null && Boolean.TRUE.equals(channelRecord.getIsStableId())
+                ? channelRecord
+                : null;
+        String match;
+        if (channel == null) {
+          match = channelRecord == null ? "UNMATCHED" : "INSUFFICIENT_EVIDENCE";
+        } else if (channel.getMaster() != null
+            && !channel.getMaster().getUser().getId().equals(session.getUser().getId())) {
+          match = "UNAVAILABLE";
+        } else if ("FACEBOOK".equals(session.getPlatform())
+            && !asset.tasks().contains("MANAGE")) {
+          match = "INSUFFICIENT_EVIDENCE";
+        } else if (channel.getMaster() == null) {
+          match = "AVAILABLE";
+        } else if (channel.getMaster().getUser().getId().equals(session.getUser().getId())) {
+          match = "ALREADY_LINKED";
+        } else {
+          match = "UNAVAILABLE";
+        }
         if (channel != null
             && session.getTargetCreator() != null
             && !channel.getId().equals(session.getTargetCreator().getId())) match = "UNAVAILABLE";

@@ -86,6 +86,13 @@ class MetaGraphClientTest {
         .expect(
             requestTo(
                 org.hamcrest.Matchers.startsWith("https://graph.facebook.com/v24.0/me/accounts?")))
+        .andExpect(
+            request ->
+                assertThat(
+                        java.net.URLDecoder.decode(
+                            request.getURI().getRawQuery(),
+                            java.nio.charset.StandardCharsets.UTF_8))
+                    .contains("fields=id,name,tasks"))
         .andRespond(
             withSuccess(
                 "{\"data\":[{\"id\":\"100\",\"name\":\"Page\",\"tasks\":[\"ANALYZE\"]}],\"paging\":{\"next\":\"https://evil.test/steal?access_token=private-user-token\",\"cursors\":{\"after\":\"next-cursor\"}}}",
@@ -118,6 +125,13 @@ class MetaGraphClientTest {
         .expect(
             requestTo(
                 org.hamcrest.Matchers.startsWith("https://graph.facebook.com/v24.0/me/accounts?")))
+        .andExpect(
+            request ->
+                assertThat(
+                        java.net.URLDecoder.decode(
+                            request.getURI().getRawQuery(),
+                            java.nio.charset.StandardCharsets.UTF_8))
+                    .contains("fields=id,name,tasks"))
         .andRespond(
             withSuccess(
                 "{\"data\":[{\"id\":\"100\",\"tasks\":[\"MANAGE\"],\"instagram_business_account\":{\"id\":\"200\",\"username\":\"creator\",\"name\":\"IG\"}},{\"id\":\"101\",\"tasks\":[\"MANAGE\"]},{\"id\":\"102\",\"tasks\":[],\"instagram_business_account\":{\"id\":\"202\"}}]}",
@@ -366,5 +380,78 @@ class MetaGraphClientTest {
         .isInstanceOfSatisfying(
             BusinessException.class,
             e -> assertThat(e.code()).isEqualTo(ErrorCode.META_OAUTH_UNAVAILABLE));
+  }
+
+  @Test
+  void facebookAuthorizationCanUseScopeWithoutAConfigId() {
+    var props =
+        new MetaOAuthProperties(
+            true,
+            "976403021867954",
+            "not-logged",
+            null,
+            "789",
+            "v24.0",
+            "https://www.influencermatch.site/api/v1/integrations/meta/callback",
+            KEY);
+    var url = props.authorizationUrl("state", "FACEBOOK");
+    assertThat(url)
+        .contains("client_id=976403021867954")
+        .contains("redirect_uri=https://www.influencermatch.site/api/v1/integrations/meta/callback")
+        .contains("scope=pages_show_list")
+        .doesNotContain("config_id");
+  }
+
+  @Test
+  void facebookAuthorizationUsesConfirmedLoginConfiguration() {
+    var props =
+        new MetaOAuthProperties(
+            true,
+            "976403021867954",
+            "not-logged",
+            "1681499253329405",
+            "789",
+            "v26.0",
+            "https://www.influencermatch.site/api/v1/integrations/meta/callback",
+            KEY);
+    var url = props.authorizationUrl("state", "FACEBOOK");
+    assertThat(url)
+        .contains("client_id=976403021867954")
+        .contains("config_id=1681499253329405")
+        .contains("redirect_uri=https://www.influencermatch.site/api/v1/integrations/meta/callback")
+        .doesNotContain("scope=");
+  }
+
+  @Test
+  void facebookPageProofPreservesManageAndInsufficientTasksSeparately() throws Exception {
+    debugResponse(debug("FACEBOOK"));
+    userAndPermissions();
+    server
+        .expect(
+            requestTo(
+                org.hamcrest.Matchers.startsWith("https://graph.facebook.com/v24.0/me/accounts?")))
+        .andRespond(
+            withSuccess(
+                "{\"data\":["
+                    + "{\"id\":\"1382893324916643\",\"name\":\"InfluenceMatch\",\"tasks\":[\"MANAGE\",\"CREATE_CONTENT\",\"ANALYZE\"]},"
+                    + "{\"id\":\"1382893324916644\",\"name\":\"No Manage\",\"tasks\":[\"CREATE_CONTENT\"]}"
+                    + "]}",
+                MediaType.APPLICATION_JSON));
+
+    var proof = graph.verify("private-user-token", "FACEBOOK");
+
+    assertThat(proof.assets()).containsExactly(
+        new MetaDtos.Asset(
+            "1382893324916643",
+            "1382893324916643",
+            "InfluenceMatch",
+            "",
+            Set.of("MANAGE", "CREATE_CONTENT", "ANALYZE")),
+        new MetaDtos.Asset(
+            "1382893324916644",
+            "1382893324916644",
+            "No Manage",
+            "",
+            Set.of("CREATE_CONTENT")));
   }
 }

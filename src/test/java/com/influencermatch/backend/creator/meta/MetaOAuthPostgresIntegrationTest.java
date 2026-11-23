@@ -140,7 +140,8 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
                 channel.getExternalId(),
                 channel.getPlatform().equals("INSTAGRAM") ? "111" : channel.getExternalId(),
                 "Meta Account",
-                "same-name")));
+                "same-name",
+                Set.of("MANAGE"))));
   }
 
   Started start(User actor, Map<String, Object> body) throws Exception {
@@ -238,10 +239,10 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
     assertUnowned();
     if (platform.equals("FACEBOOK")) {
       assertThat(choices.path("accounts").get(0).path("matchStatus").asText())
-          .isEqualTo("INSUFFICIENT_EVIDENCE");
-      confirm(creator, s, channel.getExternalId(), 409);
-      assertUnowned();
-      assertThat(masters.findByUserId(creator.getId())).isEmpty();
+          .isEqualTo("AVAILABLE");
+      var result = confirm(creator, s, channel.getExternalId(), 200).path("data");
+      assertThat(result.path("status").asText()).isEqualTo("AUTHORIZED");
+      assertThat(masters.findByUserId(creator.getId())).isPresent();
       return;
     }
     long before = creators.count();
@@ -264,6 +265,59 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
     assertThat(confirm(creator, s, channel.getExternalId(), 409).path("code").asText())
         .isEqualTo("META_OAUTH_ALREADY_PROCESSED");
     verify(graph, times(1)).verify(anyString(), eq(platform));
+  }
+
+  @Test
+  void facebookMissingManageTaskIsInsufficientEvidenceAndCannotClaim() throws Exception {
+    var base = proof();
+    var noManage =
+        new MetaDtos.Proof(
+            base.subject(),
+            base.token(),
+            base.tokenExpiresAt(),
+            base.scopes(),
+            List.of(
+                new MetaDtos.Asset(
+                    channel.getExternalId(),
+                    channel.getExternalId(),
+                    "InfluenceMatch",
+                    "same-name",
+                    Set.of("CREATE_CONTENT", "ANALYZE"))));
+    when(graph.exchange(anyString(), anyString())).thenReturn(noManage);
+    when(graph.verify(anyString(), anyString())).thenReturn(noManage);
+
+    var session = ready(creator);
+    var choices = call(creator, get(view(session)), null, 200).path("data").path("accounts");
+    assertThat(choices.get(0).path("matchStatus").asText())
+        .isEqualTo("INSUFFICIENT_EVIDENCE");
+    confirm(creator, session, channel.getExternalId(), 409);
+    assertUnowned();
+  }
+
+  @Test
+  void facebookPageIdMismatchDoesNotClaimExistingChannelByName() throws Exception {
+    var base = proof();
+    var mismatch =
+        new MetaDtos.Proof(
+            base.subject(),
+            base.token(),
+            base.tokenExpiresAt(),
+            base.scopes(),
+            List.of(
+                new MetaDtos.Asset(
+                    "1382893324916644",
+                    "1382893324916644",
+                    "InfluenceMatch",
+                    "same-name",
+                    Set.of("MANAGE"))));
+    when(graph.exchange(anyString(), anyString())).thenReturn(mismatch);
+    when(graph.verify(anyString(), anyString())).thenReturn(mismatch);
+
+    var session = ready(creator);
+    var choices = call(creator, get(view(session)), null, 200).path("data").path("accounts");
+    assertThat(choices.get(0).path("matchStatus").asText()).isEqualTo("UNMATCHED");
+    confirm(creator, session, "1382893324916644", 409);
+    assertUnowned();
   }
 
   @Test

@@ -39,6 +39,21 @@ public interface PaymentRepository
       + "order by p.lastReconciledAt asc nulls first, p.createdAt asc")
   List<Payment> findReconciliationCandidates(@Param("before") java.time.LocalDateTime before, Pageable page);
 
+  @Query("select p from Payment p where p.status = com.influencermatch.backend.billing.enums.PaymentStatus.PENDING "
+      + "and p.paymentGateway = 'PAYOS' and p.transactionCode is not null "
+      + "and p.createdAt < :before and (p.lastReconciledAt is null or p.lastReconciledAt < :before) "
+      + "order by p.lastReconciledAt asc nulls first, p.createdAt asc")
+  List<Payment> findPayOsReconciliationCandidates(
+      @Param("before") java.time.LocalDateTime before, Pageable page);
+
+  @Query("select p from Payment p "
+      + "where p.status = com.influencermatch.backend.billing.enums.PaymentStatus.PENDING "
+      + "and p.paymentGateway != 'PAYOS' "
+      + "and p.createdAt <= :expiredAt "
+      + "order by p.createdAt asc")
+  List<Payment> findExpiredPendingCheckouts(
+      @Param("expiredAt") java.time.LocalDateTime expiredAt, Pageable page);
+
   @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
   @Query("select p from Payment p where p.id = :id")
   Optional<Payment> findLockedById(@Param("id") UUID id);
@@ -51,19 +66,19 @@ public interface PaymentRepository
 
   Optional<Payment> findByTransactionCode(String transactionCode);
 
-  /** Find the most-recent PENDING VNPay checkout for a brand+plan created within the last
-   *  {@code windowMinutes} minutes that has not yet expired at the gateway. */
+  /** Find the most-recent PENDING checkout for a brand+plan created within the reuse window. */
   @Query("select p from Payment p "
       + "join p.subscription s "
       + "where p.brandProfile.id = :brandId "
       + "  and s.plan.id = :planId "
       + "  and p.status = com.influencermatch.backend.billing.enums.PaymentStatus.PENDING "
-      + "  and p.paymentGateway = 'VNPAY' "
+      + "  and p.paymentGateway = :gateway "
       + "  and p.createdAt >= :since "
       + "order by p.createdAt desc")
   List<Payment> findRecentPendingCheckouts(
       @Param("brandId") UUID brandId,
       @Param("planId") UUID planId,
+      @Param("gateway") String gateway,
       @Param("since") java.time.LocalDateTime since,
       Pageable page);
 

@@ -18,8 +18,10 @@ import com.influencermatch.backend.billing.repository.PlanRepository;
 import com.influencermatch.backend.billing.repository.SubscriptionRepository;
 import com.influencermatch.backend.billing.service.PaymentService;
 import com.influencermatch.backend.billing.service.PaymentSettlementService;
+import com.influencermatch.backend.billing.service.PayOsPaymentClient;
 import com.influencermatch.backend.brand.model.BrandProfile;
 import com.influencermatch.backend.brand.repository.BrandProfileRepository;
+import com.influencermatch.backend.config.PayOsConfig;
 import com.influencermatch.backend.config.VnPayConfig;
 import com.influencermatch.backend.exception.ValidationException;
 import com.influencermatch.backend.support.TestActors;
@@ -41,6 +43,8 @@ class PaymentServiceTest {
   private SubscriptionRepository subscriptionRepository;
   private PaymentRepository paymentRepository;
   private VnPayConfig vnPayConfig;
+  private PayOsConfig payOsConfig;
+  private PayOsPaymentClient payOsPaymentClient;
   private BrandProfileRepository brandProfileRepository;
   private PaymentSettlementService settlement;
   private PaymentService paymentService;
@@ -56,13 +60,16 @@ class PaymentServiceTest {
     subscriptionRepository = mock(SubscriptionRepository.class);
     paymentRepository = mock(PaymentRepository.class);
     vnPayConfig = mock(VnPayConfig.class);
+    payOsConfig = mock(PayOsConfig.class);
+    payOsPaymentClient = mock(PayOsPaymentClient.class);
     brandProfileRepository = mock(BrandProfileRepository.class);
     settlement = mock(PaymentSettlementService.class);
 
+    when(payOsConfig.isConfigured()).thenReturn(true);
     when(vnPayConfig.getHashSecret()).thenReturn("test-secret-key-12345678901234567890");
     when(vnPayConfig.getTmnCode()).thenReturn("TMNCODE1");
     when(vnPayConfig.getPayUrl()).thenReturn("https://sandbox.vnpayment.vn/paymentv2/vpcpay.html");
-    when(vnPayConfig.getReturnUrl()).thenReturn("https://www.influencermatch.site/subscription");
+    when(vnPayConfig.getReturnUrl()).thenReturn("https://example.test/vnpay/return");
 
     paymentService =
         new PaymentService(
@@ -70,6 +77,8 @@ class PaymentServiceTest {
             subscriptionRepository,
             paymentRepository,
             vnPayConfig,
+            payOsConfig,
+            payOsPaymentClient,
             brandProfileRepository,
             settlement);
 
@@ -96,9 +105,10 @@ class PaymentServiceTest {
   }
 
   @Test
-  @DisplayName("P0-BE-01: When no recent PENDING checkout exists, createCheckout creates a new Payment and Subscription")
+  @DisplayName("Default checkout preserves the VNPay sandbox flow")
   void createCheckout_createsNewWhenNonePending() throws Exception {
-    when(paymentRepository.findRecentPendingCheckouts(eq(brand.getId()), eq(planId), any(), any()))
+    when(paymentRepository.findRecentPendingCheckouts(
+            eq(brand.getId()), eq(planId), eq("VNPAY"), any(), any()))
         .thenReturn(List.of());
 
     when(subscriptionRepository.save(any(Subscription.class)))
@@ -113,23 +123,86 @@ class PaymentServiceTest {
           p.setId(UUID.randomUUID());
           return p;
         });
-
     PaymentResponse response = paymentService.createCheckout(planId, brand, "127.0.0.1");
 
     assertThat(response).isNotNull();
     assertThat(response.getTransactionCode()).isNotBlank();
-    assertThat(response.getPaymentUrl()).contains("https://sandbox.vnpayment.vn/paymentv2/vpcpay.html");
-    assertThat(response.getPaymentUrl()).contains("vnp_TxnRef=" + response.getTransactionCode());
+    assertThat(response.getPaymentUrl())
+        .contains("https://sandbox.vnpayment.vn/paymentv2/vpcpay.html")
+        .contains("vnp_TxnRef=" + response.getTransactionCode());
 
     verify(subscriptionRepository, times(1)).save(any(Subscription.class));
     verify(paymentRepository, times(1)).save(any(Payment.class));
+    verifyNoInteractions(payOsPaymentClient);
   }
 
   @Test
-  @DisplayName("P0-BE-01: When a recent PENDING checkout exists within 15 min, createCheckout reuses it and avoids creating duplicates")
-  void createCheckout_reusesPendingWithinWindow() throws Exception {
+  @DisplayName("Checkout reuses a recent pending VNPay payment and avoids duplicates")
+  void createCheckout_reusesVnPayPendingWithinWindow() throws Exception {
     String existingTxnRef = "OLD_TXN_REF_123";
     String gatewayDate = "20261122120000";
+
+    Subscription existingSub =
+        Subscription.builder()
+            .id(UUID.randomUUID())
+            .brandProfile(brand)
+            .plan(plan)
+            .status(SubscriptionStatus.PENDING)
+            .startDate(LocalDate.now())
+            .expirationDate(LocalDate.now().plusDays(30))
+            .build();
+    Payment existingPayment =
+        Payment.builder()
+            .id(UUID.randomUUID())
+            .brandProfile(brand)
+            .subscription(existingSub)
+            .transactionCode(existingTxnRef)
+            .amount(plan.getPrice())
+            .currency("VND")
+            .paymentGateway("VNPAY")
+            .status(PaymentStatus.PENDING)
+            .gatewayCreateDate(gatewayDate)
+            .createdAt(LocalDateTime.now().minusMinutes(5))
+            .build();
+    when(paymentRepository.findRecentPendingCheckouts(eq(brand.getId()), eq(planId), eq("VNPAY"), any(), any()))
+        .thenReturn(List.of(existingPayment));
+
+    PaymentResponse response = paymentService.createCheckout(planId, brand, "127.0.0.1");
+
+    assertThat(response.getTransactionCode()).isEqualTo(existingTxnRef);
+    assertThat(response.getPaymentUrl()).contains("vnp_TxnRef=" + existingTxnRef);
+    assertThat(response.getPaymentUrl()).contains("vnp_CreateDate=" + gatewayDate);
+    verify(subscriptionRepository, never()).save(any(Subscription.class));
+    verify(paymentRepository, never()).save(any(Payment.class));
+  }
+
+  @Test
+  @DisplayName("PayOS checkout creates a hosted QR payment link")
+  void createPayOsCheckout_createsQrCheckout() {
+    when(paymentRepository.findRecentPendingCheckouts(eq(brand.getId()), eq(planId), eq("PAYOS"), any(), any()))
+        .thenReturn(List.of());
+    when(subscriptionRepository.save(any(Subscription.class)))
+        .thenAnswer(inv -> inv.getArgument(0));
+    when(paymentRepository.save(any(Payment.class)))
+        .thenAnswer(inv -> inv.getArgument(0));
+    when(payOsPaymentClient.createPaymentLink(anyLong(), eq(500000L), anyString()))
+        .thenReturn("https://pay.payos.vn/web/test-link");
+
+    PaymentResponse response = paymentService.createPayOsCheckout(planId, brand);
+
+    assertThat(response.getTransactionCode()).matches("\\d+");
+    assertThat(response.getPaymentUrl()).isEqualTo("https://pay.payos.vn/web/test-link");
+    verify(payOsPaymentClient).createPaymentLink(
+        Long.parseLong(response.getTransactionCode()),
+        500000L,
+        "IM" + response.getTransactionCode().substring(response.getTransactionCode().length() - 7));
+  }
+
+  @Test
+  @DisplayName("PayOS checkout reuses a recent pending QR link and avoids duplicates")
+  void createPayOsCheckout_reusesPendingWithinWindow() {
+    String existingTxnRef = "1760000000123456";
+    String paymentUrl = "https://pay.payos.vn/web/already-created";
 
     Subscription existingSub =
         Subscription.builder()
@@ -149,25 +222,25 @@ class PaymentServiceTest {
             .transactionCode(existingTxnRef)
             .amount(plan.getPrice())
             .currency("VND")
-            .paymentGateway("VNPAY")
+            .paymentGateway("PAYOS")
             .status(PaymentStatus.PENDING)
-            .gatewayCreateDate(gatewayDate)
+            .gatewayPaymentUrl(paymentUrl)
             .createdAt(LocalDateTime.now().minusMinutes(5))
             .build();
 
-    when(paymentRepository.findRecentPendingCheckouts(eq(brand.getId()), eq(planId), any(), any()))
+    when(paymentRepository.findRecentPendingCheckouts(eq(brand.getId()), eq(planId), eq("PAYOS"), any(), any()))
         .thenReturn(List.of(existingPayment));
 
-    PaymentResponse response = paymentService.createCheckout(planId, brand, "127.0.0.1");
+    PaymentResponse response = paymentService.createPayOsCheckout(planId, brand);
 
     assertThat(response).isNotNull();
     assertThat(response.getTransactionCode()).isEqualTo(existingTxnRef);
-    assertThat(response.getPaymentUrl()).contains("vnp_TxnRef=" + existingTxnRef);
-    assertThat(response.getPaymentUrl()).contains("vnp_CreateDate=" + gatewayDate);
+    assertThat(response.getPaymentUrl()).isEqualTo(paymentUrl);
 
     // Verify NO new payment or subscription is saved in DB!
     verify(subscriptionRepository, never()).save(any(Subscription.class));
     verify(paymentRepository, never()).save(any(Payment.class));
+    verifyNoInteractions(payOsPaymentClient);
   }
 
   @Test
@@ -177,6 +250,17 @@ class PaymentServiceTest {
     when(planRepository.findById(planId)).thenReturn(Optional.of(inactivePlan));
 
     assertThatThrownBy(() -> paymentService.createCheckout(planId, brand, "127.0.0.1"))
+        .isInstanceOf(ValidationException.class);
+  }
+
+  @Test
+  @DisplayName("Checkout rejects fractional VND amounts not supported by PayOS")
+  void createCheckout_rejectsFractionalVndAmount() {
+    plan.setPrice(new BigDecimal("500000.50"));
+    when(paymentRepository.findRecentPendingCheckouts(eq(brand.getId()), eq(planId), eq("PAYOS"), any(), any()))
+        .thenReturn(List.of());
+
+    assertThatThrownBy(() -> paymentService.createPayOsCheckout(planId, brand))
         .isInstanceOf(ValidationException.class);
   }
 }

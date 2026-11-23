@@ -120,7 +120,7 @@ Notification, Recommendation and CRM permissions are declarations, not new APIs.
               && !method.equals("me")
               && !method.equals("logoutAll")
           || controller == com.influencermatch.backend.billing.controller.PaymentController.class
-              && method.startsWith("vnpay")
+              && (method.startsWith("vnpay") || method.equals("payOsWebhook"))
           || controller == com.influencermatch.backend.creator.meta.MetaOAuthController.class
               && method.equals("callback")
           || controller == com.influencermatch.backend.creator.tiktok.TikTokOAuthController.class

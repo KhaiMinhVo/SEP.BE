@@ -66,6 +66,8 @@ public class SecurityConfig {
     "/webjars/**",
     "/billing/vnpay/return",
     "/billing/vnpay/ipn",
+    "/billing/payos/return",
+    "/billing/payos/webhook",
     "/creators/claim/invitation/verify"
   };
 

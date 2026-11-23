@@ -192,6 +192,12 @@ application:
     refund-reconciliation-delay-ms: ${VNPAY_REFUND_RECONCILIATION_DELAY_MS:60000}
     reconciliation-enabled: ${VNPAY_RECONCILIATION_ENABLED:true}
     reconciliation-delay-ms: ${VNPAY_RECONCILIATION_DELAY_MS:60000}
+  payos:
+    client-id: ${PAYOS_CLIENT_ID:}
+    api-key: ${PAYOS_API_KEY:}
+    checksum-key: ${PAYOS_CHECKSUM_KEY:}
+    return-url: ${PAYOS_RETURN_URL:https://www.influencermatch.site/subscription}
+    cancel-url: ${PAYOS_CANCEL_URL:https://www.influencermatch.site/subscription?payment=cancelled}
 
 # ------------------------------------------------------------------------------------
 #  SpringDoc / OpenAPI (Swagger UI)

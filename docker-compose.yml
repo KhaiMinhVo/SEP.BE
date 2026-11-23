@@ -60,6 +60,11 @@ services:
       CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
       CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
       CLOUDINARY_URL: ${CLOUDINARY_URL:-}
+      PAYOS_CLIENT_ID: ${PAYOS_CLIENT_ID:-}
+      PAYOS_API_KEY: ${PAYOS_API_KEY:-}
+      PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-}
+      PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-https://www.influencermatch.site/subscription}
+      PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-https://www.influencermatch.site/subscription?payment=cancelled}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

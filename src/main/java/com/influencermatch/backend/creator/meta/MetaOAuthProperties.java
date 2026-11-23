@@ -47,9 +47,9 @@ public record MetaOAuthProperties(
   public void requireConfigured(String platform) {
     try {
       requireApplicationConfigured();
-      String configId =
-          "INSTAGRAM".equals(platform) ? instagramPageLoginConfigId : loginConfigId;
-      if (!StringUtils.hasText(configId) || !configId.matches("\\d+"))
+      if ("INSTAGRAM".equals(platform)
+          && (!StringUtils.hasText(instagramPageLoginConfigId)
+              || !instagramPageLoginConfigId.matches("\\d+")))
         throw new IllegalArgumentException();
     } catch (Exception error) {
       throw new BusinessException(ErrorCode.META_OAUTH_UNAVAILABLE, "Meta OAuth is not configured");
@@ -91,16 +91,22 @@ public record MetaOAuthProperties(
     requireConfigured(platform);
     String configId =
         "INSTAGRAM".equals(platform) ? instagramPageLoginConfigId : loginConfigId;
-    return UriComponentsBuilder.fromUriString(
-            "https://www.facebook.com/" + graphApiVersion + "/dialog/oauth")
-        .queryParam("client_id", appId)
-        .queryParam("redirect_uri", redirectUri)
-        .queryParam("config_id", configId)
-        .queryParam("response_type", "code")
-        .queryParam("state", state)
-        .build()
-        .encode()
-        .toUriString();
+    var builder =
+        UriComponentsBuilder.fromUriString(
+                "https://www.facebook.com/" + graphApiVersion + "/dialog/oauth")
+            .queryParam("client_id", appId)
+            .queryParam("redirect_uri", redirectUri)
+            .queryParam("response_type", "code")
+            .queryParam("state", state);
+    if (StringUtils.hasText(configId)) {
+      if (!configId.matches("\\d+"))
+        throw new BusinessException(
+            ErrorCode.META_OAUTH_UNAVAILABLE, "Meta OAuth configuration ID is invalid");
+      builder.queryParam("config_id", configId);
+    } else if ("FACEBOOK".equals(platform)) {
+      builder.queryParam("scope", String.join(",", requiredScopes(platform)));
+    }
+    return builder.build().encode().toUriString();
   }
 
   public Set<String> requiredScopes(String platform) {

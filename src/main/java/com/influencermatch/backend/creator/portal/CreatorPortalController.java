@@ -23,6 +23,7 @@ public class CreatorPortalController {
   final CreatorPortalProjection projection;
   final com.influencermatch.backend.creator.meta.MetaOAuthProperties meta;
   final com.influencermatch.backend.creator.meta.InstagramOAuthProperties instagram;
+  final com.influencermatch.backend.creator.meta.InstagramUnifiedOAuthProperties instagramUnified;
   final com.influencermatch.backend.creator.tiktok.TikTokLoginProperties tiktok;
 
   ResponseEntity<ApiResponse<Profile>> profile(Profile p) {
@@ -95,6 +96,12 @@ public class CreatorPortalController {
                 "OFFICIAL_API",
                 instagram::requireConfigured,
                 List.of("PROFESSIONAL_ACCOUNT", "EXISTING_STABLE_ID")),
+            option(
+                "INSTAGRAM",
+                "INSTAGRAM_UNIFIED_LOGIN",
+                "OFFICIAL_API",
+                instagramUnified::requireConfigured,
+                List.of("BUSINESS_PORTFOLIO", "GRANTED_INSTAGRAM_ASSET", "EXISTING_STABLE_ID")),
             option(
                 "TIKTOK",
                 "TIKTOK_LOGIN",

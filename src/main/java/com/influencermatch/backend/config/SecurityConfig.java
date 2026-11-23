@@ -37,6 +37,7 @@ public class SecurityConfig {
   private static final String[] PUBLIC_ENDPOINTS = {
     "/integrations/meta/callback",
     "/integrations/instagram/callback",
+    "/integrations/instagram-unified/callback",
     "/integrations/tiktok/callback",
     "/cooperation-invitations/preview",
     "/cooperation-invitations/registration",

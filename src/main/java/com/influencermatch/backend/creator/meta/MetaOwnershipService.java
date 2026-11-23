@@ -92,9 +92,9 @@ public class MetaOwnershipService {
             .filter(a -> a.id().equals(accountId))
             .findFirst()
             .orElseThrow(() -> unmatched());
-    var master = masters.findByUserId(user.getId()).orElse(null);
-    if ("FACEBOOK".equals(session.getPlatform()) && creator.getMaster() == null)
+    if ("FACEBOOK".equals(session.getPlatform()) && !asset.tasks().contains("MANAGE"))
       throw unmatched();
+    var master = masters.findByUserId(user.getId()).orElse(null);
     if (creator.getMaster() != null
         && (master == null || !creator.getMaster().getId().equals(master.getId())))
       throw conflicts.reject(
@@ -135,7 +135,11 @@ public class MetaOwnershipService {
         old.setStatus("REVOKED");
     verification.setVerifiedByUser(user);
     verification.setVerificationMethod(
-        session.getOauthFlow() == OAuthFlow.INSTAGRAM_LOGIN ? "INSTAGRAM_OAUTH" : "META_OAUTH");
+        switch (session.getOauthFlow()) {
+          case INSTAGRAM_LOGIN -> "INSTAGRAM_OAUTH";
+          case INSTAGRAM_UNIFIED_LOGIN -> "INSTAGRAM_UNIFIED_OAUTH";
+          case FACEBOOK_LOGIN -> "META_OAUTH";
+        });
     verification.setStatus("ACTIVE");
     verification.setVerifiedAt(now);
     verification.setGrantedScopes(String.join(",", new TreeSet<>(fresh.scopes())));

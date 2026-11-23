@@ -129,7 +129,7 @@ application:
     redirect-uri: ${TIKTOK_SANDBOX_REDIRECT_URI:}
     scope: ${TIKTOK_SANDBOX_SCOPE:user.info.basic,user.info.profile}
   meta:
-    enabled: ${META_OAUTH_ENABLED:false}
+    enabled: ${META_OAUTH_ENABLED:true}
     app-id: ${META_APP_ID:}
     app-secret: ${META_APP_SECRET:}
     login-config-id: ${META_LOGIN_CONFIG_ID:}

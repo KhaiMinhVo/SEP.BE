@@ -232,6 +232,15 @@ logging:
     org.hibernate.SQL: DEBUG
     org.hibernate.type.descriptor.sql.BasicBinder: INFO
 management:
+  endpoint:
+    health:
+      # Mail is optional locally, so the excluded contributor may not exist.
+      validate-group-membership: false
+      group:
+        deployment:
+          # SMTP failures remain visible on aggregate health, but must not block API deployment.
+          include: "*"
+          exclude: mail
   endpoints:
     web:
       exposure:

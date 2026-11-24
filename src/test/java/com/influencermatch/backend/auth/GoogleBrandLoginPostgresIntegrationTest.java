@@ -55,6 +55,10 @@ class GoogleBrandLoginPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   String proof(Attempt a, String email, String subject) {
+    return proof(a, email, subject, null);
+  }
+
+  String proof(Attempt a, String email, String subject, String hostedDomain) {
     String raw = UUID.randomUUID().toString();
     when(verifier.verify(raw))
         .thenReturn(
@@ -63,6 +67,7 @@ class GoogleBrandLoginPostgresIntegrationTest extends PostgresApiTestSupport {
                 .subject(subject)
                 .claim("email", email)
                 .claim("email_verified", true)
+                .claims(claims -> { if (hostedDomain != null) claims.put("hd", hostedDomain); })
                 .claim("name", "Google Brand")
                 .claim("nonce", a.nonce)
                 .expiresAt(Instant.now().plusSeconds(300))
@@ -283,12 +288,111 @@ class GoogleBrandLoginPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
-  void sameEmailNeverAutomaticallyLinksPasswordAccount() throws Exception {
+  void sameVerifiedEmailAutomaticallyLinksAndSignsInToExistingBrand() throws Exception {
     var u = account(Role.BRAND);
+    u.setEmail(email());
+    users.saveAndFlush(u);
+    String passwordHash = u.getPasswordHash();
+    String subject = UUID.randomUUID().toString();
+    var a = start();
+    String raw = proof(a, u.getEmail().toUpperCase(Locale.ROOT), subject);
+    var response = login(a, raw, 200).getResponse();
+    var data = json.readTree(response.getContentAsByteArray()).path("data");
+    assertThat(data.path("status").asText()).isEqualTo("AUTHENTICATED");
+    assertThat(data.at("/user/id").asText()).isEqualTo(u.getId().toString());
+    assertThat(data.path("accessToken").asText()).isNotBlank();
+    assertThat(response.getCookie("IM_REFRESH")).isNotNull();
+    assertThat(data.has("refreshToken")).isFalse();
+    assertThat(identities.findByUserIdAndProvider(u.getId(), ExternalIdentityProvider.GOOGLE))
+        .hasValueSatisfying(identity -> assertThat(identity.getProviderSubject()).isEqualTo(subject));
+    assertThat(users.findById(u.getId()).orElseThrow().getPasswordHash()).isEqualTo(passwordHash);
+    login(a, raw, 409);
+    var next = start();
+    assertThat(json.readTree(login(next, proof(next, u.getEmail(), subject), 200)
+        .getResponse().getContentAsByteArray()).at("/data/user/id").asText())
+        .isEqualTo(u.getId().toString());
+  }
+
+  @Test
+  void automaticLinkDoesNotReplaceAnExistingGoogleIdentity() throws Exception {
+    var u = account(Role.BRAND);
+    String original = UUID.randomUUID().toString();
+    identity(u, original);
     var a = start();
     login(a, proof(a, u.getEmail(), UUID.randomUUID().toString()), 409);
     assertThat(identities.findByUserIdAndProvider(u.getId(), ExternalIdentityProvider.GOOGLE))
+        .hasValueSatisfying(identity -> assertThat(identity.getProviderSubject()).isEqualTo(original));
+    assertThat(jdbc.queryForObject("select count(*) from refresh_token where user_id=?",
+        Integer.class, u.getId())).isZero();
+  }
+
+  @ParameterizedTest
+  @EnumSource(value = Role.class, names = {"CREATOR", "ADMIN", "DATA_MANAGER"})
+  void automaticLinkRejectsNonBrandAccounts(Role role) throws Exception {
+    var u = account(role);
+    var a = start();
+    login(a, proof(a, u.getEmail(), UUID.randomUUID().toString()), 403);
+    assertThat(identities.findByUserIdAndProvider(u.getId(), ExternalIdentityProvider.GOOGLE))
         .isEmpty();
+    assertThat(jdbc.queryForObject("select count(*) from refresh_token where user_id=?",
+        Integer.class, u.getId())).isZero();
+  }
+
+  @ParameterizedTest
+  @EnumSource(value = UserStatus.class, names = {"LOCKED", "DISABLED"})
+  void automaticLinkRejectsBlockedBrandAccounts(UserStatus state) throws Exception {
+    var u = account(Role.BRAND);
+    u.setStatus(state);
+    users.saveAndFlush(u);
+    var a = start();
+    login(a, proof(a, u.getEmail(), UUID.randomUUID().toString()), 401);
+    assertThat(identities.findByUserIdAndProvider(u.getId(), ExternalIdentityProvider.GOOGLE))
+        .isEmpty();
+    assertThat(jdbc.queryForObject("select count(*) from refresh_token where user_id=?",
+        Integer.class, u.getId())).isZero();
+  }
+
+  @Test
+  void automaticLinkRollsBackWhenSessionIssuanceFailsAndCanRetry() throws Exception {
+    var u = account(Role.BRAND);
+    u.setEmail(email());
+    users.saveAndFlush(u);
+    var a = start();
+    String raw = proof(a, u.getEmail(), UUID.randomUUID().toString());
+    doThrow(new com.influencermatch.backend.exception.BusinessException(
+        com.influencermatch.backend.exception.ErrorCode.UNAUTHENTICATED, "Failure"))
+        .when(issuer).issue(any(User.class), eq("GOOGLE"));
+    login(a, raw, 401);
+    assertThat(identities.findByUserIdAndProvider(u.getId(), ExternalIdentityProvider.GOOGLE))
+        .isEmpty();
+    assertThat(jdbc.queryForObject("select status from google_login_session where id=?",
+        String.class, a.id)).isEqualTo("NEW");
+    doCallRealMethod().when(issuer).issue(any(User.class), eq("GOOGLE"));
+    login(a, raw, 200);
+  }
+
+  @Test
+  void verifiedWorkspaceEmailAutomaticallyLinksExistingBrand() throws Exception {
+    var u = account(Role.BRAND);
+    var a = start();
+    String subject = UUID.randomUUID().toString();
+    var response = login(a, proof(a, u.getEmail(), subject, "example.test"), 200).getResponse();
+    assertThat(json.readTree(response.getContentAsByteArray()).at("/data/user/id").asText())
+        .isEqualTo(u.getId().toString());
+    assertThat(identities.findByUserIdAndProvider(u.getId(), ExternalIdentityProvider.GOOGLE))
+        .hasValueSatisfying(identity -> assertThat(identity.getProviderSubject()).isEqualTo(subject));
+  }
+
+  @Test
+  void thirdPartyEmailStillRequiresExplicitLinkDespiteGoogleEmailVerified() throws Exception {
+    var u = account(Role.BRAND);
+    var a = start();
+    var response = login(a, proof(a, u.getEmail(), UUID.randomUUID().toString()), 409).getResponse();
+    assertThat(response.getContentAsString()).contains("GOOGLE_ACCOUNT_LINK_REQUIRED");
+    assertThat(identities.findByUserIdAndProvider(u.getId(), ExternalIdentityProvider.GOOGLE))
+        .isEmpty();
+    assertThat(jdbc.queryForObject("select count(*) from refresh_token where user_id=?",
+        Integer.class, u.getId())).isZero();
   }
 
   @Test
@@ -299,6 +403,8 @@ class GoogleBrandLoginPostgresIntegrationTest extends PostgresApiTestSupport {
     var a = start();
     login(a, proof(a, u.getEmail(), UUID.randomUUID().toString()), 403);
     assertThat(users.findById(u.getId()).orElseThrow().isEmailVerified()).isFalse();
+    assertThat(identities.findByUserIdAndProvider(u.getId(), ExternalIdentityProvider.GOOGLE))
+        .isEmpty();
   }
 
   @ParameterizedTest
@@ -474,8 +580,6 @@ class GoogleBrandLoginPostgresIntegrationTest extends PostgresApiTestSupport {
   void linkingRequiresReauthenticationAndSameEmailAndDoesNotCreateUser() throws Exception {
     var u = account(Role.BRAND);
     String subject = UUID.randomUUID().toString();
-    var beforeLink = start();
-    login(beforeLink, proof(beforeLink, u.getEmail(), subject), 409);
     String access = login(u).path("accessToken").asText();
     var a = linkStart(u, access, 200);
     confirm(a, access, proof(a, email(), subject), 409);

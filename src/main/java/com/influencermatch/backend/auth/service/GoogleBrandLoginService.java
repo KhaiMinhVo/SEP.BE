@@ -154,12 +154,36 @@ public class GoogleBrandLoginService {
     }
     User existing = users.findLockedByEmail(email).orElse(null);
     if (existing != null) {
-      if (!existing.isEmailVerified())
+      checkBrand(existing);
+      if (identities.findByUserIdAndProvider(existing.getId(), ExternalIdentityProvider.GOOGLE)
+          .isPresent()) throw conflict("Brand account is already linked to another Google identity");
+      String hostedDomain = proof.getClaimAsString("hd");
+      // Google is authoritative for Gmail and verified Workspace emails only.
+      // A third-party email may have changed owners since Google first verified it.
+      if (!Boolean.TRUE.equals(proof.getClaim("email_verified"))
+          || (!email.endsWith("@gmail.com") && (hostedDomain == null || hostedDomain.isBlank())))
         throw new BusinessException(
-            ErrorCode.EMAIL_NOT_VERIFIED, "Complete email verification first");
-      throw new BusinessException(
-          ErrorCode.GOOGLE_ACCOUNT_LINK_REQUIRED,
-          "Authenticate your existing Brand account before linking Google");
+            ErrorCode.GOOGLE_ACCOUNT_LINK_REQUIRED,
+            "Authenticate your existing Brand account before linking this Google email");
+      identities.saveAndFlush(
+          ExternalIdentity.builder()
+              .user(existing)
+              .provider(ExternalIdentityProvider.GOOGLE)
+              .providerSubject(proof.getSubject())
+              .providerEmail(email)
+              .emailVerified(true)
+              .build());
+      audit.recordAs(
+          existing.getId(),
+          "LINK_GOOGLE_IDENTITY",
+          "User",
+          existing.getId(),
+          null,
+          Map.of("provider", "GOOGLE", "method", "VERIFIED_EMAIL"),
+          "Brand automatically linked Google through matching verified email");
+      LoginResponse response = issuer.issue(existing, "GOOGLE");
+      consume(id);
+      return authenticated(response);
     }
     String name = proof.getClaimAsString("name");
     if (name == null || name.isBlank()) name = "Brand";

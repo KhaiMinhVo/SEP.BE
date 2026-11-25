@@ -1,20 +1,30 @@
 package com.influencermatch.backend.creator.client.provider;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.MissingNode;
 import com.influencermatch.backend.creator.client.OAuthProofClient.ProofResult;
 import com.influencermatch.backend.creator.tiktok.TikTokLoginProperties;
 import com.influencermatch.backend.exception.*;
+import java.net.URLEncoder;
 import java.time.Duration;
 import java.util.*;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.client.*;
 
 @Component
+@Slf4j
 public class TikTokSandboxProofProvider implements OAuthProofProvider {
+  private static final Set<String> OAUTH_ERRORS =
+      Set.of("access_denied", "invalid_client", "invalid_grant", "invalid_request", "invalid_scope",
+          "unauthorized_client", "unsupported_grant_type", "unsupported_response_type",
+          "server_error", "temporarily_unavailable");
+
   public record VerifiedAccount(String openId, String username, String displayName) {
     @Override
     public String toString() {
@@ -92,6 +102,66 @@ public class TikTokSandboxProofProvider implements OAuthProofProvider {
     return value.asText();
   }
 
+  private static String tokenErrorHint(JsonNode token) {
+    String description = token.path("error_description").asText().toLowerCase(Locale.ROOT);
+    if (description.contains("redirect_uri") || description.contains("redirect uri")) return "redirect_uri";
+    if (description.contains("client_secret") || description.contains("client secret")) return "client_secret";
+    if (description.contains("client_key") || description.contains("client key")) return "client_key";
+    if (description.contains("code_verifier") || description.contains("code verifier")) return "code_verifier";
+    if (description.contains("grant_type") || description.contains("grant type")) return "grant_type";
+    if (description.matches(".*\\bcode\\b.*")) return "authorization_code";
+    if (description.contains("scope")) return "scope";
+    if (description.contains("malformed")) return "malformed_parameters";
+    return "unspecified";
+  }
+
+  private static void logTokenRejection(int status, JsonNode token) {
+    String error = token.path("error").asText();
+    String logId = token.path("log_id").asText();
+    log.warn("TikTok Sandbox token exchange rejected: {}, hint={}, httpStatus={}, providerLogId={}",
+        OAUTH_ERRORS.contains(error) ? error : "unrecognized_error", tokenErrorHint(token),
+        status, logId.matches("[0-9a-fA-F]{8,80}") ? logId : "unavailable");
+  }
+
+  private JsonNode exchangeToken(String code) {
+    // Send bytes to preserve the exact Content-Type from TikTok's web token request.
+    var form =
+        String.join(
+            "&",
+            "client_key=" + URLEncoder.encode(config.clientKey(), UTF_8),
+            "client_secret=" + URLEncoder.encode(config.clientSecret(), UTF_8),
+            "code=" + URLEncoder.encode(code, UTF_8),
+            "grant_type=authorization_code",
+            "redirect_uri=" + URLEncoder.encode(config.redirectUri(), UTF_8));
+    ResponseEntity<JsonNode> response;
+    try {
+      response = http.post()
+          .uri("https://open.tiktokapis.com/v2/oauth/token/")
+          .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+          .body(form.getBytes(UTF_8))
+          .retrieve()
+          .toEntity(JsonNode.class);
+    } catch (RestClientResponseException ex) {
+      JsonNode error = MissingNode.getInstance();
+      try {
+        var body = ex.getResponseBodyAs(JsonNode.class);
+        if (body != null) error = body;
+      } catch (RuntimeException ignored) {
+        // Log only the HTTP status and safe defaults for an unreadable provider response.
+      }
+      logTokenRejection(ex.getStatusCode().value(), error);
+      throw ex;
+    }
+    var token = response.getBody();
+    if (token == null || !token.isObject()) throw invalid();
+    if (token.has("error")) {
+      logTokenRejection(response.getStatusCode().value(), token);
+      throw new BusinessException(
+          ErrorCode.TIKTOK_AUTHORIZATION_REJECTED, "TikTok did not grant authorization");
+    }
+    return token;
+  }
+
   public VerifiedAccount verify(String code) {
     config.requireConfigured();
     if (code == null
@@ -103,23 +173,7 @@ public class TikTokSandboxProofProvider implements OAuthProofProvider {
       throw new BusinessException(
           ErrorCode.TIKTOK_AUTHORIZATION_REJECTED, "TikTok authorization code is required");
     try {
-      var form = new LinkedMultiValueMap<String, String>();
-      form.add("client_key", config.clientKey());
-      form.add("client_secret", config.clientSecret());
-      form.add("code", code);
-      form.add("grant_type", "authorization_code");
-      form.add("redirect_uri", config.redirectUri());
-      var token =
-          http.post()
-              .uri("https://open.tiktokapis.com/v2/oauth/token/")
-              .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-              .body(form)
-              .retrieve()
-              .body(JsonNode.class);
-      if (token == null || !token.isObject()) throw invalid();
-      if (token.has("error"))
-        throw new BusinessException(
-            ErrorCode.TIKTOK_AUTHORIZATION_REJECTED, "TikTok did not grant authorization");
+      var token = exchangeToken(code);
       String accessToken = text(token, "access_token", 8192), openId = text(token, "open_id", 255);
       if (!"Bearer".equalsIgnoreCase(text(token, "token_type", 32))
           || !new HashSet<>(Arrays.asList(text(token, "scope", 2048).split(",")))

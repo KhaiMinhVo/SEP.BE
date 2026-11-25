@@ -4,6 +4,7 @@ import static com.influencermatch.backend.creator.portal.PortalDtos.*;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.influencermatch.backend.common.dto.ApiResponse;
+import com.influencermatch.backend.creator.meta.OAuthFlow;
 import com.influencermatch.backend.security.permission.Permissions;
 import io.swagger.v3.oas.annotations.*;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -25,6 +26,7 @@ public class CreatorPortalController {
   final com.influencermatch.backend.creator.meta.InstagramOAuthProperties instagram;
   final com.influencermatch.backend.creator.meta.InstagramUnifiedOAuthProperties instagramUnified;
   final com.influencermatch.backend.creator.tiktok.TikTokLoginProperties tiktok;
+  final ChannelOAuthAvailability availability;
 
   ResponseEntity<ApiResponse<Profile>> profile(Profile p) {
     return ResponseEntity.ok()
@@ -72,61 +74,63 @@ public class CreatorPortalController {
   @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
   @Operation(
       summary =
-          "Read available OAuth flows without calling providers or exposing configuration secrets")
+          "Read channel connection options and the availability of each Instagram OAuth method.")
   public ApiResponse<List<ConnectionOption>> connections() {
     profiles.guard(
         com.influencermatch.backend.security.permission.Permission.CLAIM_CREATOR_PROFILE);
+    OAuthFlow instagramFlow = availability.instagramFlow();
+    var instagramMethods = List.of(
+        instagramMethod(OAuthFlow.INSTAGRAM_LOGIN, instagram::requireConfigured),
+        instagramMethod(OAuthFlow.FACEBOOK_LOGIN, () -> meta.requireConfigured("INSTAGRAM")),
+        instagramMethod(OAuthFlow.INSTAGRAM_UNIFIED_LOGIN, instagramUnified::requireConfigured));
+    var preferred = instagramMethods.stream()
+        .filter(method -> instagramFlow != null && method.oauthFlow().equals(instagramFlow.name()))
+        .findFirst()
+        .orElse(new ConnectionMethod(null, false, "NOT_ENABLED_FOR_ENVIRONMENT"));
     return ApiResponse.ok(
         List.of(
             option(
                 "FACEBOOK",
                 "FACEBOOK_LOGIN",
                 "OFFICIAL_API",
+                availability.facebookPageEnabled(),
                 () -> meta.requireConfigured("FACEBOOK"),
                 List.of("FACEBOOK_PAGE", "EXISTING_STABLE_ID")),
-            option(
-                "INSTAGRAM",
-                "FACEBOOK_LOGIN",
-                "OFFICIAL_API",
-                () -> meta.requireConfigured("INSTAGRAM"),
-                List.of("PROFESSIONAL_ACCOUNT", "LINKED_FACEBOOK_PAGE", "EXISTING_STABLE_ID")),
-            option(
-                "INSTAGRAM",
-                "INSTAGRAM_LOGIN",
-                "OFFICIAL_API",
-                instagram::requireConfigured,
-                List.of("PROFESSIONAL_ACCOUNT", "EXISTING_STABLE_ID")),
-            option(
-                "INSTAGRAM",
-                "INSTAGRAM_UNIFIED_LOGIN",
-                "OFFICIAL_API",
-                instagramUnified::requireConfigured,
-                List.of("BUSINESS_PORTFOLIO", "GRANTED_INSTAGRAM_ASSET", "EXISTING_STABLE_ID")),
+            new ConnectionOption(
+                "INSTAGRAM", preferred.oauthFlow(), "OFFICIAL_API", true, preferred.available(),
+                preferred.unavailableReason(), List.of("PROFESSIONAL_ACCOUNT", "EXISTING_STABLE_ID"),
+                instagramMethods),
             option(
                 "TIKTOK",
                 "TIKTOK_LOGIN",
                 "SANDBOX",
+                availability.tiktokSandboxEnabled(),
                 tiktok::requireConfigured,
-                List.of("SANDBOX_TARGET_USER", "CRAWLER_RESOLVER")),
-            new ConnectionOption(
-                "YOUTUBE", "LEGACY_TESTING", "TESTING", false, false, "OUTSIDE_MVP", List.of())));
+                List.of("SANDBOX_TARGET_USER", "CRAWLER_RESOLVER"))));
   }
 
   static ConnectionOption option(
-      String platform, String flow, String environment, Runnable check, List<String> requirements) {
-    boolean available = true;
+      String platform, String flow, String environment, boolean enabled,
+      Runnable check, List<String> requirements) {
+    var method = method(flow, enabled, check);
+    return new ConnectionOption(
+        platform, flow, environment, true, method.available(), method.unavailableReason(),
+        requirements, null);
+  }
+
+  private ConnectionMethod instagramMethod(OAuthFlow flow, Runnable check) {
+    return method(flow.name(), availability.allowsInstagram(flow), check);
+  }
+
+  private static ConnectionMethod method(String flow, boolean enabled, Runnable check) {
+    if (!enabled) {
+      return new ConnectionMethod(flow, false, "NOT_ENABLED_FOR_ENVIRONMENT");
+    }
     try {
       check.run();
+      return new ConnectionMethod(flow, true, null);
     } catch (com.influencermatch.backend.exception.BusinessException e) {
-      available = false;
+      return new ConnectionMethod(flow, false, "NOT_CONFIGURED");
     }
-    return new ConnectionOption(
-        platform,
-        flow,
-        environment,
-        true,
-        available,
-        available ? null : "NOT_CONFIGURED",
-        requirements);
   }
 }

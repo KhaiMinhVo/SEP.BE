@@ -9,13 +9,21 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.influencermatch.backend.creator.tiktok.TikTokLoginProperties;
 import com.influencermatch.backend.exception.*;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.*;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.client.RestClient;
 
+@ExtendWith(OutputCaptureExtension.class)
 class TikTokLoginProviderTest {
   static final String TOKEN = "https://open.tiktokapis.com/v2/oauth/token/";
   static final String PROFILE =
@@ -78,6 +86,32 @@ class TikTokLoginProviderTest {
   }
 
   @Test
+  void sendsTheDocumentedWebTokenFormWithTheDecodedCallbackCode() {
+    var code = "opaque+/*!=&%";
+    String redirect = java.util.Arrays.stream(URI.create(config().authorizationUrl("state")).getRawQuery().split("&"))
+        .filter(param -> param.startsWith("redirect_uri="))
+        .map(param -> URLDecoder.decode(param.substring("redirect_uri=".length()), StandardCharsets.UTF_8))
+        .findFirst().orElseThrow();
+    assertThat(redirect).isEqualTo(config().redirectUri());
+    var form = new LinkedMultiValueMap<String, String>();
+    form.add("client_key", config().clientKey());
+    form.add("client_secret", config().clientSecret());
+    form.add("code", code);
+    form.add("grant_type", "authorization_code");
+    form.add("redirect_uri", redirect);
+    server
+        .expect(requestTo(TOKEN))
+        .andExpect(method(HttpMethod.POST))
+        .andExpect(header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_FORM_URLENCODED_VALUE))
+        .andExpect(content().formData(form))
+        .andRespond(withSuccess(token().toString(), MediaType.APPLICATION_JSON));
+    profileReply(profile());
+
+    assertThat(provider.verify(code).username()).isEqualTo("actual_username");
+    server.verify();
+  }
+
+  @Test
   void readsRealAccountWithoutLeakingTokensOrUsingExpectedCrawlerIdentity() {
     tokenReply(token());
     profileReply(profile());
@@ -132,7 +166,7 @@ class TikTokLoginProviderTest {
 
   @ParameterizedTest
   @ValueSource(ints = {400, 401, 403, 429, 500})
-  void sanitizesHttpErrorsWithoutRetry(int status) {
+  void sanitizesHttpErrorsWithoutRetry(int status, CapturedOutput output) {
     server
         .expect(requestTo(TOKEN))
         .andRespond(
@@ -143,6 +177,26 @@ class TikTokLoginProviderTest {
         .isInstanceOf(BusinessException.class)
         .hasMessageNotContaining("private-token")
         .hasMessageNotContaining("provider-stack");
+    assertThat(output.getAll())
+        .contains("hint=unspecified, httpStatus=" + status + ", providerLogId=unavailable")
+        .doesNotContain("secret-never-expose", "private-token", "provider-stack");
+    server.verify();
+  }
+
+  @Test
+  void recordsSafeDiagnosticsFromHttpTokenRejection(CapturedOutput output) {
+    var body = json.createObjectNode()
+        .put("error", "invalid_request")
+        .put("error_description", "redirect_uri is not matched; opaque-code secret-never-expose private-token")
+        .put("log_id", "202206221854370101130062072500FFA2");
+    server.expect(requestTo(TOKEN))
+        .andRespond(withBadRequest().body(body.toString()).contentType(MediaType.APPLICATION_JSON));
+    assertThatThrownBy(() -> provider.verify("opaque-code"))
+        .isInstanceOf(BusinessException.class)
+        .extracting("code").isEqualTo(ErrorCode.TIKTOK_AUTHORIZATION_REJECTED);
+    assertThat(output.getAll())
+        .contains("invalid_request, hint=redirect_uri, httpStatus=400, providerLogId=202206221854370101130062072500FFA2")
+        .doesNotContain("opaque-code", "secret-never-expose", "private-token", "redirect_uri is not matched");
     server.verify();
   }
 
@@ -158,16 +212,21 @@ class TikTokLoginProviderTest {
   }
 
   @Test
-  void providerDenialDoesNotExposeRawResponse() {
+  void providerDenialDoesNotExposeRawResponse(CapturedOutput output) {
     tokenReply(
         json.createObjectNode()
             .put("error", "access_denied")
-            .put("error_description", "private-token"));
+            .put("error_description", "private-token")
+            .put("log_id", "private-id"));
     assertThatThrownBy(() -> provider.verify("code"))
         .isInstanceOf(BusinessException.class)
         .hasMessageNotContaining("private-token")
         .extracting("code")
         .isEqualTo(ErrorCode.TIKTOK_AUTHORIZATION_REJECTED);
+    assertThat(output.getAll())
+        .contains("access_denied, hint=unspecified, httpStatus=200, providerLogId=unavailable")
+        .doesNotContain("private-token", "private-id");
+    server.verify();
   }
 
   @ParameterizedTest
@@ -196,7 +255,9 @@ class TikTokLoginProviderTest {
     assertThat(config().toString()).doesNotContain("secret-never-expose");
     assertThat(config().authorizationUrl("state"))
         .startsWith("https://www.tiktok.com/v2/auth/authorize/")
-        .contains("user.info.profile")
+        .contains(
+            "scope=user.info.basic%2Cuser.info.profile",
+            "redirect_uri=https%3A%2F%2Ftest.example%2Fapi%2Fv1%2Fintegrations%2Ftiktok%2Fcallback")
         .doesNotContain("video.list", "secret-never-expose");
   }
 }

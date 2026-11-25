@@ -81,7 +81,7 @@ class CreatorClaimPostgresIntegrationTest {
     call(
         user(Role.DATA_MANAGER, false),
         patch("/data/creator-claims/" + id + "/review"),
-        "{\"decision\":\"APPROVED\",\"reason\":\"Development fixture\"}",
+        "{\"decision\":\"APPROVED\",\"reason\":\"Development fixture\",\"reviewEvidenceType\":\"ACCOUNT_SETTINGS\",\"reviewVerificationNote\":\"Checked account settings\"}",
         200);
   }
 
@@ -141,7 +141,7 @@ class CreatorClaimPostgresIntegrationTest {
     assertThat(item.path("claimantEmail").asText()).isEqualTo(owner.getEmail());
     assertThat(item.path("linkedToClaimant").asBoolean()).isFalse();
     var approved = json.readTree(call(reviewer, patch("/data/creator-claims/" + id + "/review"),
-        "{\"decision\":\"APPROVED\",\"reason\":\"Checked evidence\"}", 200)
+        "{\"decision\":\"APPROVED\",\"reason\":\"Checked evidence\",\"reviewEvidenceType\":\"ACCOUNT_SETTINGS\",\"reviewVerificationNote\":\"Checked account settings\"}", 200)
         .getResponse().getContentAsString()).path("data");
     assertThat(approved.path("linkedToClaimant").asBoolean()).isTrue();
     assertThat(approved.path("verification").path("environment").asText()).isEqualTo("MANUAL");
@@ -168,7 +168,7 @@ class CreatorClaimPostgresIntegrationTest {
         .platform("INSTAGRAM").externalId(UUID.randomUUID().toString()).userName(handle).build());
     String claimId = claim(claimant, owned);
     call(reviewer, patch("/data/creator-claims/" + claimId + "/review"),
-        "{\"decision\":\"APPROVED\",\"reason\":\"Verified ownership\"}", 200);
+        "{\"decision\":\"APPROVED\",\"reason\":\"Verified ownership\",\"reviewEvidenceType\":\"ACCOUNT_SETTINGS\",\"reviewVerificationNote\":\"Checked account settings\"}", 200);
 
     String path = "/creator-claims/channels/lookup";
     var found = call(claimant, get(path).param("platform", "facebook").param("q", "@" + handle.toLowerCase(Locale.ROOT)), null, 200);
@@ -197,12 +197,12 @@ class CreatorClaimPostgresIntegrationTest {
     call(
         owner,
         patch("/data/creator-claims/" + id + "/review"),
-        "{\"decision\":\"APPROVED\",\"reason\":\"Verified\"}",
+        "{\"decision\":\"APPROVED\",\"reason\":\"Verified\",\"reviewEvidenceType\":\"ACCOUNT_SETTINGS\",\"reviewVerificationNote\":\"Checked account settings\"}",
         403);
     call(
         reviewer,
         patch("/data/creator-claims/" + id + "/review"),
-        "{\"decision\":\"APPROVED\",\"reason\":\"Verified\"}",
+        "{\"decision\":\"APPROVED\",\"reason\":\"Verified\",\"reviewEvidenceType\":\"ACCOUNT_SETTINGS\",\"reviewVerificationNote\":\"Checked account settings\"}",
         200);
     var competitor = call(reviewer, get("/data/creator-claims/" + competing), null, 200);
     assertThat(
@@ -276,7 +276,7 @@ class CreatorClaimPostgresIntegrationTest {
                           patch("/data/creator-claims/" + id + "/review")
                               .header("Authorization", "Bearer " + jwt.generateToken(reviewer))
                               .contentType(MediaType.APPLICATION_JSON)
-                              .content("{\"decision\":\"APPROVED\",\"reason\":\"Verified\"}"))
+                              .content("{\"decision\":\"APPROVED\",\"reason\":\"Verified\",\"reviewEvidenceType\":\"ACCOUNT_SETTINGS\",\"reviewVerificationNote\":\"Checked account settings\"}"))
                       .andReturn()
                       .getResponse()
                       .getStatus();
@@ -343,7 +343,7 @@ class CreatorClaimPostgresIntegrationTest {
     var owner = user(Role.CREATOR, true);
     var c = channel();
     String id = claim(owner, c);
-    String approve = "{\"decision\":\"APPROVED\",\"reason\":\"Not allowed\"}";
+    String approve = "{\"decision\":\"APPROVED\",\"reason\":\"Not allowed\",\"reviewEvidenceType\":\"ACCOUNT_SETTINGS\",\"reviewVerificationNote\":\"Checked account settings\"}";
     for (var actor : List.of(owner, user(Role.BRAND, false))) {
       call(actor, patch("/data/creator-claims/" + id + "/review"), approve, 403);
       call(
@@ -356,7 +356,7 @@ class CreatorClaimPostgresIntegrationTest {
     call(
         manager,
         patch("/data/creator-claims/" + id + "/review"),
-        "{\"decision\":\"REJECTED\",\"reason\":\"More evidence required\"}",
+        "{\"decision\":\"REJECTED\",\"reason\":\"More evidence required\",\"reviewEvidenceType\":\"ACCOUNT_SETTINGS\",\"reviewVerificationNote\":\"Checked account settings\"}",
         200);
     assertThat(creators.findById(c.getId()).orElseThrow().getSourceType().name())
         .isEqualTo("PUBLIC");
@@ -399,7 +399,7 @@ class CreatorClaimPostgresIntegrationTest {
     call(
         user(Role.ADMIN, false),
         patch("/data/creator-claims/" + id + "/review"),
-        json.writeValueAsString(Map.of("decision", "APPROVED", "reason", "Verified")),
+        json.writeValueAsString(Map.of("decision", "APPROVED", "reason", "Verified", "reviewEvidenceType", "ACCOUNT_SETTINGS", "reviewVerificationNote", "Checked account settings")),
         200);
     call(user(Role.CREATOR, true), post("/creators/" + channel.getId() + "/claim"), EVIDENCE, 409);
     assertThat(

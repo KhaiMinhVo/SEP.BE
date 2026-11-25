@@ -14,6 +14,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 /** Real PostgreSQL/session/ownership integration; Meta HTTP is mocked separately. */
 @TestPropertySource(properties = {
     "application.instagram-unified.enabled=true",
+    "application.channel-oauth.instagram-mode=UNIFIED",
     "application.instagram-unified.app-id=976403021867954",
     "application.instagram-unified.app-secret=fixture-unified-secret",
     "application.instagram-unified.login-config-id=1176260962020417",
@@ -85,6 +86,22 @@ class InstagramUnifiedOAuthPostgresIntegrationTest extends DirectInstagramTestSu
     verifyNoInteractions(unified); unowned();
     completeCallback(s, 200); completeCallback(s, 409);
     verify(unified, times(1)).exchange(anyString());
+  }
+  @Test void createsMissingChannelFromUnifiedLogin() throws Exception {
+    var s = start(); completeCallback(s, 200);
+    String externalId = channel.getExternalId();
+    var freshProof = proof();
+    channel.setExternalId("old-" + externalId);
+    creators.saveAndFlush(channel);
+    when(unified.verify(any())).thenReturn(freshProof);
+    var accounts = call(creator, get(path(s)), null, 200).path("data").path("accounts");
+    assertThat(accounts.get(0).path("matchStatus").asText()).isEqualTo("CAN_CREATE");
+    var connected = confirm(s, externalId, 200).path("data");
+    var added = creators.findByPlatformAndExternalId("INSTAGRAM", externalId).orElseThrow();
+    assertThat(connected.path("creatorId").asText()).isEqualTo(added.getId().toString());
+    assertThat(verifications.findByCreatorIdAndStatus(added.getId(), "ACTIVE"))
+        .singleElement().satisfies(v -> assertThat(v.getVerificationMethod()).isEqualTo("INSTAGRAM_UNIFIED_OAUTH"));
+    unowned();
   }
   @Test void revokedGrantAndForeignSelectionNeverChangeOwnership() throws Exception {
     var s = start(); completeCallback(s, 200);

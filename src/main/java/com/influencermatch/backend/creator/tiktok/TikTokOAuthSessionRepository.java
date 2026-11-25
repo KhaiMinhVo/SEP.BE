@@ -7,6 +7,12 @@ import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 
 public interface TikTokOAuthSessionRepository extends JpaRepository<TikTokOAuthSession, UUID> {
+  @Query("select s.cooperationInvitationId from TikTokOAuthSession s where s.stateHash=:hash")
+  Optional<UUID> findCooperationInvitationByStateHash(@Param("hash") String hash);
+
+  @Query("select s.cooperationInvitationId from TikTokOAuthSession s where s.id=:id and s.user.id=:userId")
+  Optional<UUID> findCooperationInvitationForOwner(@Param("id") UUID id, @Param("userId") UUID userId);
+
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select s from TikTokOAuthSession s where s.stateHash=:hash")
   Optional<TikTokOAuthSession> lockByStateHash(@Param("hash") String hash);

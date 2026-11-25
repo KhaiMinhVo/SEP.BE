@@ -93,6 +93,10 @@ spring:
 #  JWT Security
 # ------------------------------------------------------------------------------------
 application:
+  channel-oauth:
+    facebook-page-enabled: ${CHANNEL_OAUTH_FACEBOOK_PAGE_ENABLED:false}
+    instagram-mode: ${CHANNEL_OAUTH_INSTAGRAM_MODE:ALL}
+    tiktok-sandbox-enabled: ${CHANNEL_OAUTH_TIKTOK_SANDBOX_ENABLED:false}
   campaign-embedding:
     enabled: ${CAMPAIGN_EMBEDDING_ENABLED:true}
     model: ${CAMPAIGN_EMBEDDING_MODEL:bkai-foundation-models/vietnamese-bi-encoder}
@@ -108,7 +112,7 @@ application:
     enabled: ${GOOGLE_LOGIN_ENABLED:false}
     client-id: ${GOOGLE_LOGIN_CLIENT_ID:}
   instagram:
-    enabled: ${INSTAGRAM_OAUTH_ENABLED:false}
+    enabled: ${INSTAGRAM_OAUTH_ENABLED:true}
     app-id: ${INSTAGRAM_APP_ID:}
     app-secret: ${INSTAGRAM_APP_SECRET:}
     graph-api-version: ${INSTAGRAM_GRAPH_API_VERSION:}

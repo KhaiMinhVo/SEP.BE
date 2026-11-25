@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Configuration;
 @EnableConfigurationProperties({
   MetaOAuthProperties.class,
   InstagramOAuthProperties.class,
-  InstagramUnifiedOAuthProperties.class
+  InstagramUnifiedOAuthProperties.class,
+  com.influencermatch.backend.creator.portal.ChannelOAuthAvailability.class
 })
 public class MetaOAuthConfig {}

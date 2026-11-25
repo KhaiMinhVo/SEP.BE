@@ -57,7 +57,7 @@ class CreatorClaimServiceTest {
     owner.setEmailVerified(true);
   }
   void locked() { when(creators.findLockedById(creator.getId())).thenReturn(Optional.of(creator)); }
-  ClaimRequest request() { return new ClaimRequest(List.of("https://example.test/proof"), "My channel"); }
+  ClaimRequest request() { return new ClaimRequest(List.of("https://example.test/proof"), "My channel", null); }
 
   @Test void submissionStaysPublicAndAuditsWithoutEvidence() {
     verified(); locked();
@@ -92,7 +92,8 @@ class CreatorClaimServiceTest {
     CreatorClaim competing = CreatorClaim.builder().id(UUID.randomUUID()).creator(creator).claimant(owner).status(CreatorClaimStatus.PENDING).build();
     when(claims.findById(claim.getId())).thenReturn(Optional.of(claim));
     when(claims.findByCreatorIdAndStatus(creator.getId(), CreatorClaimStatus.PENDING)).thenReturn(List.of(claim, competing));
-    service.review(claim.getId(), new ReviewRequest(Decision.APPROVED, "Checked ownership"));
+    service.review(claim.getId(), new ReviewRequest(
+        Decision.APPROVED, "Checked ownership", ReviewEvidenceType.SCREEN_SHARE, "Matched the channel ID"));
     assertThat(creator.getOwner()).isSameAs(owner);
     assertThat(creator.getSourceType()).isEqualTo(CreatorSourceType.AUTHORIZED);
     assertThat(creator.getAuthorizedAt()).isNotNull();
@@ -109,10 +110,24 @@ class CreatorClaimServiceTest {
     locked();
     CreatorClaim claim = CreatorClaim.builder().id(UUID.randomUUID()).creator(creator).claimant(owner).status(CreatorClaimStatus.PENDING).build();
     when(claims.findById(claim.getId())).thenReturn(Optional.of(claim));
-    assertThat(service.review(claim.getId(), new ReviewRequest(Decision.REJECTED, "Insufficient proof")).status())
+    assertThat(service.review(claim.getId(), new ReviewRequest(
+        Decision.REJECTED, "Insufficient proof", ReviewEvidenceType.NO_VALID_EVIDENCE,
+        "Could not establish management access")).status())
         .isEqualTo(CreatorClaimStatus.REJECTED);
     assertThat(creator.getSourceType()).isEqualTo(CreatorSourceType.PUBLIC);
     assertThat(creator.getOwner()).isNull();
+  }
+
+  @Test void roleChangeDoesNotAllowAClaimantToReviewTheirOwnClaim() {
+    owner.setRole(Role.DATA_MANAGER);
+    login(owner);
+    CreatorClaim claim = CreatorClaim.builder().id(UUID.randomUUID()).creator(creator)
+        .claimant(owner).status(CreatorClaimStatus.PENDING).build();
+    when(claims.findById(claim.getId())).thenReturn(Optional.of(claim));
+    assertThatThrownBy(() -> service.review(claim.getId(), new ReviewRequest(
+        Decision.REJECTED, "Reason", ReviewEvidenceType.NO_VALID_EVIDENCE, "Reviewed the submitted link")))
+        .isInstanceOf(ForbiddenException.class);
+    assertThat(claim.getStatus()).isEqualTo(CreatorClaimStatus.PENDING);
   }
 
 

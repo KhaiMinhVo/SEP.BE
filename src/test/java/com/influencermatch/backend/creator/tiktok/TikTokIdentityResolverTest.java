@@ -54,9 +54,21 @@ class TikTokIdentityResolverTest {
   }
 
   @Test
-  void usernameResolutionWithoutExpectedStableIdCannotAuthorizeOwnership() {
+  void standaloneResolutionRequiresFreshCanonicalEvidence() {
+    var result = response();
+    result.setExpectedExternalId(null);
+    result.setIsMatched(null);
+    when(crawler.resolveTikTokIdentity("mixi", null)).thenReturn(result);
+    assertThat(resolver.resolve(proof, null)).get().extracting(TikTokIdentityResolver.Identity::authorId)
+        .isEqualTo(expectedExternalId);
+    result.setObservedAt(now.minusSeconds(91));
     assertThat(resolver.resolve(proof, null)).isEmpty();
-    verifyNoInteractions(crawler);
+    result.setObservedAt(now);
+    result.setResolvedUsername("another_channel");
+    assertThat(resolver.resolve(proof, null)).isEmpty();
+    result.setResolvedUsername("mixi");
+    result.setExpectedExternalId(expectedExternalId);
+    assertThat(resolver.resolve(proof, null)).isEmpty();
   }
 
   @ParameterizedTest

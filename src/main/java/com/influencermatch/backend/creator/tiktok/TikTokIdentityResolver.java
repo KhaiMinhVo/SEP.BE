@@ -21,7 +21,7 @@ public class TikTokIdentityResolver {
       String authorId, String username, String displayName, String avatarUrl, Instant observedAt) {}
 
   public Optional<Identity> resolve(VerifiedAccount proof, String expectedExternalId) {
-    if (expectedExternalId == null || !expectedExternalId.matches("[1-9][0-9]{0,19}"))
+    if (expectedExternalId != null && !expectedExternalId.matches("[1-9][0-9]{0,19}"))
       return Optional.empty();
     String username = TikTokUsernames.normalize(proof.username());
     if (!username.matches("[a-z0-9._]{1,255}")) return Optional.empty();
@@ -32,12 +32,17 @@ public class TikTokIdentityResolver {
         || !"TIKTOK_USER_ID".equals(result.getIdType())
         || result.getAuthorId() == null
         || !result.getAuthorId().matches("[1-9][0-9]{0,19}")
-        || !Boolean.TRUE.equals(result.getIsMatched())
-        || !expectedExternalId.equals(result.getExpectedExternalId())
-        || !expectedExternalId.equals(result.getAuthorId())
         || !username.equals(TikTokUsernames.normalize(result.getInputUsername()))
         || !username.equals(TikTokUsernames.normalize(result.getResolvedUsername())))
       return Optional.empty();
+    if (expectedExternalId == null) {
+      if (result.getExpectedExternalId() != null && !result.getExpectedExternalId().isBlank())
+        return Optional.empty();
+    } else if (!Boolean.TRUE.equals(result.getIsMatched())
+        || !expectedExternalId.equals(result.getExpectedExternalId())
+        || !expectedExternalId.equals(result.getAuthorId())) {
+      return Optional.empty();
+    }
     var info = result.getCreatorInfo();
     var identity =
         new Identity(

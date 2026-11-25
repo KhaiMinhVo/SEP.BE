@@ -35,7 +35,7 @@ class RetiredRateCardPostgresIntegrationTest extends PostgresApiTestSupport {
     var a=channel();var b=channel();
     var claim=UUID.fromString(call(owner,post("/creators/"+a.getId()+"/claim"),
         Map.of("evidenceUrls",List.of("https://example.test/proof"),"note","Proof"),201).path("data").path("id").asText());
-    call(reviewer,patch("/data/creator-claims/"+claim+"/review"),Map.of("decision","APPROVED","reason","Verified"),200);
+    call(reviewer,patch("/data/creator-claims/"+claim+"/review"),Map.of("decision","APPROVED","reason","Verified", "reviewEvidenceType", "ACCOUNT_SETTINGS", "reviewVerificationNote", "Checked account settings"),200);
     var brand=account(Role.BRAND);var campaign=createCampaign(brand,createBrand(brand));
     for(var channel:List.of(a,b))call(brand,post("/campaigns/"+campaign+"/shortlist"),Map.of("creatorId",channel.getId(),"priority","HIGH"),200);
     var profile=call(brand,get("/creators/"+a.getId()),null,200).path("data");

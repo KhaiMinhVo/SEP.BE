@@ -38,6 +38,7 @@ public class TikTokSessionStore {
   private final RolePermissionOverrideRepository overrides;
   private final TikTokLoginProperties config;
   private final CooperationOnboarding cooperationOnboarding;
+  private final com.influencermatch.backend.creator.portal.ChannelOAuthAvailability availability;
   private final Clock clock;
   private final com.influencermatch.backend.auth.service.AuthSessionStore authSessions;
   private final SecureRandom random = new SecureRandom();
@@ -127,6 +128,7 @@ public class TikTokSessionStore {
   @Transactional(noRollbackFor = CreatorOwnershipConflictException.class)
   public TikTokDtos.Started start(TikTokDtos.Start request, String browserBinding) {
     var actor = actor();
+    availability.requireTikTokStart();
     config.requireConfigured();
     long version = actor.getAuthVersion();
     var user =
@@ -184,14 +186,22 @@ public class TikTokSessionStore {
         session.getId(), config.authorizationUrl(state), session.getExpiresAt());
   }
 
+  record ResolutionTarget(boolean standalone, String externalId) {}
+
+  static boolean isStandalone(TikTokOAuthSession session) {
+    return session.getTargetCreator() == null
+        && session.getInvitation() == null
+        && session.getCooperationInvitationId() == null;
+  }
+
   @Transactional(readOnly = true)
-  public String expectedExternalId(UUID id) {
+  public ResolutionTarget resolutionTarget(UUID id) {
     var session =
         sessions.findById(id).orElseThrow(() -> new NotFoundException("TikTok session not found"));
     var target = session.getTargetCreator();
-    return target != null && Boolean.TRUE.equals(target.getIsStableId())
-        ? target.getExternalId()
-        : null;
+    String externalId = target != null && Boolean.TRUE.equals(target.getIsStableId())
+        ? target.getExternalId() : null;
+    return new ResolutionTarget(isStandalone(session), externalId);
   }
 
   public void assertCooperationTarget(TikTokOAuthSession session) {
@@ -205,6 +215,11 @@ public class TikTokSessionStore {
         session.getUser());
   }
 
+  void lockCooperationCampaign(TikTokOAuthSession session) {
+    if (session.getCooperationInvitationId() != null)
+      cooperationOnboarding.lockVerificationCampaign(session.getCooperationInvitationId());
+  }
+
   private boolean hasText(String value) {
     return value != null && !value.isBlank();
   }
@@ -214,9 +229,12 @@ public class TikTokSessionStore {
     config.requireConfigured();
     if (state == null || !state.matches("[0-9a-f]{64}"))
       throw new BusinessException(ErrorCode.TIKTOK_INVALID_STATE, "Invalid TikTok state");
+    String stateHash = hash(state);
+    sessions.findCooperationInvitationByStateHash(stateHash)
+        .ifPresent(cooperationOnboarding::lockVerificationCampaign);
     var session =
         sessions
-            .lockByStateHash(hash(state))
+            .lockByStateHash(stateHash)
             .orElseThrow(
                 () ->
                     new BusinessException(ErrorCode.TIKTOK_INVALID_STATE, "Invalid TikTok state"));
@@ -258,6 +276,7 @@ public class TikTokSessionStore {
   @Transactional
   public Result<TikTokDtos.Session> view(UUID id) {
     var actor = actor();
+    lockOwnedCooperationCampaign(id, actor.getId());
     var session =
         sessions
             .lockById(id)
@@ -300,6 +319,7 @@ public class TikTokSessionStore {
   @Transactional
   public Result<TikTokDtos.Session> cancel(UUID id) {
     var user = actor();
+    lockOwnedCooperationCampaign(id, user.getId());
     var session = sessions.lockById(id)
         .filter(s -> s.getUser().getId().equals(user.getId()))
         .orElseThrow(() -> new NotFoundException("TikTok session not found"));
@@ -310,6 +330,11 @@ public class TikTokSessionStore {
       em.flush();
     }
     return view(id);
+  }
+
+  private void lockOwnedCooperationCampaign(UUID sessionId, UUID userId) {
+    sessions.findCooperationInvitationForOwner(sessionId, userId)
+        .ifPresent(cooperationOnboarding::lockVerificationCampaign);
   }
 
   private void clear(TikTokOAuthSession session, String status) {

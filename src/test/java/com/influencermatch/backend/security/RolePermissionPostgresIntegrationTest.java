@@ -547,7 +547,7 @@ class RolePermissionPostgresIntegrationTest {
             Permission.REVIEW_CREATOR_CLAIM,
             "PATCH",
             "/data/creator-claims/{id}/review",
-            Map.of("decision", "APPROVED", "reason", "Verified")),
+            Map.of("decision", "APPROVED", "reason", "Verified", "reviewEvidenceType", "ACCOUNT_SETTINGS", "reviewVerificationNote", "Checked account settings")),
         Arguments.of(
             Role.BRAND,
             Permission.MANAGE_OWN_SUBSCRIPTION,

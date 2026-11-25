@@ -1,6 +1,7 @@
 package com.influencermatch.backend.creator.meta;
 
 import com.influencermatch.backend.creator.model.*;
+import com.influencermatch.backend.creator.enums.CreatorSourceType;
 import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.creator.service.CreatorInvitationService;
 import com.influencermatch.backend.cooperation.CooperationOnboarding;
@@ -32,6 +33,7 @@ public class MetaSessionStore {
 
   private final MetaOAuthSessionRepository sessions;
   private final CreatorRepository creators;
+  private final CreatorProviderIdentityRepository identities;
   private final CreatorInvitationRepository invitations;
   private final UserRepository users;
   private final RolePermissionOverrideRepository overrides;
@@ -39,6 +41,7 @@ public class MetaSessionStore {
   private final InstagramOAuthProperties instagram;
   private final InstagramUnifiedOAuthProperties instagramUnified;
   private final CooperationOnboarding cooperationOnboarding;
+  private final com.influencermatch.backend.creator.portal.ChannelOAuthAvailability availability;
   private final MetaPayloadCipher cipher;
   private final Clock clock;
   private final com.influencermatch.backend.auth.service.AuthSessionStore authSessions;
@@ -47,6 +50,20 @@ public class MetaSessionStore {
 
   public Instant now() {
     return clock.instant();
+  }
+
+  static boolean isStandalone(MetaOAuthSession session) {
+    return session.getTargetCreator() == null
+        && session.getInvitation() == null
+        && session.getCooperationInvitationId() == null;
+  }
+
+  static boolean hasAssetAccess(String platform, MetaDtos.Asset asset) {
+    return !"FACEBOOK".equals(platform) || asset.tasks().contains("MANAGE");
+  }
+
+  static boolean isCanonicalAssetId(String id) {
+    return id != null && id.matches("[1-9][0-9]{0,254}");
   }
 
   public void assertUser(User user, long version) {
@@ -85,7 +102,6 @@ public class MetaSessionStore {
 
   public void requireReady(MetaOAuthSession session) {
     authSessions.require(session.getAuthSessionId(), session.getUser(), false);
-    assertCooperationTarget(session);
     if (!session.getExpiresAt().isAfter(now()))
       throw new ConflictException(
           ErrorCode.META_OAUTH_SESSION_EXPIRED, "Meta session expired; start again");
@@ -137,6 +153,7 @@ public class MetaSessionStore {
   private MetaDtos.Started start(MetaDtos.Start request, String browserBinding, OAuthFlow flow) {
     var actor = actor();
     long version = actor.getAuthVersion();
+    availability.requireMetaStart(request.platform(), flow);
     requireConfigured(flow, request.platform());
     var user =
         users
@@ -223,9 +240,12 @@ public class MetaSessionStore {
   public Exchange reserve(String state, Map<String, String> cookies, OAuthFlow callbackFlow) {
     if (state == null || !state.matches("[0-9a-f]{64}"))
       throw new BusinessException(ErrorCode.META_OAUTH_INVALID_STATE, "Invalid OAuth state");
+    String stateHash = CreatorInvitationService.hashToken(state);
+    sessions.findCooperationInvitationByStateHash(stateHash)
+        .ifPresent(cooperationOnboarding::lockVerificationCampaign);
     var session =
         sessions
-            .lockByStateHash(CreatorInvitationService.hashToken(state))
+            .lockByStateHash(stateHash)
             .orElseThrow(
                 () ->
                     new BusinessException(
@@ -266,6 +286,11 @@ public class MetaSessionStore {
         session.getTargetCreator().getId(),
         session.getPlatform(),
         session.getUser());
+  }
+
+  void lockCooperationCampaign(MetaOAuthSession session) {
+    if (session.getCooperationInvitationId() != null)
+      cooperationOnboarding.lockVerificationCampaign(session.getCooperationInvitationId());
   }
 
   private boolean hasText(String value) {
@@ -329,24 +354,33 @@ public class MetaSessionStore {
                 ? channelRecord
                 : null;
         String match;
-        if (channel == null) {
-          match = channelRecord == null ? "UNMATCHED" : "INSUFFICIENT_EVIDENCE";
-        } else if (channel.getMaster() != null
-            && !channel.getMaster().getUser().getId().equals(session.getUser().getId())) {
+        String reason = null;
+        if (!isStandalone(session)
+            && (channelRecord == null || session.getTargetCreator() == null
+                || !channelRecord.getId().equals(session.getTargetCreator().getId()))) {
           match = "UNAVAILABLE";
-        } else if ("FACEBOOK".equals(session.getPlatform())
-            && !asset.tasks().contains("MANAGE")) {
+          reason = "TARGET_MISMATCH";
+        } else if (channelRecord != null && channel == null) {
           match = "INSUFFICIENT_EVIDENCE";
+          reason = "UNSTABLE_CHANNEL_ID";
+        } else if ((channel != null && (channel.getMaster() == null
+                ? channel.getSourceType() == CreatorSourceType.AUTHORIZED
+                : !channel.getMaster().getUser().getId().equals(session.getUser().getId())))
+            || (channel == null && identities
+                .findByProviderAndProviderUserId(session.getPlatform(), asset.id()).isPresent())) {
+          match = "UNAVAILABLE";
+          reason = "OWNERSHIP_CONFLICT";
+        } else if (!hasAssetAccess(session.getPlatform(), asset)) {
+          match = "INSUFFICIENT_EVIDENCE";
+          reason = "MISSING_PAGE_MANAGEMENT";
+        } else if (channel == null) {
+          match = isCanonicalAssetId(asset.id()) ? "CAN_CREATE" : "UNMATCHED";
+          if ("UNMATCHED".equals(match)) reason = "CHANNEL_NOT_FOUND";
         } else if (channel.getMaster() == null) {
           match = "AVAILABLE";
-        } else if (channel.getMaster().getUser().getId().equals(session.getUser().getId())) {
-          match = "ALREADY_LINKED";
         } else {
-          match = "UNAVAILABLE";
+          match = "ALREADY_LINKED";
         }
-        if (channel != null
-            && session.getTargetCreator() != null
-            && !channel.getId().equals(session.getTargetCreator().getId())) match = "UNAVAILABLE";
         accounts.add(
             new MetaDtos.Account(
                 asset.id(),
@@ -354,7 +388,8 @@ public class MetaSessionStore {
                 asset.name(),
                 asset.username(),
                 channel == null ? null : channel.getId(),
-                match));
+                match,
+                reason));
       }
     }
     return new MetaDtos.Session(

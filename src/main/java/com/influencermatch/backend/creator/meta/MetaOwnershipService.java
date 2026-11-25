@@ -48,6 +48,7 @@ public class MetaOwnershipService {
     em.refresh(user);
     if (!user.getId().equals(actor.getId())) throw new ForbiddenException("Creator unavailable");
     store.assertUser(user, initial.getAuthVersion());
+    store.lockCooperationCampaign(initial);
     creators.acquireIdentityLock(initial.getPlatform() + ":" + accountId);
     var creator =
         creators
@@ -80,6 +81,7 @@ public class MetaOwnershipService {
     var session = sessions.lockById(sessionId).orElseThrow();
     em.refresh(session);
     store.requireReady(session);
+    store.assertCooperationTarget(session);
     if (!session.getUser().getId().equals(user.getId())
         || session.getAuthVersion() != user.getAuthVersion())
       throw new ForbiddenException("Meta session changed");

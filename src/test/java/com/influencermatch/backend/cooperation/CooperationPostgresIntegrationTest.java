@@ -268,6 +268,60 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
+  void manualClaimUsesTheInvitedChannelAndRechecksTheInvitationAtApproval() throws Exception {
+    var invited = channel(false);
+    var other = channel(false);
+    var fixture = onboardingInvitation(invited);
+    var claimant = account(Role.CREATOR);
+    var reviewer = account(Role.DATA_MANAGER);
+    jdbc.update("update cooperation_email_job set delivery_method='MANUAL_LINK' where invitation_id=?",
+        fixture.invitation());
+    var evidence = Map.of("cooperationInvitationToken", fixture.token(),
+        "evidenceUrls", List.of("https://evidence.example.test/settings"), "note", "I manage this channel");
+    call(claimant, post("/creators/" + other.getId() + "/claim"), evidence, 400);
+    var claim = call(claimant, post("/creators/" + invited.getId() + "/claim"), evidence, 201)
+        .path("data");
+    assertThat(claim.path("cooperationInvitationId").asText()).isEqualTo(fixture.invitation().toString());
+    assertThat(claim.path("status").asText()).isEqualTo("PENDING");
+    call(claimant, post("/creators/" + invited.getId() + "/claim"), evidence, 409);
+    call(claimant, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 403);
+
+    var path = "/data/creator-claims/" + claim.path("id").asText() + "/review";
+    call(reviewer, patch(path), Map.of("decision", "APPROVED", "reason", "Reviewed"), 400);
+    jdbc.update("update cooperation_invitation set status='REPLACED' where id=?", fixture.invitation());
+    call(reviewer, patch(path), Map.of("decision", "APPROVED", "reason", "Reviewed",
+        "reviewEvidenceType", "SCREEN_SHARE", "reviewVerificationNote", "Matched the management screen"), 409);
+    assertThat(jdbc.queryForObject("select master_id from creator where id=?", UUID.class, invited.getId())).isNull();
+    var rejected = call(reviewer, patch(path), Map.of("decision", "REJECTED", "reason", "Invitation replaced",
+        "reviewEvidenceType", "NO_VALID_EVIDENCE", "reviewVerificationNote", "Confirmed the original invitation was replaced"),
+        200).path("data");
+    assertThat(rejected.path("status").asText()).isEqualTo("REJECTED");
+    assertThat(rejected.path("reviewEvidenceType").asText()).isEqualTo("NO_VALID_EVIDENCE");
+    assertThat(rejected.path("reviewVerificationNote").asText()).contains("original invitation");
+  }
+
+  @Test
+  void approvedBoundManualClaimOpensProposalWithoutAccepting() throws Exception {
+    var invited = channel(false);
+    var fixture = onboardingInvitation(invited);
+    var claimant = account(Role.CREATOR);
+    jdbc.update("update cooperation_email_job set delivery_method='MANUAL_LINK' where invitation_id=?", fixture.invitation());
+    var claim = call(claimant, post("/creators/" + invited.getId() + "/claim"), Map.of(
+        "cooperationInvitationToken", fixture.token(), "evidenceUrls", List.of("https://evidence.example.test/page"),
+        "note", "I manage this channel"), 201).path("data");
+    var approved = call(account(Role.DATA_MANAGER),
+        patch("/data/creator-claims/" + claim.path("id").asText() + "/review"),
+        Map.of("decision", "APPROVED", "reason", "Valid evidence", "reviewEvidenceType", "ACCOUNT_SETTINGS",
+            "reviewVerificationNote", "Matched the channel ID and management access"), 200).path("data");
+    assertThat(approved.path("reviewEvidenceType").asText()).isEqualTo("ACCOUNT_SETTINGS");
+    assertThat(approved.path("reviewerId").asText()).isNotBlank();
+    assertThat(call(claimant, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 200)
+        .at("/data/dealId").asText()).isEqualTo(fixture.deal().toString());
+    assertThat(jdbc.queryForObject("select accepted_revision from cooperation_deal where id=?", Integer.class,
+        fixture.deal())).isNull();
+  }
+
+  @Test
   void registrationUsesDeliveredRecipientSnapshotAndRateLimitsRequests() throws Exception {
     var fixture = onboardingInvitation(channel(false));
     String email = UUID.randomUUID() + "@creator.test";

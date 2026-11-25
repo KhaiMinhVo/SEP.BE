@@ -39,6 +39,7 @@ public class MetaSessionStore {
   private final InstagramOAuthProperties instagram;
   private final InstagramUnifiedOAuthProperties instagramUnified;
   private final CooperationOnboarding cooperationOnboarding;
+  private final com.influencermatch.backend.creator.portal.ChannelOAuthAvailability availability;
   private final MetaPayloadCipher cipher;
   private final Clock clock;
   private final com.influencermatch.backend.auth.service.AuthSessionStore authSessions;
@@ -85,7 +86,6 @@ public class MetaSessionStore {
 
   public void requireReady(MetaOAuthSession session) {
     authSessions.require(session.getAuthSessionId(), session.getUser(), false);
-    assertCooperationTarget(session);
     if (!session.getExpiresAt().isAfter(now()))
       throw new ConflictException(
           ErrorCode.META_OAUTH_SESSION_EXPIRED, "Meta session expired; start again");
@@ -137,6 +137,7 @@ public class MetaSessionStore {
   private MetaDtos.Started start(MetaDtos.Start request, String browserBinding, OAuthFlow flow) {
     var actor = actor();
     long version = actor.getAuthVersion();
+    availability.requireMetaStart(request.platform(), flow);
     requireConfigured(flow, request.platform());
     var user =
         users
@@ -223,9 +224,12 @@ public class MetaSessionStore {
   public Exchange reserve(String state, Map<String, String> cookies, OAuthFlow callbackFlow) {
     if (state == null || !state.matches("[0-9a-f]{64}"))
       throw new BusinessException(ErrorCode.META_OAUTH_INVALID_STATE, "Invalid OAuth state");
+    String stateHash = CreatorInvitationService.hashToken(state);
+    sessions.findCooperationInvitationByStateHash(stateHash)
+        .ifPresent(cooperationOnboarding::lockVerificationCampaign);
     var session =
         sessions
-            .lockByStateHash(CreatorInvitationService.hashToken(state))
+            .lockByStateHash(stateHash)
             .orElseThrow(
                 () ->
                     new BusinessException(
@@ -266,6 +270,11 @@ public class MetaSessionStore {
         session.getTargetCreator().getId(),
         session.getPlatform(),
         session.getUser());
+  }
+
+  void lockCooperationCampaign(MetaOAuthSession session) {
+    if (session.getCooperationInvitationId() != null)
+      cooperationOnboarding.lockVerificationCampaign(session.getCooperationInvitationId());
   }
 
   private boolean hasText(String value) {
@@ -329,24 +338,32 @@ public class MetaSessionStore {
                 ? channelRecord
                 : null;
         String match;
+        String reason = null;
         if (channel == null) {
           match = channelRecord == null ? "UNMATCHED" : "INSUFFICIENT_EVIDENCE";
+          reason = channelRecord == null ? "CHANNEL_NOT_FOUND" : "UNSTABLE_CHANNEL_ID";
         } else if (channel.getMaster() != null
             && !channel.getMaster().getUser().getId().equals(session.getUser().getId())) {
           match = "UNAVAILABLE";
+          reason = "OWNERSHIP_CONFLICT";
         } else if ("FACEBOOK".equals(session.getPlatform())
             && !asset.tasks().contains("MANAGE")) {
           match = "INSUFFICIENT_EVIDENCE";
+          reason = "MISSING_PAGE_MANAGEMENT";
         } else if (channel.getMaster() == null) {
           match = "AVAILABLE";
         } else if (channel.getMaster().getUser().getId().equals(session.getUser().getId())) {
           match = "ALREADY_LINKED";
         } else {
           match = "UNAVAILABLE";
+          reason = "OWNERSHIP_CONFLICT";
         }
         if (channel != null
             && session.getTargetCreator() != null
-            && !channel.getId().equals(session.getTargetCreator().getId())) match = "UNAVAILABLE";
+            && !channel.getId().equals(session.getTargetCreator().getId())) {
+          match = "UNAVAILABLE";
+          reason = "TARGET_MISMATCH";
+        }
         accounts.add(
             new MetaDtos.Account(
                 asset.id(),
@@ -354,7 +371,8 @@ public class MetaSessionStore {
                 asset.name(),
                 asset.username(),
                 channel == null ? null : channel.getId(),
-                match));
+                match,
+                reason));
       }
     }
     return new MetaDtos.Session(

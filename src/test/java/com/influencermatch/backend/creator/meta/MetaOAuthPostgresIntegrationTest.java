@@ -26,6 +26,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 @TestPropertySource(
     properties = {
       "application.meta.enabled=true",
+      "application.channel-oauth.facebook-page-enabled=true",
+      "application.channel-oauth.instagram-mode=VIA_FACEBOOK_PAGE",
       "application.instagram.enabled=false",
       "application.meta.app-id=123",
       "application.meta.app-secret=test-secret",
@@ -610,7 +612,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
             201)
         .at("/data/id").asText();
     call(manager, patch("/data/creator-claims/" + claimId + "/review"),
-        Map.of("decision", "APPROVED", "reason", "Verified manual evidence"), 200);
+        Map.of("decision", "APPROVED", "reason", "Verified manual evidence", "reviewEvidenceType", "ACCOUNT_SETTINGS", "reviewVerificationNote", "Checked account settings"), 200);
     UUID manualMaster = masters.findByUserId(creator.getId()).orElseThrow().getId();
 
     var session = ready(creator);
@@ -673,7 +675,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
                         patch("/data/creator-claims/" + claimId + "/review")
                             .header("Authorization", "Bearer " + managerToken)
                             .contentType("application/json")
-                            .content("{\"decision\":\"APPROVED\",\"reason\":\"Reviewed proof\"}"))
+                            .content("{\"decision\":\"APPROVED\",\"reason\":\"Reviewed proof\",\"reviewEvidenceType\":\"ACCOUNT_SETTINGS\",\"reviewVerificationNote\":\"Checked account settings\"}"))
                     .andReturn()
                     .getResponse()
                     .getStatus();

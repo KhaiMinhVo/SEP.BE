@@ -14,6 +14,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 /** Real PostgreSQL/session/ownership integration; Meta HTTP is mocked separately. */
 @TestPropertySource(properties = {
     "application.instagram-unified.enabled=true",
+    "application.channel-oauth.instagram-mode=UNIFIED",
     "application.instagram-unified.app-id=976403021867954",
     "application.instagram-unified.app-secret=fixture-unified-secret",
     "application.instagram-unified.login-config-id=1176260962020417",

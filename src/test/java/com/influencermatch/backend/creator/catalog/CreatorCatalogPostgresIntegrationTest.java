@@ -70,7 +70,7 @@ class CreatorCatalogPostgresIntegrationTest extends PostgresApiTestSupport {
     return call(
         dm,
         patch("/data/creator-claims/" + id + "/review"),
-        Map.of("decision", "APPROVED", "reason", "Checked evidence"),
+        Map.of("decision", "APPROVED", "reason", "Checked evidence", "reviewEvidenceType", "ACCOUNT_SETTINGS", "reviewVerificationNote", "Checked account settings"),
         status);
   }
 
@@ -389,7 +389,7 @@ class CreatorCatalogPostgresIntegrationTest extends PostgresApiTestSupport {
                           patch("/data/creator-claims/" + id + "/review")
                               .header("Authorization", "Bearer " + jwt.generateToken(actor))
                               .contentType("application/json")
-                              .content("{\"decision\":\"APPROVED\",\"reason\":\"Checked\"}"))
+                              .content("{\"decision\":\"APPROVED\",\"reason\":\"Checked\",\"reviewEvidenceType\":\"ACCOUNT_SETTINGS\",\"reviewVerificationNote\":\"Checked account settings\"}"))
                       .andReturn()
                       .getResponse()
                       .getStatus();
@@ -495,7 +495,7 @@ class CreatorCatalogPostgresIntegrationTest extends PostgresApiTestSupport {
                           patch("/data/creator-claims/" + id + "/review")
                               .header("Authorization", "Bearer " + jwt.generateToken(dm))
                               .contentType("application/json")
-                              .content("{\"decision\":\"APPROVED\",\"reason\":\"Proof checked\"}"))
+                              .content("{\"decision\":\"APPROVED\",\"reason\":\"Proof checked\",\"reviewEvidenceType\":\"ACCOUNT_SETTINGS\",\"reviewVerificationNote\":\"Checked account settings\"}"))
                       .andReturn()
                       .getResponse()
                       .getStatus();

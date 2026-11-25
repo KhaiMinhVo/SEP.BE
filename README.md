@@ -422,16 +422,30 @@ in the backend deployment environment. For TikTok, register the callback in the 
 ```dotenv
 META_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/meta/callback
 INSTAGRAM_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/instagram/callback
+INSTAGRAM_UNIFIED_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/instagram-unified/callback
 TIKTOK_SANDBOX_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/tiktok/callback
 ```
 
-Deploy the backend Claim lookup first, then the frontend callback proxy. Check the three
-callbacks on the frontend origin before enabling or switching the corresponding provider settings.
+Deploy the backend with V55 and the frontend together because the Claim review request changes.
+Check the callback on the frontend origin for each selected method. Keep the options disabled until
+the deployment has been tested with authorized Meta or TikTok Sandbox accounts. Use these switches
+in addition to the selected provider's credentials and enable setting:
+
+```dotenv
+CHANNEL_OAUTH_FACEBOOK_PAGE_ENABLED=false
+CHANNEL_OAUTH_INSTAGRAM_MODE=OFF
+CHANNEL_OAUTH_TIKTOK_SANDBOX_ENABLED=false
+```
+
+Set the Instagram mode to `DIRECT`, `UNIFIED` or `VIA_FACEBOOK_PAGE` to enable exactly one Instagram
+method. Provider eligibility and asset permissions are determined during consent.
 Open **Kênh liên kết** on that origin as an email-verified Creator. Facebook and Instagram
 show channel choices after consent. TikTok Sandbox reads the completed session and linked channels.
-The OAuth browser cookie belongs to the origin that started the flow. For manual claims, the portal first calls
-`GET /api/v1/creator-claims/channels/lookup?platform=FACEBOOK&q=<username-or-id>`, then
-submits evidence for the selected channel through the existing Claim endpoint.
+The OAuth browser cookie belongs to the origin that started the flow. Standalone Manual Claim uses
+the exact channel lookup. From a cooperation invitation, the portal submits the selected channel
+from the invitation with `cooperationInvitationToken` in `POST /creators/{id}/claim`.
+Approval rechecks the invitation. The reviewer submits `reviewEvidenceType`, `reviewVerificationNote`
+and `reason` for either decision in `PATCH /data/creator-claims/{id}/review`.
 
 ### API and browser test
 
@@ -499,6 +513,7 @@ Configure your environment using `.env.example` (the actual `.env` is not modifi
 
 ```dotenv
 TIKTOK_SANDBOX_LOGIN_ENABLED=true
+CHANNEL_OAUTH_TIKTOK_SANDBOX_ENABLED=true
 TIKTOK_SANDBOX_CLIENT_KEY=<Sandbox client key>
 TIKTOK_SANDBOX_CLIENT_SECRET=<Sandbox client secret>
 TIKTOK_SANDBOX_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/tiktok/callback

@@ -28,7 +28,7 @@ public class CreatorClaimController {
   }
 
   @PostMapping("/creators/{id}/claim") @PreAuthorize("hasAuthority('CLAIM_CREATOR_PROFILE')")
-  @Operation(summary="Submit channel ownership evidence",description="Creates PENDING claim, not authorization. Requires an active CREATOR with verified email. Evidence is private and URLs are not fetched.")
+  @Operation(summary="Submit channel ownership evidence",description="Creates a PENDING claim. With a cooperation invitation token, the channel must belong to the active invitation. Evidence is private and URLs are not fetched.")
   public ResponseEntity<ApiResponse<ClaimResponse>> claim(@PathVariable UUID id,@Valid @RequestBody ClaimRequest request) {
     return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(service.claim(id,request)));
   }

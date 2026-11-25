@@ -109,22 +109,36 @@ public class CooperationOnboarding {
         || !user.isEmailVerified())
       throw new ForbiddenException("An active, verified Creator account is required");
     var invitation = invitation(token);
-    validateOAuthTarget(invitation, creatorId, platform, user);
+    validateVerificationTarget(invitation, creatorId, platform, user);
     return uuid(invitation.get("id"));
   }
 
   public void assertOAuthTarget(UUID invitationId, UUID creatorId, String platform, User user) {
+    lockVerificationCampaign(invitationId);
+    assertVerificationTarget(invitationId, creatorId, platform, user);
+  }
+
+  public UUID resolveVerificationInvitation(String token) {
+    return uuid(invitation(token).get("id"));
+  }
+
+  public void lockVerificationCampaign(UUID invitationId) {
     var initial = store.one("select deal_id from cooperation_invitation where id=?", invitationId);
     var deal = store.deal(uuid(initial.get("deal_id")));
     store.one("select id from campaign where id=? for update", deal.get("campaign_id"));
+  }
+
+  public void assertVerificationTarget(UUID invitationId, UUID creatorId, String platform, User user) {
+    var initial = store.one("select deal_id from cooperation_invitation where id=?", invitationId);
+    var deal = store.deal(uuid(initial.get("deal_id")));
     store.one("select id from cooperation_deal where id=? for update", deal.get("id"));
     var invitation =
         store.one("select * from cooperation_invitation where id=? for update", invitationId);
     check(invitation);
-    validateOAuthTarget(invitation, creatorId, platform, user);
+    validateVerificationTarget(invitation, creatorId, platform, user);
   }
 
-  private void validateOAuthTarget(
+  private void validateVerificationTarget(
       Map<String, Object> invitation, UUID creatorId, String platform, User user) {
     var deal = store.deal(uuid(invitation.get("deal_id")));
     var target =

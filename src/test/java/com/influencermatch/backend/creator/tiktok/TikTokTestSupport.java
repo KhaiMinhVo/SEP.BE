@@ -28,6 +28,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 @TestPropertySource(
     properties = {
       "application.tiktok.enabled=true",
+      "application.channel-oauth.tiktok-sandbox-enabled=true",
       "application.tiktok.client-key=sandbox-key",
       "application.tiktok.client-secret=private-secret",
       "application.tiktok.redirect-uri=https://test.example/api/v1/integrations/tiktok/callback",

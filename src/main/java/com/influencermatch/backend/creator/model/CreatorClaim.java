@@ -1,10 +1,12 @@
 package com.influencermatch.backend.creator.model;
 import com.influencermatch.backend.common.BaseEntity;
 import com.influencermatch.backend.creator.enums.CreatorClaimStatus;
+import com.influencermatch.backend.creator.dto.CreatorClaimDtos.ReviewEvidenceType;
 import com.influencermatch.backend.user.model.User;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -15,11 +17,14 @@ public class CreatorClaim extends BaseEntity {
   @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(nullable=false) private Creator creator;
   @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(nullable=false) private User claimant;
   @ManyToOne(fetch=FetchType.LAZY) @JoinColumn(name="invitation_id") private CreatorInvitation invitation;
+  private UUID cooperationInvitationId;
   @JdbcTypeCode(SqlTypes.JSON) @Column(nullable=false) private List<String> evidenceUrls;
   @Column(nullable=false,length=2000) private String note;
   @Enumerated(EnumType.STRING) @Column(nullable=false,length=16) private CreatorClaimStatus status;
   @ManyToOne(fetch=FetchType.LAZY) private User reviewer;
   @Column(length=2000) private String reason;
+  @Enumerated(EnumType.STRING) @Column(length=32) private ReviewEvidenceType reviewEvidenceType;
+  @Column(length=2000) private String reviewVerificationNote;
   private LocalDateTime reviewedAt;
   @ManyToOne(fetch=FetchType.LAZY) private User revokedBy;
   @Column(length=2000) private String revokeReason;

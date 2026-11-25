@@ -51,6 +51,7 @@ public class TikTokOwnershipService {
             .orElseThrow(() -> new ForbiddenException("Creator unavailable"));
     if (!user.getId().equals(initial.getUser().getId()))
       throw new ForbiddenException("Creator unavailable");
+    store.lockCooperationCampaign(initial);
     creators.acquireIdentityLock(TikTokUsernames.MATCH_LOCK);
     var identityKeys = new TreeSet<String>();
     identityKeys.add("TIKTOK:SANDBOX:" + initial.getClientKey() + ":" + proof.openId());
@@ -245,6 +246,8 @@ public class TikTokOwnershipService {
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public TikTokSessionStore.Result<TikTokDtos.Callback> manualResolution(
       UUID id, VerifiedAccount proof) {
+    var initial = sessions.findById(id).orElseThrow();
+    store.lockCooperationCampaign(initial);
     var session = sessions.lockById(id).orElseThrow();
     em.refresh(session);
     if (!"EXCHANGING".equals(session.getStatus()))

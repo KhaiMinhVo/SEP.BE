@@ -93,6 +93,10 @@ spring:
 #  JWT Security
 # ------------------------------------------------------------------------------------
 application:
+  channel-oauth:
+    facebook-page-enabled: ${CHANNEL_OAUTH_FACEBOOK_PAGE_ENABLED:false}
+    instagram-mode: ${CHANNEL_OAUTH_INSTAGRAM_MODE:OFF}
+    tiktok-sandbox-enabled: ${CHANNEL_OAUTH_TIKTOK_SANDBOX_ENABLED:false}
   campaign-embedding:
     enabled: ${CAMPAIGN_EMBEDDING_ENABLED:true}
     model: ${CAMPAIGN_EMBEDDING_MODEL:bkai-foundation-models/vietnamese-bi-encoder}

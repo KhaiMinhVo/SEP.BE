@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 import java.time.*;
 import java.util.*;
+import com.influencermatch.backend.creator.portal.ChannelOAuthAvailability;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
@@ -21,6 +23,8 @@ import org.springframework.test.context.TestPropertySource;
       "application.meta.encryption-key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
     })
 class OAuthFlowCompatibilityPostgresIntegrationTest extends DirectInstagramTestSupport {
+  @SpyBean ChannelOAuthAvailability availability;
+
   MetaDtos.Proof facebookProof() {
     return new MetaDtos.Proof(
         "facebook-user",
@@ -33,11 +37,16 @@ class OAuthFlowCompatibilityPostgresIntegrationTest extends DirectInstagramTestS
   Started facebookStart() throws Exception {
     when(facebook.exchange(anyString(), eq("INSTAGRAM"))).thenReturn(facebookProof());
     when(facebook.verify(anyString(), eq("INSTAGRAM"))).thenReturn(facebookProof());
-    return startAt(
-        creator,
-        "/creators/portal/accounts/connect/meta/start",
-        Map.of("platform", "INSTAGRAM"),
-        "www.facebook.com");
+    doReturn(OAuthFlow.FACEBOOK_LOGIN).when(availability).instagramFlow();
+    try {
+      return startAt(
+          creator,
+          "/creators/portal/accounts/connect/meta/start",
+          Map.of("platform", "INSTAGRAM"),
+          "www.facebook.com");
+    } finally {
+      doCallRealMethod().when(availability).instagramFlow();
+    }
   }
 
   void facebookCallback(Started s, int expected) throws Exception {

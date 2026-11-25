@@ -293,10 +293,13 @@ class CreatorPortalProfilePostgresIntegrationTest extends ExecutionScenarioSuppo
         .doesNotContain("TOP_PRIVATE_VALUE");
     var options =
         call(owner, get("/creators/portal/accounts/connection-options"), null, 200).path("data");
-    assertThat(options.size()).isEqualTo(5);
+    assertThat(options.size()).isEqualTo(3);
     assertThat(options.toString())
         .doesNotContain("appSecret", "clientSecret", "encryptionKey", "accessToken");
-    assertThat(options.get(4).path("supported").asBoolean()).isFalse();
+    assertThat(options).allSatisfy(option -> {
+      assertThat(option.path("available").asBoolean()).isFalse();
+      assertThat(option.path("unavailableReason").asText()).isEqualTo("NOT_ENABLED_FOR_ENVIRONMENT");
+    });
   }
 
   @Test
@@ -383,7 +386,7 @@ class CreatorPortalProfilePostgresIntegrationTest extends ExecutionScenarioSuppo
     call(
         reviewer,
         patch("/data/creator-claims/" + claim + "/review"),
-        Map.of("decision", "APPROVED", "reason", "Evidence reviewed"),
+        Map.of("decision", "APPROVED", "reason", "Evidence reviewed", "reviewEvidenceType", "ACCOUNT_SETTINGS", "reviewVerificationNote", "Checked account settings"),
         200);
     var approved = call(brand, get("/creators/" + publicChannel), null, 200).path("data");
     assertThat(approved.path("verifiedByInfluencerMatch").asBoolean()).isTrue();

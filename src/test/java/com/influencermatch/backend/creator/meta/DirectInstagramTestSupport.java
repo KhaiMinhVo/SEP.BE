@@ -23,6 +23,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
     properties = {
       "application.meta.enabled=false",
       "application.instagram.enabled=true",
+      "application.channel-oauth.instagram-mode=DIRECT",
       "application.instagram.app-id=789",
       "application.instagram.app-secret=private-ig-secret",
       "application.instagram.graph-api-version=v26.0",

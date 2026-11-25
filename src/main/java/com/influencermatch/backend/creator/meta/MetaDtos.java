@@ -53,7 +53,8 @@ public final class MetaDtos {
       String name,
       String username,
       UUID creatorId,
-      String matchStatus) {}
+      String matchStatus,
+      String matchReason) {}
 
   public record Session(
       UUID sessionId,

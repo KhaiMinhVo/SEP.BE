@@ -298,7 +298,10 @@ class CreatorPortalProfilePostgresIntegrationTest extends ExecutionScenarioSuppo
         .doesNotContain("appSecret", "clientSecret", "encryptionKey", "accessToken");
     assertThat(options).allSatisfy(option -> {
       assertThat(option.path("available").asBoolean()).isFalse();
-      assertThat(option.path("unavailableReason").asText()).isEqualTo("NOT_ENABLED_FOR_ENVIRONMENT");
+      String reason = "INSTAGRAM".equals(option.path("platform").asText())
+          ? "NOT_CONFIGURED"
+          : "NOT_ENABLED_FOR_ENVIRONMENT";
+      assertThat(option.path("unavailableReason").asText()).isEqualTo(reason);
     });
   }
 

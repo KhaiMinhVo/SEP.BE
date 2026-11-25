@@ -25,6 +25,20 @@ class InstagramOAuthPostgresIntegrationTest extends DirectInstagramTestSupport {
   }
   @Test
   void worksWithoutFacebookAndPurgesSecretsAfterGrantAndReplay() throws Exception {
+    var options =
+        call(creator, get("/creators/portal/accounts/connection-options"), null, 200).path("data");
+    assertThat(options).anySatisfy(option -> {
+      assertThat(option.path("platform").asText()).isEqualTo("INSTAGRAM");
+      assertThat(option.path("oauthFlow").asText()).isEqualTo("INSTAGRAM_LOGIN");
+      assertThat(option.path("available").asBoolean()).isTrue();
+      assertThat(option.path("methods")).hasSize(3);
+      assertThat(option.path("methods")).allSatisfy(method -> {
+        boolean direct = "INSTAGRAM_LOGIN".equals(method.path("oauthFlow").asText());
+        assertThat(method.path("available").asBoolean()).isEqualTo(direct);
+        if (!direct) assertThat(method.path("unavailableReason").asText()).isEqualTo("NOT_CONFIGURED");
+      });
+    });
+
     var s = readyDirect();
     var view = call(creator, get(path(s)), null, 200).path("data");
     assertThat(view.path("oauthFlow").asText()).isEqualTo("INSTAGRAM_LOGIN");

@@ -10,6 +10,7 @@ public record ChannelOAuthAvailability(
     boolean facebookPageEnabled, InstagramMode instagramMode, boolean tiktokSandboxEnabled) {
   public enum InstagramMode {
     OFF(null),
+    ALL(OAuthFlow.INSTAGRAM_LOGIN),
     DIRECT(OAuthFlow.INSTAGRAM_LOGIN),
     UNIFIED(OAuthFlow.INSTAGRAM_UNIFIED_LOGIN),
     VIA_FACEBOOK_PAGE(OAuthFlow.FACEBOOK_LOGIN);
@@ -25,10 +26,14 @@ public record ChannelOAuthAvailability(
     return instagramMode == null ? null : instagramMode.flow;
   }
 
+  public boolean allowsInstagram(OAuthFlow flow) {
+    return flow != null && (instagramMode == InstagramMode.ALL || instagramFlow() == flow);
+  }
+
   public void requireMetaStart(String platform, OAuthFlow flow) {
     boolean enabled = switch (platform) {
       case "FACEBOOK" -> facebookPageEnabled && flow == OAuthFlow.FACEBOOK_LOGIN;
-      case "INSTAGRAM" -> instagramFlow() == flow;
+      case "INSTAGRAM" -> allowsInstagram(flow);
       default -> false;
     };
     if (!enabled) {

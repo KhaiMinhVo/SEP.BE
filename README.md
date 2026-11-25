@@ -427,18 +427,19 @@ TIKTOK_SANDBOX_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations
 ```
 
 Deploy the backend with V55 and the frontend together because the Claim review request changes.
-Check the callback on the frontend origin for each selected method. Keep the options disabled until
-the deployment has been tested with authorized Meta or TikTok Sandbox accounts. Use these switches
-in addition to the selected provider's credentials and enable setting:
+Check the callback on the frontend origin for each selected method. Instagram shows three methods
+and enables each one with valid provider configuration. Facebook Page and TikTok Sandbox
+require their environment switches:
 
 ```dotenv
 CHANNEL_OAUTH_FACEBOOK_PAGE_ENABLED=false
-CHANNEL_OAUTH_INSTAGRAM_MODE=OFF
+CHANNEL_OAUTH_INSTAGRAM_MODE=ALL
 CHANNEL_OAUTH_TIKTOK_SANDBOX_ENABLED=false
 ```
 
-Set the Instagram mode to `DIRECT`, `UNIFIED` or `VIA_FACEBOOK_PAGE` to enable exactly one Instagram
-method. Provider eligibility and asset permissions are determined during consent.
+Set the Instagram mode to `DIRECT`, `UNIFIED` or `VIA_FACEBOOK_PAGE` to limit the environment to one
+method. Set it to `OFF` to disable all Instagram methods. Older frontend versions use Direct Login
+in `ALL` mode. Provider eligibility and asset permissions are determined during consent.
 Open **Kênh liên kết** on that origin as an email-verified Creator. Facebook and Instagram
 show channel choices after consent. TikTok Sandbox reads the completed session and linked channels.
 The OAuth browser cookie belongs to the origin that started the flow. Standalone Manual Claim uses

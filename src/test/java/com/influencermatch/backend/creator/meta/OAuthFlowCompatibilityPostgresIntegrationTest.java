@@ -7,7 +7,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import java.time.*;
 import java.util.*;
 import com.influencermatch.backend.creator.portal.ChannelOAuthAvailability;
-import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
@@ -20,11 +19,16 @@ import org.springframework.test.context.TestPropertySource;
       "application.meta.instagram-page-login-config-id=789",
       "application.meta.graph-api-version=v26.0",
       "application.meta.redirect-uri=http://localhost:8080/api/v1/integrations/meta/callback",
-      "application.meta.encryption-key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+      "application.meta.encryption-key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+      "application.instagram-unified.enabled=true",
+      "application.instagram-unified.app-id=987",
+      "application.instagram-unified.app-secret=fixture-unified-secret",
+      "application.instagram-unified.login-config-id=654",
+      "application.instagram-unified.graph-api-version=v26.0",
+      "application.instagram-unified.redirect-uri=https://test.example/api/v1/integrations/instagram-unified/callback",
+      "application.instagram-unified.encryption-key=AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
     })
 class OAuthFlowCompatibilityPostgresIntegrationTest extends DirectInstagramTestSupport {
-  @SpyBean ChannelOAuthAvailability availability;
-
   MetaDtos.Proof facebookProof() {
     return new MetaDtos.Proof(
         "facebook-user",
@@ -37,16 +41,11 @@ class OAuthFlowCompatibilityPostgresIntegrationTest extends DirectInstagramTestS
   Started facebookStart() throws Exception {
     when(facebook.exchange(anyString(), eq("INSTAGRAM"))).thenReturn(facebookProof());
     when(facebook.verify(anyString(), eq("INSTAGRAM"))).thenReturn(facebookProof());
-    doReturn(OAuthFlow.FACEBOOK_LOGIN).when(availability).instagramFlow();
-    try {
-      return startAt(
-          creator,
-          "/creators/portal/accounts/connect/meta/start",
-          Map.of("platform", "INSTAGRAM"),
-          "www.facebook.com");
-    } finally {
-      doCallRealMethod().when(availability).instagramFlow();
-    }
+    return startAt(
+        creator,
+        "/creators/portal/accounts/connect/meta/start",
+        Map.of("platform", "INSTAGRAM"),
+        "www.facebook.com");
   }
 
   void facebookCallback(Started s, int expected) throws Exception {
@@ -58,6 +57,30 @@ class OAuthFlowCompatibilityPostgresIntegrationTest extends DirectInstagramTestS
             .param("code", "fb-code"),
         null,
         expected);
+  }
+
+  @Test
+  void allModeAdvertisesAndStartsEachConfiguredInstagramMethod() throws Exception {
+    var options = call(creator, get("/creators/portal/accounts/connection-options"), null, 200).path("data");
+    assertThat(options).anySatisfy(option -> {
+      assertThat(option.path("platform").asText()).isEqualTo("INSTAGRAM");
+      assertThat(option.path("methods")).hasSize(3).allSatisfy(method ->
+          assertThat(method.path("available").asBoolean()).isTrue());
+    });
+    assertThat(startDirect(creator, Map.of()).id()).isNotNull();
+    assertThat(facebookStart().id()).isNotNull();
+    assertThat(startAt(creator, "/creators/portal/accounts/connect/instagram-unified/start",
+        Map.of(), "www.facebook.com").id()).isNotNull();
+  }
+
+  @Test
+  void offModeRejectsEveryInstagramStart() {
+    var off = new ChannelOAuthAvailability(false, ChannelOAuthAvailability.InstagramMode.OFF, false);
+    for (var flow : OAuthFlow.values()) {
+      assertThat(off.allowsInstagram(flow)).isFalse();
+      assertThatThrownBy(() -> off.requireMetaStart("INSTAGRAM", flow))
+          .isInstanceOf(com.influencermatch.backend.exception.BusinessException.class);
+    }
   }
 
   @Test

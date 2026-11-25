@@ -96,5 +96,8 @@ public final class PortalDtos {
       boolean supported,
       boolean available,
       String unavailableReason,
-      List<String> requirements) {}
+      List<String> requirements,
+      List<ConnectionMethod> methods) {}
+
+  public record ConnectionMethod(String oauthFlow, boolean available, String unavailableReason) {}
 }

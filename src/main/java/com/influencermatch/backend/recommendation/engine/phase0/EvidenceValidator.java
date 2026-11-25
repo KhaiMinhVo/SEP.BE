@@ -175,9 +175,13 @@ public class EvidenceValidator {
     int postCount = posts != null ? posts.size() : 0;
     double totalViews = 0.0;
     double totalInteractions = 0.0;
+    boolean hasAnyInteractionObservation = false;
 
     if (posts != null && !posts.isEmpty()) {
       for (Post p : posts) {
+        if (p.getLikes() != null || p.getComments() != null || p.getShares() != null) {
+          hasAnyInteractionObservation = true;
+        }
         double v = p.getViews() != null ? p.getViews().doubleValue() : 0.0;
         double likes = p.getLikes() != null ? p.getLikes().doubleValue() : 0.0;
         double comments = p.getComments() != null ? p.getComments().doubleValue() : 0.0;
@@ -208,7 +212,7 @@ public class EvidenceValidator {
         // Facebook: Nền tảng hướng người theo dõi (Follower-based platform), bài đăng thường là text/ảnh
         // Luôn tính ER theo Followers để đảm bảo tính nhất quán trên nền tảng Facebook
         erMethod = ErMethod.BY_FOLLOWERS;
-        if (followers > 0) {
+        if (followers > 0 && hasAnyInteractionObservation) {
           rawEr = (totalInteractions / postCount) / followers;
         } else {
           rawEr = Double.NaN;
@@ -223,26 +227,27 @@ public class EvidenceValidator {
           // Có bài đăng hỗ trợ Views: Chỉ tính ER trên chính tập bài có Views để tránh phóng đại tương tác
           erMethod = ErMethod.BY_VIEWS;
           viewsSum = postsWithViews.stream().mapToDouble(p -> p.getViews().doubleValue()).sum();
+          boolean hasViewInteractionObservation = postsWithViews.stream()
+              .anyMatch(p -> p.getLikes() != null || p.getComments() != null || p.getShares() != null);
           double interactionsOnViewPosts = postsWithViews.stream().mapToDouble(p ->
               (p.getLikes() != null ? p.getLikes().doubleValue() : 0.0) +
               (p.getComments() != null ? p.getComments().doubleValue() : 0.0) +
               (p.getShares() != null ? p.getShares().doubleValue() : 0.0)
           ).sum();
 
-          if (viewsSum > 0) {
+          if (viewsSum > 0 && hasViewInteractionObservation) {
             rawEr = interactionsOnViewPosts / viewsSum;
           } else {
-            // viewsSum == 0: Tất cả video đều có 0 lượt xem thực tế
-            // Phép chia 0 / 0 là bất định toán học (indeterminate form), không được tự ý gán 0.0
+            // viewsSum == 0 hoặc thiếu hoàn toàn interaction metrics -> không tự ý gán 0.0
             rawEr = Double.NaN;
           }
         } else {
           // TẤT CẢ bài đều không có trường views (ví dụ bài ảnh Instagram photo)
           erMethod = ErMethod.BY_FOLLOWERS;
-          if (followers > 0) {
+          if (followers > 0 && hasAnyInteractionObservation) {
             rawEr = (totalInteractions / postCount) / followers;
           } else {
-            rawEr = Double.NaN; // Không có followers để chia
+            rawEr = Double.NaN; // Không có followers hoặc không có interaction observations
           }
         }
       }
@@ -283,17 +288,17 @@ public class EvidenceValidator {
     if (posts != null && !posts.isEmpty()) {
       if (!postsWithViews.isEmpty() && !isFacebook) {
         double avgViews = viewsSum / postsWithViews.size();
-        rawVr = (followers > 0) ? (avgViews / followers) : 0.0;
+        rawVr = (followers > 0) ? (avgViews / followers) : Double.NaN;
       } else if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && !isFacebook) {
         // Fallback tạm thời: Dùng avgViews cấp kênh trong CSDL (lưu ý: chưa có metadata metricSource/metricWindow để xác minh cùng cửa sổ)
-        rawVr = (followers > 0) ? (cand.getAvgViews().doubleValue() / followers) : 0.0;
+        rawVr = (followers > 0) ? (cand.getAvgViews().doubleValue() / followers) : Double.NaN;
         unverifiedViewProvenance = true;
       } else {
         // Không có bài nào hỗ trợ views (ví dụ bài ảnh hoặc Facebook không có video views)
         rawVr = Double.NaN;
       }
     } else if (cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && !isFacebook) {
-      rawVr = (followers > 0) ? (cand.getAvgViews().doubleValue() / followers) : 0.0;
+      rawVr = (followers > 0) ? (cand.getAvgViews().doubleValue() / followers) : Double.NaN;
     } else {
       rawVr = Double.NaN;
     }
@@ -429,7 +434,9 @@ public class EvidenceValidator {
         }
       }
       if (Double.isNaN(rawVr)) {
-        if (postCount == 0 && (cand.getAvgViews() == null || cand.getAvgViews().doubleValue() <= 0)) {
+        if (followers <= 0) {
+          reasons.add("VR_UNAVAILABLE_MISSING_FOLLOWER_DENOMINATOR: Positive followers required for View-to-Follower Ratio");
+        } else if (postCount == 0 && (cand.getAvgViews() == null || cand.getAvgViews().doubleValue() <= 0)) {
           reasons.add("NO_POST_EVIDENCE: Creator has no posts in database and lacks aggregate view metrics");
         } else {
           String platformUpper = cand.getPlatform() != null ? cand.getPlatform().trim().toUpperCase() : "";

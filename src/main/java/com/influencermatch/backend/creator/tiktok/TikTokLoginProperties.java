@@ -38,13 +38,14 @@ public record TikTokLoginProperties(
   public String authorizationUrl(String state) {
     requireConfigured();
     return UriComponentsBuilder.fromUriString("https://www.tiktok.com/v2/auth/authorize/")
-        .queryParam("client_key", clientKey)
+        .queryParam("client_key", "{clientKey}")
         .queryParam("response_type", "code")
-        .queryParam("scope", "user.info.basic,user.info.profile")
-        .queryParam("redirect_uri", redirectUri)
-        .queryParam("state", state)
-        .build()
+        .queryParam("scope", "{scope}")
+        .queryParam("redirect_uri", "{redirectUri}")
+        .queryParam("state", "{state}")
         .encode()
+        .buildAndExpand(
+            Map.of("clientKey", clientKey, "scope", scope, "redirectUri", redirectUri, "state", state))
         .toUriString();
   }
 

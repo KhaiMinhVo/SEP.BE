@@ -135,7 +135,7 @@ class OAuthFlowCompatibilityPostgresIntegrationTest extends DirectInstagramTestS
   }
 
   @Test
-  void differentCanonicalNamespaceNeverRewritesTheExistingChannelOrMatchesByHandle()
+  void distinctCanonicalIdCreatesItsOwnChannelAndPreservesTheOriginalById()
       throws Exception {
     var fb = facebookStart();
     facebookCallback(fb, 200);
@@ -154,8 +154,11 @@ class OAuthFlowCompatibilityPostgresIntegrationTest extends DirectInstagramTestS
     when(instagram.verify(any())).thenReturn(mismatched);
     var ig = readyDirect();
     long count = creators.count();
-    confirm(ig, "17849999999999", 409);
-    assertThat(creators.count()).isEqualTo(count);
+    var connected = confirm(ig, "17849999999999", 200).path("data");
+    assertThat(creators.count()).isEqualTo(count + 1);
+    assertThat(connected.path("creatorId").asText()).isNotEqualTo(channel.getId().toString());
+    assertThat(creators.findByPlatformAndExternalId("INSTAGRAM", "17849999999999").orElseThrow()
+        .getId().toString()).isEqualTo(connected.path("creatorId").asText());
     assertThat(
             jdbc.queryForObject(
                 "select to_jsonb(c)::text from creator c where id=?",

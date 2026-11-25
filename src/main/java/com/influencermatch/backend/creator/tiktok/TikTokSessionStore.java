@@ -186,14 +186,22 @@ public class TikTokSessionStore {
         session.getId(), config.authorizationUrl(state), session.getExpiresAt());
   }
 
+  record ResolutionTarget(boolean standalone, String externalId) {}
+
+  static boolean isStandalone(TikTokOAuthSession session) {
+    return session.getTargetCreator() == null
+        && session.getInvitation() == null
+        && session.getCooperationInvitationId() == null;
+  }
+
   @Transactional(readOnly = true)
-  public String expectedExternalId(UUID id) {
+  public ResolutionTarget resolutionTarget(UUID id) {
     var session =
         sessions.findById(id).orElseThrow(() -> new NotFoundException("TikTok session not found"));
     var target = session.getTargetCreator();
-    return target != null && Boolean.TRUE.equals(target.getIsStableId())
-        ? target.getExternalId()
-        : null;
+    String externalId = target != null && Boolean.TRUE.equals(target.getIsStableId())
+        ? target.getExternalId() : null;
+    return new ResolutionTarget(isStandalone(session), externalId);
   }
 
   public void assertCooperationTarget(TikTokOAuthSession session) {

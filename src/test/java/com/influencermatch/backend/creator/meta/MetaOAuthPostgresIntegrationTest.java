@@ -296,9 +296,13 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
     assertUnowned();
   }
 
-  @Test
-  void facebookPageIdMismatchDoesNotClaimExistingChannelByName() throws Exception {
+  @ParameterizedTest
+  @ValueSource(strings = {"FACEBOOK", "INSTAGRAM"})
+  void createsCanonicalChannelInsteadOfLinkingAnotherRecordWithTheSameName(String platform)
+      throws Exception {
+    channel = channel(platform);
     var base = proof();
+    String newId = Long.toUnsignedString(UUID.randomUUID().getMostSignificantBits());
     var mismatch =
         new MetaDtos.Proof(
             base.subject(),
@@ -307,18 +311,33 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
             base.scopes(),
             List.of(
                 new MetaDtos.Asset(
-                    "1382893324916644",
-                    "1382893324916644",
+                    newId,
+                    "FACEBOOK".equals(platform) ? newId : "111",
                     "InfluenceMatch",
-                    "same-name",
+                    null,
                     Set.of("MANAGE"))));
     when(graph.exchange(anyString(), anyString())).thenReturn(mismatch);
     when(graph.verify(anyString(), anyString())).thenReturn(mismatch);
 
     var session = ready(creator);
     var choices = call(creator, get(view(session)), null, 200).path("data").path("accounts");
-    assertThat(choices.get(0).path("matchStatus").asText()).isEqualTo("UNMATCHED");
-    confirm(creator, session, "1382893324916644", 409);
+    assertThat(choices.get(0).path("matchStatus").asText()).isEqualTo("CAN_CREATE");
+    assertThat(creators.findByPlatformAndExternalId(platform, newId)).isEmpty();
+    var connected = confirm(creator, session, newId, 200).path("data");
+    var added = creators.findByPlatformAndExternalId(platform, newId).orElseThrow();
+    assertThat(connected.path("creatorId").asText()).isEqualTo(added.getId().toString());
+    assertThat(added.getDisplayName()).isEqualTo("InfluenceMatch");
+    assertThat(added.getUserName()).isEqualTo(newId);
+    assertThat(added.getIsStableId()).isTrue();
+    assertThat(added.getSourceType().name()).isEqualTo("AUTHORIZED");
+    assertThat(verifications.findByCreatorIdAndStatus(added.getId(), "ACTIVE"))
+        .singleElement().satisfies(proof -> assertThat(proof.getVerificationMethod()).isEqualTo("META_OAUTH"));
+    assertThat(call(creator, get("/creators/portal/accounts"), null, 200).path("data"))
+        .anySatisfy(account -> {
+          assertThat(account.path("id").asText()).isEqualTo(added.getId().toString());
+          assertThat(account.path("verifiedByInfluencerMatch").asBoolean()).isTrue();
+        });
+    confirm(creator, session, newId, 409);
     assertUnowned();
   }
 
@@ -509,30 +528,22 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"unmatched", "unstable", "not-listed", "wrong-platform"})
-  void neverCreatesChannelsOrMatchesByUsername(String reason) throws Exception {
+  @ValueSource(strings = {"unstable", "not-listed", "invalid-id", "missing-manage"})
+  void rejectsCreationOrLinkingWithoutEligibleProof(String reason) throws Exception {
+    if (reason.equals("invalid-id")) {
+      channel.setExternalId("unstable-" + channel.getExternalId());
+      creators.saveAndFlush(channel);
+    }
     var s = ready(creator);
     long count = creators.count();
-    switch (reason) {
-      case "unmatched" -> {
-        channel.setExternalId("different-public-id");
-        creators.saveAndFlush(channel);
-      }
-      case "unstable" -> {
-        channel.setIsStableId(false);
-        creators.saveAndFlush(channel);
-      }
-      case "wrong-platform" -> {
-        channel.setPlatform("INSTAGRAM");
-        creators.saveAndFlush(channel);
-      }
+    var original = channel.getExternalId();
+    if (reason.equals("unstable")) {
+      channel.setIsStableId(false);
+      creators.saveAndFlush(channel);
     }
-    var original = proof().assets().getFirst().id();
-    // For changed-ID case the original ID remains in the encrypted snapshot, not the current
-    // profile.
-    if (reason.equals("unmatched")) {
-      var choices = call(creator, get(view(s)), null, 200).path("data").path("accounts");
-      original = choices.get(0).path("accountId").asText();
+    if (reason.equals("invalid-id") || reason.equals("missing-manage")) {
+      channel.setExternalId("old-" + original);
+      creators.saveAndFlush(channel);
       when(graph.verify(anyString(), anyString()))
           .thenReturn(
               new MetaDtos.Proof(
@@ -540,7 +551,8 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
                   "private-user-token",
                   now.plusSeconds(3600),
                   proof().scopes(),
-                  List.of(new MetaDtos.Asset(original, original, "Meta", "same-name"))));
+                  List.of(new MetaDtos.Asset(original, original, "Meta", "same-name",
+                      reason.equals("invalid-id") ? Set.of("MANAGE") : Set.of("ANALYZE")))));
     }
     confirm(creator, s, reason.equals("not-listed") ? "not-granted-id" : original, 409);
     assertThat(creators.count()).isEqualTo(count);
@@ -753,6 +765,31 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
     assertUnowned();
   }
 
+  @Test
+  void invitationCannotCreateAnotherGrantedPage() throws Exception {
+    String token = UUID.randomUUID().toString();
+    var invitation =
+        invite(creator.getEmail(), LocalDateTime.ofInstant(now.plusSeconds(3600), ZoneOffset.UTC));
+    invitation.setTokenHash(
+        com.influencermatch.backend.creator.service.CreatorInvitationService.hashToken(token));
+    invitations.saveAndFlush(invitation);
+    String otherPage = Long.toUnsignedString(UUID.randomUUID().getMostSignificantBits());
+    var base = proof();
+    var wrongPage = new MetaDtos.Proof(base.subject(), base.token(), base.tokenExpiresAt(), base.scopes(),
+        List.of(new MetaDtos.Asset(otherPage, otherPage, "Other Page", null, Set.of("MANAGE"))));
+    when(graph.exchange(anyString(), anyString())).thenReturn(wrongPage);
+    when(graph.verify(anyString(), anyString())).thenReturn(wrongPage);
+    var s = start(creator, Map.of("platform", "FACEBOOK", "invitationToken", token));
+    callback(s, 200);
+    var choice = call(creator, get(view(s)), null, 200).path("data").path("accounts").get(0);
+    assertThat(choice.path("matchStatus").asText()).isEqualTo("UNAVAILABLE");
+    assertThat(choice.path("matchReason").asText()).isEqualTo("TARGET_MISMATCH");
+    confirm(creator, s, otherPage, 409);
+    assertThat(creators.findByPlatformAndExternalId("FACEBOOK", otherPage)).isEmpty();
+    assertThat(invitations.findById(invitation.getId()).orElseThrow().getStatus()).isEqualTo("PENDING");
+    assertUnowned();
+  }
+
   void setOwner(User user) {
     var master =
         masters.saveAndFlush(
@@ -798,6 +835,11 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
   void concurrentConfirmOnOneSessionHasOneWinnerAndNoDuplicateEvidence() throws Exception {
     channel = channel("INSTAGRAM");
     var s = ready(creator);
+    String externalId = channel.getExternalId();
+    var freshProof = proof();
+    channel.setExternalId("old-" + externalId);
+    creators.saveAndFlush(channel);
+    when(graph.verify(anyString(), anyString())).thenReturn(freshProof);
     var ready = new CountDownLatch(2);
     var gate = new CountDownLatch(1);
     try (var pool = Executors.newFixedThreadPool(2)) {
@@ -810,7 +852,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
                         .header("Authorization", "Bearer " + jwt.generateToken(creator))
                         .contentType("application/json")
                         .content(
-                            json.writeValueAsBytes(Map.of("accountId", channel.getExternalId()))))
+                            json.writeValueAsBytes(Map.of("accountId", externalId))))
                 .andReturn()
                 .getResponse()
                 .getStatus();
@@ -822,13 +864,14 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
       assertThat(List.of(a.get(20, TimeUnit.SECONDS), b.get(20, TimeUnit.SECONDS)))
           .containsExactlyInAnyOrder(200, 409);
     }
-    assertThat(verifications.findByCreatorIdAndStatus(channel.getId(), "ACTIVE")).hasSize(1);
+    UUID addedId = creators.findByPlatformAndExternalId("INSTAGRAM", externalId).orElseThrow().getId();
+    assertThat(verifications.findByCreatorIdAndStatus(addedId, "ACTIVE")).hasSize(1);
     assertThat(
             jdbc.queryForObject(
                 "select count(*) from creator_identity_audit where account_id=? and"
                     + " event_type='LINK_META_ACCOUNT'",
                 Long.class,
-                channel.getId()))
+                addedId))
         .isEqualTo(1);
   }
 
@@ -849,19 +892,27 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"INSTAGRAM"})
-  void auditFailureRollsBackMasterOwnershipEvidenceAndSessionConsumption(String platform)
+  @ValueSource(booleans = {false, true})
+  void auditFailureRollsBackMasterOwnershipEvidenceAndSessionConsumption(boolean create)
       throws Exception {
-    channel = channel(platform);
+    channel = channel("INSTAGRAM");
+    String externalId = channel.getExternalId();
+    var freshProof = proof();
     var s = ready(creator);
+    if (create) {
+      channel.setExternalId("old-" + externalId);
+      creators.saveAndFlush(channel);
+      when(graph.verify(anyString(), anyString())).thenReturn(freshProof);
+    }
     String suffix = UUID.randomUUID().toString().replace("-", "");
     String fn = "meta_fail_" + suffix, tr = "meta_fail_tr_" + suffix;
     jdbc.execute(
         "create function "
             + fn
-            + "() returns trigger language plpgsql as $$ begin if new.account_id='"
-            + channel.getId()
-            + "'::uuid then raise exception 'Audit failed'; end if; return new; end $$");
+            + "() returns trigger language plpgsql as $$ begin if exists "
+            + "(select 1 from creator where id=new.account_id and platform='INSTAGRAM' and external_id='"
+            + externalId
+            + "') then raise exception 'Audit failed'; end if; return new; end $$");
     jdbc.execute(
         "create trigger "
             + tr
@@ -869,8 +920,9 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
             + fn
             + "()");
     try {
-      confirm(creator, s, channel.getExternalId(), 500);
+      confirm(creator, s, externalId, 500);
       assertUnowned();
+      if (create) assertThat(creators.findByPlatformAndExternalId("INSTAGRAM", externalId)).isEmpty();
       assertThat(masters.findByUserId(creator.getId())).isEmpty();
       assertThat(sessions.findById(s.id()).orElseThrow().getStatus()).isEqualTo("READY");
       assertThat(sessions.findById(s.id()).orElseThrow().getPayloadCiphertext()).isNotNull();
@@ -878,7 +930,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
       jdbc.execute("drop trigger " + tr + " on creator_identity_audit");
       jdbc.execute("drop function " + fn + "()");
     }
-    confirm(creator, s, channel.getExternalId(), 200);
+    confirm(creator, s, externalId, 200);
   }
 
   @ParameterizedTest
@@ -955,11 +1007,19 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
     assertUnowned();
   }
 
-  @Test
-  void twoDifferentCreatorsCompetingForOneChannelHaveOneOwner() throws Exception {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void twoDifferentCreatorsCompetingForOneChannelHaveOneOwner(boolean create) throws Exception {
     channel = channel("INSTAGRAM");
     var a = ready(creator);
     var b = ready(other);
+    String externalId = channel.getExternalId();
+    if (create) {
+      var freshProof = proof();
+      channel.setExternalId("old-" + externalId);
+      creators.saveAndFlush(channel);
+      when(graph.verify(anyString(), anyString())).thenReturn(freshProof);
+    }
     var ready = new CountDownLatch(2);
     var gate = new CountDownLatch(1);
     try (var pool = Executors.newFixedThreadPool(2)) {
@@ -978,7 +1038,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
                               .contentType("application/json")
                               .content(
                                   json.writeValueAsBytes(
-                                      Map.of("accountId", channel.getExternalId()))))
+                                      Map.of("accountId", externalId))))
                       .andReturn()
                       .getResponse()
                       .getStatus();
@@ -992,7 +1052,8 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
                   futures.get(1).get(20, TimeUnit.SECONDS)))
           .containsExactlyInAnyOrder(200, 409);
     }
-    assertThat(verifications.findByCreatorIdAndStatus(channel.getId(), "ACTIVE")).hasSize(1);
+    UUID linkedId = creators.findByPlatformAndExternalId("INSTAGRAM", externalId).orElseThrow().getId();
+    assertThat(verifications.findByCreatorIdAndStatus(linkedId, "ACTIVE")).hasSize(1);
     assertThat(
             jdbc.queryForObject(
                 "select count(*) from creator_master where user_id in (?,?)",
@@ -1005,7 +1066,7 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
                 "select count(*) from audit_log where entity_id=? and"
                     + " action='REJECT_CREATOR_INVITATION_OR_OWNERSHIP'",
                 Long.class,
-                channel.getId()))
+                linkedId))
         .isEqualTo(1);
   }
 

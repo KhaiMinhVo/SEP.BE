@@ -255,7 +255,7 @@ Claim email uses durable outbox and async delivery, with status/retry APIs. Conf
 
 ## Facebook Page and Instagram Professional verification (Meta OAuth)
 
-This connects an already signed-in, ACTIVE, email-verified Creator to an existing database channel.
+This connects an already signed-in, ACTIVE, email-verified Creator to a Meta channel.
 It does not register/sign in a user. Manual Claim remains available. Facebook personal profiles,
 Instagram personal accounts, real TikTok/YouTube adapters and metrics collection are outside this feature.
 
@@ -325,7 +325,8 @@ only the User Access Token, does not request Page tokens, and follows pagination
    JSON with session ID and `READY` only; it does not expose account choices/tokens or grant ownership.
 5. In Bruno with the same Creator JWT, call
    `GET /creators/portal/accounts/connect/meta/sessions/{sessionId}`. Inspect sanitized choices:
-   `AVAILABLE`, `ALREADY_LINKED`, `UNMATCHED` or `UNAVAILABLE`. Other users receive 404.
+   `AVAILABLE`, `CAN_CREATE`, `ALREADY_LINKED`, `INSUFFICIENT_EVIDENCE`, `UNMATCHED` or
+   `UNAVAILABLE`. Other users receive 404.
 6. Confirm one account using `POST /creators/portal/accounts/connect/meta/sessions/{sessionId}/confirm`:
 
    ```json
@@ -334,8 +335,11 @@ only the User Access Token, does not request Page tokens, and follows pagination
 
    The backend rechecks Meta outside database locks, then validates current User/authVersion/permission,
    stable channel ID, invitation email/expiry and ownership under locks. Success returns `AUTHORIZED`,
-   reuses/creates the CreatorMaster, synchronizes relationships and records `META_OAUTH` evidence/audit.
-   An invitation never creates a User; general selection cannot bypass another email's active invitation.
+   reuses/creates the CreatorMaster, synchronizes relationships and records OAuth evidence and audit.
+   For `CAN_CREATE` in a standalone session, confirmation can create a minimal channel from the
+   verified provider ID and metadata. Facebook Page confirmation requires `MANAGE`. Targeted and
+   invitation sessions require the existing target channel. General selection cannot bypass another
+   email's active invitation.
 7. Repeat callback/confirm to check 409 replay protection. Another Master's channel returns 409 and
    durable rejection audit without transfer. Nonmatching IDs return `409 META_ACCOUNT_NOT_MATCHED`;
    use manual Claim instead. Changing permissions/status/authVersion before confirm blocks the operation.
@@ -466,8 +470,8 @@ and `reason` for either decision in `PATCH /data/creator-claims/{id}/review`.
    `GET /api/v1/creators/portal/accounts/connect/meta/sessions/{sessionId}`. It reports
    `oauthFlow=INSTAGRAM_LOGIN`, platform INSTAGRAM and one sanitized account with no `pageId`.
 6. Canonical ID is `user_id` from the authenticated Instagram account, independently of app-scoped
-   `id`/subject or username. Only exact stable IDs already in the database can match. `UNMATCHED`
-   requires manual Claim or an explicitly prepared local fixture, never auto-creation/ID rewriting.
+   `id`/subject or username. An exact stable ID matches a stored channel. A missing channel can
+   be created from verified provider evidence on confirmation of a standalone session.
 7. Confirm through the existing `POST .../sessions/{sessionId}/confirm` using
    `{"accountId":"<canonical Instagram ID>"}`. The adapter rechecks Instagram before the transaction
    locks and fresh permission/authVersion/invitation/owner checks. Success returns AUTHORIZED, stores
@@ -537,8 +541,11 @@ create a tunnel or restart the backend for you.
    pending, unexpired and match your email; it is consumed only on a successful ownership grant.
 3. Open `authorizationUrl` in the same browser and consent using the Sandbox target account.
 4. Public GET `/api/v1/integrations/tiktok/callback` validates state/cookie, exchanges code and
-   obtains TikTok User Info. It calls `POST {CRAWLER_SERVICE_URL}/tiktok/resolve-author` with
-   `{"username":"<OAuth username>","auto_update_staging":false}`, without an expected ID.
+   obtains TikTok User Info. For a standalone session it calls
+   `POST {CRAWLER_SERVICE_URL}/tiktok/resolve-author` with
+   `{"username":"<OAuth username>","auto_update_staging":false}`. A targeted session also passes its
+   expected stable ID and requires the crawler to confirm it explicitly. Use a trusted connection
+   from the backend to the crawler before testing this flow on a shared deployment.
    The crawler must return `status=success`, `platform=TIKTOK`, positive numeric `author_id` (1–20 digits),
    `id_type=TIKTOK_USER_ID`, actual `resolved_username` and UTC `observed_at`. Username normalization
    trims, removes one leading `@` and lowercases. Observations may be at most 90 seconds old or
@@ -556,8 +563,9 @@ create a tunnel or restart the backend for you.
 6. A specified channel/invitation must match the author ID. Otherwise callback returns `READY` and
    GET `/api/v1/creators/portal/accounts/connect/tiktok/sessions/{id}` reports `TARGET_MISMATCH`,
    without creating a channel or consuming the invitation. Completed sessions retain only linked IDs;
-   another user's session returns 404. Crawler HTTP/timeout/malformed/stale/mismatched results return
-   `502 TIKTOK_IDENTITY_RESOLUTION_FAILED`. There is no username-only fallback or automatic retry.
+   another user's session returns 404. When the crawler lookup cannot establish the identity, the
+   session returns `READY` so the Creator can try again or use manual verification for a known channel.
+   There is no username-only fallback or automatic retry.
 
 V23 adds bindings scoped by `(SANDBOX, client key, open_id)` and prevents rebinding the identity or
 channel within the same app. Legacy/mock identities are never imported as trusted bindings. Old

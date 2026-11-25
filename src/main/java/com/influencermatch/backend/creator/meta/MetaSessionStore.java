@@ -1,6 +1,7 @@
 package com.influencermatch.backend.creator.meta;
 
 import com.influencermatch.backend.creator.model.*;
+import com.influencermatch.backend.creator.enums.CreatorSourceType;
 import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.creator.service.CreatorInvitationService;
 import com.influencermatch.backend.cooperation.CooperationOnboarding;
@@ -32,6 +33,7 @@ public class MetaSessionStore {
 
   private final MetaOAuthSessionRepository sessions;
   private final CreatorRepository creators;
+  private final CreatorProviderIdentityRepository identities;
   private final CreatorInvitationRepository invitations;
   private final UserRepository users;
   private final RolePermissionOverrideRepository overrides;
@@ -48,6 +50,20 @@ public class MetaSessionStore {
 
   public Instant now() {
     return clock.instant();
+  }
+
+  static boolean isStandalone(MetaOAuthSession session) {
+    return session.getTargetCreator() == null
+        && session.getInvitation() == null
+        && session.getCooperationInvitationId() == null;
+  }
+
+  static boolean hasAssetAccess(String platform, MetaDtos.Asset asset) {
+    return !"FACEBOOK".equals(platform) || asset.tasks().contains("MANAGE");
+  }
+
+  static boolean isCanonicalAssetId(String id) {
+    return id != null && id.matches("[1-9][0-9]{0,254}");
   }
 
   public void assertUser(User user, long version) {
@@ -339,30 +355,31 @@ public class MetaSessionStore {
                 : null;
         String match;
         String reason = null;
-        if (channel == null) {
-          match = channelRecord == null ? "UNMATCHED" : "INSUFFICIENT_EVIDENCE";
-          reason = channelRecord == null ? "CHANNEL_NOT_FOUND" : "UNSTABLE_CHANNEL_ID";
-        } else if (channel.getMaster() != null
-            && !channel.getMaster().getUser().getId().equals(session.getUser().getId())) {
-          match = "UNAVAILABLE";
-          reason = "OWNERSHIP_CONFLICT";
-        } else if ("FACEBOOK".equals(session.getPlatform())
-            && !asset.tasks().contains("MANAGE")) {
-          match = "INSUFFICIENT_EVIDENCE";
-          reason = "MISSING_PAGE_MANAGEMENT";
-        } else if (channel.getMaster() == null) {
-          match = "AVAILABLE";
-        } else if (channel.getMaster().getUser().getId().equals(session.getUser().getId())) {
-          match = "ALREADY_LINKED";
-        } else {
-          match = "UNAVAILABLE";
-          reason = "OWNERSHIP_CONFLICT";
-        }
-        if (channel != null
-            && session.getTargetCreator() != null
-            && !channel.getId().equals(session.getTargetCreator().getId())) {
+        if (!isStandalone(session)
+            && (channelRecord == null || session.getTargetCreator() == null
+                || !channelRecord.getId().equals(session.getTargetCreator().getId()))) {
           match = "UNAVAILABLE";
           reason = "TARGET_MISMATCH";
+        } else if (channelRecord != null && channel == null) {
+          match = "INSUFFICIENT_EVIDENCE";
+          reason = "UNSTABLE_CHANNEL_ID";
+        } else if ((channel != null && (channel.getMaster() == null
+                ? channel.getSourceType() == CreatorSourceType.AUTHORIZED
+                : !channel.getMaster().getUser().getId().equals(session.getUser().getId())))
+            || (channel == null && identities
+                .findByProviderAndProviderUserId(session.getPlatform(), asset.id()).isPresent())) {
+          match = "UNAVAILABLE";
+          reason = "OWNERSHIP_CONFLICT";
+        } else if (!hasAssetAccess(session.getPlatform(), asset)) {
+          match = "INSUFFICIENT_EVIDENCE";
+          reason = "MISSING_PAGE_MANAGEMENT";
+        } else if (channel == null) {
+          match = isCanonicalAssetId(asset.id()) ? "CAN_CREATE" : "UNMATCHED";
+          if ("UNMATCHED".equals(match)) reason = "CHANNEL_NOT_FOUND";
+        } else if (channel.getMaster() == null) {
+          match = "AVAILABLE";
+        } else {
+          match = "ALREADY_LINKED";
         }
         accounts.add(
             new MetaDtos.Account(

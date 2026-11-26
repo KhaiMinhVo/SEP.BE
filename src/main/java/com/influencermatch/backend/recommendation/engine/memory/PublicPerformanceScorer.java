@@ -34,6 +34,12 @@ public class PublicPerformanceScorer {
     boolean isStabImputed = false;
 
     if (p0 != null) {
+      if (p0.isNotScorable() || p0.isDataError()
+          || Double.isNaN(p0.erNormalized()) || Double.isInfinite(p0.erNormalized())
+          || Double.isNaN(p0.vrNormalized()) || Double.isInfinite(p0.vrNormalized())) {
+        throw new IllegalArgumentException(
+            "SM2_NOT_SCORABLE: Cannot score candidate without finite ER and VR normalized features");
+      }
       erNorm = p0.erNormalized();
       vrNorm = p0.vrNormalized();
       stabNorm = p0.stabNormalized();
@@ -41,7 +47,7 @@ public class PublicPerformanceScorer {
       isStabImputed = p0.isStabImputed();
     } else {
       // Fallback khi p0 chưa được tính trước (ví dụ standalone direct call)
-      double rawEr = 0.0;
+      double rawEr;
       if (cand != null && cand.getAvgViews() != null && cand.getAvgViews().doubleValue() > 0 && cand.getAvgLikes() != null) {
         rawEr = cand.getAvgLikes().doubleValue() / cand.getAvgViews().doubleValue();
       } else if (cand != null && cand.getEngagementRate() != null) {
@@ -54,17 +60,25 @@ public class PublicPerformanceScorer {
               String.format("INVALID_ER_OUTLIER: engagementRate exceeds 10.0 (%f). Sanity bound violated.", v));
         }
         rawEr = v;
+      } else {
+        throw new IllegalArgumentException(
+            "ER_UNAVAILABLE_MISSING_EVIDENCE: Engagement Rate or view/like evidence required");
       }
       String platform = (cand != null) ? cand.getPlatform() : "TIKTOK";
       double kEr = normalizer.resolveKEr(platform, ErMethod.BY_VIEWS);
       erNorm = normalizer.normalize(rawEr, kEr);
 
-      double rawVr = 0.0;
       long followers = (cand != null && cand.getFollowers() != null) ? cand.getFollowers() : 0L;
-      double avgViews = (cand != null && cand.getAvgViews() != null) ? cand.getAvgViews().doubleValue() : 0.0;
-      if (followers > 0 && avgViews > 0) {
-        rawVr = avgViews / followers;
+      if (followers <= 0) {
+        throw new IllegalArgumentException(
+            "VR_UNAVAILABLE_MISSING_FOLLOWER_DENOMINATOR: Positive followers required for View-to-Follower Ratio");
       }
+      if (cand == null || cand.getAvgViews() == null) {
+        throw new IllegalArgumentException(
+            "VR_UNAVAILABLE_MISSING_VIEW_EVIDENCE: avgViews required for View-to-Follower Ratio");
+      }
+      double avgViews = cand.getAvgViews().doubleValue();
+      double rawVr = avgViews / followers;
       double kVr = normalizer.resolveKVr(platform);
       vrNorm = normalizer.normalize(rawVr, kVr);
 

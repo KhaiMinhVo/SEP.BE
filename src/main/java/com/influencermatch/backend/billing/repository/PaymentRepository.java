@@ -48,7 +48,6 @@ public interface PaymentRepository
 
   @Query("select p from Payment p "
       + "where p.status = com.influencermatch.backend.billing.enums.PaymentStatus.PENDING "
-      + "and p.paymentGateway != 'PAYOS' "
       + "and p.createdAt <= :expiredAt "
       + "order by p.createdAt asc")
   List<Payment> findExpiredPendingCheckouts(

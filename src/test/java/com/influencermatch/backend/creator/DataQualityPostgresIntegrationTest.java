@@ -66,7 +66,7 @@ class DataQualityPostgresIntegrationTest {
   }
   PublicCreatorMetric metric(Creator c, String type, String confidence, LocalDateTime at) {
     return metrics.saveAndFlush(PublicCreatorMetric.builder().creator(c).creatorType(type)
-        .dataConfidence(confidence == null ? null : new BigDecimal(confidence)).niche("Original")
+        .dataConfidence(confidence == null ? null : new BigDecimal(confidence)).niche("Làm đẹp & Mỹ phẩm")
         .contentSummary("Sample content").collectedAt(at).freshnessStatus(MetricDataStatus.FRESH).build());
   }
   MvcResult call(User user, MockHttpServletRequestBuilder request, String body, int status) throws Exception {
@@ -252,10 +252,20 @@ class DataQualityPostgresIntegrationTest {
   @org.junit.jupiter.params.provider.CsvSource({"0,400","120,200","121,400"})
   void nicheLengthAfterTrimmingAndRejectedRequestsAreAtomic(int length,int expected) throws Exception {
     var reviewer=user(Role.DATA_MANAGER);var m=metric(creator(),"KOC","0.2",LocalDateTime.now());
-    String niche=" "+"x".repeat(length)+" ";
+    String rawNiche;
+    if (length == 120) {
+      String partA = "a".repeat(60);
+      String partB = "b".repeat(58);
+      jdbc.update("INSERT INTO niche_catalog (name, active) VALUES (?, true) ON CONFLICT (LOWER(name)) DO NOTHING", partA);
+      jdbc.update("INSERT INTO niche_catalog (name, active) VALUES (?, true) ON CONFLICT (LOWER(name)) DO NOTHING", partB);
+      rawNiche = partA + ", " + partB;
+    } else {
+      rawNiche = "x".repeat(length);
+    }
+    String niche=" "+rawNiche+" ";
     call(reviewer,put(path(m)),json.writeValueAsString(Map.of("niche",niche)),expected);
     var stored=metrics.findById(m.getId()).orElseThrow();
-    assertThat(stored.getNiche()).isEqualTo(expected==200?niche.trim():"Original");
+    assertThat(stored.getNiche()).isEqualTo(expected==200?niche.trim():"Làm đẹp & Mỹ phẩm");
     assertThat(stored.getDataConfidence()).isEqualByComparingTo("0.2");
     assertThat(stored.getQualityReviewedAt()!=null).isEqualTo(expected==200);
     assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id=? AND action='APPROVE_DATA_QUALITY'",Integer.class,m.getId())).isEqualTo(expected==200?1:0);
@@ -265,7 +275,7 @@ class DataQualityPostgresIntegrationTest {
     var reviewer=user(Role.DATA_MANAGER);var m=metric(creator(),"KOC","0.4",LocalDateTime.now());
     call(reviewer,put(path(m)),"{}",200);
     var stored=metrics.findById(m.getId()).orElseThrow();
-    assertThat(stored.getNiche()).isEqualTo("Original");
+    assertThat(stored.getNiche()).isEqualTo("Làm đẹp & Mỹ phẩm");
     assertThat(stored.getContentSummary()).isEqualTo("Sample content");
     assertThat(stored.getDataConfidence()).isEqualByComparingTo("0.4");
     assertThat(stored.getQualityReviewedAt()).isNotNull();

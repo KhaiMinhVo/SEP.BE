@@ -157,6 +157,8 @@ class CreatorCatalogPostgresIntegrationTest extends PostgresApiTestSupport {
         masters.saveAndFlush(
             CreatorMaster.builder().user(owner).canonicalName("Unrelated canonical name").build());
     linked.setMaster(master);
+    linked.setSourceType(com.influencermatch.backend.creator.enums.CreatorSourceType.AUTHORIZED);
+    linked.setAuthorizedAt(LocalDateTime.now());
     creators.saveAndFlush(linked);
 
     for (String query : List.of(externalId, userName)) {
@@ -431,8 +433,11 @@ class CreatorCatalogPostgresIntegrationTest extends PostgresApiTestSupport {
           "insert into " + schema + ".\"user\" select * from public.\"user\" where id in (?,?)",
           dm.getId(),
           owner.getId());
+      String creatorCols = jdbc.queryForObject(
+          "select string_agg(column_name, ',') from information_schema.columns where table_schema=? and table_name='creator' and is_generated='NEVER'",
+          String.class, schema);
       jdbc.update(
-          "insert into " + schema + ".creator select * from public.creator where id=?",
+          "insert into " + schema + ".creator(" + creatorCols + ") select " + creatorCols + " from public.creator where id=?",
           channel.getId());
       jdbc.update(
           "insert into "
@@ -571,6 +576,7 @@ class CreatorCatalogPostgresIntegrationTest extends PostgresApiTestSupport {
       throws Exception {
     var brand = account(Role.BRAND);
     var campaign = createCampaign(brand, createBrand(brand));
+    evaluatedShortlist(brand, campaign, List.of(channel.getId()));
     call(
         brand,
         post("/campaigns/" + campaign + "/shortlist"),

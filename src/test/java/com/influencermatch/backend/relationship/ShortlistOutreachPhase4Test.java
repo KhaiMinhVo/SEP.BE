@@ -55,6 +55,7 @@ class ShortlistOutreachPhase4Test extends PostgresApiTestSupport {
                 .path("data")
                 .path("id")
                 .asText());
+    evaluatedShortlist(brand, campaign, List.of(c.getId()));
   }
 
   Map<String, Object> body() {

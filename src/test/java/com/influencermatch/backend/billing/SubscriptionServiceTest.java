@@ -68,7 +68,9 @@ class SubscriptionServiceTest {
     assertThat(sub.getExpirationDate()).isEqualTo(LocalDate.now().plusDays(30));
     verify(audit,times(1)).record(eq("CANCEL_SUBSCRIPTION"),anyString(),eq(sub.getId()),any(),any(),anyString());
   }
-  @Test void checkAndDeductCampaignQuotaSuccessAndExceeded(){
+  @Test
+  @org.junit.jupiter.api.DisplayName("checkAndDeductCampaignQuota UTCID01/03 [N/A]: Reserves available quota and rejects exhausted quota")
+  void checkAndDeductCampaignQuotaSuccessAndExceeded(){
     var activePlan = Plan.builder().id(UUID.randomUUID()).campaignQuota(2).build();
     var sub = Subscription.builder().id(UUID.randomUUID()).brandProfile(brand).plan(activePlan)
         .status(SubscriptionStatus.ACTIVE).expirationDate(LocalDate.now().plusDays(10)).usedCampaignQuota(1).build();
@@ -81,6 +83,8 @@ class SubscriptionServiceTest {
 
     assertThatThrownBy(() -> service.checkAndDeductCampaignQuota(brand.getId()))
         .isInstanceOfSatisfying(ConflictException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.QUOTA_EXCEEDED));
+    verify(subscriptions, times(2)).reserveCampaignQuotaAtomically(eq(sub.getId()), any());
+    verify(em, times(1)).refresh(sub);
   }
 
   @Test void trialPlanCanOnlyBeUsedOnceByBrand() {
@@ -96,5 +100,40 @@ class SubscriptionServiceTest {
         .isInstanceOfSatisfying(BusinessException.class,
             e -> assertThat(e.code()).isEqualTo(ErrorCode.SUBSCRIPTION_CONFLICT));
     verify(subscriptions, never()).save(any());
+  }
+
+  @Test void checkAndDeductCampaignQuota_expiresTodaySucceeds() {
+    var activePlan = Plan.builder().id(UUID.randomUUID()).campaignQuota(2).build();
+    var sub = Subscription.builder().id(UUID.randomUUID()).brandProfile(brand).plan(activePlan)
+        .status(SubscriptionStatus.ACTIVE).expirationDate(LocalDate.now()).usedCampaignQuota(1).build();
+    when(subscriptions.findByBrandProfileId(brand.getId())).thenReturn(List.of(sub));
+    when(subscriptions.reserveCampaignQuotaAtomically(eq(sub.getId()), any())).thenReturn(1);
+
+    service.checkAndDeductCampaignQuota(brand.getId());
+
+    verify(subscriptions).reserveCampaignQuotaAtomically(eq(sub.getId()), any());
+    verify(em).refresh(sub);
+  }
+
+  @Test void checkAndDeductCampaignQuota_expiredYesterdayThrowsForbidden() {
+    var activePlan = Plan.builder().id(UUID.randomUUID()).campaignQuota(2).build();
+    var sub = Subscription.builder().id(UUID.randomUUID()).brandProfile(brand).plan(activePlan)
+        .status(SubscriptionStatus.ACTIVE).expirationDate(LocalDate.now().minusDays(1)).usedCampaignQuota(0).build();
+    when(subscriptions.findByBrandProfileId(brand.getId())).thenReturn(List.of(sub));
+
+    assertThatThrownBy(() -> service.checkAndDeductCampaignQuota(brand.getId()))
+        .isInstanceOf(ForbiddenException.class);
+    verify(subscriptions, never()).reserveCampaignQuotaAtomically(any(), any());
+  }
+
+  @Test void checkAndDeductCampaignQuota_underRefundHoldThrowsForbidden() {
+    var activePlan = Plan.builder().id(UUID.randomUUID()).campaignQuota(2).build();
+    var sub = Subscription.builder().id(UUID.randomUUID()).brandProfile(brand).plan(activePlan)
+        .status(SubscriptionStatus.ACTIVE).refundHold(true).expirationDate(LocalDate.now().plusDays(5)).usedCampaignQuota(0).build();
+    when(subscriptions.findByBrandProfileId(brand.getId())).thenReturn(List.of(sub));
+
+    assertThatThrownBy(() -> service.checkAndDeductCampaignQuota(brand.getId()))
+        .isInstanceOf(ForbiddenException.class);
+    verify(subscriptions, never()).reserveCampaignQuotaAtomically(any(), any());
   }
 }

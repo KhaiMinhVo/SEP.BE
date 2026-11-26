@@ -259,8 +259,7 @@ class AiRecommendationFeedbackPhase4Test {
 
   @Test
   @DisplayName(
-      "TEST-10 Idempotence: Rejecting the same creator twice does not duplicate in"
-          + " excludedCreatorIds")
+      "submitRecommendationFeedback UTCID04 [N]: Repeated REJECT appends history without duplicate exclusion")
   void testFeedback_idempotentRejection_noDuplicates() {
     UUID creatorId = UUID.randomUUID();
 
@@ -290,11 +289,18 @@ class AiRecommendationFeedbackPhase4Test {
 
     RecommendationFeedbackResponse res = service.processFeedback(campaignId, req);
 
-    assertThat(res.getTotalExcludedCount()).isEqualTo(1); // Vẫn chỉ là 1, không bị duplicate
+    assertThat(res.getTotalExcludedCount()).isEqualTo(1);
+    ArgumentCaptor<CampaignContext> captor = ArgumentCaptor.forClass(CampaignContext.class);
+    verify(campaignContextRepository).save(captor.capture());
+    JsonNode savedData = captor.getValue().getContextData();
+    assertThat(savedData.get("excludedCreatorIds")).hasSize(1);
+    assertThat(savedData.get("excludedCreatorIds").get(0).asText()).isEqualTo(creatorId.toString());
+    assertThat(savedData.get("feedbackHistory")).hasSize(1);
+    assertThat(savedData.get("feedbackHistory").get(0).get("action").asText()).isEqualTo("REJECT");
   }
 
   @Test
-  @DisplayName("Action ACCEPT: Records into feedbackHistory without adding to excludedCreatorIds")
+  @DisplayName("submitRecommendationFeedback UTCID02 [N]: ACCEPT appends feedback without excluding creator")
   void testFeedback_acceptAction_recordsHistoryWithoutExclusion() {
     UUID creatorId = UUID.randomUUID();
 
@@ -334,5 +340,82 @@ class AiRecommendationFeedbackPhase4Test {
     assertThat(newCtx.getContextData().get("feedbackHistory")).hasSize(1);
     assertThat(newCtx.getContextData().get("feedbackHistory").get(0).get("action").asText())
         .isEqualTo("ACCEPT");
+    assertThat(campaign.getBudgetMax()).isEqualByComparingTo(BigDecimal.valueOf(50_000_000));
+    assertThat(campaign.getNiches()).containsExactly("BEAUTY", "SKINCARE");
+  }
+
+  @Test
+  @DisplayName("submitRecommendationFeedback UTCID01 [N]: REJECT evolves context v3 -> v4 and archives v3")
+  void testFeedback_rejectVersion3EvolvesToVersion4() {
+    UUID creatorId = UUID.randomUUID();
+    ObjectNode dataV3 = objectMapper.createObjectNode();
+    dataV3.set("excludedCreatorIds", objectMapper.createArrayNode());
+    dataV3.set("feedbackHistory", objectMapper.createArrayNode());
+
+    CampaignContext contextV3 = CampaignContext.builder()
+        .id(UUID.randomUUID())
+        .campaign(campaign)
+        .contextVersion(3)
+        .contextData(dataV3)
+        .active(true)
+        .build();
+    when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
+        .thenReturn(List.of(contextV3));
+
+    RecommendationFeedbackRequest req = RecommendationFeedbackRequest.builder()
+        .creatorId(creatorId)
+        .action("REJECT")
+        .reasonCode("OFF_BRAND")
+        .build();
+
+    RecommendationFeedbackResponse res = service.processFeedback(campaignId, req);
+
+    assertThat(res.getPreviousContextVersion()).isEqualTo(3);
+    assertThat(res.getNewContextVersion()).isEqualTo(4);
+    assertThat(res.getTotalExcludedCount()).isEqualTo(1);
+    assertThat(contextV3.isActive()).isFalse();
+    verify(campaignContextRepository).saveAndFlush(contextV3);
+    ArgumentCaptor<CampaignContext> captor = ArgumentCaptor.forClass(CampaignContext.class);
+    verify(campaignContextRepository).save(captor.capture());
+    assertThat(captor.getValue().getContextVersion()).isEqualTo(4);
+    assertThat(captor.getValue().isActive()).isTrue();
+  }
+
+  @Test
+  @DisplayName("submitRecommendationFeedback UTCID03 [B]: No previous context creates active context version 1")
+  void testFeedback_noPreviousContextCreatesVersion1() {
+    UUID creatorId = UUID.randomUUID();
+    when(campaignContextRepository.findByCampaignIdOrderByContextVersionDesc(campaignId))
+        .thenReturn(List.of());
+
+    RecommendationFeedbackRequest req = RecommendationFeedbackRequest.builder()
+        .creatorId(creatorId)
+        .action("REJECT")
+        .reasonCode("PRICE_TOO_HIGH")
+        .build();
+
+    RecommendationFeedbackResponse res = service.processFeedback(campaignId, req);
+
+    assertThat(res.getNewContextVersion()).isEqualTo(1);
+    assertThat(res.getTotalExcludedCount()).isEqualTo(1);
+    verify(campaignContextRepository, never()).saveAndFlush(any());
+    ArgumentCaptor<CampaignContext> captor = ArgumentCaptor.forClass(CampaignContext.class);
+    verify(campaignContextRepository).save(captor.capture());
+    assertThat(captor.getValue().getContextVersion()).isEqualTo(1);
+    assertThat(captor.getValue().isActive()).isTrue();
+  }
+
+  @Test
+  @DisplayName("submitRecommendationFeedback UTCID05 [A]: Caller without RUN_RECOMMENDATION throws ForbiddenException")
+  void testFeedback_unauthorizedCallerThrowsForbidden() {
+    TestActors.authenticate(TestActors.user(Role.CREATOR));
+    RecommendationFeedbackRequest req = RecommendationFeedbackRequest.builder()
+        .creatorId(UUID.randomUUID())
+        .action("REJECT")
+        .build();
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.processFeedback(campaignId, req))
+        .isInstanceOf(com.influencermatch.backend.exception.ForbiddenException.class);
+    verify(campaignContextRepository, never()).save(any());
   }
 }

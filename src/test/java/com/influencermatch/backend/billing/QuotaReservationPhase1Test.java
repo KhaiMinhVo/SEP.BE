@@ -134,4 +134,43 @@ class QuotaReservationPhase1Test {
     assertThatThrownBy(() -> subscriptionService.reserveRecommendationQuota(brandProfileId))
         .isInstanceOf(ForbiddenException.class);
   }
+
+  @Test
+  @DisplayName("reserveRecommendationQuota UTCID02 [B]: Subscription expiring today still reserves quota")
+  void testReserveQuota_expiresTodaySucceeds() {
+    subscription.setExpirationDate(LocalDate.now());
+    subscription.setUsedRecommendationQuota(49);
+    when(subscriptionRepository.findByBrandProfileId(brandProfileId))
+        .thenReturn(List.of(subscription));
+    when(subscriptionRepository.reserveQuotaAtomically(subscriptionId)).thenReturn(1);
+
+    UUID reservedId = subscriptionService.reserveRecommendationQuota(brandProfileId);
+
+    assertThat(reservedId).isEqualTo(subscriptionId);
+    verify(subscriptionRepository).reserveQuotaAtomically(subscriptionId);
+  }
+
+  @Test
+  @DisplayName("reserveRecommendationQuota UTCID04 [A]: Subscription expired yesterday throws ForbiddenException")
+  void testReserveQuota_expiredYesterdayThrowsForbidden() {
+    subscription.setExpirationDate(LocalDate.now().minusDays(1));
+    when(subscriptionRepository.findByBrandProfileId(brandProfileId))
+        .thenReturn(List.of(subscription));
+
+    assertThatThrownBy(() -> subscriptionService.reserveRecommendationQuota(brandProfileId))
+        .isInstanceOf(ForbiddenException.class);
+    verify(subscriptionRepository, never()).reserveQuotaAtomically(any());
+  }
+
+  @Test
+  @DisplayName("reserveRecommendationQuota UTCID05 [A]: Subscription under refund hold throws ForbiddenException")
+  void testReserveQuota_refundHoldThrowsForbidden() {
+    subscription.setRefundHold(true);
+    when(subscriptionRepository.findByBrandProfileId(brandProfileId))
+        .thenReturn(List.of(subscription));
+
+    assertThatThrownBy(() -> subscriptionService.reserveRecommendationQuota(brandProfileId))
+        .isInstanceOf(ForbiddenException.class);
+    verify(subscriptionRepository, never()).reserveQuotaAtomically(any());
+  }
 }

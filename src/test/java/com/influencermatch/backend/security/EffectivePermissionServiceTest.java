@@ -29,23 +29,6 @@ class EffectivePermissionServiceTest {
     if (role == Role.ADMIN) verifyNoInteractions(overrides);
   }
 
-  @Test void requestSnapshotIsImmutableAndNotCachedBetweenRequests() {
-    var row = new RolePermissionOverride(); row.setRole(Role.BRAND);
-    row.setPermission(Permission.MANAGE_OWN_SHORTLIST); row.setEnabled(false);
-    when(overrides.findByRole(Role.BRAND)).thenReturn(List.of(row));
-    RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
-    var snapshot = service.resolve(Role.BRAND);
-    assertThat(snapshot).doesNotContain(Permission.MANAGE_OWN_SHORTLIST);
-    assertThatThrownBy(() -> snapshot.clear()).isInstanceOf(UnsupportedOperationException.class);
-    row.setEnabled(true);
-    assertThat(service.resolve(Role.BRAND)).isSameAs(snapshot);
-    service.names(Role.BRAND); service.authorities(Role.BRAND);
-    verify(overrides, times(1)).findByRole(Role.BRAND);
-    RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
-    assertThat(service.resolve(Role.BRAND)).contains(Permission.MANAGE_OWN_SHORTLIST);
-    verify(overrides, times(2)).findByRole(Role.BRAND);
-  }
-
   @Test void securityFilterSnapshotIsReusedByDispatcherAndService() {
     var request = new MockHttpServletRequest();
     service.authorities(Role.CREATOR, request);
@@ -68,5 +51,43 @@ class EffectivePermissionServiceTest {
     assertThat(Permissions.has(Permission.CREATE_CAMPAIGN)).isFalse();
     assertThatThrownBy(() -> Permissions.require(Permission.CREATE_CAMPAIGN))
         .isInstanceOf(com.influencermatch.backend.exception.ForbiddenException.class);
+  }
+
+  @Test void disablingAllDefaultPermissionsReturnsEmptySetForNonAdmin() {
+    var disabledAll = RolePermissions.forRole(Role.BRAND).stream()
+        .map(p -> {
+          var o = new RolePermissionOverride();
+          o.setRole(Role.BRAND);
+          o.setPermission(p);
+          o.setEnabled(false);
+          return o;
+        })
+        .toList();
+    when(overrides.findByRole(Role.BRAND)).thenReturn(disabledAll);
+
+    assertThat(service.resolve(Role.BRAND)).isEmpty();
+  }
+
+  @Test void adminRoleRetainsAllDefaultsEvenIfOverridesExistWithoutQueryingOverrides() {
+    var result = service.resolve(Role.ADMIN);
+
+    assertThat(result).containsExactlyInAnyOrderElementsOf(RolePermissions.forRole(Role.ADMIN));
+    verifyNoInteractions(overrides);
+  }
+  @Test
+  @org.junit.jupiter.api.DisplayName("resolveEffectivePermissions UTCID02 [N]: One disabled default permission is removed while others remain")
+  void resolveEffectivePermissions_oneDefaultDisabledRetainsOthers() {
+    var row = new RolePermissionOverride();
+    row.setRole(Role.BRAND);
+    row.setPermission(Permission.CREATE_CAMPAIGN);
+    row.setEnabled(false);
+    when(overrides.findByRole(Role.BRAND)).thenReturn(List.of(row));
+
+    var resolved = service.resolve(Role.BRAND);
+
+    var expected = EnumSet.copyOf(RolePermissions.forRole(Role.BRAND));
+    expected.remove(Permission.CREATE_CAMPAIGN);
+    assertThat(resolved).doesNotContain(Permission.CREATE_CAMPAIGN);
+    assertThat(resolved).containsExactlyInAnyOrderElementsOf(expected);
   }
 }

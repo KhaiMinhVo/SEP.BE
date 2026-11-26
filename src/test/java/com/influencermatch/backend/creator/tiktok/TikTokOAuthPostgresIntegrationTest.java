@@ -102,7 +102,7 @@ class TikTokOAuthPostgresIntegrationTest extends TikTokTestSupport {
     assertThat(result.path("data").path("status").asText()).isEqualTo("READY");
     var view = call(actor, get(SESSIONS + s.id()), null, 200).path("data");
     assertThat(view.path("platform").asText()).isEqualTo("TIKTOK");
-    assertThat(view.path("account").path("openId").asText()).isEqualTo("app-scoped-id");
+    assertThat(view.path("account").path("openId").asText()).isEqualTo(providerAccountId);
     assertThat(view.path("account").path("username").asText()).isEqualTo("real_username");
     assertThat(view.path("account").path("matchStatus").asText()).isEqualTo("UNMATCHED");
     assertThat(row(s.id()))
@@ -114,7 +114,7 @@ class TikTokOAuthPostgresIntegrationTest extends TikTokTestSupport {
             "access_token",
             "refresh_token");
     assertThat(businessRows()).isEqualTo(before);
-    call(actor, post(SESSIONS + s.id() + "/confirm"), Map.of("accountId", "app-scoped-id"), 404);
+    call(actor, post(SESSIONS + s.id() + "/confirm"), Map.of("accountId", providerAccountId), 404);
   }
 
   @Test

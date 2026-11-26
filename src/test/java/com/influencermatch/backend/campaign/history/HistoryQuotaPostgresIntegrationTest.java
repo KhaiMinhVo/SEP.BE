@@ -95,11 +95,13 @@ class HistoryQuotaPostgresIntegrationTest {
         "quota-" + plan);
     jdbc.update(
         "insert into"
-            + " subscription(id,brand_profile_id,plan_id,start_date,expiration_date,status,used_campaign_quota,used_ai_quota,used_refresh_quota)"
-            + " values(?,?,?,current_date,current_date+365,'ACTIVE',1,0,0)",
+            + " subscription(id,brand_profile_id,plan_id,start_date,expiration_date,status,used_campaign_quota,used_ai_quota,used_refresh_quota,"
+            + "purchased_plan_name,purchased_price,purchased_currency,purchased_duration_days,purchased_campaign_quota,purchased_recommendation_quota,purchased_refresh_quota)"
+            + " values(?,?,?,current_date,current_date+365,'ACTIVE',1,0,0,?,0,'VND',365,2,100,100)",
         subscription,
         brand,
-        plan);
+        plan,
+        "quota-" + plan);
     token = jwt.generateToken(actor);
   }
 

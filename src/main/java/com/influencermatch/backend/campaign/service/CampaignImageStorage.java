@@ -69,8 +69,15 @@ public class CampaignImageStorage {
   @org.springframework.transaction.annotation.Transactional
   public Image upload(UUID brandId, MultipartFile file) {
     if (file == null || file.isEmpty() || file.getSize() > MAX_BYTES) {
-      throw new ValidationException("Choose an image up to 5 MB.");
+      throw new ValidationException("Choose a JPG or PNG image up to 5 MB.");
     }
+    byte[] bytes;
+    try {
+      bytes = file.getBytes();
+    } catch (IOException e) {
+      throw new ValidationException("Cannot read image file.");
+    }
+    String format = validateImage(bytes);
     if (cloudinaryStorageService != null && cloudinaryStorageService.isConfigured()) {
       var stored = cloudinaryStorageService.uploadFile(
           file,
@@ -79,17 +86,6 @@ public class CampaignImageStorage {
       );
       return remember(brandId, stored);
     }
-
-    byte[] bytes;
-    if (file == null || file.isEmpty() || file.getSize() > MAX_BYTES) {
-      throw new ValidationException("Choose a JPG or PNG image up to 5 MB.");
-    }
-    try {
-      bytes = file.getBytes();
-    } catch (IOException e) {
-      throw new ValidationException("Cannot read image file.");
-    }
-    String format = validateImage(bytes);
     if (client == null) throw unavailable();
     String key = "campaign-images/" + brandId + "/" + UUID.randomUUID() + "." + format;
     try {
@@ -106,7 +102,11 @@ public class CampaignImageStorage {
 
   static String validateImage(byte[] bytes) {
     if (bytes == null || bytes.length > MAX_BYTES) throw new ValidationException("Image exceeds 5 MB.");
-    return com.influencermatch.backend.storage.CloudinaryStorageService.validateImage(bytes);
+    String format = com.influencermatch.backend.storage.CloudinaryStorageService.validateImage(bytes);
+    if (!format.equals("jpg") && !format.equals("png")) {
+      throw new ValidationException("Only JPG and PNG images are supported.");
+    }
+    return format;
   }
 
   private BusinessException unavailable() {

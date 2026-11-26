@@ -320,6 +320,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
  "platforms":["TIKTOK"],"niches":["skincare"],"locations":["HCMC"],
  "followerMin":10000,"followerMax":50000,"totalBudget":5000000,"currency":"VND","brief":"Serum launch","creatorMode":"SINGLE","targetCreatorCount":1,"deliverables":[{"platform":"TIKTOK","contentType":"Review","quantity":1}]}
 """;
+    grantCampaignSubscription(java.util.UUID.fromString(brandId), 100);
     String invalidCampaignBody =
         campaignBody.replace(
             "\"followerMin\":10000,\"followerMax\":50000",
@@ -387,6 +388,7 @@ class BackendApplicationTests extends com.influencermatch.backend.support.Postgr
                 .getContentAsString())
             .at("/data/id")
             .asText();
+    grantCampaignSubscription(java.util.UUID.fromString(brandId), 100);
     String campaignBody =
         """
 {"name":"Workflow Campaign","productService":"Serum","objective":"AWARENESS",

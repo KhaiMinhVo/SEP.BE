@@ -48,6 +48,8 @@ class CollaborationReadControllerTest {
 
   @MockBean private com.influencermatch.backend.cooperation.CollaborationExecution execution;
 
+  @MockBean private com.influencermatch.backend.cooperation.PostMetricCollections postMetricCollections;
+
   @Test
   @DisplayName("GET /campaigns/{id}/collaborations returns paginated collaboration summaries")
   void getCampaignCollaborationsReturnsPage() throws Exception {

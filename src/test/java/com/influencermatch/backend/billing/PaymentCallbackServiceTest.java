@@ -167,4 +167,63 @@ class PaymentCallbackServiceTest {
         .isEqualTo(PaymentService.PayOsReturnResult.PENDING);
     verify(settlement, never()).apply(any(), anyBoolean(), any());
   }
+
+  @Test void vnPayCallbackSuccessReturnsAcceptedAndCallsSettlement() {
+    when(config.getHashSecret()).thenReturn("test-secret");
+    when(config.getTmnCode()).thenReturn("TEST");
+    var payment = stored();
+    var p = params();
+    sign(p);
+    when(settlement.apply(payment, true, "00")).thenReturn(true);
+
+    assertThat(service.processVnPayCallback(p)).isEqualTo(PaymentService.CallbackResult.ACCEPTED);
+    verify(settlement).apply(payment, true, "00");
+  }
+
+  @Test void vnPayCallbackWith127CharSignatureReturnsInvalidSignature() {
+    when(config.getHashSecret()).thenReturn("test-secret");
+    when(config.getTmnCode()).thenReturn("TEST");
+    var p = params();
+    p.put("vnp_SecureHash", "a".repeat(127));
+
+    assertThat(service.processVnPayCallback(p))
+        .isEqualTo(PaymentService.CallbackResult.INVALID_SIGNATURE);
+    verifyNoInteractions(payments, settlement);
+  }
+
+  @Test void vnPayCallbackMerchantMismatchReturnsInvalidMerchant() {
+    when(config.getHashSecret()).thenReturn("test-secret");
+    when(config.getTmnCode()).thenReturn("TEST");
+    var p = params();
+    p.put("vnp_TmnCode", "OTHER");
+    sign(p);
+
+    assertThat(service.processVnPayCallback(p))
+        .isEqualTo(PaymentService.CallbackResult.INVALID_MERCHANT);
+    verifyNoInteractions(payments, settlement);
+  }
+
+  @Test void vnPayCallbackAmountOffByOneGatewayUnitReturnsInvalidAmount() {
+    when(config.getHashSecret()).thenReturn("test-secret");
+    when(config.getTmnCode()).thenReturn("TEST");
+    stored();
+    var p = params();
+    p.put("vnp_Amount", "10001");
+    sign(p);
+
+    assertThat(service.processVnPayCallback(p))
+        .isEqualTo(PaymentService.CallbackResult.INVALID_AMOUNT);
+    verify(settlement, never()).apply(any(), anyBoolean(), any());
+  }
+
+  @Test void vnPayCallbackWhenSettlementReturnsFalseReturnsConflict() {
+    when(config.getHashSecret()).thenReturn("test-secret");
+    when(config.getTmnCode()).thenReturn("TEST");
+    var payment = stored();
+    var p = params();
+    sign(p);
+    when(settlement.apply(payment, true, "00")).thenReturn(false);
+
+    assertThat(service.processVnPayCallback(p)).isEqualTo(PaymentService.CallbackResult.CONFLICT);
+  }
 }

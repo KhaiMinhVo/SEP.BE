@@ -87,7 +87,8 @@ class CreatorRegistrationInvitationServiceTest {
         .startsWith("https://frontend.example.test/auth/creator/register?token=");
     assertThat(result.expiresAt()).isEqualTo(now.plusSeconds(172800));
     verify(audit)
-        .record(
+        .recordAs(
+            any(UUID.class),
             eq("INVITE_CREATOR"),
             eq("CreatorRegistrationInvitation"),
             eq(result.id()),

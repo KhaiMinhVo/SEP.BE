@@ -135,8 +135,8 @@ class RbacPostgresIntegrationTest {
             .schemas("empty_rbac")
             .defaultSchema("empty_rbac")
             .load();
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(33);
-    assertThat(flyway.info().current().getVersion().toString()).isEqualTo("34");
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(54);
+    assertThat(flyway.info().current().getVersion().toString()).isEqualTo("55");
     assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
   }
 
@@ -209,6 +209,16 @@ class RbacPostgresIntegrationTest {
         support,
         "{\"role\":\"DATA_MANAGER\",\"reason\":\"Not permitted with profile\"}",
         409);
+    UUID freePlan = UUID.randomUUID();
+    jdbc.update(
+        "insert into plan(id,plan_name,price,currency,duration_days,campaign_quota,ai_recommendation_quota,refresh_quota,status,created_at)"
+            + " values(?,?,0,'VND',365,10,10,10,'ACTIVE',now())",
+        freePlan, "rbac-free-" + freePlan);
+    jdbc.update(
+        "insert into subscription(id,brand_profile_id,plan_id,start_date,expiration_date,status,used_campaign_quota,used_ai_quota,used_refresh_quota,"
+            + "purchased_plan_name,purchased_price,purchased_currency,purchased_duration_days,purchased_campaign_quota,purchased_recommendation_quota,purchased_refresh_quota)"
+            + " select ?,?,?,current_date,current_date+365,'ACTIVE',0,0,0,plan_name,price,currency,duration_days,campaign_quota,ai_recommendation_quota,refresh_quota from plan where id=?",
+        UUID.randomUUID(), UUID.fromString(id), freePlan, freePlan);
     var campaign =
         call(
             post("/brands/" + id + "/campaigns"),
@@ -298,7 +308,7 @@ class RbacPostgresIntegrationTest {
     fields.put("vnp_SecureHash", "a".repeat(128));
     var invalid = get("/billing/vnpay/return");
     fields.forEach(invalid::param);
-    mvc.perform(invalid).andExpect(status().isBadRequest());
+    mvc.perform(invalid).andExpect(status().isFound());
     assertThat(payments.findById(payment.getId()).orElseThrow().getStatus())
         .isEqualTo(PaymentStatus.PENDING);
     fields.remove("vnp_SecureHash");
@@ -307,7 +317,7 @@ class RbacPostgresIntegrationTest {
         "vnp_SecureHash", VnPayUtil.hashAllFields(fields, "integration-test-signing-secret"));
     var wrongAmount = get("/billing/vnpay/return");
     fields.forEach(wrongAmount::param);
-    mvc.perform(wrongAmount).andExpect(status().isBadRequest());
+    mvc.perform(wrongAmount).andExpect(status().isFound());
     fields.remove("vnp_SecureHash");
     fields.put("vnp_Amount", "10000000");
     fields.put("vnp_TmnCode", "OTHER");
@@ -315,7 +325,7 @@ class RbacPostgresIntegrationTest {
         "vnp_SecureHash", VnPayUtil.hashAllFields(fields, "integration-test-signing-secret"));
     var wrongMerchant = get("/billing/vnpay/return");
     fields.forEach(wrongMerchant::param);
-    mvc.perform(wrongMerchant).andExpect(status().isBadRequest());
+    mvc.perform(wrongMerchant).andExpect(status().isFound());
     assertThat(payments.findById(payment.getId()).orElseThrow().getStatus())
         .isEqualTo(PaymentStatus.PENDING);
     fields.remove("vnp_SecureHash");

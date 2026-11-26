@@ -48,12 +48,14 @@ abstract class TikTokTestSupport extends PostgresApiTestSupport {
   Instant now;
   User actor, other;
   Creator channel;
+  String providerAccountId;
 
   record Started(UUID id, String state, Cookie cookie) {}
 
   @BeforeEach
   void setup() {
     now = Instant.parse("2026-10-26T10:00:00Z");
+    providerAccountId = "app-scoped-id-" + UUID.randomUUID();
     when(clock.instant()).thenAnswer(i -> now);
     when(clock.getZone()).thenReturn(ZoneOffset.UTC);
     actor = account(Role.CREATOR);
@@ -79,7 +81,7 @@ abstract class TikTokTestSupport extends PostgresApiTestSupport {
         .thenAnswer(
             i -> {
               assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-              return new VerifiedAccount("app-scoped-id", "real_username", "Real name");
+              return new VerifiedAccount(providerAccountId, "real_username", "Real name");
             });
   }
 

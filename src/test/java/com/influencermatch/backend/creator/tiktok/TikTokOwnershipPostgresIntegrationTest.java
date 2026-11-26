@@ -651,8 +651,11 @@ class TikTokOwnershipPostgresIntegrationTest extends TikTokTestSupport {
     jdbc.update(
         "insert into " + schema + ".\"user\" select * from public.\"user\" where id=?",
         actor.getId());
+    String creatorCols = jdbc.queryForObject(
+        "select string_agg(column_name, ',') from information_schema.columns where table_schema=? and table_name='creator' and is_generated='NEVER'",
+        String.class, schema);
     jdbc.update(
-        "insert into " + schema + ".creator select * from public.creator where id=?",
+        "insert into " + schema + ".creator(" + creatorCols + ") select " + creatorCols + " from public.creator where id=?",
         channel.getId());
     UUID id = UUID.randomUUID();
     jdbc.update(

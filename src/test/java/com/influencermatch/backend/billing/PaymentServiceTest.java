@@ -244,13 +244,15 @@ class PaymentServiceTest {
   }
 
   @Test
-  @DisplayName("Checkout rejects inactive or non-VND or zero-price plan")
+  @DisplayName("createCheckout UTCID05 [A]: Inactive plan is rejected without creating payment")
   void createCheckout_validatesPlan() {
     Plan inactivePlan = Plan.builder().id(planId).status(PlanStatus.INACTIVE).price(BigDecimal.TEN).currency("VND").build();
     when(planRepository.findById(planId)).thenReturn(Optional.of(inactivePlan));
 
     assertThatThrownBy(() -> paymentService.createCheckout(planId, brand, "127.0.0.1"))
         .isInstanceOf(ValidationException.class);
+    verify(paymentRepository, never()).save(any());
+    verify(subscriptionRepository, never()).save(any());
   }
 
   @Test
@@ -262,5 +264,29 @@ class PaymentServiceTest {
 
     assertThatThrownBy(() -> paymentService.createPayOsCheckout(planId, brand))
         .isInstanceOf(ValidationException.class);
+  }
+
+  @Test
+  @DisplayName("createCheckout UTCID03 [B]: Zero-price plan throws ValidationException with no payment created")
+  void createCheckout_zeroPricePlanThrowsValidation() {
+    plan.setPrice(BigDecimal.ZERO);
+
+    assertThatThrownBy(() -> paymentService.createCheckout(planId, brand, "127.0.0.1"))
+        .isInstanceOf(ValidationException.class);
+    verify(paymentRepository, never()).save(any());
+    verify(subscriptionRepository, never()).save(any());
+  }
+
+  @Test
+  @DisplayName("createCheckout UTCID04 [A]: Blank VNPay hash secret throws BusinessException INTERNAL_ERROR")
+  void createCheckout_blankHashSecretThrowsInternalError() {
+    when(vnPayConfig.getHashSecret()).thenReturn("   ");
+
+    assertThatThrownBy(() -> paymentService.createCheckout(planId, brand, "127.0.0.1"))
+        .isInstanceOfSatisfying(
+            com.influencermatch.backend.exception.BusinessException.class,
+            ex -> assertThat(ex.code())
+                .isEqualTo(com.influencermatch.backend.exception.ErrorCode.INTERNAL_ERROR));
+    verify(paymentRepository, never()).save(any());
   }
 }

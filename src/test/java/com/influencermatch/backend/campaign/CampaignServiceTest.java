@@ -204,6 +204,7 @@ class CampaignServiceTest {
   }
 
   @Test
+  @DisplayName("changeStatus UTCID01 [N]: READY_FOR_DISCOVERY to ACTIVE increments revision")
   void readyTransitionCreatesOneContextAndSequentialActivationDoesNotRecreateIt() {
     var c = campaign(CampaignStatus.DRAFT);
     service.changeStatus(
@@ -216,6 +217,7 @@ class CampaignServiceTest {
     verify(contexts).saveAndFlush(saved.capture());
     assertThat(saved.getValue().getContextVersion()).isEqualTo(1);
     assertThat(saved.getValue().getContextData().path("objective").asText()).isEqualTo("AWARENESS");
+    long revision = c.getCampaignRevision();
     service.changeStatus(
         c.getId(),
         new CampaignStatusRequest(CampaignStatus.ACTIVE),
@@ -223,6 +225,7 @@ class CampaignServiceTest {
         com.influencermatch.backend.campaign.service.CampaignRevision.tag(
             c.getId(), c.getCampaignRevision()));
     assertThat(c.getStatus()).isEqualTo(CampaignStatus.ACTIVE);
+    assertThat(c.getCampaignRevision()).isEqualTo(revision + 1);
     verify(contexts, times(1)).saveAndFlush(any());
   }
 
@@ -295,5 +298,136 @@ class CampaignServiceTest {
     assertThat(c.getName()).isEqualTo("Old");
     assertThat(c.getStatus()).isEqualTo(CampaignStatus.DRAFT);
     verify(contexts, never()).save(any());
+  }
+
+  @Test
+  @DisplayName("changeStatus UTCID02 [B]: ACTIVE to COMPLETED with 1 completed collab succeeds and increments revision")
+  void changeStatus_activeToCompletedWithOneCompletedCollab() {
+    var c = campaign(CampaignStatus.ACTIVE);
+    long rev = c.getCampaignRevision();
+    var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+    org.springframework.test.util.ReflectionTestUtils.setField(service, "executionDb", jdbc);
+    when(jdbc.queryForObject(contains("status='COMPLETED'"), eq(Long.class), eq(c.getId()))).thenReturn(1L);
+    when(jdbc.queryForObject(contains("not in ('COMPLETED'"), eq(Long.class), eq(c.getId()))).thenReturn(0L);
+    when(jdbc.queryForObject(contains("cooperation_deal"), eq(Long.class), eq(c.getId()))).thenReturn(0L);
+
+    var res = service.changeStatus(
+        c.getId(),
+        new CampaignStatusRequest(CampaignStatus.COMPLETED),
+        auth,
+        com.influencermatch.backend.campaign.service.CampaignRevision.tag(c.getId(), rev));
+
+    assertThat(res.status()).isEqualTo(CampaignStatus.COMPLETED);
+    assertThat(c.getCampaignRevision()).isEqualTo(rev + 1);
+  }
+
+  @Test
+  @DisplayName("changeStatus UTCID03 [A]: ACTIVE to COMPLETED with 0 completed collabs throws INVALID_COLLABORATION_STATE")
+  void changeStatus_activeToCompletedWithZeroCompletedThrows() {
+    var c = campaign(CampaignStatus.ACTIVE);
+    long rev = c.getCampaignRevision();
+    var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+    org.springframework.test.util.ReflectionTestUtils.setField(service, "executionDb", jdbc);
+    when(jdbc.queryForObject(contains("status='COMPLETED'"), eq(Long.class), eq(c.getId()))).thenReturn(0L);
+    when(jdbc.queryForObject(contains("not in ('COMPLETED'"), eq(Long.class), eq(c.getId()))).thenReturn(0L);
+    when(jdbc.queryForObject(contains("cooperation_deal"), eq(Long.class), eq(c.getId()))).thenReturn(0L);
+
+    assertThatThrownBy(() -> service.changeStatus(
+        c.getId(),
+        new CampaignStatusRequest(CampaignStatus.COMPLETED),
+        auth,
+        com.influencermatch.backend.campaign.service.CampaignRevision.tag(c.getId(), rev)))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            ex -> assertThat(ex.code()).isEqualTo(ErrorCode.INVALID_COLLABORATION_STATE));
+    assertThat(c.getStatus()).isEqualTo(CampaignStatus.ACTIVE);
+  }
+
+  @Test
+  @DisplayName("changeStatus UTCID04 [A]: DRAFT to ACTIVE throws INVALID_CAMPAIGN_TRANSITION")
+  void changeStatus_draftToActiveRejected() {
+    var c = campaign(CampaignStatus.DRAFT);
+    String rev = com.influencermatch.backend.campaign.service.CampaignRevision.tag(c.getId(), c.getCampaignRevision());
+
+    assertThatThrownBy(() -> service.changeStatus(
+        c.getId(), new CampaignStatusRequest(CampaignStatus.ACTIVE), auth, rev))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            ex -> assertThat(ex.code()).isEqualTo(ErrorCode.INVALID_CAMPAIGN_TRANSITION));
+    assertThat(c.getStatus()).isEqualTo(CampaignStatus.DRAFT);
+  }
+
+  @Test
+  @DisplayName("changeStatus UTCID05 [A]: ACTIVE to CLOSED with blank reason throws ValidationException")
+  void changeStatus_activeToClosedWithBlankReasonThrowsValidation() {
+    var c = campaign(CampaignStatus.ACTIVE);
+    long rev = c.getCampaignRevision();
+    var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+    org.springframework.test.util.ReflectionTestUtils.setField(service, "executionDb", jdbc);
+    when(jdbc.queryForObject(contains("status='COMPLETED'"), eq(Long.class), eq(c.getId()))).thenReturn(0L);
+    when(jdbc.queryForObject(contains("not in ('COMPLETED'"), eq(Long.class), eq(c.getId()))).thenReturn(0L);
+    when(jdbc.queryForObject(contains("cooperation_deal"), eq(Long.class), eq(c.getId()))).thenReturn(0L);
+
+    assertThatThrownBy(() -> service.changeStatus(
+        c.getId(),
+        new CampaignStatusRequest(CampaignStatus.CLOSED, "   "),
+        auth,
+        com.influencermatch.backend.campaign.service.CampaignRevision.tag(c.getId(), rev)))
+        .isInstanceOf(ValidationException.class);
+    assertThat(c.getStatus()).isEqualTo(CampaignStatus.ACTIVE);
+  }
+
+  @Test
+  @DisplayName("archiveCampaign UTCID01 [N]: DRAFT campaign archived and revision incremented")
+  void archive_draftCampaignSucceedsAndIncrementsRevision() {
+    var c = campaign(CampaignStatus.DRAFT);
+    long rev = c.getCampaignRevision();
+
+    var res = service.archive(
+        c.getId(),
+        auth,
+        com.influencermatch.backend.campaign.service.CampaignRevision.tag(c.getId(), rev));
+
+    assertThat(res.status()).isEqualTo(CampaignStatus.ARCHIVED);
+    assertThat(c.getCampaignRevision()).isEqualTo(rev + 1);
+  }
+
+  @Test
+  @DisplayName("archiveCampaign UTCID03 [A]: ACTIVE campaign cannot be archived (INVALID_CAMPAIGN_TRANSITION)")
+  void archive_activeCampaignRejected() {
+    var c = campaign(CampaignStatus.ACTIVE);
+    String rev = com.influencermatch.backend.campaign.service.CampaignRevision.tag(c.getId(), c.getCampaignRevision());
+
+    assertThatThrownBy(() -> service.archive(c.getId(), auth, rev))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            ex -> assertThat(ex.code()).isEqualTo(ErrorCode.INVALID_CAMPAIGN_TRANSITION));
+    assertThat(c.getStatus()).isEqualTo(CampaignStatus.ACTIVE);
+  }
+
+  @Test
+  @DisplayName("archiveCampaign UTCID04 [A]: Stale revision header throws CAMPAIGN_REVISION_CONFLICT")
+  void archive_staleRevisionThrowsConflict() {
+    var c = campaign(CampaignStatus.DRAFT);
+    String staleRev = com.influencermatch.backend.campaign.service.CampaignRevision.tag(
+        c.getId(), c.getCampaignRevision() + 99);
+
+    assertThatThrownBy(() -> service.archive(c.getId(), auth, staleRev))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            ex -> assertThat(ex.code()).isEqualTo(ErrorCode.CAMPAIGN_REVISION_CONFLICT));
+    assertThat(c.getStatus()).isEqualTo(CampaignStatus.DRAFT);
+  }
+
+  @Test
+  @DisplayName("archiveCampaign UTCID05 [A]: Missing revision header throws PRECONDITION_REQUIRED")
+  void archive_missingRevisionThrowsPreconditionRequired() {
+    var c = campaign(CampaignStatus.DRAFT);
+
+    assertThatThrownBy(() -> service.archive(c.getId(), auth, null))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            ex -> assertThat(ex.code()).isEqualTo(ErrorCode.PRECONDITION_REQUIRED));
+    assertThat(c.getStatus()).isEqualTo(CampaignStatus.DRAFT);
   }
 }

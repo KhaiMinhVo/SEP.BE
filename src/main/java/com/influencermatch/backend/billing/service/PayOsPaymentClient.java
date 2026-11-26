@@ -22,6 +22,8 @@ public class PayOsPaymentClient {
 
   public String createPaymentLink(long orderCode, long amount, String description) {
     PayOS client = configuredClient();
+    long expiredAt =
+        java.time.Instant.now().plus(java.time.Duration.ofMinutes(15)).getEpochSecond();
     CreatePaymentLinkRequest request =
         CreatePaymentLinkRequest.builder()
             .orderCode(orderCode)
@@ -29,6 +31,7 @@ public class PayOsPaymentClient {
             .description(description)
             .returnUrl(config.getReturnUrl())
             .cancelUrl(config.getCancelUrl())
+            .expiredAt(expiredAt)
             .build();
     try {
       CreatePaymentLinkResponse response = client.paymentRequests().create(request);

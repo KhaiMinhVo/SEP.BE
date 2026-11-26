@@ -46,12 +46,15 @@ class EmailVerificationServiceTest {
     assertThat(captor.getValue().getExpiresAt()).isEqualTo(now.plusSeconds(600));
     verify(sender).send(user.getEmail(),"000042");verify(deliveries).save(any());
   }
-  @Test void verifyNormalizesEmailConsumesCodeAndMarksVerified() {
+  @Test
+  @DisplayName("verifyOtpCode UTCID01 [N]: Valid OTP is consumed and verifies normalized email")
+  void verifyNormalizesEmailConsumesCodeAndMarksVerified() {
     var code=otp();pending(code);service.verify(" BRAND@EXAMPLE.TEST ","000042");
     assertThat(user.isEmailVerified()).isTrue();assertThat(code.getConsumedAt()).isEqualTo(now);
     verifyNoInteractions(sender,deliveries);
   }
   @ParameterizedTest @ValueSource(ints={0,1,2,3,4})
+  @DisplayName("verifyOtpCode UTCID03 [B]: Fifth incorrect attempt is rate limited")
   void wrongAttemptIsCountedAndFifthLocksCode(int attempts) {
     var code=otp();code.setAttempts(attempts);pending(code);
     assertThatThrownBy(()->service.verify(user.getEmail(),"999999")).isInstanceOfSatisfying(EmailOtpAttemptException.class,
@@ -59,10 +62,14 @@ class EmailVerificationServiceTest {
     assertThat(code.getAttempts()).isEqualTo(attempts+1);assertThat(user.isEmailVerified()).isFalse();
   }
   @ParameterizedTest @ValueSource(strings={"expired","consumed","exhausted"})
+  @DisplayName("verifyOtpCode UTCID02/04 [B/A]: Expired or consumed OTP is rejected")
   void unusableCodesNeverVerify(String state) {
     var code=otp();if(state.equals("expired"))code.setExpiresAt(now);
     if(state.equals("consumed"))code.setConsumedAt(now);if(state.equals("exhausted"))code.setAttempts(5);pending(code);
-    assertThatThrownBy(()->service.verify(user.getEmail(),"000042")).isInstanceOf(EmailOtpAttemptException.class);
+    assertThatThrownBy(()->service.verify(user.getEmail(),"000042"))
+        .isInstanceOfSatisfying(EmailOtpAttemptException.class,
+            e -> assertThat(e.code()).isEqualTo(
+                state.equals("exhausted") ? ErrorCode.EMAIL_OTP_RATE_LIMITED : ErrorCode.EMAIL_OTP_INVALID_OR_EXPIRED));
     assertThat(user.isEmailVerified()).isFalse();
   }
   @Test void alreadyVerifiedAndUnknownEmailsCannotBeVerified() {
@@ -74,16 +81,20 @@ class EmailVerificationServiceTest {
     verifyNoInteractions(codes);
   }
   @ParameterizedTest @ValueSource(booleans={true,false})
+  @DisplayName("sendOtpVerification UTCID05 [N]: Verified email does not receive another OTP")
   void resendDoesNothingForVerifiedOrUnknownEmail(boolean exists) {
     user.setEmailVerified(true);when(users.findLockedByEmail(user.getEmail())).thenReturn(exists?Optional.of(user):Optional.empty());
     service.resend(user.getEmail());verify(sender).requireConfigured();verifyNoMoreInteractions(sender);verifyNoInteractions(codes,deliveries);
   }
-  @Test void resendAfterCooldownResetsAttemptsAndInvalidatesOldCode() {
+  @Test
+  @DisplayName("sendOtpVerification UTCID02 [B]: OTP is reissued at the 60-second cooldown boundary")
+  void resendAfterCooldownResetsAttemptsAndInvalidatesOldCode() {
     var code=otp();code.setAttempts(5);pending(code);doReturn("000043").when(crypto).generate();
     service.resend(user.getEmail());assertThat(code.getAttempts()).isZero();assertThat(code.getConsumedAt()).isNull();
     assertThat(crypto.matches(user.getId(),"000042",code.getCodeHash())).isFalse();verify(sender).send(user.getEmail(),"000043");
   }
   @ParameterizedTest @ValueSource(strings={"cooldown","hourly"})
+  @DisplayName("sendOtpVerification UTCID03/04 [A]: Cooldown and hourly delivery limits block resend")
   void resendLimitsNeverReplaceCodeOrSend(String limit) {
     var code=otp();if(limit.equals("cooldown"))code.setLastSentAt(now.minusSeconds(59));pending(code);
     if(limit.equals("hourly"))when(deliveries.countByUserIdAndSentAtAfter(user.getId(),now.minusSeconds(3600))).thenReturn(5L);
@@ -106,5 +117,22 @@ class EmailVerificationServiceTest {
     assertThat(crypto.hash(user.getId(),"000042")).isNotEqualTo(crypto.hash(user.getId(),"password-setup","000042"));
     assertThat(crypto.hash(user.getId(),"000042")).isNotEqualTo(crypto.hash(UUID.randomUUID(),"000042"))
         .isNotEqualTo(new EmailOtpCodes("different-otp-secret-at-least-32-characters").hash(user.getId(),"000042"));
+  }
+
+  @Test
+  @DisplayName("sendOtpVerification UTCID01 [N]: Unverified user without OTP receives a new code")
+  void resendIssuesNewOtpWhenNoPreviousRecordExists() {
+    when(users.findLockedByEmail(user.getEmail())).thenReturn(Optional.of(user));
+    when(codes.findById(user.getId())).thenReturn(Optional.empty());
+    when(deliveries.countByUserIdAndSentAtAfter(user.getId(), now.minusSeconds(3600))).thenReturn(0L);
+    doReturn("123456").when(crypto).generate();
+
+    service.resend(user.getEmail());
+
+    var captor = ArgumentCaptor.forClass(EmailVerificationOtp.class);
+    verify(codes).save(captor.capture());
+    assertThat(captor.getValue().getExpiresAt()).isEqualTo(now.plusSeconds(600));
+    assertThat(crypto.matches(user.getId(), "123456", captor.getValue().getCodeHash())).isTrue();
+    verify(sender).send(user.getEmail(), "123456");
   }
 }

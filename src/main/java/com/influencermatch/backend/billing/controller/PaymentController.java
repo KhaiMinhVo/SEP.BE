@@ -134,7 +134,8 @@ public class PaymentController {
       security = {})
   @GetMapping("/payos/return")
   public ResponseEntity<Void> payOsReturn(
-      @org.springframework.web.bind.annotation.RequestParam(required = false) String orderCode) {
+      @org.springframework.web.bind.annotation.RequestParam(required = false) Map<String, String> params) {
+    String orderCode = params != null ? params.get("orderCode") : null;
     var result = paymentService.processPayOsReturn(orderCode);
     String payment = switch (result) {
       case PAID -> "success";

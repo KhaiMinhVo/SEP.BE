@@ -21,7 +21,10 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
 
-@org.springframework.test.context.TestPropertySource(properties="application.auth.email-verification.secret=test-email-secret-at-least-32-characters")
+@org.springframework.test.context.TestPropertySource(properties={
+    "application.auth.email-verification.secret=test-email-secret-at-least-32-characters",
+    "application.auth.creator-invitation.frontend-base-url=http://localhost:5173"
+})
 class ClaimInvitationPostgresIntegrationTest extends PostgresApiTestSupport {
   @MockBean VerificationEmailSender sender;
   @MockBean OAuthProofClient provider;

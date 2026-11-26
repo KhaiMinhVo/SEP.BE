@@ -29,6 +29,19 @@ class CreatorActivityPostgresIntegrationTest extends PostgresApiTestSupport {
     return c;
   }
 
+  Map<String, String> allActivity(com.influencermatch.backend.user.model.User manager, String query) throws Exception {
+    var result = new HashMap<String, String>();
+    int page = 0;
+    int totalPages = 1;
+    while (page < totalPages) {
+      var data = call(manager, get("/data/creator-activity?size=100&page=" + page + (query == null ? "" : "&" + query)), null, 200).path("data");
+      totalPages = Math.max(1, data.path("totalPages").asInt(1));
+      data.path("items").forEach(i -> result.put(i.path("creatorId").asText(), i.path("status").asText()));
+      page++;
+    }
+    return result;
+  }
+
   @Test void assessesInactivityAndTreatsMissingStaleFailedAndMalformedEvidenceAsUnknown() throws Exception {
     var manager = account(Role.DATA_MANAGER);
     var old = Instant.now().minusSeconds(45 * 86400L).toString();
@@ -39,15 +52,12 @@ class CreatorActivityPostgresIntegrationTest extends PostgresApiTestSupport {
     var invalid = fixture("2026-99-99", MetricDataStatus.FRESH, 0);
     var future = fixture(Instant.now().plusSeconds(86400).toString(), MetricDataStatus.FRESH, 0);
     var failed = fixture(old, MetricDataStatus.REFRESH_FAILED, 0);
-    var data = call(manager, get("/data/creator-activity?size=100"), null, 200).path("data");
-    var statuses = new HashMap<String, String>();
-    data.path("items").forEach(i -> statuses.put(i.path("creatorId").asText(), i.path("status").asText()));
+    var statuses = allActivity(manager, null);
     assertThat(statuses.get(inactive.getId().toString())).isEqualTo("INACTIVE");
     assertThat(statuses.get(active.getId().toString())).isEqualTo("ACTIVE");
     for (var c : List.of(stale, missing, invalid, future, failed))
       assertThat(statuses.get(c.getId().toString())).isEqualTo("UNKNOWN");
-    var filtered = call(manager, get("/data/creator-activity?status=INACTIVE"), null, 200).path("data");
-    assertThat(filtered.path("items").findValuesAsText("creatorId")).contains(inactive.getId().toString());
+    assertThat(allActivity(manager, "status=INACTIVE").keySet()).contains(inactive.getId().toString());
   }
 
   @Test void latestFailedRefreshWinsAndInvalidNewerPostPreventsFalseWarning() throws Exception {
@@ -58,9 +68,7 @@ class CreatorActivityPostgresIntegrationTest extends PostgresApiTestSupport {
         .freshnessStatus(MetricDataStatus.REFRESH_FAILED).collectedAt(LocalDateTime.now(ZoneOffset.UTC)).build());
     var invalid = fixture(old, MetricDataStatus.FRESH, 0);
     posts.saveAndFlush(Post.builder().creator(invalid).platformPostId("invalid").postedAt("yesterday").build());
-    var items = call(manager, get("/data/creator-activity?status=UNKNOWN&size=100"), null, 200)
-        .path("data").path("items").findValuesAsText("creatorId");
-    assertThat(items).contains(c.getId().toString(), invalid.getId().toString());
+    assertThat(allActivity(manager, "status=UNKNOWN").keySet()).contains(c.getId().toString(), invalid.getId().toString());
   }
 
   @Test void onlyDataManagerCanListOrChangeVisibility() throws Exception {

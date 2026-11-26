@@ -42,7 +42,7 @@ class BrandM4PostgresIntegrationTest extends PostgresApiTestSupport {
 
   @BeforeEach
   void init() throws Exception {
-    now = Instant.parse("2026-11-08T00:00:00Z");
+    now = Instant.now().plusSeconds(60);
     when(clock.instant()).thenAnswer(i -> now);
     when(clock.getZone()).thenReturn(ZoneOffset.UTC);
     owner = account(Role.BRAND);

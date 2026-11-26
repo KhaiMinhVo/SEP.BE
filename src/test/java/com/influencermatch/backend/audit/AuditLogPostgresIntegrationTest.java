@@ -47,7 +47,7 @@ class AuditLogPostgresIntegrationTest extends PostgresApiTestSupport {
     assertThat(call(admin,get("/admin/audit-logs").param("action",action).param("size","0"),null,200).path("data").path("size").asInt()).isEqualTo(1);
   }
   @Test void keywordSearchReturnsSafeDtoAndPreservesDeletedActorId() throws Exception {
-    var admin=account(Role.ADMIN);var deletedActor=UUID.randomUUID();var entity=UUID.randomUUID();
+    var admin=account(Role.ADMIN);var deletedActor=account(Role.BRAND).getId();var entity=UUID.randomUUID();
     String action="KEYWORD_AUDIT_"+UUID.randomUUID();
     logs.saveAndFlush(AuditLog.builder().userId(deletedActor).action(action).entityType("SensitiveEntity")
         .entityId(entity).createdAt(LocalDateTime.now())
@@ -73,13 +73,13 @@ class AuditLogPostgresIntegrationTest extends PostgresApiTestSupport {
     assertThat(byActorKeyword.path("data").path("totalElements").asLong()).isGreaterThanOrEqualTo(1);
   }
   @Test void csvExportAppliesFiltersAndOmitsPrivateAuditPayload() throws Exception {
-    var admin=account(Role.ADMIN);var actor=UUID.randomUUID();var entity=UUID.randomUUID();
+    var admin=account(Role.ADMIN);var actor=account(Role.BRAND).getId();var otherActor=account(Role.BRAND).getId();var entity=UUID.randomUUID();
     String action="CSV_AUDIT_"+UUID.randomUUID();
     logs.saveAndFlush(AuditLog.builder().userId(actor).action(action).entityType("User").entityId(entity)
         .createdAt(LocalDateTime.now()).oldValue(json.createObjectNode().put("password","csv-secret"))
         .newValue(json.createObjectNode().put("email","csv-private@example.test"))
         .description("csv-private-description").ipAddress("192.0.2.44").build());
-    event(UUID.randomUUID(),action+"_OTHER",entity,LocalDateTime.now());
+    event(otherActor,action+"_OTHER",entity,LocalDateTime.now());
     var response=mvc.perform(get("/admin/audit-logs/export").header("Authorization","Bearer "+jwt.generateToken(admin))
             .param("keyword",action)
             .param("actorId",actor.toString()).param("entityId",entity.toString()).param("limit","99999")

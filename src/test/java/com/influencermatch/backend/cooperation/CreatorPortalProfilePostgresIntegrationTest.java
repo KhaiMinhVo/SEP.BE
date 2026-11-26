@@ -159,6 +159,7 @@ class CreatorPortalProfilePostgresIntegrationTest extends ExecutionScenarioSuppo
 
   @Test
   void publicProjectionNeedsRealEvidenceAndAppliesSharingOnNextRequest() throws Exception {
+    jdbc.update("delete from creator_account_verification where creator_id=?", channel);
     edit(
         owner,
         "{\"introduction\":\"Visible"
@@ -426,8 +427,11 @@ class CreatorPortalProfilePostgresIntegrationTest extends ExecutionScenarioSuppo
               + schema
               + ".creator_master select m.* from public.creator_master m where m.user_id=?",
           owner.getId());
+      String creatorCols = jdbc.queryForObject(
+          "select string_agg(column_name, ',') from information_schema.columns where table_schema=? and table_name='creator' and is_generated='NEVER'",
+          String.class, schema);
       jdbc.update(
-          "insert into " + schema + ".creator select c.* from public.creator c where c.id=?",
+          "insert into " + schema + ".creator(" + creatorCols + ") select " + creatorCols + " from public.creator c where c.id=?",
           channel);
       var before =
           jdbc.queryForObject(

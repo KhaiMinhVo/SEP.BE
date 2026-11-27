@@ -23,6 +23,8 @@ public class CollaborationExecution {
   final AuditService audit;
   final ExecutionHistoryReader history;
   final CollaborationVideo videos;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  com.influencermatch.backend.notification.service.NotificationService notificationService;
 
   UUID actor() {
     return Permissions.actor().getId();
@@ -374,6 +376,16 @@ public class CollaborationExecution {
         rev,
         d);
     changed(id, "CONTENT_SUBMITTED", Map.of("deliverableId", d, "submissionRevision", rev));
+    if (!external && notificationService != null && c.get("brand_user_id") != null) {
+      String contentType = Objects.toString(row.get("content_type"), "ấn phẩm");
+      notificationService.createAndDispatch(
+          uuid(c.get("brand_user_id")),
+          com.influencermatch.backend.notification.enums.NotificationType.CONTENT_DRAFT_SUBMITTED,
+          "Creator nộp bản nháp nội dung",
+          "Creator vừa nộp bản nháp lần " + rev + " cho hạng mục " + contentType + ". Vui lòng xem xét và phản hồi.",
+          "COLLABORATION",
+          id);
+    }
     return deals.remembered(scope, key, request, view(id));
   }
 
@@ -425,6 +437,32 @@ public class CollaborationExecution {
         id,
         approved ? "CONTENT_APPROVED" : "CONTENT_CHANGES_REQUESTED",
         Map.of("deliverableId", d, "submissionRevision", r.submissionRevision()));
+    if (notificationService != null) {
+      s.optional(
+              "select m.user_id from creator cr join creator_master m on m.id=cr.master_id where cr.id=?",
+              c.get("creator_id"))
+          .map(u -> uuid(u.get("user_id")))
+          .ifPresent(creatorUserId -> {
+            String contentType = Objects.toString(row.get("content_type"), "ấn phẩm");
+            if (approved) {
+              notificationService.createAndDispatch(
+                  creatorUserId,
+                  com.influencermatch.backend.notification.enums.NotificationType.CONTENT_DRAFT_APPROVED,
+                  "Nhãn hàng đã duyệt bản nháp",
+                  "Bản nháp lần " + r.submissionRevision() + " cho hạng mục " + contentType + " đã được nhãn hàng phê duyệt.",
+                  "COLLABORATION",
+                  id);
+            } else {
+              notificationService.createAndDispatch(
+                  creatorUserId,
+                  com.influencermatch.backend.notification.enums.NotificationType.CONTENT_CHANGE_REQUESTED,
+                  "Nhãn hàng yêu cầu chỉnh sửa bản nháp",
+                  "Nhãn hàng yêu cầu chỉnh sửa bản nháp (" + contentType + "): " + r.reason().strip(),
+                  "COLLABORATION",
+                  id);
+            }
+          });
+    }
     return deals.remembered(scope, key, r, view(id));
   }
 

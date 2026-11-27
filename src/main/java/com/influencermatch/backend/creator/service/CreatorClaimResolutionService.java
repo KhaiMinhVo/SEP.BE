@@ -159,6 +159,7 @@ public class CreatorClaimResolutionService {
     }
 
     // 5. Find or create CreatorMaster M1 for claimantUser
+    ChannelPlatformLimit.requireSlot(creatorRepository, claimantUser.getId(), creator.getPlatform(), creator.getId());
     User finalClaimant = claimantUser;
     CreatorMaster master = creatorMasterRepository.findByUserId(claimantUser.getId())
         .orElseGet(() -> {

@@ -165,7 +165,7 @@ public class MetaSessionStore {
     requireConfigured(flow, request.platform());
     var user =
         users
-            .findById(actor.getId())
+            .findLockedById(actor.getId())
             .orElseThrow(() -> new ForbiddenException("Creator unavailable"));
     em.refresh(user);
     assertUser(user, version);
@@ -353,6 +353,7 @@ public class MetaSessionStore {
     if (!session.getExpiresAt().isAfter(now()) && !List.of("COMPLETED", "FAILED").contains(status))
       status = "EXPIRED";
     if ("READY".equals(status)) {
+      var linkedIds = creators.findChannelIdsByOwnerAndPlatform(session.getUser().getId(), session.getPlatform());
       for (var asset :
           cipher.decrypt(session.getOauthFlow(), session.getPayloadCiphertext()).assets()) {
         var channelRecord =
@@ -381,6 +382,10 @@ public class MetaSessionStore {
         } else if (!hasAssetAccess(session.getPlatform(), asset)) {
           match = "INSUFFICIENT_EVIDENCE";
           reason = "MISSING_PAGE_MANAGEMENT";
+        } else if (com.influencermatch.backend.creator.service.ChannelPlatformLimit.occupied(
+            linkedIds, channel == null ? null : channel.getId())) {
+          match = "UNAVAILABLE";
+          reason = "CHANNEL_PLATFORM_ALREADY_LINKED";
         } else if (channel == null && hasLegacyFacebookChannel(session.getPlatform(), asset)) {
           // A matching alias prevents a duplicate, but an alias can move between Pages.
           match = "INSUFFICIENT_EVIDENCE";

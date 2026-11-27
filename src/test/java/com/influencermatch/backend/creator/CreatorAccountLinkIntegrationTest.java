@@ -112,6 +112,7 @@ class CreatorAccountLinkIntegrationTest {
             .build();
 
     when(userRepository.findById(kocUser.getId())).thenReturn(Optional.of(kocUser));
+    when(userRepository.findLockedById(kocUser.getId())).thenReturn(Optional.of(kocUser));
     when(creatorMasterRepository.findByUserId(kocUser.getId())).thenReturn(Optional.of(masterM1));
   }
 

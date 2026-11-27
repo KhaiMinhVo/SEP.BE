@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 public class CreatorPortalAccountController {
 
   private final CreatorAccountLinkService accountLinkService;
+  private final com.influencermatch.backend.creator.service.CreatorChannelUnlinkService unlinkService;
   private final com.influencermatch.backend.creator.client.OAuthProofClient proofClient;
 
   @PostMapping("/connect/{platform}/start")
@@ -80,5 +82,12 @@ public class CreatorPortalAccountController {
       getAggregatedReach() {
     User actor = Permissions.actor();
     return ApiResponse.ok(accountLinkService.getAggregatedReach(actor.getId()));
+  }
+
+  @DeleteMapping("/{creatorId}")
+  @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
+  @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+  public void unlink(@PathVariable UUID creatorId) {
+    unlinkService.unlink(creatorId);
   }
 }

@@ -61,6 +61,9 @@ public class TikTokOAuthSession extends BaseEntity {
   @Column(length = 24)
   private String matchStatus;
 
+  @Column(length = 64)
+  private String failureCode;
+
   private java.util.UUID linkedCreatorId;
   private java.util.UUID linkedMasterId;
 }

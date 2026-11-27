@@ -117,11 +117,16 @@ public class TikTokOwnershipService {
         if (!Boolean.TRUE.equals(existing.getIsStableId()))
           throw rejection(user, existing, session, "Stored channel identity is not stable");
       }
+      if (matchesTarget)
+        com.influencermatch.backend.creator.service.ChannelPlatformLimit.requireSlot(
+            creators, user.getId(), "TIKTOK", existing == null ? null : existing.getId());
     } catch (BusinessException ex) {
       if (standalone && ex.code() == ErrorCode.TIKTOK_IDENTITY_RESOLUTION_FAILED)
         return readyUnmatched(session, proof);
       session.setStatus(ex.code() == ErrorCode.TIKTOK_SESSION_EXPIRED ? "EXPIRED" : "FAILED");
       clearProfile(session);
+      if (ex.code() == ErrorCode.CHANNEL_PLATFORM_ALREADY_LINKED)
+        session.setFailureCode(ex.code().name());
       return new TikTokSessionStore.Result<>(null, ex);
     }
     if (!matchesTarget) return readyUnmatched(session, proof);

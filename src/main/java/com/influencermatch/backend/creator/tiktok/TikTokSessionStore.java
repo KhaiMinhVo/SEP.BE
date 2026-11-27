@@ -133,8 +133,9 @@ public class TikTokSessionStore {
     long version = actor.getAuthVersion();
     var user =
         users
-            .findById(actor.getId())
+            .findLockedById(actor.getId())
             .orElseThrow(() -> new ForbiddenException("Creator unavailable"));
+    em.refresh(user);
     assertUser(user, version);
     Creator target =
         request.creatorId() == null
@@ -307,7 +308,8 @@ public class TikTokSessionStore {
             session.getExpiresAt(),
             account,
             session.getLinkedCreatorId(),
-            session.getLinkedMasterId()),
+            session.getLinkedMasterId(),
+            session.getFailureCode()),
         null);
   }
 
@@ -343,6 +345,7 @@ public class TikTokSessionStore {
     session.setUsername(null);
     session.setDisplayName(null);
     session.setMatchStatus(null);
+    session.setFailureCode(null);
     session.setLinkedCreatorId(null);
     session.setLinkedMasterId(null);
   }

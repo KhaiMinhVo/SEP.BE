@@ -367,6 +367,71 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
+  void limitsLinkingByPlatformAndInvalidatesPendingSessionsAfterUnlink() throws Exception {
+    var first = channel;
+    var initial = ready(creator);
+    confirm(creator, initial, first.getExternalId(), 200);
+
+    channel = channel("FACEBOOK");
+    when(graph.exchange(anyString(), anyString())).thenReturn(proof());
+    when(graph.verify(anyString(), anyString())).thenReturn(proof());
+    var second = ready(creator);
+    var choice = call(creator, get(view(second)), null, 200).path("data").path("accounts").get(0);
+    assertThat(choice.path("matchReason").asText()).isEqualTo("CHANNEL_PLATFORM_ALREADY_LINKED");
+    assertThat(confirm(creator, second, channel.getExternalId(), 409).path("code").asText())
+        .isEqualTo("CHANNEL_PLATFORM_ALREADY_LINKED");
+
+    String unlink = "/creators/portal/accounts/" + first.getId();
+    call(other, org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete(unlink), null, 404);
+    var secondChannel = channel;
+    channel = first;
+    var liveInvitation = invite(creator.getEmail(), LocalDateTime.ofInstant(now, ZoneOffset.UTC).plusDays(1));
+    assertThat(call(creator, org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete(unlink),
+        null, 409).path("code").asText()).isEqualTo("CHANNEL_UNLINK_BLOCKED");
+    liveInvitation.setExpiresAt(LocalDateTime.ofInstant(now, ZoneOffset.UTC).minusDays(1));
+    invitations.saveAndFlush(liveInvitation);
+    channel = secondChannel;
+    call(creator, org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete(unlink), null, 204);
+    assertThat(creators.findById(first.getId()).orElseThrow().getMaster()).isNull();
+    assertThat(verifications.findByCreatorIdAndStatus(first.getId(), "REVOKED")).isNotEmpty();
+    assertThat(call(creator, get(view(second)), null, 200).path("data").path("status").asText())
+        .isEqualTo("EXPIRED");
+    confirm(creator, ready(creator), channel.getExternalId(), 200);
+  }
+
+  @Test
+  void concurrentFacebookConfirmationsForDifferentPagesOnlyLinkOne() throws Exception {
+    var first = channel;
+    var second = channel("FACEBOOK");
+    var base = proof();
+    var both = new MetaDtos.Proof(base.subject(), base.token(), base.tokenExpiresAt(), base.scopes(),
+        List.of(base.assets().getFirst(), new MetaDtos.Asset(second.getExternalId(),
+            second.getExternalId(), "Second page", null, Set.of("MANAGE"))));
+    when(graph.exchange(anyString(), anyString())).thenReturn(both);
+    when(graph.verify(anyString(), anyString())).thenReturn(both);
+    var firstSession = ready(creator);
+    var secondSession = ready(creator);
+    var gate = new CountDownLatch(1);
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var a = executor.submit(() -> confirmStatus(firstSession, first.getExternalId(), gate));
+      var b = executor.submit(() -> confirmStatus(secondSession, second.getExternalId(), gate));
+      gate.countDown();
+      assertThat(List.of(a.get(15, TimeUnit.SECONDS), b.get(15, TimeUnit.SECONDS)))
+          .containsExactlyInAnyOrder(200, 409);
+    }
+    assertThat(creators.findChannelIdsByOwnerAndPlatform(creator.getId(), "FACEBOOK")).hasSize(1);
+  }
+
+  private int confirmStatus(Started session, String externalId, CountDownLatch gate) throws Exception {
+    gate.await();
+    return mvc.perform(post(view(session) + "/confirm")
+        .header("Authorization", "Bearer " + jwt.generateToken(creator))
+        .contentType("application/json")
+        .content(json.writeValueAsBytes(Map.of("accountId", externalId))))
+        .andReturn().getResponse().getStatus();
+  }
+
+  @Test
   void instagramCannotConfirmItsFacebookPageIdEvenIfThatIdExistsInTheDatabase() throws Exception {
     channel = channel("INSTAGRAM");
     var misleading = channel("INSTAGRAM");

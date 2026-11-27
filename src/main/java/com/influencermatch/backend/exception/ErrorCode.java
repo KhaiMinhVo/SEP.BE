@@ -3,6 +3,8 @@ package com.influencermatch.backend.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+  CHANNEL_PLATFORM_ALREADY_LINKED(HttpStatus.CONFLICT, "A channel is already linked for this platform"),
+  CHANNEL_UNLINK_BLOCKED(HttpStatus.CONFLICT, "This channel has a live invitation or collaboration"),
   CREATOR_PROFILE_REVISION_CONFLICT(HttpStatus.CONFLICT, "Creator profile revision changed"),
   DEAL_REVISION_CONFLICT(HttpStatus.CONFLICT, "Deal revision changed"),
   DEAL_STATE_CONFLICT(HttpStatus.CONFLICT, "Deal workflow conflict"),

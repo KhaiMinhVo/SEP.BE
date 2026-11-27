@@ -250,6 +250,7 @@ public class CreatorClaimService {
                               .build()));
       if (!"ACTIVE".equals(master.getStatus()))
         throw new ForbiddenException("Creator Master is not active");
+      ChannelPlatformLimit.requireSlot(creators, claimant.getId(), creator.getPlatform(), creator.getId());
       creator.setMaster(master);
       applicable.forEach(i -> i.setStatus("ACCEPTED"));
       creator.setSourceType(CreatorSourceType.AUTHORIZED);

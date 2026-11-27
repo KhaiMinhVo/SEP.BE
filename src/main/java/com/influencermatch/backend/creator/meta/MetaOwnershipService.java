@@ -125,6 +125,8 @@ public class MetaOwnershipService {
           ErrorCode.CREATOR_ALREADY_LINKED,
           "Channel identity is already linked");
     boolean alreadyOwned = existing != null && existing.getMaster() != null;
+    com.influencermatch.backend.creator.service.ChannelPlatformLimit.requireSlot(
+        creators, user.getId(), session.getPlatform(), existing == null ? null : existing.getId());
     if (master == null)
       master =
           masters.save(

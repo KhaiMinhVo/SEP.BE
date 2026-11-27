@@ -45,5 +45,6 @@ public final class TikTokDtos {
       Instant expiresAt,
       Account account,
       UUID creatorId,
-      UUID masterId) {}
+      UUID masterId,
+      String failureCode) {}
 }

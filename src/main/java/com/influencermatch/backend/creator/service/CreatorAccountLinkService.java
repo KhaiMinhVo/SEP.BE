@@ -106,8 +106,9 @@ public class CreatorAccountLinkService {
   public ConnectAccountResponse linkAdditionalAccount(
       UUID userId, String platform, String authorizationCode) {
 
-    User currentUser = userRepository.findById(userId)
+    User currentUser = userRepository.findLockedById(userId)
         .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+    em.refresh(currentUser);
 
     com.influencermatch.backend.security.permission.Permissions.require(com.influencermatch.backend.security.permission.Permission.CLAIM_CREATOR_PROFILE);
     if(!currentUser.getId().equals(com.influencermatch.backend.security.permission.Permissions.actor().getId())
@@ -141,6 +142,8 @@ public class CreatorAccountLinkService {
     // 2. Check if this account already exists in DB
     Optional<Creator> existingOpt = creatorRepository.findLockedByPlatformAndExternalId(
         normalizedPlatform, lookupExternalId);
+    ChannelPlatformLimit.requireSlot(creatorRepository, userId, normalizedPlatform,
+        existingOpt.map(Creator::getId).orElse(null));
 
     // CASE 2: Tài khoản hoàn toàn mới chưa từng cào
     if (existingOpt.isEmpty()) {

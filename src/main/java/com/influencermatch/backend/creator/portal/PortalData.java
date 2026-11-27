@@ -24,7 +24,8 @@ public final class PortalData {
                 new PortalDtos.Contacts(
                     new PortalDtos.Contact(null, PortalDtos.Visibility.PRIVATE),
                     new PortalDtos.Contact(null, PortalDtos.Visibility.PRIVATE),
-                    new PortalDtos.Contact(null, PortalDtos.Visibility.PRIVATE))));
+                    new PortalDtos.Contact(null, PortalDtos.Visibility.PRIVATE)),
+                List.of()));
   }
 
   static void keys(JsonNode n, String... allowed) {
@@ -76,7 +77,8 @@ public final class PortalData {
         "portfolio",
         "availability",
         "sharing",
-        "contacts");
+        "contacts",
+        "rateCards");
     var out = before.deepCopy();
     if (request.has("introduction"))
       out.set("introduction", j.valueToTree(text(request.get("introduction"), 4000)));
@@ -193,6 +195,55 @@ public final class PortalData {
         index++;
       }
       out.set("portfolio", items);
+    }
+    if (request.has("rateCards")) {
+      JsonNode rc = request.get("rateCards");
+      if (rc.isNull()) rc = j.createArrayNode();
+      if (!rc.isArray() || rc.size() > 20) throw bad("Expected at most 20 rate cards");
+      var items = j.createArrayNode();
+      for (var item : rc) {
+        keys(
+            item,
+            "id",
+            "platform",
+            "format",
+            "name",
+            "description",
+            "priceVnd",
+            "turnaroundDays",
+            "usageRightsDays",
+            "deliverables",
+            "isPopular");
+        String id = text(item.get("id"), 100);
+        String platform = text(item.get("platform"), 40);
+        String format = text(item.get("format"), 40);
+        String name = text(item.get("name"), 200);
+        String description = text(item.get("description"), 1000);
+        if (name == null || platform == null || format == null) {
+          throw bad("Rate card name, platform, and format are required");
+        }
+        long priceVnd = item.path("priceVnd").asLong(-1);
+        int turnaroundDays = item.path("turnaroundDays").asInt(0);
+        int usageRightsDays = item.path("usageRightsDays").asInt(0);
+        if (priceVnd < 0 || turnaroundDays < 1 || usageRightsDays < 1) {
+          throw bad("Invalid rate card pricing or duration");
+        }
+        var node = j.createObjectNode();
+        node.put("id", id != null ? id : UUID.randomUUID().toString());
+        node.put("platform", platform);
+        node.put("format", format);
+        node.put("name", name);
+        node.set("description", j.valueToTree(description));
+        node.put("priceVnd", priceVnd);
+        node.put("turnaroundDays", turnaroundDays);
+        node.put("usageRightsDays", usageRightsDays);
+        node.set(
+            "deliverables",
+            item.has("deliverables") ? strings(j, item.get("deliverables"), 200) : j.createArrayNode());
+        node.put("isPopular", item.path("isPopular").asBoolean(false));
+        items.add(node);
+      }
+      out.set("rateCards", items);
     }
     return out;
   }

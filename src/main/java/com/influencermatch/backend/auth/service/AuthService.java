@@ -22,4 +22,6 @@ public interface AuthService {
   void logout(RefreshTokenRequest request);
 
   UserProfileResponse getProfile(User currentUser);
+
+  UserProfileResponse updateProfile(User currentUser, String fullName);
 }

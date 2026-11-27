@@ -126,7 +126,7 @@ public class MetaGraphClient {
         String fields =
             platform.equals("INSTAGRAM")
                 ? "id,name,tasks,instagram_business_account{id,username,name}"
-                : "id,name,tasks";
+                : "id,name,tasks,username";
         var uri = endpoint("/me/accounts").queryParam("fields", fields).queryParam("limit", 100);
         if (after != null) uri.queryParam("after", after);
         var result = get(uri.build().encode().toUri(), token);

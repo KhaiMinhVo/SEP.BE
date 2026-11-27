@@ -36,6 +36,8 @@ public interface CreatorRepository extends JpaRepository<Creator, UUID> {
   Optional<Creator> findLockedByPlatformAndExternalId(@Param("platform") String platform,@Param("externalId") String externalId);
   Optional<Creator> findByPlatformAndExternalId(String platform, String externalId);
 
+  boolean existsByPlatformAndExternalIdIgnoreCaseAndIsStableIdFalse(String platform, String externalId);
+
   @Query("""
       select c from Creator c
       where c.platform = :platform and c.master is null and c.sourceType = :sourceType

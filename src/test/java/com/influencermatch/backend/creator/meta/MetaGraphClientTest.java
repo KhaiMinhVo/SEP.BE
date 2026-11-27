@@ -92,10 +92,10 @@ class MetaGraphClientTest {
                         java.net.URLDecoder.decode(
                             request.getURI().getRawQuery(),
                             java.nio.charset.StandardCharsets.UTF_8))
-                    .contains("fields=id,name,tasks"))
+                    .contains("fields=id,name,tasks,username"))
         .andRespond(
             withSuccess(
-                "{\"data\":[{\"id\":\"100\",\"name\":\"Page\",\"tasks\":[\"ANALYZE\"]}],\"paging\":{\"next\":\"https://evil.test/steal?access_token=private-user-token\",\"cursors\":{\"after\":\"next-cursor\"}}}",
+                "{\"data\":[{\"id\":\"100\",\"name\":\"Page\",\"username\":\"Page.Alias\",\"tasks\":[\"ANALYZE\"]}],\"paging\":{\"next\":\"https://evil.test/steal?access_token=private-user-token\",\"cursors\":{\"after\":\"next-cursor\"}}}",
                 MediaType.APPLICATION_JSON));
     server
         .expect(
@@ -110,6 +110,7 @@ class MetaGraphClientTest {
                 MediaType.APPLICATION_JSON));
     var proof = graph.exchange("one-time-code", "FACEBOOK");
     assertThat(proof.assets()).extracting(MetaDtos.Asset::id).containsExactly("100", "101");
+    assertThat(proof.assets()).extracting(MetaDtos.Asset::username).containsExactly("Page.Alias", "");
     assertThat(proof.assets())
         .extracting(MetaDtos.Asset::tasks)
         .containsExactly(Set.of("ANALYZE"), Set.of("CREATE_CONTENT"));

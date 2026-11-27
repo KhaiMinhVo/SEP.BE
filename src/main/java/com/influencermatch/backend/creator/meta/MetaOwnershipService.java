@@ -91,7 +91,9 @@ public class MetaOwnershipService {
     var original = cipher.decrypt(session.getOauthFlow(), session.getPayloadCiphertext());
     if (!original.subject().equals(fresh.subject()) || !fresh.tokenExpiresAt().isAfter(store.now()))
       throw new ForbiddenException("Meta authorization changed");
-    if (original.assets().stream().noneMatch(a -> a.id().equals(accountId))) throw unmatched();
+    var originalAsset =
+        original.assets().stream().filter(a -> a.id().equals(accountId)).findFirst()
+            .orElseThrow(() -> unmatched());
     var asset =
         fresh.assets().stream()
             .filter(a -> a.id().equals(accountId))
@@ -99,7 +101,9 @@ public class MetaOwnershipService {
             .orElseThrow(() -> unmatched());
     if (!MetaSessionStore.hasAssetAccess(session.getPlatform(), asset)) throw unmatched();
     if (existing == null && (!MetaSessionStore.isStandalone(session)
-        || !MetaSessionStore.isCanonicalAssetId(asset.id()))) throw unmatched();
+        || !MetaSessionStore.isCanonicalAssetId(asset.id())
+        || store.hasLegacyFacebookChannel(session.getPlatform(), asset)
+        || store.hasLegacyFacebookChannel(session.getPlatform(), originalAsset))) throw unmatched();
     var master = masters.findByUserId(user.getId()).orElse(null);
     if (existing != null && existing.getMaster() != null
         && (master == null || !existing.getMaster().getId().equals(master.getId())))

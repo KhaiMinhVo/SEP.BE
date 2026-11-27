@@ -342,6 +342,31 @@ class MetaOAuthPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
+  void blocksDuplicateCreationWhenFacebookPageAlreadyHasAnUnstableSlugRecord() throws Exception {
+    String pageId = channel.getExternalId();
+    String slug = "page." + UUID.randomUUID().toString().replace("-", "");
+    channel.setExternalId(slug);
+    channel.setUserName(slug);
+    channel.setIsStableId(false);
+    creators.saveAndFlush(channel);
+    var base = proof();
+    var authorizedPage = new MetaDtos.Proof(
+        base.subject(), base.token(), base.tokenExpiresAt(), base.scopes(),
+        List.of(new MetaDtos.Asset(pageId, pageId, "Page", slug.toUpperCase(Locale.ROOT), Set.of("MANAGE"))));
+    when(graph.exchange(anyString(), anyString())).thenReturn(authorizedPage);
+    when(graph.verify(anyString(), anyString())).thenReturn(authorizedPage);
+
+    var session = ready(creator);
+    var choice = call(creator, get(view(session)), null, 200).path("data").path("accounts").get(0);
+    assertThat(choice.path("matchStatus").asText()).isEqualTo("INSUFFICIENT_EVIDENCE");
+    assertThat(choice.path("matchReason").asText()).isEqualTo("UNSTABLE_CHANNEL_ID");
+    assertThat(confirm(creator, session, pageId, 409).path("code").asText())
+        .isEqualTo("META_ACCOUNT_NOT_MATCHED");
+    assertThat(creators.findByPlatformAndExternalId("FACEBOOK", pageId)).isEmpty();
+    assertUnowned();
+  }
+
+  @Test
   void instagramCannotConfirmItsFacebookPageIdEvenIfThatIdExistsInTheDatabase() throws Exception {
     channel = channel("INSTAGRAM");
     var misleading = channel("INSTAGRAM");

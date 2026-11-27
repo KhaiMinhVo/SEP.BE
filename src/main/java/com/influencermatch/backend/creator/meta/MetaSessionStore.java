@@ -66,6 +66,14 @@ public class MetaSessionStore {
     return id != null && id.matches("[1-9][0-9]{0,254}");
   }
 
+  boolean hasLegacyFacebookChannel(String platform, MetaDtos.Asset asset) {
+    if (!"FACEBOOK".equals(platform) || asset.username() == null) return false;
+    String slug = asset.username().strip();
+    return slug.matches("[a-zA-Z0-9.]{1,255}")
+        && !isCanonicalAssetId(slug)
+        && creators.existsByPlatformAndExternalIdIgnoreCaseAndIsStableIdFalse(platform, slug);
+  }
+
   public void assertUser(User user, long version) {
     if (user.getRole() != Role.CREATOR
         || user.getStatus() != UserStatus.ACTIVE
@@ -373,6 +381,10 @@ public class MetaSessionStore {
         } else if (!hasAssetAccess(session.getPlatform(), asset)) {
           match = "INSUFFICIENT_EVIDENCE";
           reason = "MISSING_PAGE_MANAGEMENT";
+        } else if (channel == null && hasLegacyFacebookChannel(session.getPlatform(), asset)) {
+          // A matching alias prevents a duplicate, but an alias can move between Pages.
+          match = "INSUFFICIENT_EVIDENCE";
+          reason = "UNSTABLE_CHANNEL_ID";
         } else if (channel == null) {
           match = isCanonicalAssetId(asset.id()) ? "CAN_CREATE" : "UNMATCHED";
           if ("UNMATCHED".equals(match)) reason = "CHANNEL_NOT_FOUND";

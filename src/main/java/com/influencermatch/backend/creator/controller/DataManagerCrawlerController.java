@@ -91,4 +91,15 @@ public class DataManagerCrawlerController {
     return ApiResponse.ok(overview);
   }
 
+  @GetMapping("/trends")
+  @Operation(summary = "Lấy xu hướng thu thập dữ liệu theo ngày (7 hoặc 30 ngày)")
+  public ApiResponse<Map<String, Object>> getTrends(
+      @RequestParam(value = "days", defaultValue = "7") int days) {
+    List<Map<String, Object>> items = crawlerServiceClient.getTrends(days);
+    return ApiResponse.ok(Map.of(
+        "items", items,
+        "source", "Crawler / PostgreSQL (public_creator_metric)",
+        "isFallback", false));
+  }
+
 }

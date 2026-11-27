@@ -40,6 +40,19 @@ public final class PortalDtos {
   public record Availability(AvailabilityStatus status, LocalDate availableFrom, String note) {}
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
+  public record RateCardItem(
+      String id,
+      String platform,
+      String format,
+      String name,
+      String description,
+      long priceVnd,
+      int turnaroundDays,
+      int usageRightsDays,
+      List<String> deliverables,
+      Boolean isPopular) {}
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   public record Data(
       String introduction,
       List<String> serviceAreas,
@@ -47,7 +60,8 @@ public final class PortalDtos {
       List<Portfolio> portfolio,
       Availability availability,
       Sharing sharing,
-      Contacts contacts) {}
+      Contacts contacts,
+      List<RateCardItem> rateCards) {}
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   public record Profile(

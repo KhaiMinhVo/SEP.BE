@@ -70,6 +70,15 @@ public class CreatorPortalController {
         .body(ApiResponse.ok(projection.contacts(id, true)));
   }
 
+  @GetMapping("/creators/{id}/rate-cards")
+  @PreAuthorize("hasRole('BRAND')")
+  @Operation(summary = "Read public Rate Card packages declared by a verified Creator")
+  public ResponseEntity<ApiResponse<List<RateCardItem>>> rateCards(@PathVariable UUID id) {
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noStore())
+        .body(ApiResponse.ok(projection.rateCards(id)));
+  }
+
   @GetMapping("/creators/portal/accounts/connection-options")
   @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
   @Operation(

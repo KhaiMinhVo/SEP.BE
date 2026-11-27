@@ -114,6 +114,22 @@ public class CreatorClaimService {
         null,
         Map.of("status", "PENDING", "creatorId", creatorId, "claimantId", claimant.getId()),
         "Creator nộp bằng chứng xác minh quyền sở hữu kênh");
+    if (notificationService != null) {
+      String channelLabel = creator.getDisplayName() != null && !creator.getDisplayName().isBlank()
+          ? creator.getDisplayName()
+          : (creator.getUserName() != null ? creator.getUserName() : creator.getExternalId());
+      for (User manager : users.findByRoleAndStatus(
+          com.influencermatch.backend.user.enums.Role.DATA_MANAGER,
+          com.influencermatch.backend.user.enums.UserStatus.ACTIVE)) {
+        notificationService.createAndDispatch(
+            manager.getId(),
+            com.influencermatch.backend.notification.enums.NotificationType.CLAIM_SUBMITTED,
+            "Có yêu cầu xác minh kênh thủ công mới",
+            "Creator vừa gửi bằng chứng xác minh cho kênh " + creator.getPlatform() + " · " + channelLabel + ".",
+            "CREATOR_CLAIM",
+            claim.getId());
+      }
+    }
     return response(claim);
   }
 

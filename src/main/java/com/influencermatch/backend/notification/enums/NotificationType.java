@@ -22,6 +22,16 @@ public enum NotificationType {
       "Lời mời hợp tác từ nhãn hàng",
       "Nhãn hàng đã gửi cho bạn một lời mời hợp tác chiến dịch.",
       OccurrencePolicy.SINGLE_PER_ENTITY),
+  COOPERATION_PROPOSAL_ACCEPTED(
+      false,
+      "Creator đã đồng ý đề xuất hợp tác",
+      "Creator đã đồng ý với bản đề xuất. Bạn có thể vào xác nhận chốt hợp tác.",
+      OccurrencePolicy.MULTI_EVENT_INSTANCE),
+  COOPERATION_COUNTEROFFER(
+      false,
+      "Creator gửi đề xuất thay đổi",
+      "Creator đã gửi đề xuất điều chỉnh chi phí hoặc điều khoản hợp tác.",
+      OccurrencePolicy.MULTI_EVENT_INSTANCE),
   COLLABORATION_PROPOSAL(
       true,
       "Lời mời hợp tác chiến dịch",
@@ -64,6 +74,11 @@ public enum NotificationType {
       OccurrencePolicy.SINGLE_PER_ENTITY),
 
   // Creator Claim Profile (Luồng 4)
+  CLAIM_SUBMITTED(
+      false,
+      "Có yêu cầu xác minh kênh thủ công mới",
+      "Creator vừa gửi bằng chứng xác minh quyền sở hữu kênh đang chờ phê duyệt.",
+      OccurrencePolicy.MULTI_EVENT_INSTANCE),
   CLAIM_APPROVED(
       true,
       "Yêu cầu quản lý kênh Creator được duyệt",

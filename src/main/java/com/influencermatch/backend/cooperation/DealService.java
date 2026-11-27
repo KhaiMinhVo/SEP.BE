@@ -30,6 +30,8 @@ public class DealService {
   final ExecutionHistoryReader historyReader;
   final CreatorPortalProjection creatorProjection;
   @org.springframework.beans.factory.annotation.Autowired RecommendationContactPolicy contactPolicy;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  com.influencermatch.backend.notification.service.NotificationService notificationService;
   @jakarta.persistence.PersistenceContext jakarta.persistence.EntityManager em;
 
   UUID actor() {
@@ -669,6 +671,26 @@ public class DealService {
         action.equals("accept") ? "PROPOSAL_ACCEPTED" : "DEAL_DECLINED",
         store.revision(d),
         Map.of("proposalRevision", p.get("revision")));
+    if (notificationService != null && d.get("brand_user_id") != null) {
+      UUID brandUserId = uuid(d.get("brand_user_id"));
+      if (action.equals("accept")) {
+        notificationService.createAndDispatch(
+            brandUserId,
+            com.influencermatch.backend.notification.enums.NotificationType.COOPERATION_PROPOSAL_ACCEPTED,
+            "Creator đã đồng ý đề xuất hợp tác",
+            "Creator đã đồng ý bản đề xuất số " + p.get("revision") + ". Hãy mở Quản lý hợp tác để xác nhận chốt hợp tác.",
+            "DEAL",
+            id);
+      } else {
+        notificationService.createAndDispatch(
+            brandUserId,
+            com.influencermatch.backend.notification.enums.NotificationType.COLLABORATION_REJECTED,
+            "Creator từ chối lời mời hợp tác",
+            "Creator đã từ chối lời mời hợp tác của bạn.",
+            "DEAL",
+            id);
+      }
+    }
     return view(store.deal(id));
   }
 
@@ -677,7 +699,17 @@ public class DealService {
     var d = portalLocked(id);
     if (!"OFFER".equals(store.latest(id).get("kind")))
       throw conflict("Wait for a Brand offer before countering");
-    return proposeLocked(d, p, key, "COUNTEROFFER");
+    var result = proposeLocked(d, p, key, "COUNTEROFFER");
+    if (notificationService != null && d.get("brand_user_id") != null) {
+      notificationService.createAndDispatch(
+          uuid(d.get("brand_user_id")),
+          com.influencermatch.backend.notification.enums.NotificationType.COOPERATION_COUNTEROFFER,
+          "Creator gửi đề xuất thay đổi (Counter-offer)",
+          "Creator vừa gửi đề xuất điều chỉnh ngân sách hoặc điều khoản hợp tác.",
+          "DEAL",
+          id);
+    }
+    return result;
   }
 
   @Transactional

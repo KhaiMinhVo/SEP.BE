@@ -58,7 +58,7 @@ public enum NotificationType {
       "Nhãn hàng đã gửi yêu cầu chỉnh sửa cho bản nháp nội dung của bạn.",
       OccurrencePolicy.MULTI_EVENT_INSTANCE),
   CONTENT_DRAFT_APPROVED(
-      false,
+      true,
       "Nhãn hàng đã duyệt bản nháp",
       "Bản nháp nội dung của bạn đã được nhãn hàng phê duyệt thành công.",
       OccurrencePolicy.MULTI_EVENT_INSTANCE),

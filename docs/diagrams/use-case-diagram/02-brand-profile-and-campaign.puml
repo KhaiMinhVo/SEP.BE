@@ -1,0 +1,36 @@
+@startuml 02-brand-profile-and-campaign
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+skinparam ArrowColor #242424
+skinparam usecase {
+    BackgroundColor #F1F1F1
+    BorderColor #555555
+}
+
+title Brand Profile and Campaign
+
+' Brand may request AI assistance while drafting a campaign.
+
+actor "Brand / SME" as Brand
+actor "Google OAuth" as Google <<external system>>
+actor "Gemini API" as Gemini <<external system>>
+
+rectangle "Intelligent Influencer Discovery and Recommendation Platform\nBased on Historical and Contextual Data for SMEs" {
+    usecase "UC-09 Manage Brand Profile" as UC09
+    usecase "UC-12 Manage Campaigns" as UC12
+    usecase "UC-17 Manage Campaign Status" as UC17
+    usecase "UC-18 Generate AI-Assisted Campaign Brief" as UC18
+}
+
+Brand -- UC09
+Brand -- UC12
+Brand -- UC17
+Brand -- UC18
+
+UC09 -- Google
+UC18 -- Gemini
+
+UC18 ..> UC12 : <<extend>>
+@enduml

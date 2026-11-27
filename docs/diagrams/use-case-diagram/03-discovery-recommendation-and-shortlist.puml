@@ -1,0 +1,35 @@
+@startuml 03-discovery-recommendation-and-shortlist
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+skinparam ArrowColor #242424
+skinparam usecase {
+    BackgroundColor #F1F1F1
+    BorderColor #555555
+}
+
+title Creator Discovery, Recommendation and Shortlist
+
+' Recommendation uses eligible history (M1) and derives learned Brand preferences (M4) during evaluation.
+
+actor "Brand / SME" as Brand
+
+rectangle "Intelligent Influencer Discovery and Recommendation Platform\nBased on Historical and Contextual Data for SMEs" {
+    usecase "UC-19 Discover Creators" as UC19
+    usecase "UC-21 View Creator Details" as UC21
+    usecase "UC-22 Find Similar Creators" as UC22
+    usecase "UC-25 Generate Four-Memory Creator\nRecommendations" as UC25
+    usecase "UC-27 Evaluate Recommendation Results" as UC27
+    usecase "UC-28 Manage Creator Shortlist" as UC28
+    usecase "UC-32 Compare Shortlisted Creators" as UC32
+}
+
+Brand -- UC19
+Brand -- UC21
+Brand -- UC22
+Brand -- UC25
+Brand -- UC27
+Brand -- UC28
+Brand -- UC32
+@enduml

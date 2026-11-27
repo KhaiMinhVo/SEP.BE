@@ -1,0 +1,27 @@
+@startuml refund-state
+title WF-06 | RefundStatus
+hide empty description
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+
+[*] --> NONE : create payment
+NONE --> REQUESTED : request [owner and eligible payment] / record reason
+NONE --> APPROVED : approve [authorized exception] / apply refund hold
+REQUESTED --> APPROVED : approve [eligible request or authorized exception]\n/ apply refund hold
+REQUESTED --> REJECTED : reject [Admin authorized] / audit decision
+APPROVED --> PROCESSING : submit [eligible VNPay refund, no prior request ID]\n/ reserve gateway request ID
+APPROVED --> COMPLETED : confirm [valid manual transfer] / complete refund
+PROCESSING --> COMPLETED : apply [verified successful full refund] / complete refund
+PROCESSING --> GATEWAY_FAILED : apply [verified gateway failure] / record failure
+PROCESSING --> PROCESSING : apply [outcome uncertain] / keep refund pending
+GATEWAY_FAILED --> COMPLETED : confirm [valid manual transfer] / complete refund
+REJECTED --> [*]
+COMPLETED --> [*]
+
+note right of COMPLETED
+  In the same transaction, mark the payment REFUNDED,
+  cancel the subscription and clear its refund hold.
+end note
+@enduml

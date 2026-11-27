@@ -1,0 +1,36 @@
+@startuml collaboration-lifecycle-state
+title WF-03 | Collaboration Lifecycle
+hide empty description
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam stateBackgroundColor white
+skinparam defaultFontName Arial
+top to bottom direction
+
+state PLANNED
+state IN_PROGRESS
+state AWAITING_REVIEW
+state COMPLETED
+state CANCELLED
+state TERMINATED
+
+[*] --> PLANNED : / create when Deal is confirmed (BR-55)
+PLANNED --> IN_PROGRESS : start\n[authorized Brand, current Deal revision, ACTIVE Campaign,\nconfirmed Deal, plan and assignment ready when COLLABORATIVE]\n/ start execution
+PLANNED --> CANCELLED : cancel\n[current Deal revision and authorized Brand] / cancel before start
+IN_PROGRESS --> AWAITING_REVIEW : accept\n[latest Outcome revision, complete results and costs,\nno pending termination request (BR-60/61)] / store acceptance
+AWAITING_REVIEW --> IN_PROGRESS : reopen\n[current execution revision and reason] / mark acceptance reopened
+AWAITING_REVIEW --> COMPLETED : review or completeWithoutReview\n[matching active acceptance and revision (BR-60/62)] / persist outcome and evidence
+IN_PROGRESS --> TERMINATED : terminate\n[ACTIVE Campaign, current revision and pending request agreed by other party]\n/ record PORTAL termination
+IN_PROGRESS --> TERMINATED : terminateExternal\n[ACTIVE Campaign, current revision, BRAND_MANAGED,\nowning Brand and valid consent record] / save BRAND_EXTERNAL termination
+COMPLETED --> [*]
+CANCELLED --> [*]
+TERMINATED --> [*]
+
+note right of IN_PROGRESS
+  requestTermination(), decline and withdraw update
+  the exit request. Collaboration stays IN_PROGRESS.
+  Consent recorded outside Portal requires a non-future
+  agreement time, reason and HTTPS evidence.
+end note
+@enduml

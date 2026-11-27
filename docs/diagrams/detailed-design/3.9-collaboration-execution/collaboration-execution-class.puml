@@ -1,0 +1,108 @@
+@startuml collaboration-execution-class
+title WF-03 | Collaboration Execution and Closure
+hide circle
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam classBackgroundColor white
+skinparam noteBackgroundColor white
+skinparam classAttributeIconSize 0
+skinparam defaultFontName Arial
+top to bottom direction
+
+class CollaborationExecutionController <<controller>>
+class FlexibleExecutionController <<controller>>
+class CollaborationExecution <<service>> {
+  + submit(id : UUID, d : UUID, r : Submission, key : String) : JsonNode
+  + submitExternal(id : UUID, d : UUID, r : ExternalSubmission, key : String) : JsonNode
+  + decide(id : UUID, d : UUID, r : Decision, key : String) : JsonNode
+  + accept(id : UUID, r : Accept, key : String) : JsonNode
+  + review(id : UUID, r : FinalReview, key : String) : JsonNode
+}
+class FlexibleExecution <<service>> {
+  + mode(id : UUID, r : Mode, key : String) : JsonNode
+  + completeWithoutReview(id : UUID, r : Complete, key : String) : JsonNode
+  + terminateExternal(id : UUID, r : ExternalTermination, key : String) : JsonNode
+}
+class CollaborationVideo <<service>>
+class CollaborationVideoStorage <<storage>>
+class Collaboration <<entity>> {
+  - status : CollaborationStatus
+}
+enum CollaborationStatus <<enumeration>> {
+  PLANNED
+  IN_PROGRESS
+  AWAITING_REVIEW
+  COMPLETED
+  CANCELLED
+  TERMINATED
+}
+class collaboration_deliverable <<SQL row>> {
+  status : varchar(30)
+  revision : bigint
+  submission_revision : bigint
+  revision_rounds : integer
+}
+class collaboration_submission <<SQL row>> {
+  revision : bigint
+  source : varchar(30)
+  video_upload_id : UUID
+  received_at : timestamptz
+}
+class collaboration_publication <<SQL row>> {
+  submission_revision : bigint
+  url : varchar(2000)
+}
+class collaboration_content_review <<SQL row>> {
+  submission_revision : bigint
+  decision : varchar(30)
+  checklist : jsonb
+  reason : varchar(2000)
+}
+class collaboration_outcome_revision <<SQL row>> {
+  revision : bigint
+  payload : jsonb
+}
+class collaboration_outcome_acceptance <<SQL row>> {
+  outcome_revision : bigint
+  reopened_at : timestamptz
+}
+class CreatorReview <<entity>>
+class collaboration_exit_request <<SQL row>> {
+  reason : varchar(2000)
+  resolved_at : timestamptz
+  resolution : varchar(20)
+}
+
+CollaborationExecutionController ..> CollaborationExecution
+FlexibleExecutionController ..> FlexibleExecution
+FlexibleExecutionController ..> CollaborationExecution
+FlexibleExecution ..> CollaborationExecution
+CollaborationExecution ..> CollaborationVideo
+CollaborationVideo ..> CollaborationVideoStorage
+CollaborationExecution ..> collaboration_deliverable : JDBC
+FlexibleExecution ..> collaboration_exit_request : JDBC
+Collaboration --> CollaborationStatus
+Collaboration "1" -- "0..*" collaboration_deliverable
+Collaboration "1" -- "0..*" collaboration_outcome_revision
+Collaboration "1" -- "0..*" collaboration_exit_request
+collaboration_deliverable "1" -- "0..*" collaboration_submission
+collaboration_submission "1" -- "0..1" collaboration_publication : deliverable and revision
+collaboration_submission "1" -- "0..1" collaboration_content_review : deliverable and revision
+collaboration_outcome_revision "1" -- "0..*" collaboration_outcome_acceptance : collaboration and revision
+collaboration_outcome_revision "0..1" -- "0..1" CreatorReview : accepted revision
+
+note right of Collaboration
+  SQL column management_mode:
+  COLLABORATIVE or BRAND_MANAGED.
+  Brand can change mode while PLANNED.
+end note
+note left of CollaborationExecution
+  BR-57/58/59: record and review the exact submission.
+  BR-60/61/62: accept the current outcome before completion.
+end note
+note right of FlexibleExecution
+  BR-60: completion without review retains the accepted
+  outcome and completion evidence without creating a rating.
+end note
+@enduml

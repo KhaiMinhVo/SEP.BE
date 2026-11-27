@@ -1,0 +1,107 @@
+@startuml manual-claim-sequence
+title WF-04 | Manual Channel Claim and Review
+hide footbox
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+autonumber
+skinparam roundcorner 0
+skinparam ParticipantPadding 10
+skinparam SequenceLifeLineBorderColor #555555
+skinparam SequenceLifeLineBackgroundColor white
+skinparam SequenceParticipantBackgroundColor white
+skinparam SequenceGroupBackgroundColor white
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam noteBackgroundColor white
+
+actor Creator
+actor "Data Manager" as Reviewer
+participant "Web Client" as Web
+participant CreatorClaimController as Submit
+participant CreatorClaimReviewController as Review
+participant CreatorClaimService as Service
+participant CreatorClaimRepository as Claims
+participant AuditService as Audit
+
+Creator -> Web : submit private evidence URLs and note
+Web -> Submit : POST /api/v1/creators/{id}/claim
+activate Submit
+Submit -> Service : claim(creatorId, request)
+activate Service
+note over Service
+  Require CLAIM_CREATOR_PROFILE and a verified Creator.
+  When supplied, validate the cooperation invitation and exact channel.
+end note
+alt <U+005B>eligible channel and no duplicate pending claim<U+005D>
+  Service -> Claims : saveAndFlush(claim)
+  Claims --> Service : PENDING
+  Service -> Audit : record(SUBMIT_CREATOR_CLAIM, ...)
+  Audit --> Service : audit recorded
+  Service --> Submit : ClaimResponse
+  Submit --> Web : 201 Created
+else <U+005B>channel already owned or duplicate pending claim<U+005D>
+  Service --> Submit : ownership or claim conflict
+  Submit --> Web : 409 Conflict
+else <U+005B>evidence or invitation checks fail<U+005D>
+  Service --> Submit : validation or authorization error
+  Submit --> Web : claim rejected by the API
+end
+deactivate Service
+deactivate Submit
+
+opt <U+005B>claim submitted<U+005D>
+  Reviewer -> Web : inspect evidence and submit decision
+  Web -> Review : GET /api/v1/data/creator-claims/{id}
+  Review --> Web : private claim detail
+  Web -> Review : PATCH /api/v1/data/creator-claims/{id}/review\ndecision, evidence type, verification note and reason
+  activate Review
+  Review -> Service : review(id, request)
+  activate Service
+  note over Service : Require REVIEW_CREATOR_CLAIM (BR-70), then lock the channel and claim.
+  alt <U+005B>claim is no longer PENDING<U+005D>
+    Service --> Review : CREATOR_CLAIM_CONFLICT
+    Review --> Web : 409 Conflict
+  else <U+005B>approve PENDING claim and eligibility rechecks fail<U+005D>
+    Service --> Review : invitation, claimant or ownership error
+    Review --> Web : approval denied
+  else <U+005B>approve eligible PENDING claim — BR-23/25/27<U+005D>
+    note over Service : Link Creator Master; mark claim APPROVED; reject other pending claims for this channel.
+    Service -> Audit : record(REVIEW_CREATOR_CLAIM, ...)
+    Audit --> Service : audit recorded
+    Service --> Review : APPROVED
+    Review --> Web : 200 OK
+  else <U+005B>reject PENDING claim<U+005D>
+    Service -> Audit : record(REVIEW_CREATOR_CLAIM, ...)
+    Audit --> Service : audit recorded
+    Service --> Review : REJECTED
+    Review --> Web : 200 OK
+  end
+  deactivate Service
+  deactivate Review
+
+  opt <U+005B>approved evidence selected for revocation<U+005D>
+    Reviewer -> Web : provide revocation reason
+    Web -> Review : POST /api/v1/data/creator-claims/{id}/revoke
+    activate Review
+    Review -> Service : revoke(id, request)
+    activate Service
+    alt <U+005B>claim not APPROVED or claimant is no longer the owner<U+005D>
+      Service --> Review : claim or ownership conflict
+      Review --> Web : 409 Conflict
+    else <U+005B>approved evidence belongs to current owner<U+005D>
+      alt <U+005B>independent valid proof remains<U+005D>
+        note over Service : Revoke the claim and retain current ownership.
+      else <U+005B>no valid proof remains<U+005D>
+        note over Service : Revoke the claim and clear current ownership and references.
+      end
+      Service -> Audit : record(REVOKE_CREATOR_CLAIM, ...)
+      Audit --> Service : audit recorded
+      Service --> Review : REVOKED
+      Review --> Web : 200 OK
+    end
+    deactivate Service
+    deactivate Review
+  end
+end
+@enduml

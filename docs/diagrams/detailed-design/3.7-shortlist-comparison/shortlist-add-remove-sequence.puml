@@ -1,0 +1,39 @@
+@startuml shortlist-add-remove-sequence
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+title Figures 4.3.7.2.1–2 Add and Remove Creator from Shortlist
+hide footbox
+autonumber
+actor Brand
+participant "Web Client" as Web
+participant ShortlistController as API
+participant ShortlistServiceImpl as Service
+participant ShortlistItemRepository as Items
+alt <U+005B>add a Creator<U+005D>
+  Brand -> Web : select Creator to add
+  Web -> API : POST /api/v1/campaigns/{campaignId}/shortlist/items
+  API -> Service : addCreatorToShortlist(campaignId, request)
+  alt <U+005B>authorization, ownership or input check fails<U+005D>
+    Service --> API : mapped error
+  else <U+005B>request accepted<U+005D>
+    note over Service : The writer handles deduplication and the optional recommendationRunId.
+    Service --> API : ShortlistItemDto
+  end
+else <U+005B>remove an item<U+005D>
+  Brand -> Web : select item to remove
+  Web -> API : DELETE /api/v1/campaigns/{campaignId}/shortlist/items/{itemId}
+  API -> Service : removeCreatorFromShortlist(campaignId, itemId)
+  activate Service
+  Service -> Items : findLockedByIdAndCampaignId(itemId, campaignId)
+  alt <U+005B>open owned campaign and matching item<U+005D>
+    Service -> Items : save(item) with status REMOVED
+    Service --> API : completed
+  else <U+005B>permission, campaign or item check fails<U+005D>
+    Service --> API : mapped error
+  end
+  deactivate Service
+end
+API --> Web : result
+@enduml

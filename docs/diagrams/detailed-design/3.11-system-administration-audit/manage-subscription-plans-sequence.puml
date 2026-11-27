@@ -1,0 +1,56 @@
+@startuml manage-subscription-plans-sequence
+title Manage Subscription Plans
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 230
+
+actor Admin
+participant "Web Client" as Web
+participant "Spring Security" as Security
+participant PlanController as API
+participant PlanService as Service
+participant PlanRepository as Plans
+participant AuditService as Audit
+
+Admin -> Web : open or administer the plan catalogue
+Web -> Security : GET or POST /api/v1/plans\nPUT or DELETE /api/v1/plans/{id}
+activate Security
+alt <U+005B>unauthenticated or missing required plan authority (BR-69)<U+005D>
+  Security --> Web : 401 or 403
+else <U+005B>Admin has MANAGE_PLAN<U+005D>
+  Security -> API : getAllPlans(...), createPlan(...), updatePlan(...) or deactivatePlan(...)
+  activate API
+  alt <U+005B>view the catalogue<U+005D>
+    API -> Service : getAllPlans(pageable)
+    Service -> Plans : findAll(pageable)
+    Plans --> Service : plan page
+    Service --> API : plan responses
+  else <U+005B>create, update or deactivate a plan<U+005D>
+    API -> Service : createPlan(request), updatePlan(id, request) or deactivatePlan(id)
+    activate Service
+    opt <U+005B>update or deactivation requested<U+005D>
+      Service -> Plans : findById(id)
+      Plans --> Service : current plan or empty result
+    end
+    alt <U+005B>plan missing, invalid request or duplicate name<U+005D>
+      Service --> API : mapped error
+    else <U+005B>deactivation requested for an already INACTIVE plan<U+005D>
+      Service --> API : return without another write
+    else <U+005B>valid plan change<U+005D>
+      Service -> Plans : saveAndFlush(plan) or save(plan)
+      Service -> Audit : record(action, entityType, id, before, after, reason)
+      Service --> API : plan response or successful deactivation
+    end
+    deactivate Service
+  end
+  API --> Security : response or mapped error
+  deactivate API
+  Security --> Web : result
+end
+deactivate Security
+note over Service, Plans : Deactivation removes the plan from sale. Existing active subscriptions run until expiry.
+@enduml

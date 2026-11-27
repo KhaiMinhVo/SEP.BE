@@ -1,0 +1,92 @@
+@startuml influencermatch-conceptual-erd
+
+' Report 4 section 2.1. Reproduces the corresponding report figure.
+
+top to bottom direction
+hide circle
+hide empty members
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam titleFontSize 20
+skinparam shadowing false
+skinparam roundcorner 5
+skinparam packageStyle rectangle
+skinparam packageBorderColor #8198B0
+skinparam packageBackgroundColor #F9FBFE
+skinparam packageFontColor #173A58
+skinparam classBackgroundColor #FFFFFF
+skinparam classBorderColor #52708D
+skinparam classFontColor #18354E
+skinparam ArrowColor #405872
+skinparam nodesep 21
+skinparam ranksep 111
+
+package "2.1  Conceptual model" as Concept #F1F6FC {
+  entity "User Account" as C_Account
+  entity "Sign-in Session" as C_Session
+  entity "Refresh Token" as C_Token
+  entity "Brand Profile" as C_Brand
+  entity "Creator Identity" as C_Master
+  entity "Creator Channel" as C_Channel
+  entity "Channel Claim" as C_Claim
+  entity "Post" as C_Post
+  entity "Public Channel Metric" as C_Metric
+  entity "Campaign" as C_Campaign
+  entity "Brand Context" as C_BrandContext
+  entity "Brand Pattern" as C_Pattern
+  entity "Campaign Context" as C_CampaignContext
+  entity "Recommendation Run" as C_Run
+  entity "Creator Relationship" as C_Relationship
+  entity "Deal" as C_Deal
+  entity "Proposal" as C_Proposal
+  entity "Cooperation Invitation" as C_Invitation
+  entity "Collaboration" as C_Collaboration
+  entity "Deliverable" as C_Deliverable
+  entity "Submission" as C_Submission
+  entity "Publication" as C_Publication
+  entity "Outcome Revision" as C_Revision
+  entity "Outcome Acceptance" as C_Acceptance
+  entity "Campaign Outcome" as C_Outcome
+  entity "Creator Review" as C_Review
+  entity "Historical Evidence" as C_Evidence
+  entity "Plan" as C_Plan
+  entity "Subscription" as C_Subscription
+  entity "Payment" as C_Payment
+}
+
+C_Account ||--o{ C_Session : opens
+C_Session |o--o{ C_Token : issues
+C_Account ||--o| C_Brand : has
+C_Account ||--o| C_Master : owns
+C_Master |o--o{ C_Channel : groups
+C_Channel ||--o{ C_Claim : receives
+C_Channel ||--o{ C_Post : publishes
+C_Channel ||--o{ C_Metric : has
+C_Brand ||--o{ C_BrandContext : versions
+C_Brand ||--o{ C_Pattern : learns
+C_Brand ||--o{ C_Campaign : owns
+C_Campaign ||--o{ C_CampaignContext : versions
+C_Campaign ||--o{ C_Run : runs
+C_CampaignContext |o--o{ C_Run : informs
+C_Campaign }o--o{ C_Channel : shortlists
+C_Campaign ||--o{ C_Relationship : tracks
+C_Channel ||--o{ C_Relationship : participates in
+C_Campaign ||--o{ C_Deal : negotiates
+C_Deal ||--o{ C_Proposal : versions
+C_Deal ||--o{ C_Invitation : issues
+C_Deal |o--o| C_Collaboration : confirms
+C_Collaboration }o--|{ C_Channel : covers
+C_Collaboration ||--o{ C_Deliverable : plans
+C_Deliverable ||--o{ C_Submission : receives
+C_Submission ||--o| C_Publication : links to
+C_Collaboration ||--o{ C_Revision : records
+C_Revision ||--o{ C_Acceptance : receives
+C_Collaboration ||--o| C_Outcome : produces
+C_Outcome ||--o| C_Review : has
+C_Collaboration |o--o{ C_Evidence : yields
+C_Brand ||--o{ C_Subscription : holds
+C_Plan ||--o{ C_Subscription : defines terms
+C_Subscription ||--o{ C_Payment : receives
+
+@enduml

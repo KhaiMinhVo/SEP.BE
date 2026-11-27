@@ -1,0 +1,87 @@
+@startuml background-processing-class
+title Background Processing and Notification
+hide circle
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam classAttributeIconSize 0
+
+package "Spring Boot · Notification and invitation delivery" as NotificationFlow {
+  class NotificationController <<controller>> {
+    + subscribeStream() : SseEmitter
+  }
+  class NotificationService <<service>> {
+    + getUserNotifications(userId : UUID, page : int, size : int) : PageResponse<NotificationDto>
+    + getUnreadCount(userId : UUID) : long
+  }
+  class RealtimeNotificationService <<service>> {
+    + subscribe(userId : UUID) : SseEmitter
+    + sendNotification(userId : UUID, notification : NotificationDto) : void
+  }
+  class NotificationEmailSender <<service>> {
+    + sendEmailAsync(recipientEmail : String, subject : String, content : String) : void
+  }
+  interface NotificationRepository <<repository>>
+  class CooperationDispatch {
+    + committed(event : Queued) : void
+    + sweep() : void
+  }
+  class CooperationWorker {
+    + sendAsync(id : UUID) : void
+  }
+  class CooperationDelivery <<service>>
+  class VerificationEmailSender <<service>>
+  NotificationController ..> NotificationService
+  NotificationController ..> RealtimeNotificationService
+  NotificationService ..> NotificationRepository
+  NotificationService ..> RealtimeNotificationService
+  NotificationService ..> NotificationEmailSender
+  CooperationDelivery ..> NotificationService
+  CooperationDispatch ..> CooperationDelivery
+  CooperationDispatch ..> CooperationWorker
+  CooperationWorker ..> CooperationDelivery
+  CooperationWorker ..> VerificationEmailSender
+}
+
+package "Creator discovery · FastAPI, Celery and Redis" as CrawlFlow {
+  class "crawl_router" as CrawlerRouter <<module>>
+  class "tasks" as CrawlerTasks <<module>>
+  class "celery_app" as CeleryApp <<module>>
+  class JavaClient {
+    + send_creator_data(payload : dict) : bool
+  }
+  CrawlerRouter ..> CrawlerTasks : enqueue
+  CrawlerTasks ..> CeleryApp : Celery tasks
+  CrawlerTasks ..> JavaClient
+  note bottom of CeleryApp : Redis is the task broker and result backend.
+}
+
+class CreatorIngestionController <<controller>>
+JavaClient ..> CreatorIngestionController : HTTP ingest
+
+package "Spring Boot · Payment reconciliation" as PaymentFlow {
+  class PaymentReconciliationJob {
+    + reconcile() : void
+  }
+  class PayOsReconciliationJob {
+    + reconcile() : void
+  }
+  class VnPayQueryClient
+  class PayOsPaymentClient
+  interface PaymentRepository <<repository>>
+  class PaymentSettlementService <<service>> {
+    + lock(existing : Payment) : Payment
+    + apply(payment : Payment, success : boolean, failureReason : String) : boolean
+  }
+  PaymentReconciliationJob ..> VnPayQueryClient
+  PayOsReconciliationJob ..> PayOsPaymentClient
+  PaymentReconciliationJob ..> PaymentRepository
+  PayOsReconciliationJob ..> PaymentRepository
+  PaymentReconciliationJob ..> PaymentSettlementService
+  PayOsReconciliationJob ..> PaymentSettlementService
+  note bottom of PaymentSettlementService : BR-66/67: verify the gateway outcome and\napply settlement under locks.
+}
+NotificationFlow -[hidden]down- CrawlFlow
+CrawlFlow -[hidden]down- PaymentFlow
+@enduml

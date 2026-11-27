@@ -1,0 +1,76 @@
+@startuml system-administration-class
+title System Administration and Audit
+hide circle
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam classAttributeIconSize 0
+
+class AdminUserController <<controller>>
+class AdminUserService <<service>> {
+  + changeRole(id : UUID, request : UpdateUserRoleRequest) : AdminUserResponse
+  + changeStatus(id : UUID, request : UpdateUserStatusRequest) : AdminUserResponse
+}
+class AdminAccessGuard <<service>> {
+  + read(permission : Permission) : void
+  + lock(target : UUID, permission : Permission) : User
+}
+class RolePermissions {
+  {static} + forRole(role : Role) : Set<Permission>
+}
+class User <<entity>> {
+  - role : Role
+  - status : UserStatus
+  - authVersion : long
+}
+
+class PlanController <<controller>>
+class PlanService <<service>> {
+  + createPlan(request : PlanCreateRequest) : PlanResponse
+  + updatePlan(id : UUID, request : PlanUpdateRequest) : PlanResponse
+  + deactivatePlan(id : UUID) : void
+}
+class Plan <<entity>> {
+  - planName : String
+  - price : BigDecimal
+  - status : PlanStatus
+}
+
+class AdminRecommendationConfigController <<controller>> {
+  + getConfiguration() : ResponseEntity<ApiResponse<RecommendationConfigResponseDto>>
+}
+class RecommendationConfigResponseDto <<DTO>> {
+  {static} + createCurrent() : RecommendationConfigResponseDto
+}
+
+class AuditLogController <<controller>>
+class AuditLogQueryService <<service>>
+class AuditService <<service>>
+interface AuditLogRepository <<repository>>
+class AuditLog <<entity>> {
+  - userId : UUID
+  - action : String
+  - entityType : String
+  - entityId : UUID
+  - createdAt : LocalDateTime
+}
+
+AdminUserController ..> AdminUserService
+AdminUserService ..> AdminAccessGuard
+AdminAccessGuard ..> RolePermissions
+AdminAccessGuard ..> User
+AdminUserService ..> AuditService
+PlanController ..> PlanService
+PlanService ..> Plan
+PlanService ..> AuditService
+AdminRecommendationConfigController ..> RecommendationConfigResponseDto
+AuditLogController ..> AuditLogQueryService
+AuditLogQueryService ..> AuditLogRepository
+AuditService ..> AuditLogRepository
+AuditLogRepository ..> AuditLog
+
+note bottom of AdminAccessGuard : BR-69: recheck Admin authorization\nagainst the persisted account.
+note bottom of AdminRecommendationConfigController : BR-70: DATA_MANAGER role and\nMANAGE_RECOMMENDATION_CONFIG authority.\nRead-only inspection.
+note bottom of AuditLogQueryService : BR-69: access is gated by VIEW_AUDIT_LOG\nat AuditLogController. Export contains metadata.
+@enduml

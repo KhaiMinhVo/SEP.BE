@@ -1,0 +1,45 @@
+@startuml 01-authentication-and-account
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+skinparam ArrowColor #242424
+skinparam usecase {
+    BackgroundColor #F1F1F1
+    BorderColor #555555
+}
+
+title Authentication and Account
+
+actor "Guest" as Guest
+actor "Authenticated User" as Auth
+actor "Email Service" as Mail <<external system>>
+actor "Google OAuth" as Google <<external system>>
+
+rectangle "Intelligent Influencer Discovery and Recommendation Platform\nBased on Historical and Contextual Data for SMEs" {
+    usecase "UC-01 View Public Landing Page" as UC01
+    usecase "UC-02 Register Brand Account" as UC02
+    usecase "UC-103 Register Creator by Invitation" as UC103
+    usecase "UC-03 Sign In to InfluencerMatch" as UC03
+    usecase "UC-04 Request Password Recovery" as UC04
+    usecase "UC-05 Reset Account Password" as UC05
+    usecase "UC-06 Sign Out of Account" as UC06
+    usecase "UC-07 Manage Personal Profile" as UC07
+    usecase "UC-08 Change Account Password" as UC08
+}
+
+Guest -- UC01
+Guest -- UC02
+Guest -- UC103
+Guest -- UC03
+Guest -- UC04
+Guest -- UC05
+Auth -- UC06
+Auth -- UC07
+Auth -- UC08
+
+UC02 -- Mail
+UC04 -- Mail
+UC02 -- Google
+UC03 -- Google
+@enduml

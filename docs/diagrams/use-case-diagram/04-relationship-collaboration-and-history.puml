@@ -1,0 +1,64 @@
+@startuml 04-relationship-collaboration-and-history
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+skinparam ArrowColor #242424
+skinparam usecase {
+    BackgroundColor #F1F1F1
+    BorderColor #555555
+}
+
+title Relationships, Invitations, Collaboration and History
+
+' Successful completion records evidence against the accepted outcome, with or without a final review.
+
+actor "Brand / SME" as Brand
+actor "Creator" as Creator
+actor "Email Service" as Mail <<external system>>
+
+rectangle "Intelligent Influencer Discovery and Recommendation Platform\nBased on Historical and Contextual Data for SMEs" {
+    usecase "UC-33 Manage Creator Relationships" as UC33
+    usecase "UC-34 View Creator Contact and Social\nProfiles" as UC34
+    usecase "UC-35 Log Creator Interactions" as UC35
+    usecase "UC-37 Review Creator Interaction History" as UC37
+    usecase "UC-95 Send Cooperation Invitations" as UC95
+    usecase "UC-90 Respond to Cooperation Invitations" as UC90
+    usecase "UC-96 Confirm Cooperation Deals" as UC96
+    usecase "UC-39 Manage Collaboration Execution" as UC39
+    usecase "UC-91 Submit Collaboration Deliverables" as UC91
+    usecase "UC-40 Review Collaboration Deliverables" as UC40
+    usecase "UC-41 Record Published Content" as UC41
+    usecase "UC-42 Record Collaboration Outcomes" as UC42
+    usecase "UC-97 Accept Collaboration Outcomes" as UC97
+    usecase "UC-43 Submit Final Creator Review" as UC43
+    usecase "UC-44 Complete Creator Collaborations" as UC44
+    usecase "UC-79 Record Collaboration Completion\nEvidence" as UC79
+    usecase "UC-93 Track Collaboration Progress and\nReviews" as UC93
+    usecase "UC-45 Review Campaign History and Evidence" as UC45
+    usecase "UC-98 Review Campaign Performance" as UC98
+}
+
+Brand -- UC33
+Brand -- UC34
+Brand -- UC35
+Brand -- UC37
+Brand -- UC95
+Brand -- UC96
+Brand -- UC39
+Brand -- UC40
+Brand -- UC41
+Brand -- UC42
+Brand -- UC97
+Brand -- UC43
+Brand -- UC44
+Brand -- UC45
+Brand -- UC98
+Creator -- UC90
+Creator -- UC91
+Creator -- UC93
+
+UC95 -- Mail
+
+UC44 ..> UC79 : <<include>>
+@enduml

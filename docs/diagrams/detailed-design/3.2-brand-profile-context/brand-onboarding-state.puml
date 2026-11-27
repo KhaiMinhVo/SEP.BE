@@ -1,0 +1,30 @@
+@startuml brand-onboarding-state
+title Brand Profile Onboarding | State Machine
+hide empty description
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+top to bottom direction
+skinparam roundcorner 12
+skinparam state {
+  BackgroundColor white
+  BorderColor #333333
+}
+skinparam noteBackgroundColor white
+skinparam ranksep 40
+
+state PENDING
+state COMPLETED
+
+[*] --> PENDING : / initialize onboardingStatus
+PENDING --> COMPLETED : complete(auth, revision)\n[Brand owner with UPDATE_BRAND_PROFILE, current If-Match,\nand required profile fields present (BR-08)]\n/ set onboardingCompletedAt and increment profileRevision
+COMPLETED --> [*]
+
+note right of COMPLETED
+  Onboarding has ended. The profile remains editable.
+  Updates to the profile must still satisfy BR-08.
+  Calling complete again with valid data and the current
+  ETag leaves the status and revision unchanged.
+end note
+@enduml

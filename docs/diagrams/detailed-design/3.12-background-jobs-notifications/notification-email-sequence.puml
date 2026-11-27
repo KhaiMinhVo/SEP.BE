@@ -1,0 +1,91 @@
+@startuml notification-email-sequence
+title Send Notification and Email
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 195
+
+participant "notificationStore\n(React)" as FE
+participant NotificationController as API
+participant RealtimeNotificationService as SSE
+participant "Spring Boot\nbusiness transaction" as Tx
+participant NotificationService as Notifications
+database PostgreSQL as DB
+participant "NotificationEmailSender /\nCooperationWorker" as Mail
+participant SMTP
+
+FE -> API : GET /api/v1/notifications/stream
+API -> SSE : subscribe(userId)
+SSE ->> FE : CONNECTED
+
+group Notification created by a business operation
+  note over Tx, Notifications
+    Examples: PAYMENT_SUCCESS after payment settlement,
+    EVIDENCE_SUBMITTED for collaboration evidence and
+    COOPERATION_INVITATION when Portal delivery is selected.
+  end note
+  opt <U+005B>business operation requests an in-app notification<U+005D>
+    Tx -> Notifications : createAndDispatch(userId, type, title, message, entityType, entityId)
+    activate Notifications
+    opt <U+005B>deduplication does not return an existing notification<U+005D>
+      Notifications -> DB : save(notification) in the business transaction
+      Notifications -> Notifications : dispatchPostCommit(userId, title, message, dto, sendEmail)
+    end
+    Notifications --> Tx : NotificationDto
+    deactivate Notifications
+  end
+  opt <U+005B>cooperation invitation email requested<U+005D>
+    Tx -> DB : save cooperation_email_job as QUEUED
+    Tx -> Tx : publish cooperation Queued(jobId)
+  end
+end
+
+alt <U+005B>transaction rolls back<U+005D>
+  Tx -> DB : rollback
+else <U+005B>transaction commits<U+005D>
+  Tx -> DB : commit
+  opt <U+005B>a new in-app notification was saved<U+005D>
+    Tx -> Notifications : afterCommit()
+    Notifications -> SSE : sendNotification(userId, dto)
+    opt <U+005B>the recipient is connected<U+005D>
+      SSE ->> FE : NOTIFICATION
+    end
+    opt <U+005B>type enables email and recipient address is available<U+005D>
+      Notifications ->> Mail : NotificationEmailSender.sendEmailAsync(email, title, message)
+      loop <U+005B>up to 3 attempts while sending fails<U+005D>
+        Mail -> SMTP : send(message)
+        SMTP --> Mail : sent or send error
+      end
+    end
+  end
+  opt <U+005B>cooperation invitation email was queued<U+005D>
+    Tx -> Tx : CooperationDispatch.committed(event)
+    Tx ->> Mail : CooperationWorker.sendAsync(jobId)
+    Mail -> DB : CooperationDelivery.prepare(jobId)
+    opt <U+005B>job is claimable and invitation valid<U+005D>
+      Mail -> SMTP : VerificationEmailSender.sendCooperationInvitation(email, link)
+      Mail -> DB : CooperationDelivery.finish(work, sent)
+    end
+    note over Tx, Mail : CooperationDispatch.sweep() can recover due persisted jobs.
+  end
+end
+
+opt <U+005B>SSE disconnects while the session remains eligible<U+005D>
+  FE -> FE : reconnect with backoff
+  FE -> API : GET /api/v1/notifications/stream
+  API -> SSE : subscribe(userId)
+  SSE ->> FE : CONNECTED
+end
+group After CONNECTED or NOTIFICATION for the current user
+  FE -> FE : scheduleSync(active) → refresh(active)
+  FE -> API : GET /api/v1/notifications?page=...&size=...\nGET /api/v1/notifications/unread-count
+  API -> Notifications : getUserNotifications(...) and getUnreadCount(userId)
+  Notifications -> DB : read the current list and count
+  DB --> Notifications : notification rows and unread total
+  Notifications --> API : list and count
+  API --> FE : update notification UI from REST responses
+end
+@enduml

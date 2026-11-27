@@ -1,0 +1,84 @@
+@startuml subscription-payment-class
+title WF-06 | Subscription and Payment
+hide circle
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam classAttributeIconSize 0
+skinparam defaultFontName Arial
+
+class PaymentController <<controller>>
+class PaymentService <<service>> {
+  + processVnPayCallback(params : Map<String, String>) : CallbackResult
+  + processPayOsWebhook(rawBody : String) : CallbackResult
+  + processPayOsReturn(orderCodeValue : String) : PayOsReturnResult
+}
+class PaymentSettlementService <<service>> {
+  + lock(existing : Payment) : Payment
+  + apply(payment : Payment, success : boolean, failureReason : String) : boolean
+}
+class SubscriptionService <<service>> {
+  + checkAndDeductCampaignQuota(brandProfileId : UUID) : void
+  + reserveRecommendationQuota(brandProfileId : UUID) : UUID
+  + cancelSubscription(id : UUID) : void
+}
+class RefundService <<service>> {
+  + request(id : UUID, request : RefundRequest) : RefundDetails
+  + approve(id : UUID, request : RefundApprovalRequest) : RefundDetails
+  + confirm(id : UUID, request : RefundConfirmationRequest) : RefundDetails
+}
+class VnPayRefundService <<service>> {
+  + submit(id : UUID) : RefundDetails
+  + query(id : UUID) : RefundDetails
+}
+interface PaymentRepository <<repository>>
+interface SubscriptionRepository <<repository>>
+class Plan <<entity>> {
+  - planName : String
+  - price : BigDecimal
+  - durationDays : int
+  - campaignQuota : int
+  - recommendationQuota : int
+  - refreshQuota : int
+}
+class Subscription <<entity>> {
+  - status : SubscriptionStatus
+  - expirationDate : LocalDate
+  - cancelAtPeriodEnd : boolean
+  - refundHold : boolean
+  - purchasedCampaignQuota : Integer
+  - purchasedRecommendationQuota : Integer
+  - purchasedRefreshQuota : Integer
+  + capturePlan() : void
+}
+class Payment <<entity>> {
+  - transactionCode : String
+  - amount : BigDecimal
+  - paymentGateway : String
+  - status : PaymentStatus
+  - refundStatus : RefundStatus
+}
+
+PaymentController ..> PaymentService
+PaymentService ..> PaymentSettlementService
+PaymentSettlementService ..> PaymentRepository
+PaymentSettlementService ..> SubscriptionRepository
+SubscriptionService ..> SubscriptionRepository
+RefundService ..> PaymentRepository
+RefundService ..> SubscriptionRepository
+VnPayRefundService ..> RefundService
+PaymentRepository ..> Payment
+SubscriptionRepository ..> Subscription
+Plan "1" -- "0..*" Subscription : plan
+Subscription "1" -- "0..*" Payment : subscription
+
+note left of PaymentSettlementService
+  BR-66/67: apply verified gateway results
+  under locks. A matching replay does not
+  activate or extend the subscription again.
+end note
+note right of SubscriptionService
+  BR-65: quota use requires an ACTIVE,
+  unexpired subscription without a refund hold.
+end note
+@enduml

@@ -1,0 +1,107 @@
+@startuml creator-data-quality-sequence
+title WF-05 | Review Creator Data Quality
+hide footbox
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+autonumber
+skinparam roundcorner 0
+skinparam ParticipantPadding 10
+skinparam SequenceLifeLineBorderColor #555555
+skinparam SequenceLifeLineBackgroundColor white
+skinparam SequenceParticipantBackgroundColor white
+skinparam SequenceGroupBackgroundColor white
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam noteBackgroundColor white
+
+actor "Data Manager" as Reviewer
+participant "Web Client" as Web
+participant DataQualityController as Controller
+participant DataQualityService as Service
+participant DataQualityRepository as Metrics
+participant CreatorRepository as Creators
+participant NicheRepository as Niches
+participant AuditService as Audit
+
+Reviewer -> Web : open the review queue
+Web -> Controller : GET /api/v1/data/quality/pending
+activate Controller
+Controller -> Service : pending(page, size)
+activate Service
+Service -> Metrics : pending(pageable)
+Metrics --> Service : latest unreviewed KOC/KOL snapshots needing review
+Service --> Controller : PageResponse<QualityItem>
+deactivate Service
+Controller --> Web : 200 OK
+deactivate Controller
+
+note over Reviewer, Service
+  REVIEW_CREATOR_CLASSIFICATION is required (BR-03).
+  BR-18: review when niche is missing, blank or UNKNOWN,
+  or recorded confidence is below 0.7.
+end note
+
+Reviewer -> Web : approve, reject or reclassify a snapshot
+alt <U+005B>reviewer chooses approve<U+005D>
+  Web -> Controller : PUT /api/v1/data/quality/{id}/approve
+  Controller -> Service : approve(id, request)
+else <U+005B>reviewer chooses reject or reclassify<U+005D>
+  Web -> Controller : PUT /api/v1/data/quality/{id}/reject
+  Controller -> Service : reject(id, request)
+end
+activate Controller
+activate Service
+alt <U+005B>review request invalid<U+005D>
+  Service --> Controller : validation error
+  Controller --> Web : 400 Bad Request
+else <U+005B>review request valid<U+005D>
+Service -> Metrics : creatorId(id)
+Metrics --> Service : Creator ID or empty
+opt <U+005B>snapshot has a Creator ID<U+005D>
+  Service -> Creators : findLockedById(creatorId)
+  Creators --> Service : locked Creator or empty
+  opt <U+005B>Creator exists<U+005D>
+    Service -> Metrics : findLocked(id)
+    Metrics --> Service : locked snapshot or empty
+    opt <U+005B>snapshot exists<U+005D>
+      Service -> Metrics : findFirstByCreatorIdOrderByCollectedAtDescIdDesc(creatorId)
+      Metrics --> Service : latest snapshot
+    end
+  end
+end
+
+alt <U+005B>Creator or snapshot missing<U+005D>
+  Service --> Controller : NotFoundException
+  Controller --> Web : 404 Not Found
+else <U+005B>snapshot exists but is no longer pending review<U+005D>
+  Service --> Controller : DATA_QUALITY_REVIEW_CONFLICT
+  Controller --> Web : 409 Conflict
+else <U+005B>snapshot still pending review<U+005D>
+  opt <U+005B>approval and a concrete niche was supplied or retained<U+005D>
+    loop <U+005B>each distinct niche name<U+005D>
+      Service -> Niches : findByNameIgnoreCaseAndActiveTrue(name)
+      Niches --> Service : active niche or empty
+    end
+  end
+  alt <U+005B>approval and niche missing, unknown or inactive<U+005D>
+    Service --> Controller : BadRequestException
+    Controller --> Web : 400 Bad Request
+  else <U+005B>approval with active niches, or valid rejection or reclassification<U+005D>
+    note over Service
+      Approval sets niche and the first niche as category.
+      Rejection sets creatorType to the requested type or REJECTED.
+      Both record the reviewer and review time.
+    end note
+    Service -> Metrics : flush()
+    Metrics --> Service : snapshot updated
+    Service -> Audit : record(action, entity, id, before, after, reason)
+    Audit --> Service : audit recorded
+    Service --> Controller : QualityItem
+    Controller --> Web : 200 OK
+  end
+end
+end
+deactivate Service
+deactivate Controller
+@enduml

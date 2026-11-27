@@ -1,0 +1,50 @@
+@startuml background-data-processing-sequence
+title Background Data Processing
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 220
+
+participant "Crawler API caller" as Caller
+participant "crawl_router\n(FastAPI)" as API
+queue "Redis\nCelery broker and result backend" as Broker
+participant "tasks\n(Celery worker)" as Worker
+participant "TikTok" as Platform
+participant JavaClient as Client
+participant CreatorIngestionController as Ingest
+
+Caller -> API : POST /api/v1/crawl/tiktok/enqueue?username=...
+activate API
+API -> Broker : process_tiktok_profile.delay(username)
+alt <U+005B>enqueue succeeds<U+005D>
+  API --> Caller : status=success (queued)
+else <U+005B>enqueue raises an error<U+005D>
+  API --> Caller : HTTP 500
+end
+deactivate API
+
+opt <U+005B>task was queued<U+005D>
+  Broker ->> Worker : deliver process_tiktok_profile task
+  activate Worker
+  Worker -> Platform : _crawl_tiktok_profile_sync(username)
+  Platform --> Worker : profile and posts, or crawl failure
+  alt <U+005B>profile fetched<U+005D>
+    Worker -> Worker : process_ai_enrichment(creator, recentPosts)\nJavaMapper.from_ingest_payload(result)
+    Worker -> Client : send_creator_data(payload)
+    Client -> Ingest : POST /api/v1/creators/ingest\nX-Service-Key · HTTP timeout 15 s
+    Ingest --> Client : ingestion result or HTTP error
+    Client --> Worker : accepted or failed delivery
+    note over Client, Worker
+      The task returns the crawl result. A false delivery result
+      is logged by JavaClient and does not itself trigger task retry.
+    end note
+    Worker -> Broker : store task result
+  else <U+005B>crawl returns no data or processing raises an exception<U+005D>
+    Worker ->> Broker : self.retry(countdown=10) [retry budget available]
+  end
+  deactivate Worker
+end
+@enduml

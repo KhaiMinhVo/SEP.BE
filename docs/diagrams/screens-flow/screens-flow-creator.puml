@@ -1,0 +1,99 @@
+' Report 7, section 3.1.1 Screens Flow.
+' UI codes identify boxes in these four dialog maps. Navigation labels describe the actions shown by each source branch.
+' Initial markers show entry points. Hidden links preserve visual order and do not represent navigation.
+
+@startuml screens-flow-creator
+' Source figure: word/media/image20.png
+!pragma layout smetana
+left to right direction
+hide empty description
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontColor #162A3F
+skinparam defaultFontSize 14
+skinparam ArrowColor #627892
+skinparam ArrowFontColor #334B61
+skinparam nodesep 15
+skinparam ranksep 40
+skinparam state {
+    BackgroundColor #FFFFFF
+    BorderColor #90ABC5
+    FontColor #162A3F
+    RoundCorner 12
+}
+
+title
+<size:22><b>Creator Screen</b></size>
+<size:13><color:#506581>InfluencerMatch AI | Screen navigation hierarchy</color></size>
+end title
+
+' LEVEL 1 · ENTRY
+state "<b>UI-CR-00 Creator Auth</b>\n<size:12><color:#435972>Login or invitation-only</color></size>\n<size:12><color:#435972>registration</color></size>" as CR00 #FFF0DE
+
+' LEVEL 2 · LAYOUT
+state "<b>UI-CR-01 Creator Layout</b>\n<size:12><color:#435972>Sidebar, header and main content</color></size>" as CR01 #E3EFF9
+
+' LEVEL 3 · MAIN MENU
+state "<b>UI-CR-02 Account Menu</b>" as CR02 #EDF4FA
+state "<b>UI-CR-03 Notifications</b>" as CR03 #EDF4FA
+state "<b>UI-CR-04 Portal Profile</b>\n<size:12><color:#435972>Creator Profile Management</color></size>" as CR04 #EDF4FA
+state "<b>UI-CR-05 Verification & Claims</b>\n<size:12><color:#435972>Identity & Ownership Claims</color></size>" as CR05 #EDF4FA
+state "<b>UI-CR-06 Social Accounts</b>\n<size:12><color:#435972>Connected Channels</color></size>" as CR06 #EDF4FA
+state "<b>UI-CR-07 Bookings & Collaborations</b>\n<size:12><color:#435972>Deals & Deliverables</color></size>" as CR07 #EDF4FA
+
+' LEVEL 4 · SCREENS / TABS / MODALS
+state "<b>UI-CR-08 Creator Profile & Logout</b>\n<size:12><color:#435972>Profile access and sign out</color></size>" as CR08
+state "<b>UI-CR-09 Notification Drawer</b>\n<size:12><color:#435972>Invitations, claims and review alerts</color></size>" as CR09
+state "<b>UI-CR-10 Profile & Niches</b>\n<size:12><color:#435972>Introduction, service areas and accepted niches</color></size>" as CR10
+state "<b>UI-CR-11 Booking Contacts</b>\n<size:12><color:#435972>Email, Zalo, manager contact and visibility rules</color></size>" as CR11
+state "<b>UI-CR-12 Portfolio References</b>\n<size:12><color:#435972>Curated portfolio items</color></size>" as CR12
+state "<b>UI-CR-13 Identity & Claim Status</b>\n<size:12><color:#435972>Pending, approved, rejected and revoked claims</color></size>" as CR13
+state "<b>UI-CR-14 Channel Lookup & Claim</b>\n<size:12><color:#435972>Search registry and submit ownership claim</color></size>" as CR14
+state "<b>UI-CR-15 Connected Channels</b>\n<size:12><color:#435972>Verified platform accounts linked to Master</color></size>" as CR15
+state "<b>UI-CR-16 OAuth Verification</b>\n<size:12><color:#435972>Meta, Instagram and TikTok account connect</color></size>" as CR16
+state "<b>UI-CR-17 Cooperation Invitations</b>\n<size:12><color:#435972>Accept, decline or counter proposals</color></size>" as CR17
+state "<b>UI-CR-18 Collaboration Detail</b>\n<size:12><color:#435972>Active deliverables and Brand feedback</color></size>" as CR18
+state "<b>UI-CR-19 Deliverable Submission</b>\n<size:12><color:#435972>Submit drafts, videos and published URLs</color></size>" as CR19
+
+' Navigation
+[*] --> CR00 : Open application
+CR00 --> CR01 : Sign in or register [Creator]
+CR01 --> CR02 : Open account menu
+CR01 --> CR03 : Open notifications
+CR01 --> CR04 : Open Portal Profile
+CR01 --> CR05 : Open Verification & Claims
+CR01 --> CR06 : Open Social Accounts
+CR01 --> CR07 : Open Bookings & Collaborations
+CR02 --> CR08 : Open profile or sign out
+CR03 --> CR09 : View alerts
+CR04 --> CR10 : View profile and niches
+CR04 --> CR11 : Open booking contacts
+CR04 --> CR12 : Open portfolio
+CR05 --> CR13 : View claim status
+CR05 --> CR14 : Look up or claim a channel
+CR06 --> CR15 : View connected channels
+CR06 --> CR16 : Connect an account
+CR07 --> CR17 : Open invitations
+CR07 --> CR18 : Open a collaboration
+CR07 --> CR19 : Open deliverable submission
+
+' Hidden layout links
+CR02 -right[hidden]-> CR03
+CR03 -right[hidden]-> CR04
+CR04 -right[hidden]-> CR05
+CR05 -right[hidden]-> CR06
+CR06 -right[hidden]-> CR07
+CR08 -right[hidden]-> CR09
+CR09 -right[hidden]-> CR10
+CR10 -right[hidden]-> CR11
+CR11 -right[hidden]-> CR12
+CR12 -right[hidden]-> CR13
+CR13 -right[hidden]-> CR14
+CR14 -right[hidden]-> CR15
+CR15 -right[hidden]-> CR16
+CR16 -right[hidden]-> CR17
+CR17 -right[hidden]-> CR18
+CR18 -right[hidden]-> CR19
+
+@enduml

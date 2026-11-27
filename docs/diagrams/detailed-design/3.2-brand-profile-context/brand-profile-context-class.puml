@@ -1,0 +1,101 @@
+@startuml brand-profile-context-class
+title Brand Profile and Context (M4) | Class Diagram
+hide circle
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+top to bottom direction
+skinparam roundcorner 0
+skinparam class {
+  BackgroundColor white
+  BorderColor #333333
+}
+skinparam noteBackgroundColor white
+skinparam nodesep 26
+skinparam ranksep 34
+
+class BrandController <<controller>> {
+  - service : BrandService
+  + create(request : BrandRequest, auth : Authentication) : ResponseEntity<ApiResponse<BrandResponse>>
+  + me(auth : Authentication) : ResponseEntity<ApiResponse<BrandResponse>>
+  + patch(patch : JsonNode, auth : Authentication, revision : String) : ResponseEntity<ApiResponse<BrandResponse>>
+  + complete(auth : Authentication, revision : String) : ResponseEntity<ApiResponse<BrandResponse>>
+}
+class BrandService <<service>> {
+  + me(authentication : Authentication) : BrandResponse
+  + patchMe(patch : JsonNode, auth : Authentication, revision : String) : BrandResponse
+  + complete(authentication : Authentication, revision : String) : BrandResponse
+  - validateComplete(p : BrandProfile) : void
+  - applyUpdate(p : BrandProfile, r : BrandRequest) : BrandResponse
+}
+class BrandRevision {
+  + {static} tag(id : UUID, revision : long) : String
+  + {static} require(header : String, id : UUID, revision : long) : void
+}
+class BrandProfile <<entity>> {
+  - businessName : String
+  - profileRevision : long
+  - onboardingStatus : String
+  - onboardingCompletedAt : Instant
+}
+class BrandContext <<entity>> {
+  - brandProfile : BrandProfile
+  - contextVersion : int
+  - profileContext : JsonNode
+  - learnedPatterns : JsonNode
+  - evidenceRefs : JsonNode
+  + updateProfileContext(value : JsonNode) : void
+}
+class BrandPattern <<entity>> {
+  - id : UUID
+  - brandProfile : BrandProfile
+  - platform : String
+  - niche : String
+  - patternValue : JsonNode
+  - evidenceCount : int
+}
+class BrandContextLifecycle <<service>> {
+  - contexts : BrandContextRepository
+  - embeddings : BrandEmbeddingStore
+  + initial(profile : BrandProfile) : BrandContext
+  + append(profile : BrandProfile, version : int) : BrandContext
+}
+interface BrandContextRepository <<repository>> <<interface>> {
+  + findByBrandProfileId(brandProfileId : UUID) : Optional<BrandContext>
+}
+class BrandEmbeddingStore <<store>> {
+  + enqueue(context : UUID) : void
+}
+
+BrandController ..> BrandService
+BrandController ..> BrandRevision : builds ETag
+BrandService ..> BrandRevision : checks If-Match
+BrandService ..> BrandProfile
+BrandService ..> BrandContextLifecycle
+BrandService ..> BrandContextRepository
+BrandContextLifecycle ..> BrandContextRepository
+BrandContextLifecycle ..> BrandEmbeddingStore
+BrandContextRepository ..> BrandContext
+BrandProfile "1" -- "0..*" BrandContext : context versions
+BrandProfile "1" -- "0..*" BrandPattern : pattern records
+
+note left of BrandService
+  BR-08   Validate required onboarding fields.
+  BR-09   Compare the semantic projection after update.
+  Profile revision is the concurrency token for If-Match.
+end note
+note right of BrandContextLifecycle
+  BR-09   Append a snapshot and enqueue embedding
+  in the update transaction when semantic data changes.
+end note
+note bottom of BrandContext
+  UNIQUE (brand_profile_id, context_version).
+  Context version identifies an immutable snapshot.
+  updateProfileContext() rejects in-place changes.
+end note
+' Layout only.
+BrandController -[hidden]down- BrandService
+BrandService -[hidden]down- BrandContextLifecycle
+@enduml

@@ -1,0 +1,42 @@
+@startuml campaign-lifecycle-state
+title Campaign Lifecycle | UML State Machine
+hide empty description
+skinparam monochrome true
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam backgroundColor white
+skinparam stateBackgroundColor white
+skinparam noteBackgroundColor white
+top to bottom direction
+
+state DRAFT
+state READY_FOR_DISCOVERY
+state ACTIVE
+state COMPLETED
+state CLOSED
+state ARCHIVED
+
+[*] --> DRAFT : / create campaign
+DRAFT --> READY_FOR_DISCOVERY : changeStatus(READY_FOR_DISCOVERY)\n[required brief fields present (BR-11/12)]\n/ save M3 snapshot and enqueue embedding
+DRAFT --> ARCHIVED : archive() or changeStatus(ARCHIVED)\n[allowed from DRAFT (BR-12)] / archive campaign
+READY_FOR_DISCOVERY --> ACTIVE : changeStatus(ACTIVE)\n[allowed from READY_FOR_DISCOVERY (BR-12)] / activate campaign
+ACTIVE --> COMPLETED : changeStatus(COMPLETED)\n[at least one COMPLETED collaboration; no unfinished\ncollaborations or open deals (BR-12)] / complete campaign
+READY_FOR_DISCOVERY --> CLOSED : changeStatus(CLOSED)\n[closure conditions met] / record reason and closed_at
+ACTIVE --> CLOSED : changeStatus(CLOSED)\n[closure conditions met] / record reason and closed_at
+COMPLETED --> [*]
+CLOSED --> [*]
+ARCHIVED --> [*]
+
+note right of CLOSED
+  Closure requires zero COMPLETED collaborations,
+  no unfinished collaborations, no CONTACTED or
+  NEGOTIATING deals and a nonblank reason.
+end note
+note left of DRAFT
+  Status changes require the authorized owner,
+  CHANGE_CAMPAIGN_STATUS and current If-Match.
+  prepareForRecommendation() can also move a
+  DRAFT to READY_FOR_DISCOVERY after the
+  same checks, with RUN_RECOMMENDATION.
+end note
+@enduml

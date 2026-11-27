@@ -1,0 +1,109 @@
+@startuml campaign-brief-m3-sequence
+title Campaign Brief, Draft Confirmation and M3 Embedding
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam backgroundColor white
+skinparam noteBackgroundColor white
+skinparam maxMessageSize 225
+
+actor Brand
+participant "Web Client" as Web
+participant CampaignController as Controller
+participant GeminiCampaignAutofillService as Autofill
+participant "Google Gemini" as Gemini
+participant CampaignService as Service
+participant CampaignM3ContextService as M3
+participant CampaignContextRepository as Contexts
+participant CampaignEmbeddingStore as Jobs
+participant CampaignEmbeddingDispatch as Dispatch
+participant CampaignEmbeddingWorker as Worker
+participant AiServiceClient as AI
+
+opt <U+005B>Brand requests AI brief suggestions<U+005D>
+  Brand -> Web : enter a natural-language brief
+  Web -> Controller : POST /api/v1/ai/campaign-autofill
+  activate Controller
+  Controller -> Autofill : autofill(request)
+  activate Autofill
+  Autofill -> Gemini : POST /{model}:generateContent
+  alt <U+005B>suggestion returned and parsed<U+005D>
+    Gemini --> Autofill : suggested fields
+    Autofill --> Controller : CampaignAutofillResponse
+    Controller --> Web : 200 OK, suggested fields for review
+  else <U+005B>provider error or timeout<U+005D>
+    Autofill --> Controller : AI_SERVICE_UNAVAILABLE
+    Controller --> Web : 503 Service Unavailable
+  end
+  deactivate Autofill
+  deactivate Controller
+end
+
+Brand -> Web : review and confirm the draft fields (BR-13)
+Web -> Controller : POST /api/v1/brands/{brandId}/campaigns
+activate Controller
+Controller -> Service : create(brandId, request, auth)
+activate Service
+alt <U+005B>draft passes ownership, validation and quota checks<U+005D>
+  Service --> Controller : CampaignResponse in DRAFT
+  Controller --> Web : 201 Created with ETag
+else <U+005B>draft checks fail<U+005D>
+  Service --> Controller : reject draft creation
+  Controller --> Web : request error
+end
+deactivate Service
+deactivate Controller
+
+opt <U+005B>draft created and Brand confirms readiness<U+005D>
+  Brand -> Web : mark draft ready for Discovery
+  Web -> Controller : PATCH /api/v1/campaigns/{id}/status\nREADY_FOR_DISCOVERY, If-Match
+  activate Controller
+  Controller -> Service : changeStatus(id, request, auth, revision)
+  activate Service
+  alt <U+005B>If-Match missing, invalid or stale<U+005D>
+    Service --> Controller : revision check failed
+    Controller --> Web : 428 missing, 400 invalid or 409 stale
+  else <U+005B>revision current but required brief fields missing — BR-11<U+005D>
+    Service --> Controller : ProfileIncompleteException
+    Controller --> Web : 400 Bad Request
+  else <U+005B>DRAFT with current revision and complete brief<U+005D>
+    Service -> M3 : create(campaign, false)
+    activate M3
+    M3 -> Contexts : saveAndFlush(newContext)
+    Contexts --> M3 : versioned BRIEF_SNAPSHOT
+    M3 -> Jobs : enqueue(contextId)
+    Jobs --> M3 : job recorded
+    M3 --> Service : CampaignContext
+    deactivate M3
+    alt <U+005B>snapshot, job and status changes commit<U+005D>
+      note over Service : Set READY_FOR_DISCOVERY and increment campaignRevision.
+      note over Dispatch : committed(Wake) runs AFTER_COMMIT.
+      Dispatch ->> Worker : process(jobId) via executor
+      Service --> Controller : CampaignResponse
+      Controller --> Web : 200 OK with updated ETag
+    else <U+005B>snapshot or job persistence fails<U+005D>
+      Service --> Controller : transaction rolls back
+      Controller --> Web : update failed; campaign remains DRAFT
+    end
+  end
+  deactivate Service
+  deactivate Controller
+end
+
+opt <U+005B>embedding worker claims the job<U+005D>
+  activate Worker
+  Worker -> Jobs : claim(jobId)
+  Jobs --> Worker : lease
+  Worker -> AI : getBrandEmbedding(lease.text(), lease.model())
+  alt <U+005B>embedding succeeds<U+005D>
+    AI --> Worker : vector
+    Worker -> Jobs : finish(lease, vector)
+  else <U+005B>embedding fails<U+005D>
+    AI --> Worker : exception
+    Worker -> Jobs : fail(lease)
+  end
+  deactivate Worker
+end
+@enduml

@@ -1,0 +1,124 @@
+@startuml deal-confirmation-sequence
+title WF-02 | Proposal, Invitation and Deal Confirmation
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam noteBackgroundColor white
+skinparam maxMessageSize 245
+
+actor Brand
+actor Creator
+participant "Web Client" as Web
+participant DealController as Controller
+participant DealService as Service
+participant CooperationDelivery as Delivery
+participant CooperationDispatch as Dispatch
+participant CooperationWorker as Worker
+participant ExecutionSnapshot as Snapshot
+database PostgreSQL as DB
+
+note over Controller, Service
+  Brand writes require MANAGE_OWN_RELATIONSHIP.
+  Proposal, send and confirm require expectedRevision and Idempotency-Key.
+  BR-71: after access checks, replay an identical saved response before
+  revision validation. A changed payload under that key returns 409.
+  An invalid key returns 400; a stale new request returns DEAL_REVISION_CONFLICT (409).
+end note
+
+Brand -> Web : submit the offer
+Web -> Controller : POST /api/v1/campaigns/{campaignId}/deals/{dealId}/proposals
+activate Controller
+Controller -> Service : propose(campaignId, dealId, body, key)
+activate Service
+Service -> DB : insert cooperation_proposal; update Deal revision/status and CRM stage
+note over Service, DB : Invalidate prior invitations and clear previous acceptance.
+DB --> Service : offer stored
+Service --> Controller : Deal with current revision
+Controller --> Web : 200 OK
+deactivate Service
+deactivate Controller
+
+Brand -> Web : send invitation for current offer
+Web -> Controller : POST /api/v1/campaigns/{campaignId}/deals/{dealId}/invitations
+activate Controller
+Controller -> Service : send(campaignId, dealId, body, key)
+activate Service
+Service -> Delivery : enqueue(deal, proposal, deliveryMethod)
+Delivery -> DB : persist invitation and delivery job for current proposal revision
+DB --> Delivery : invitation persisted
+Delivery --> Service : invitation and delivery result
+opt <U+005B>delivery method sends email and transaction committed<U+005D>
+  Dispatch ->> Worker : sendAsync(jobId)
+end
+Service --> Controller : invitation response
+Controller --> Web : 200 OK
+deactivate Service
+deactivate Controller
+
+alt <U+005B>Portal agreement path<U+005D>
+  Creator -> Web : open proposal from invitation
+  note over Creator, Controller
+    Portal requires RESPOND_OWN_COOPERATION and verified ownership.
+    Accept and decline validate expectedRevision.
+    For invitation-bound verification, see WF-04 in section 3.4.
+  end note
+  Web -> Controller : GET /api/v1/creators/portal/cooperation-deals/{id}
+  Controller -> Service : portalGet(id)
+  Service --> Controller : proposal or access error
+  Controller --> Web : proposal or error
+  alt <U+005B>Creator accepts current OFFER<U+005D>
+    Web -> Controller : POST /api/v1/creators/portal/cooperation-deals/{id}/accept
+    Controller -> Service : respond(id, "accept", body)
+    Service -> DB : record accepted_revision, accepted_by and accepted_at
+    Service --> Controller : Deal stays NEGOTIATING
+    Controller --> Web : 200 OK
+  else <U+005B>Creator declines<U+005D>
+    Web -> Controller : POST /api/v1/creators/portal/cooperation-deals/{id}/decline
+    Controller -> Service : respond(id, "decline", body)
+    Service -> DB : mark DECLINED; invalidate pending invitation
+    Service --> Controller : declined Deal
+    Controller --> Web : 200 OK
+  else <U+005B>Creator counters an OFFER<U+005D>
+    Web -> Controller : POST /api/v1/creators/portal/cooperation-deals/{id}/counteroffers\nIdempotency-Key and expectedRevision
+    Controller -> Service : counter(id, body, key)
+    Service -> DB : append COUNTEROFFER revision and invalidate previous invitation
+    Service --> Controller : latest Deal revision
+    Controller --> Web : 200 OK
+    note over Brand, Web : Brand can issue a new offer and send a new invitation.
+  end
+else <U+005B>external agreement path<U+005D>
+  Brand -> Web : enter non-future agreement time, source, HTTPS evidence and description
+end
+
+opt <U+005B>Brand requests confirmation with Portal acceptance or external evidence<U+005D>
+  Brand -> Web : confirm current terms
+  Web -> Controller : POST /api/v1/campaigns/{campaignId}/deals/{dealId}/confirm\nexpectedRevision, agreementSource and Idempotency-Key
+  activate Controller
+  Controller -> Service : confirm(campaignId, dealId, body, key)
+  activate Service
+  note over Service : Require relationship and collaboration permissions and lock Campaign/Deal.
+  alt <U+005B>saved result for the same key and payload<U+005D>
+    Service --> Controller : prior confirmation response
+    Controller --> Web : 200 OK
+  else <U+005B>revision changed, key conflict or workflow checks fail<U+005D>
+    Service --> Controller : conflict; confirmation does not proceed
+    Controller --> Web : 409 Conflict
+  else <U+005B>external evidence fields invalid<U+005D>
+    Service --> Controller : validation error
+    Controller --> Web : 400 Bad Request
+  else <U+005B>current acceptance or valid external evidence; budget and channel checks pass (BR-55/56)<U+005D>
+    Service -> DB : insert PLANNED Collaboration and channel rows
+    Service -> Snapshot : create(collaborationId, proposalId, deliverables, "PROPOSAL")
+    Snapshot --> Service : execution plan written
+    Service -> DB : mark Deal and CRM CONFIRMED; record history and receipt
+    DB --> Service : writes completed
+    Service --> Controller : confirmed Deal with PLANNED Collaboration
+    Controller --> Web : 200 OK
+  end
+  deactivate Service
+  deactivate Controller
+end
+@enduml

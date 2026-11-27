@@ -1,0 +1,37 @@
+@startuml creator-identity-conflict-sequence
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+title Figure 4.3.4.2.4 View Creator Identity Conflicts Sequence Diagram
+hide footbox
+autonumber
+actor "Data Manager" as Manager
+participant "Web Client" as Web
+participant AdminIdentityConflictController as API
+participant CreatorIdentityConflictService as Service
+participant CreatorIdentityConflictRepository as Repo
+Manager -> Web : open identity conflicts
+Web -> API : GET /api/v1/data/creator-conflicts
+activate API
+alt <U+005B>missing both REVIEW_CREATOR_CLAIM and RESOLVE_CREATOR_DUPLICATE (BR-70)<U+005D>
+  API --> Web : access denied
+else <U+005B>either authority granted<U+005D>
+  API -> Service : listConflicts(status, pageable)
+  activate Service
+  alt <U+005B>status provided<U+005D>
+    Service -> Repo : findByStatus(uppercaseStatus, pageable)
+  else <U+005B>no status filter<U+005D>
+    Service -> Repo : findAll(pageable)
+  end
+  Repo --> Service : matching conflict page
+  Service --> API : page of ConflictDetailDto
+  deactivate Service
+  API --> Web : 200 OK
+end
+deactivate API
+note over API, Service
+  The controller exposes the list as GET. Ownership-transfer
+  resolution has no HTTP mapping and the service rejects transfers.
+end note
+@enduml

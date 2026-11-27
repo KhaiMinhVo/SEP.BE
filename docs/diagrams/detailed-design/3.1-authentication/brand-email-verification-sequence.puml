@@ -1,0 +1,89 @@
+@startuml brand-email-verification-sequence
+title Brand Registration and Email Verification OTP
+hide footbox
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+autonumber
+skinparam roundcorner 0
+skinparam ParticipantPadding 10
+skinparam SequenceLifeLineBorderColor #555555
+skinparam SequenceLifeLineBackgroundColor white
+skinparam SequenceParticipantBackgroundColor white
+skinparam SequenceGroupBackgroundColor white
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam noteBackgroundColor white
+
+actor Brand
+participant "Web Client" as Web
+participant AuthController as Auth
+participant AuthServiceImpl as Service
+participant EmailVerificationService as Verification
+participant SmtpVerificationEmailSender as Sender
+participant "Email Service" as Mail
+
+Brand -> Web : submit registration
+activate Web
+Web -> Auth : POST /api/v1/auth/register
+activate Auth
+Auth -> Service : register(request)
+activate Service
+Service -> Verification : sendInitial(user)
+activate Verification
+Verification -> Sender : send(email, otp)
+activate Sender
+Sender -> Mail : submit OTP email (SMTP)
+Mail --> Sender : delivery result
+Sender --> Verification : return or delivery error
+deactivate Sender
+Verification --> Service : return or delivery error
+deactivate Verification
+alt <U+005B>email accepted by SMTP<U+005D>
+  Service --> Auth : registration committed
+  Auth --> Web : 201 Created
+else <U+005B>SMTP delivery failed<U+005D>
+  Service --> Auth : EMAIL_DELIVERY_UNAVAILABLE; registration rolls back
+  Auth --> Web : 503 Service Unavailable
+end
+deactivate Service
+deactivate Auth
+deactivate Web
+
+opt <U+005B>registration succeeded<U+005D>
+  Brand -> Web : enter the six-digit email verification code
+  activate Web
+  Web -> Auth : POST /api/v1/auth/verify-email
+  activate Auth
+  Auth -> Verification : verify(email, otp)
+  activate Verification
+  alt <U+005B>email already verified<U+005D>
+    Verification --> Auth : EMAIL_ALREADY_VERIFIED
+    Auth --> Web : 409 Conflict
+  else <U+005B>verification attempt limit reached<U+005D>
+    Verification --> Auth : EMAIL_OTP_RATE_LIMITED
+    Auth --> Web : 429 Too Many Requests
+  else <U+005B>OTP invalid or expired and attempt limit not reached<U+005D>
+    Verification --> Auth : EMAIL_OTP_INVALID_OR_EXPIRED
+    Auth --> Web : 400 Bad Request
+  else <U+005B>OTP valid and verification allowed<U+005D>
+    Verification --> Auth : email marked verified
+    Auth --> Web : 200 OK
+  end
+  deactivate Verification
+  deactivate Auth
+  deactivate Web
+
+  opt <U+005B>email verified<U+005D>
+    Brand -> Web : sign in with email and password
+    Web -> Auth : POST /api/v1/auth/login
+    activate Auth
+    Auth -> Service : login(request)
+    activate Service
+    Service --> Auth : LoginResponse [valid credentials and active account]
+    deactivate Service
+    Auth --> Web : 200 OK, access token and refresh cookie
+    deactivate Auth
+  end
+end
+@enduml

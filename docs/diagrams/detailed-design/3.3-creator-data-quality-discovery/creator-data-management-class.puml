@@ -1,0 +1,55 @@
+@startuml creator-data-management-class
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+title Figure 4.3.3.1.1 Creator Data Management Class Diagram
+hide circle
+skinparam classAttributeIconSize 0
+class CreatorIngestionController <<controller>>
+class CreatorIngestionService <<service>> {
+  + ingestCreatorData(request : CreatorIngestionRequest) : CreatorIngestionResponse
+}
+class CreatorClaimResolutionService <<service>>
+interface CreatorRepository <<repository>>
+interface CreatorMasterRepository <<repository>>
+interface PublicCreatorMetricRepository <<repository>>
+interface PostRepository <<repository>>
+class Creator <<entity>> {
+  - platform : String
+  - externalId : String
+  - userName : String
+  - sourceType : CreatorSourceType
+  + getOwner() : User
+}
+class CreatorMaster <<entity>> {
+  - canonicalName : String
+  - status : String
+}
+class PublicCreatorMetric <<entity>>
+class Post <<entity>>
+class User <<entity>>
+enum CreatorSourceType <<enumeration>> {
+  PUBLIC
+  AUTHORIZED
+}
+CreatorIngestionController ..> CreatorIngestionService
+CreatorIngestionService ..> CreatorRepository
+CreatorIngestionService ..> PublicCreatorMetricRepository
+CreatorIngestionService ..> PostRepository
+CreatorClaimResolutionService ..> CreatorMasterRepository
+CreatorClaimResolutionService ..> CreatorRepository
+CreatorRepository ..> Creator
+CreatorMasterRepository ..> CreatorMaster
+PublicCreatorMetricRepository ..> PublicCreatorMetric
+PostRepository ..> Post
+User "1" -- "0..1" CreatorMaster : account owner
+CreatorMaster "0..1" -- "0..*" Creator : links channels
+Creator "1" -- "0..*" PublicCreatorMetric : metric records
+Creator "1" -- "0..*" Post : posts
+Creator --> CreatorSourceType : sourceType
+note right of CreatorIngestionService
+  Ingestion locks platform and external ID before matching.
+  Updates to public fields preserve ownership.
+end note
+@enduml

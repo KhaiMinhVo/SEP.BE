@@ -1,0 +1,153 @@
+@startuml influencermatch-components
+' Report 4, section 1.1. Runtime components and their provided interfaces.
+' Source snapshots: SEP.BE bfb6227, INFLUENCERMATCH 2483221, creator-discovery e5594ec.
+' FE: package.json, vercel.json, api/proxy.js, api/crawlerProxy.js.
+' BE: pom.xml, docker-compose.yml, application.yml, CreatorIngestionController,
+'     PaymentController, AiServiceClient, CrawlerServiceClient, CollaborationVideoStorage.
+' Crawler: docker-compose.yml, main.py, celery_app.py, tasks.py, java_client.py,
+'          candidate_staging.py, and the crawl, AI, review, monitor and quality routers.
+' The Report 1 "Crawler Service" and "AI Service" are logical roles. This view expands
+' the team-operated Python subsystem and keeps third-party providers outside the boundary.
+' Brand / SME and System Admin retain their context labels. Guest, Creator and Data
+' Manager are portal roles listed in the application and the accompanying requirements.
+' "sync" denotes request/response. "async" denotes queued work, an event stream,
+' or an independent notification. Each provider still acknowledges its HTTP request.
+' Beat and FastAPI publish jobs. FastAPI also reads task results. Workers publish results.
+' Spring email dispatch runs within the API process. SMTP calls are request/response.
+' PayOS checkout/query and VNPay query/refund are outbound calls. Browser checkout
+' and return use redirects. The inbound dependency shows server-to-server IPN/webhook.
+' Media and OAuth links are conditional on the selected method and environment settings.
+
+title UML component diagram – InfluencerMatch
+!pragma layout smetana
+top to bottom direction
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam componentStyle uml2
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam nodesep 46
+skinparam ranksep 39
+skinparam component {
+  BackgroundColor #F0F5FB
+  BackgroundColor<<external system>> #F7F6F2
+  BorderColor #40536C
+  FontColor #172B41
+}
+skinparam database {
+  BackgroundColor #EEF6F2
+  BorderColor #426455
+  FontColor #172B41
+}
+skinparam interface {
+  BackgroundColor white
+  BorderColor #40536C
+  FontColor #172B41
+}
+skinparam package {
+  BackgroundColor white
+  BorderColor #40536C
+  FontColor #172B41
+}
+skinparam ArrowColor #40536C
+skinparam ArrowFontSize 12
+
+actor "Guest, Brand / SME, Creator,\nData Manager, System Admin" as Users
+
+package "InfluencerMatch Platform" {
+  component "Web Client\nReact 19 SPA\nRenders portal and admin screens" as Web
+  component "API Proxy\nVercel Functions / Node.js\nRoutes browser requests to both APIs" as Proxy
+  interface "Same-origin API" as IProxy
+
+  component "Application API\nSpring Boot 3.3 / Java 21\nApplies rules and ranks creators" as Api
+  interface "Business API" as IBusiness
+  interface "Creator Ingest" as IIngest
+  interface "IPN" as IPaymentEvents
+
+  component "Crawler & AI API\nFastAPI / Python\nProvides crawl and AI services" as PythonApi
+  interface "Python REST" as IPython
+  component "Crawler Worker\nCelery / Python\nCollects and normalizes creator data" as Worker
+  component "Crawler Scheduler\nCelery Beat / Python\nSchedules recurring crawler jobs" as Beat
+  component "Job Broker\nRedis 7\nQueues jobs and stores task results" as Redis <<message broker>>
+  interface "Jobs & Results" as IJobs
+
+  database "Application Database\nPostgreSQL 16 + pgvector\nStores business data and search vectors" as Pg
+  interface "SQL" as ISql
+  database "Crawler Staging\nSQLite\nStores candidate data before ingestion" as Staging
+  interface "Staging Data" as IStaging
+}
+
+component "Identity Providers\nGoogle, Meta and TikTok Sandbox\nsign users in or authorize channels" as Identity <<external system>>
+component "AI Provider\nGoogle Gemini\nExtracts brief fields and labels content" as Gemini <<external system>>
+component "Payment Gateway\nVNPay and PayOS\nProcesses subscription payments" as Payment <<external system>>
+component "Email Service\nSMTP relay\nDelivers OTPs and invitations" as Mail <<external system>>
+component "Creator Data Providers\nTikTok, Facebook, Instagram\nExpose public profiles, posts and metrics" as Social <<external system>>
+component "Media Storage\nCloudflare R2 / Cloudinary\nStores uploads and serves media" as Storage <<external system>>
+
+interface "OAuth" as IOAuth
+interface "Gemini API" as IGemini
+interface "Payment API" as IPayments
+interface "SMTP" as IMail
+interface "Public" as IPublic
+interface "Media" as IMedia
+
+Users -down-> Web : HTTPS (sync)
+
+Web .down.> IProxy : HTTPS / JSON (sync)\nHTTPS / SSE (async)
+IProxy -down- Proxy
+Proxy .down.> IBusiness : HTTPS / JSON (sync)\nHTTPS / SSE (async)
+IBusiness -down- Api
+Proxy .down.> IPython : HTTP / JSON (sync)\ncrawl, quality and monitoring
+IPython -down- PythonApi
+Api .[norank].> IPython : HTTP(S) / JSON (sync)\nidentity, metrics, AI
+
+Api -down- IIngest
+Worker .[norank].> IIngest : HTTPS / JSON (sync)\nPOST /api/v1/creators/ingest
+Api .down.> ISql : JDBC / SQL (sync)
+ISql -down- Pg
+
+PythonApi .down.> IJobs : Redis / Celery (async)\nqueue jobs and read status
+Worker .down.> IJobs : Redis / Celery (async)\nconsume jobs and save results
+Beat .down.> IJobs : Redis / Celery (async)\npublish scheduled jobs
+IJobs -down- Redis
+
+PythonApi .[norank].> IStaging : SQLite / SQL (sync)
+Worker .down.> IStaging : SQLite / SQL (sync)
+IStaging -down- Staging
+
+IOAuth -right- Identity
+IGemini -right- Gemini
+IPayments -right- Payment
+IMail -right- Mail
+IMedia -right- Storage
+IPublic -right- Social
+
+Api .[norank].> IOAuth : HTTPS (sync)\nOAuth / OIDC
+Web .right.> IOAuth : HTTPS (sync)\nredirect / Google sign-in
+Api .[norank].> IGemini : HTTPS / JSON (sync)\nbrief extraction
+Worker .[norank].> IGemini : HTTPS / JSON (sync)\nAI enrichment
+Api .[norank].> IPayments : HTTPS (sync)\ncheckout, query, refund
+Api .[norank].> IMail : SMTP / TLS (sync)
+Api .[norank].> IMedia : HTTPS (sync)\nS3 / Cloudinary
+Web .[norank].> IMedia : HTTPS (sync)\npresigned R2
+
+Api -down- IPaymentEvents
+Payment .[norank].> IPaymentEvents : HTTPS (async)\nIPN / webhook
+PythonApi .[norank].> IPublic : HTTPS (sync)
+Worker .[norank].> IPublic : HTTPS (sync)
+
+' Invisible links guide the renderer.
+IPaymentEvents -[hidden]right-> ISql
+IBusiness -[hidden]right-> IPython
+Api -[hidden]right-> PythonApi
+Worker -[hidden]right-> Beat
+PythonApi -[hidden]down-> Worker
+IOAuth -[hidden]down-> IPayments
+IPayments -[hidden]down-> IMail
+IMail -[hidden]down-> IMedia
+IMedia -[hidden]down-> IGemini
+IGemini -[hidden]down-> IPublic
+
+caption Spring Boot applies business rules and ranks creators, while FastAPI and Redis-backed Celery jobs provide creator data and AI signals.
+@enduml

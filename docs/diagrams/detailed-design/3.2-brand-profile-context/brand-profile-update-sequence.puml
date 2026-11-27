@@ -1,0 +1,118 @@
+@startuml brand-profile-update-sequence
+title Brand Profile Update and M4 Context Versioning
+hide footbox
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+autonumber
+skinparam roundcorner 0
+skinparam SequenceLifeLineBorderColor #555555
+skinparam SequenceLifeLineBackgroundColor white
+skinparam SequenceParticipantBackgroundColor white
+skinparam SequenceGroupBackgroundColor white
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam noteBackgroundColor white
+skinparam ParticipantPadding 10
+skinparam maxMessageSize 250
+
+actor Brand
+participant "Web Client" as Web
+participant BrandController as Controller
+participant BrandService as Service
+participant BrandProfileRepository as Profiles
+participant BrandRevision as Revision
+participant BrandContextLifecycle as Lifecycle
+participant BrandContextRepository as Contexts
+participant BrandEmbeddingStore as Jobs
+participant BrandEmbeddingDispatch as Dispatch
+participant BrandEmbeddingWorker as Worker
+
+Brand -> Web : open own profile
+Web -> Controller : GET /api/v1/brands/me
+activate Controller
+Controller -> Service : me(auth)
+activate Service
+Service -> Profiles : findByUserId(userId)
+Profiles --> Service : BrandProfile
+Service -> Contexts : findByBrandProfileId(profileId)
+Contexts --> Service : latest BrandContext
+Service --> Controller : BrandResponse
+deactivate Service
+Controller -> Revision : tag(profileId, profileRevision)
+Revision --> Controller : ETag
+Controller --> Web : 200 OK, profile and ETag
+deactivate Controller
+
+note over Controller, Service
+  POST /api/v1/brands supports historical Brand accounts
+  missing a profile. create() calls initial(profile) for context version 1.
+end note
+
+Brand -> Web : save edited fields
+Web -> Controller : PATCH /api/v1/brands/me\nIf-Match: current ETag
+activate Controller
+Controller -> Service : patchMe(patch, auth, ifMatch)
+activate Service
+Service -> Profiles : lockForBilling(profileId)
+Profiles --> Service : locked profile
+note over Service, Profiles : Require UPDATE_BRAND_PROFILE and verify profile access.
+Service -> Revision : require(ifMatch, profileId, profileRevision)
+Revision --> Service : match or precondition error
+
+alt <U+005B>If-Match missing<U+005D>
+  Service --> Controller : PRECONDITION_REQUIRED
+  Controller --> Web : 428 Precondition Required
+else <U+005B>If-Match has invalid syntax<U+005D>
+  Service --> Controller : validation error
+  Controller --> Web : 400 Bad Request
+else <U+005B>ETag no longer matches<U+005D>
+  Service --> Controller : BRAND_REVISION_CONFLICT
+  Controller --> Web : 409 Conflict
+  note over Web : Re-read GET /api/v1/brands/me for the latest profile and ETag.
+else <U+005B>ETag matches<U+005D>
+  alt <U+005B>patch invalid or completed profile would violate BR-08<U+005D>
+    Service --> Controller : validation error
+    Controller --> Web : 400 Bad Request
+  else <U+005B>patch valid<U+005D>
+    Service -> Service : applyUpdate(profile, request)
+    alt <U+005B>canonical profile data unchanged<U+005D>
+      note right of Service : Keep profileRevision and contextVersion.
+    else <U+005B>canonical profile data changed<U+005D>
+      Service -> Profiles : save(profile)
+      Profiles --> Service : profileRevision incremented
+      Service -> Contexts : findByBrandProfileId(profileId)
+      Contexts --> Service : current context
+      alt <U+005B>semantic projection unchanged<U+005D>
+        note right of Service : Keep the current contextVersion.
+      else <U+005B>semantic projection changed — BR-09<U+005D>
+        Service -> Lifecycle : append(profile, contextVersion + 1)
+        activate Lifecycle
+        Lifecycle -> Contexts : saveAndFlush(newContext)
+        Contexts --> Lifecycle : new immutable snapshot
+        Lifecycle -> Jobs : enqueue(contextId)
+        Jobs --> Lifecycle : job recorded or persistence error
+        Lifecycle --> Service : new BrandContext or error
+        deactivate Lifecycle
+      end
+    end
+    alt <U+005B>transaction commits<U+005D>
+      opt <U+005B>new embedding job recorded<U+005D>
+        activate Dispatch
+        note over Dispatch : committed(Wake) runs AFTER_COMMIT.
+        Dispatch ->> Worker : process(jobId) via bounded executor
+        deactivate Dispatch
+      end
+      Service --> Controller : BrandResponse
+      Controller -> Revision : tag(profileId, profileRevision)
+      Revision --> Controller : ETag
+      Controller --> Web : 200 OK, profile and ETag
+    else <U+005B>persistence or job enqueue fails<U+005D>
+      Service --> Controller : error; profile and context changes roll back
+      Controller --> Web : request fails
+    end
+  end
+end
+deactivate Service
+deactivate Controller
+@enduml

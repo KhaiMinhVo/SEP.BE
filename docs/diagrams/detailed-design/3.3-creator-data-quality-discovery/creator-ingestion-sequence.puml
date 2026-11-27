@@ -1,0 +1,52 @@
+@startuml creator-ingestion-sequence
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+title Figures 4.3.3.2.1–2 Creator Ingestion and Public Profile Update
+hide footbox
+autonumber
+participant "Crawler / Data Service" as Crawler
+participant CreatorIngestionController as API
+participant CreatorIngestionService as Service
+participant CreatorRepository as Creators
+participant PublicCreatorMetricRepository as Metrics
+participant PostRepository as Posts
+Crawler -> API : POST /api/v1/creators/ingest\nX-Service-Key
+activate API
+alt <U+005B>missing or invalid service authorization<U+005D>
+  API --> Crawler : request denied
+else <U+005B>authorized caller<U+005D>
+  API -> Service : ingestCreatorData(request)
+  activate Service
+  alt <U+005B>type not KOL/KOC or supplied followers below 5,000<U+005D>
+    Service --> API : status REJECTED
+  else <U+005B>eligible data<U+005D>
+    Service -> Creators : acquireIdentityLock(platform + ":" + externalId)
+    Service -> Creators : findLockedByPlatformAndExternalId(platform, externalId)
+    Creators --> Service : existing Creator or empty
+    alt <U+005B>existing Creator<U+005D>
+      Service -> Service : refresh entity and update public fields
+    else <U+005B>no matching Creator<U+005D>
+      Service -> Service : create PUBLIC Creator with no master
+    end
+    Service -> Creators : save(creator)
+    opt <U+005B>crawlRunId supplied<U+005D>
+      Service -> Metrics : existsByCreatorIdAndCrawlRunId(creatorId, crawlRunId)
+      Metrics --> Service : already recorded?
+    end
+    alt <U+005B>crawl run already recorded<U+005D>
+      Service --> API : status SKIPPED; existing metric ID when available
+    else <U+005B>new run or crawlRunId omitted<U+005D>
+      Service -> Metrics : save(metric)
+      opt <U+005B>recent posts supplied<U+005D>
+        Service -> Posts : replace recent posts for the Creator
+      end
+      Service --> API : SUCCESS or REJECTED based on stored creator type,\nwith creatorId and metricId
+    end
+  end
+  deactivate Service
+  API --> Crawler : 200 OK with ingestion result
+end
+deactivate API
+@enduml

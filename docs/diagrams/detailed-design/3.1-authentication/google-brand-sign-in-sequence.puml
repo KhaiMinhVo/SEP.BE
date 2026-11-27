@@ -1,0 +1,106 @@
+@startuml google-brand-sign-in-sequence
+title Google Sign-In for Brand | Google Identity Services
+hide footbox
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+autonumber
+skinparam roundcorner 0
+skinparam ParticipantPadding 10
+skinparam SequenceLifeLineBorderColor #555555
+skinparam SequenceLifeLineBackgroundColor white
+skinparam SequenceParticipantBackgroundColor white
+skinparam SequenceGroupBackgroundColor white
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam noteBackgroundColor white
+
+actor Brand
+participant "Web Client" as Web
+participant "Google Identity Services" as Google
+participant GoogleBrandLoginController as Auth
+participant GoogleIdTokenVerifier as Verifier
+participant GoogleBrandLoginService as Service
+participant AuthSessionIssuer as Issuer
+
+Brand -> Web : choose Google sign-in
+Web -> Auth : POST /api/v1/auth/google/start\nCSRF header
+activate Auth
+Auth -> Service : start(browserBinding)
+activate Service
+Service --> Auth : Start or GOOGLE_LOGIN_UNAVAILABLE
+deactivate Service
+alt <U+005B>Google login disabled or unconfigured<U+005D>
+  Auth --> Web : 503 Service Unavailable
+else <U+005B>Google login configured<U+005D>
+  Auth --> Web : 200 OK, sessionId, clientId, nonce and binding cookie
+end
+deactivate Auth
+
+opt <U+005B>challenge created<U+005D>
+  Web -> Google : google.accounts.id.initialize(client_id, nonce, callback)
+  Google ->> Web : CredentialResponse callback
+  Web -> Auth : POST /api/v1/auth/google/login\nsessionId, credential, binding cookie and CSRF header
+  activate Auth
+  Auth -> Verifier : verify(credential)
+  activate Verifier
+  Verifier --> Auth : verified Jwt or authentication error
+  deactivate Verifier
+  alt <U+005B>Google credential invalid<U+005D>
+    Auth --> Web : 401 Unauthorized
+  else <U+005B>credential verified<U+005D>
+    Auth -> Service : finish(sessionId, browserBinding, proof)
+    activate Service
+    alt <U+005B>challenge expired or binding or nonce invalid<U+005D>
+      Service --> Auth : UNAUTHENTICATED
+      Auth --> Web : 401 Unauthorized
+    else <U+005B>challenge already used or explicit account linking required<U+005D>
+      Service --> Auth : GOOGLE_LOGIN_REPLAY or GOOGLE_ACCOUNT_LINK_REQUIRED
+      Auth --> Web : 409 Conflict
+    else <U+005B>existing account is disabled, locked or ineligible for Brand login<U+005D>
+      Service --> Auth : account eligibility error
+      Auth --> Web : 401 or 403 according to the error
+    else <U+005B>eligible linked or auto-linkable Brand<U+005D>
+      Service -> Issuer : issue(user, "GOOGLE")
+      Issuer --> Service : LoginResponse
+      Service --> Auth : AUTHENTICATED
+      Auth --> Web : 200 OK, access token and IM_REFRESH cookie
+    else <U+005B>no existing account for the verified email<U+005D>
+      Service --> Auth : REGISTRATION_REQUIRED
+      Auth --> Web : 200 OK, registration details
+    end
+    deactivate Service
+  end
+  deactivate Auth
+
+  opt <U+005B>registration required and Brand supplies password and consent<U+005D>
+    Brand -> Web : submit onboarding form
+    Web -> Auth : POST /api/v1/auth/google/registration/complete\nregistration data, binding cookie and CSRF header
+    activate Auth
+    Auth -> Service : complete(request, browserBinding)
+    activate Service
+    alt <U+005B>challenge usable and registration data valid<U+005D>
+      Service -> Issuer : issue(user, "GOOGLE")
+      Issuer --> Service : LoginResponse
+      Service --> Auth : AUTHENTICATED
+      Auth --> Web : 200 OK, access token and IM_REFRESH cookie
+    else <U+005B>registration already processed or email taken<U+005D>
+      Service --> Auth : GOOGLE_LOGIN_REPLAY or EMAIL_ALREADY_EXISTS
+      Auth --> Web : 409 Conflict
+    else <U+005B>challenge invalid or expired<U+005D>
+      Service --> Auth : UNAUTHENTICATED
+      Auth --> Web : 401 Unauthorized
+    else <U+005B>password or registration data invalid<U+005D>
+      Service --> Auth : validation error
+      Auth --> Web : 400 Bad Request
+    end
+    deactivate Service
+    deactivate Auth
+  end
+end
+
+note over Auth, Service
+  BR-07   Google sign-in authenticates a Brand account.
+  Creator channel verification is covered in section 3.4.
+end note
+@enduml

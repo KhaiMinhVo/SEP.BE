@@ -1,0 +1,37 @@
+@startuml 05-creator-profile-and-channel-verification
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+skinparam ArrowColor #242424
+skinparam usecase {
+    BackgroundColor #F1F1F1
+    BorderColor #555555
+}
+
+title Creator Profile, Channel Verification and Claims
+
+actor "Creator" as Creator
+actor "Data Manager" as Manager
+actor "Social OAuth Providers" as Social <<external system>>
+actor "Cloudinary" as Cloudinary <<external system>>
+
+rectangle "Intelligent Influencer Discovery and Recommendation Platform\nBased on Historical and Contextual Data for SMEs" {
+    usecase "UC-86 Manage Creator Profile" as UC86
+    usecase "UC-87 Verify Channel Ownership Using OAuth" as UC87
+    usecase "UC-88 Submit Channel Ownership Claims" as UC88
+    usecase "UC-89 Track Channel Verification Status" as UC89
+    usecase "UC-61 Inspect Creator Master Identities" as UC61
+    usecase "UC-62 Review Channel Ownership Claims" as UC62
+}
+
+Creator -- UC86
+Creator -- UC87
+Creator -- UC88
+Creator -- UC89
+Manager -- UC61
+Manager -- UC62
+
+UC87 -- Social
+UC86 -- Cloudinary
+@enduml

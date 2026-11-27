@@ -1,0 +1,87 @@
+@startuml creator-discovery-sequence
+title WF-05 | Discover Creators with Lexical Fallback
+hide footbox
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+autonumber
+skinparam roundcorner 0
+skinparam ParticipantPadding 10
+skinparam SequenceLifeLineBorderColor #555555
+skinparam SequenceLifeLineBackgroundColor white
+skinparam SequenceParticipantBackgroundColor white
+skinparam SequenceGroupBackgroundColor white
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam noteBackgroundColor white
+skinparam maxMessageSize 260
+
+actor Brand
+participant "Web Client" as Web
+participant CreatorDiscoveryController as Controller
+participant CreatorDiscoveryService as Service
+participant CampaignRepository as Campaigns
+participant AiServiceClient as AI
+participant "Crawler & AI API" as Python
+participant PublicCreatorMetricRepository as Metrics
+database "PostgreSQL / pgvector" as DB
+
+Brand -> Web : open Discovery and set filters
+Web -> Controller : GET /api/v1/campaigns/{campaignId}/discovery
+activate Controller
+Controller -> Service : discoverCreators(campaignId, searchRequest)
+activate Service
+note over Controller, Service : SEARCH_CREATOR required (BR-03).
+Service -> Campaigns : findById(campaignId)
+Campaigns --> Service : campaign or empty
+alt <U+005B>campaign missing<U+005D>
+  Service --> Controller : ResourceNotFoundException
+  Controller --> Web : 404 Not Found
+else <U+005B>campaign belongs to another Brand — BR-04<U+005D>
+  Service --> Controller : ForbiddenException
+  Controller --> Web : 403 Forbidden
+else <U+005B>owned campaign is archived or closed<U+005D>
+  Service --> Controller : CAMPAIGN_CONTEXT_NOT_READY
+  Controller --> Web : 409 Conflict
+else <U+005B>owned campaign available for discovery<U+005D>
+  Service -> Service : validate(searchRequest)
+  alt <U+005B>filters invalid<U+005D>
+    Service --> Controller : BadRequestException
+    Controller --> Web : 400 Bad Request
+  else <U+005B>no campaign niche and no usable product topic<U+005D>
+    Service --> Controller : empty page
+    Controller --> Web : 200 OK, empty result
+  else <U+005B>valid filters and campaign has niche or usable topic<U+005D>
+    opt <U+005B>query text present<U+005D>
+      Service -> AI : getEmbedding(queryText)
+      activate AI
+      AI -> Python : POST /api/v1/ai/embed
+      Python --> AI : embedding, error or timeout
+      AI --> Service : vector or empty list
+      deactivate AI
+    end
+    alt <U+005B>valid query vector available<U+005D>
+      note over Service : Supply queryVector for vector and lexical retrieval.
+    else <U+005B>vector unavailable or invalid<U+005D>
+      note over Service : Keep queryVector null; retain filters and lexical retrieval.
+    end
+    loop <U+005B>exact search, then eligible expansion stages while fewer than five matches<U+005D>
+      Service -> Metrics : searchDiscoveryCreators(..., keyword, topic, queryVector, stageRequest, ...)
+      activate Metrics
+      Metrics -> DB : execute Discovery query
+      DB --> Metrics : matching Creator metrics
+      Metrics --> Service : result page
+      deactivate Metrics
+      note over Service, Metrics
+        Keep explicit UI filters, campaign platforms and the data-quality rules.
+        Expand eligible campaign preferences for location, followers or topic.
+        Deduplicate by Creator Master, falling back to the account key.
+      end note
+    end
+    Service --> Controller : Page<HybridDiscoveryCreatorProjection>
+    Controller --> Web : 200 OK, results and any expansion reasons
+  end
+end
+deactivate Service
+deactivate Controller
+@enduml

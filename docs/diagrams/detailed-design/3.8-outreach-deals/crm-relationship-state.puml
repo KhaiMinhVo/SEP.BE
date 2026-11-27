@@ -1,0 +1,29 @@
+@startuml crm-relationship-state
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+title Figure 4.3.8.3.1 CRM Relationship Lifecycle State Diagram
+hide empty description
+state " " as Entry <<choice>>
+[*] --> Entry
+Entry --> CONTACTED : createRelationship [new record] / save
+Entry --> SHORTLISTED : view lifecycle [existing record has SHORTLISTED]
+SHORTLISTED --> CONTACTED : updateStage [ungrouped] / save stage
+CONTACTED --> NEGOTIATING : updateStage [ungrouped] / save stage
+CONTACTED --> DECLINED : updateStage [ungrouped] / save stage
+CONTACTED --> CANCELLED : updateStage [ungrouped] / save stage
+NEGOTIATING --> DECLINED : updateStage [ungrouped] / save stage
+NEGOTIATING --> CANCELLED : updateStage [ungrouped] / save stage
+DECLINED --> [*]
+CANCELLED --> [*]
+note right of CONTACTED
+  Scope: standalone CRM stage endpoint.
+  SHORTLISTED is accepted as an existing value.
+  A grouped relationship follows the Deal workflow (§3.8).
+end note
+note right of NEGOTIATING
+  Blocked: direct CRM confirmation and direct patches
+  on active Deal members. Same-stage updates can update nextAction.
+end note
+@enduml

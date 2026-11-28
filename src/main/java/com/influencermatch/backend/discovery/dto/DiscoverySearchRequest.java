@@ -34,6 +34,22 @@ public class DiscoverySearchRequest {
     private java.math.BigDecimal maxFee;
     private String sortBy;
 
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @io.swagger.v3.oas.annotations.media.Schema(hidden = true)
+    @Builder.Default
+    private java.math.BigDecimal minimumDataConfidence = java.math.BigDecimal.valueOf(
+        com.influencermatch.backend.discovery.service.CreatorDiscoveryContract.DEFINITION.minDataConfidence());
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @io.swagger.v3.oas.annotations.media.Schema(hidden = true)
+    @Builder.Default
+    private boolean taxonomyKeyword = false;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @io.swagger.v3.oas.annotations.media.Schema(hidden = true)
+    @Builder.Default
+    private java.util.List<String> keywordNiches = java.util.List.of("__NONE__");
+
     // Server-built campaign context for deterministic retrieval scoring, before AI review.
     @com.fasterxml.jackson.annotation.JsonIgnore
     @io.swagger.v3.oas.annotations.media.Schema(hidden = true)

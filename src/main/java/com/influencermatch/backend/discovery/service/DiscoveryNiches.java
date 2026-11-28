@@ -40,50 +40,27 @@ public final class DiscoveryNiches {
             .collect(java.util.stream.Collectors.joining(" OR "));
     }
 
-    public static boolean onlyBroadCategories(List<String> niches) {
-        return niches != null && !niches.isEmpty() && niches.stream().allMatch(value ->
-            List.of("beauty", "lam dep", "lam dep & my pham", "my pham & lam dep", "fashion", "lifestyle",
-                "thoi trang & phu kien", "am thuc", "du lich", "cong nghe", "giai tri", "doi song & gia dinh")
-                .contains(normalize(value)));
-    }
-
     private static String normalize(String text) {
         return java.text.Normalizer.normalize(text == null ? "" : text, java.text.Normalizer.Form.NFD)
             .replaceAll("\\p{M}+", "").replace('đ', 'd').replace('Đ', 'D')
             .trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
     }
-    private static final List<List<String>> ALIASES = List.of(
-        List.of("BEAUTY", "Beauty", "Làm đẹp", "Làm đẹp & Mỹ phẩm", "Mỹ phẩm & Làm đẹp", "Mỹ phẩm", "Review mỹ phẩm", "Cosmetics"),
-        List.of("SKINCARE", "Chăm sóc da", "Chăm sóc da & Skincare", "Dưỡng da", "Review skincare"),
-        List.of("FASHION", "Fashion", "Thời trang", "Thời trang & Phong cách", "Thời trang & Phụ kiện"),
-        List.of("Ẩm thực", "FOOD", "Ẩm thực và ăn uống", "Ẩm thực và Đồ ăn vặt", "Ẩm thực & Nhà hàng"),
-        List.of("Du lịch", "TRAVEL", "Du lịch & Trải nghiệm"),
-        List.of("Công nghệ", "TECHNOLOGY", "Công nghệ & Điện thoại / PC"),
-        List.of("Giải trí", "ENTERTAINMENT", "Truyền thông & Giải trí"),
-        List.of("Đời sống & Gia đình", "LIFESTYLE", "Phong cách sống", "Lối sống & Sáng tạo", "Đời sống, Sức khỏe & Gia đình")
-    );
     public static List<String> expand(List<String> niches) {
-        var result = new LinkedHashSet<String>();
-        if (niches == null) return List.of();
-        for (String niche : niches) {
-            if (niche == null || niche.isBlank()) continue;
-            String value = niche.trim().toLowerCase(Locale.ROOT);
-            result.add(value);
-            for (var group : ALIASES)
-                if (group.stream().anyMatch(alias -> alias.equalsIgnoreCase(value)))
-                    group.forEach(alias -> result.add(alias.toLowerCase(Locale.ROOT)));
-        }
-        return List.copyOf(result);
+        return CreatorDiscoveryContract.expand(niches);
     }
 
     /** Related categories are used only for explicitly labelled expanded results. */
     public static List<String> related(List<String> niches, List<String> productNiches) {
         var result = new LinkedHashSet<>(expand(niches));
-        result.addAll(productNiches);
+        // Inferred product topics cannot replace an explicitly selected category.
+        if (result.isEmpty()) result.addAll(productNiches);
         if (result.stream().anyMatch(value -> value.contains("skincare") || value.contains("chăm sóc da")
                 || value.contains("makeup") || value.contains("trang điểm") || value.contains("haircare")
-                || value.contains("chăm sóc tóc") || value.contains("beauty") || value.contains("mỹ phẩm")))
+                || value.contains("chăm sóc tóc") || value.contains("beauty") || value.contains("mỹ phẩm"))) {
+            // All currently supported product topics belong to the beauty family.
+            result.addAll(productNiches);
             result.addAll(expand(List.of("BEAUTY")));
+        }
         return List.copyOf(result);
     }
 }

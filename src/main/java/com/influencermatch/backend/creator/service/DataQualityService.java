@@ -36,7 +36,8 @@ public class DataQualityService {
     String niche = metric.getNiche();
     return niche == null || niche.isBlank() || "UNKNOWN".equalsIgnoreCase(niche.trim())
         || (metric.getDataConfidence() != null
-            && metric.getDataConfidence().compareTo(new BigDecimal("0.7")) < 0);
+            && metric.getDataConfidence().compareTo(BigDecimal.valueOf(
+                com.influencermatch.backend.discovery.service.CreatorDiscoveryContract.DEFINITION.minDataConfidence())) < 0);
   }
 
   @Transactional(readOnly = true)
@@ -96,7 +97,8 @@ public class DataQualityService {
     String joinedNiches = String.join(", ", canonicalNames);
     metric.setNiche(joinedNiches);
     if (!canonicalNames.isEmpty()) {
-      metric.setCategory(canonicalNames.get(0));
+      metric.setCategory(com.influencermatch.backend.discovery.service.CreatorDiscoveryContract
+          .classify(canonicalNames.get(0), joinedNiches).category());
     }
     metric.setQualityReviewedBy(Permissions.actor());
     metric.setQualityReviewedAt(LocalDateTime.now());

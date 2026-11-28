@@ -108,6 +108,7 @@ public enum ErrorCode {
   CAMPAIGN_DELETE_BLOCKED(HttpStatus.CONFLICT, "Campaign cannot be permanently deleted"),
   RECOMMENDATION_REQUIRED(HttpStatus.CONFLICT, "Recommendation required before outreach"),
   UPLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "Upload exceeds size limit"),
+  CRAWLER_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Crawler is unavailable"),
   INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
   private final HttpStatus status;
   private final String title;

@@ -961,7 +961,8 @@ public class AiRecommendationService {
     ExplainRequestDto explainReq = ExplainRequestDto.builder()
         .creatorName(cand.getDisplayName() != null ? cand.getDisplayName() : cand.getUserName())
         .followers(cand.getFollowers() != null ? cand.getFollowers() : 0L)
-        .engagementRate(candEr)
+        // The Python explanation API uses percentage units; persisted metrics are ratios.
+        .engagementRate(candEr * 100.0)
         .engagementRateViews(erViews)
         .platform(cand.getPlatform() != null ? cand.getPlatform() : "TIKTOK")
         .niche(cand.getNiche() != null ? cand.getNiche() : "general")

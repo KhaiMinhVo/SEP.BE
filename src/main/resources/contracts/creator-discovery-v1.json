@@ -1,0 +1,32 @@
+{
+  "version": "creator-discovery-v1",
+  "engagementRateUnit": "RATIO",
+  "minFollowers": 5000,
+  "maxRecentPosts": 3,
+  "embeddingDimensions": 768,
+  "minDataConfidence": 0.7,
+  "acceptedCreatorTypes": ["KOL", "KOC"],
+  "categories": [
+    {"code":"BEAUTY","aliases":["Beauty","Làm đẹp","Làm đẹp & Mỹ phẩm","Mỹ phẩm & Làm đẹp","Mỹ phẩm","Review mỹ phẩm","Cosmetics"],"searchTerms":["Làm đẹp","Mỹ phẩm","Chăm sóc cá nhân"]},
+    {"code":"FOOD","aliases":["Ẩm thực","Ẩm thực và ăn uống","Ẩm thực và Đồ ăn vặt","Ẩm thực & Nhà hàng","Thực phẩm","Thực phẩm & Đồ uống","Thực phẩm & Nấu ăn","Ăn uống"],"searchTerms":["Thực phẩm & Đồ uống","Thực phẩm & Nấu ăn","Ăn uống"]},
+    {"code":"TECH","aliases":["TECHNOLOGY","Công nghệ","Công nghệ & Điện thoại / PC","IT & Cao Kỹ Thuật","Máy móc & Thiết bị","Điện tử"],"searchTerms":["Công nghệ","Điện tử","Review điện thoại"]},
+    {"code":"FASHION","aliases":["Fashion","Thời trang","Thời trang & Phong cách","Thời trang & Phụ kiện","Trang phục","Quần áo & Phụ kiện","Giày dép"],"searchTerms":["Quần áo & Phụ kiện","Thời trang","Giày dép"]},
+    {"code":"LIFESTYLE","aliases":["Đời sống & Gia đình","Phong cách sống","Lối sống & Sáng tạo","Đời sống, Sức khỏe & Gia đình","Đời sống"],"searchTerms":["Phong cách sống","Đời sống"]},
+    {"code":"HOME","aliases":["Gia dụng","Đồ gia dụng","Đánh giá đồ gia dụng","HOME_APPLIANCE_REVIEW","Nhà cửa, Nội thất & Thiết bị gia dụng"],"searchTerms":["Review đồ gia dụng","Nhà cửa nội thất"]},
+    {"code":"PETS","aliases":["Thú cưng","Chăm sóc thú cưng"],"searchTerms":["Thú cưng","Chăm sóc thú cưng"]},
+    {"code":"HEALTH","aliases":["Sức khỏe","Chăm sóc sức khỏe","WELLNESS","Sức khỏe & Sống khỏe"],"searchTerms":["Chăm sóc sức khỏe"]},
+    {"code":"MOTHER_BABY","aliases":["Mẹ & Bé","Mẹ và Bé"],"searchTerms":["Mẹ và Bé"]},
+    {"code":"TRAVEL","aliases":["Du lịch","Du lịch & Trải nghiệm","Đi lại & Du lịch"],"searchTerms":["Du lịch","Du lịch & Trải nghiệm"]},
+    {"code":"ENTERTAINMENT","aliases":["Giải trí","Truyền thông & Giải trí","Hài hước","MCN"],"searchTerms":["Truyền thông & Giải trí","Hài hước"]},
+    {"code":"EDUCATION","aliases":["Giáo dục","Giáo dục & Đào tạo"],"searchTerms":["Giáo dục & Đào tạo"]},
+    {"code":"SPORTS","aliases":["Thể thao","Sức khỏe & Thể hình"],"searchTerms":["Thể thao","Thể hình"]},
+    {"code":"GAMING","aliases":["Game","Trò chơi"],"searchTerms":["Gaming","Game"]},
+    {"code":"AUTOMOTIVE","aliases":["Ô tô","Xe cộ","Ô tô & Xe máy"],"searchTerms":["Ô tô","Xe máy"]},
+    {"code":"FINANCE","aliases":["Tài chính","Tài chính & Đầu tư"],"searchTerms":["Tài chính & Đầu tư"]}
+  ],
+  "niches": [
+    {"code":"SKINCARE","category":"BEAUTY","aliases":["Chăm sóc da","Chăm sóc da & Skincare","Dưỡng da","Review skincare"]},
+    {"code":"HAIRCARE","category":"BEAUTY","aliases":["Chăm sóc tóc","Chăm sóc và tạo mẫu tóc"]},
+    {"code":"MAKEUP","category":"BEAUTY","aliases":["Trang điểm","Trang điểm & Mỹ phẩm"]}
+  ]
+}

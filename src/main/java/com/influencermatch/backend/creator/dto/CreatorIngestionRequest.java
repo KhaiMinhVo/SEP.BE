@@ -8,10 +8,12 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 @Data
-@Builder
+@Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
 public class CreatorIngestionRequest {
+  private String contractVersion;
+  private String engagementRateUnit;
   private String platform;
   private String externalId;
   private String userName;
@@ -31,6 +33,7 @@ public class CreatorIngestionRequest {
   private BigDecimal avgLikes;
   private BigDecimal avgComments;
   private BigDecimal avgShares;
+  // Decimal ratio: 5.2% is 0.052. Crawler percentages are converted before ingestion.
   private BigDecimal engagementRate;
   private BigDecimal estimatedFeeMin;
   private BigDecimal estimatedFeeMax;

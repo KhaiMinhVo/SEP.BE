@@ -162,8 +162,7 @@ public class TikTokOwnershipService {
     creator.setUserName(username);
     creator.setProfileUrl("https://www.tiktok.com/@" + username);
     if (identity.displayName() != null) creator.setDisplayName(identity.displayName());
-    if (existing == null) creator.setAvatarUrl(identity.avatarUrl());
-    else if (identity.avatarUrl() != null) applyCreatorAvatar(creator, identity.avatarUrl(), username);
+    if (identity.avatarUrl() != null) applyCreatorAvatar(creator, identity.avatarUrl(), username);
     boolean alreadyOwned = creator.getMaster() != null;
     var master = masters.findByUserId(user.getId()).orElse(null);
     if (master == null)

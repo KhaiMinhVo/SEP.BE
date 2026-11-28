@@ -23,7 +23,7 @@ Ngày đối chiếu: **26/10/2026**. Phạm vi: working tree của `SEP.BE`, ba
 4. [06 — Authentication & RBAC](class-diagram/rendered/06-class-auth-rbac.svg): AuthService/AuthServiceImpl, JWT, refresh token, email OTP, lời mời đăng ký Creator, role và permission overrides.
 5. [07 — Subscription & Payment](class-diagram/rendered/07-class-billing.svg): Plan, Subscription, Payment, các service/repository và VNPay settlement.
 
-Sơ đồ được chia vào `package-diagram/`, `class-diagram/` và `state-diagram/`. Mỗi thư mục chứa mã `.puml`, trang xem `index.html` và thư mục `rendered/` cho PNG/SVG. Script dùng chung `generate_diagrams.py` và `render.ps1` nằm ở thư mục gốc này. [source-index.json](class-diagram/source-index.json) liên kết tên lớp được sử dụng đến đường dẫn Java thực tế.
+Sơ đồ được chia vào `package-diagram/`, `class-diagram/` và `state-diagram/`. Mỗi thư mục chứa mã `.puml`, trang xem `index.html` và thư mục `rendered/` cho PNG/SVG. Công cụ Python `scripts/backend_docs/generate_diagrams.py` nằm trong repo crawler; `render.ps1` nằm ở thư mục tài liệu này. [source-index.json](class-diagram/source-index.json) liên kết tên lớp được sử dụng đến đường dẫn Java thực tế.
 
 ## Căn cứ và quy ước
 
@@ -65,7 +65,7 @@ Sơ đồ được chia vào `package-diagram/`, `class-diagram/` và `state-dia
 Chạy từ thư mục gốc repository:
 
 ```powershell
-python docs/diagrams/generate_diagrams.py
+python 'C:\Crawl data\scripts\backend_docs\generate_diagrams.py' --backend-root .
 # Cần Java và PlantUML 1.2025.2; đường dẫn JAR tùy máy.
 powershell -ExecutionPolicy Bypass -File docs/diagrams/render.ps1 -PlantUmlJar target/uml-tools/plantuml.jar -JavaExecutable 'C:\Program Files\Eclipse Adoptium\jdk-21.0.7.6-hotspot\bin\java.exe'
 ```

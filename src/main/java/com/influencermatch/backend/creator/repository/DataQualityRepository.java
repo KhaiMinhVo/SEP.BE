@@ -12,7 +12,8 @@ public interface DataQualityRepository extends JpaRepository<PublicCreatorMetric
   String PENDING = """
       FROM public_creator_metric m
       WHERE m.creator_type IN ('KOC', 'KOL')
-      AND (m.data_confidence < 0.7 OR m.niche IS NULL OR trim(m.niche) = '' OR upper(trim(m.niche)) = 'UNKNOWN')
+      AND (m.data_confidence < :#{T(com.influencermatch.backend.discovery.service.CreatorDiscoveryContract).DEFINITION.minDataConfidence()}
+        OR m.niche IS NULL OR trim(m.niche) = '' OR upper(trim(m.niche)) = 'UNKNOWN')
       AND m.quality_reviewed_at IS NULL
       AND NOT EXISTS (
         SELECT 1 FROM public_creator_metric newer WHERE newer.creator_id=m.creator_id

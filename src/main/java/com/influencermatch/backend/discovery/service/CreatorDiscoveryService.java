@@ -35,7 +35,14 @@ public class CreatorDiscoveryService {
                 "Cannot run discovery on an ARCHIVED campaign.");
         if (req == null) req = new DiscoverySearchRequest();
         // Never mutate UI filters or accept a client-controlled internal expansion mode.
-        req = req.toBuilder().similarityExpansion(false).build();
+        req = req.toBuilder().similarityExpansion(false).minimumDataConfidence(java.math.BigDecimal.valueOf(
+            CreatorDiscoveryContract.DEFINITION.minDataConfidence())).taxonomyKeyword(false)
+            .keywordNiches(List.of("__NONE__")).build();
+        // Category names/codes entered in the search box use the same taxonomy as ingestion.
+        if (CreatorDiscoveryContract.label(req.getKeyword()).isPresent()) {
+            req.setTaxonomyKeyword(true);
+            req.setKeywordNiches(DiscoveryNiches.expand(List.of(req.getKeyword())));
+        }
         validate(req);
         int size = req.getSize() == null || req.getSize() < 1 ? 50 : Math.min(req.getSize(), 50);
         int page = req.getPage() == null || req.getPage() < 0 ? 0 : req.getPage();
@@ -47,17 +54,17 @@ public class CreatorDiscoveryService {
         // An absent niche is not permission to return the entire catalogue. Require product
         // evidence in public content instead. A name is only a last resort for incomplete drafts.
         var productNiches = DiscoveryNiches.productNiches(campaign.getProductService(), campaign.getName());
-        boolean requiresProductEvidence = !hasNiches || !productNiches.isEmpty()
-            || (DiscoveryNiches.onlyBroadCategories(campaign.getNiches()) && hasText(campaign.getProductService()));
+        boolean hasCategoryContext = hasNiches || hasText(req.getNiche()) || req.isTaxonomyKeyword();
+        boolean requiresProductEvidence = !hasCategoryContext || !productNiches.isEmpty();
         String topic = requiresProductEvidence
             ? firstText(campaign.getProductService(), campaign.getName(), campaign.getBrief()) : "";
         String productEvidenceQuery = DiscoveryNiches.productEvidenceQuery(campaign.getProductService(), campaign.getName());
         if (requiresProductEvidence && !productEvidenceQuery.isBlank()) topic = productEvidenceQuery;
-        if (!hasNiches && topic.isBlank()) return Page.empty(pageable);
+        if (!hasCategoryContext && topic.isBlank()) return Page.empty(pageable);
         String keyword = firstText(req.getKeyword(), campaign.getProductService(),
             String.join(" ", niches), campaign.getName(), campaign.getBrief());
         if (!hasText(req.getKeyword()) && !productEvidenceQuery.isBlank()) keyword = productEvidenceQuery;
-        Long min = maximum(campaign.getFollowerMin(), req.getMinFollowers());
+        Long min = maximum(CreatorDiscoveryContract.DEFINITION.minFollowers(), maximum(campaign.getFollowerMin(), req.getMinFollowers()));
         Long max = minimum(campaign.getFollowerMax(), req.getMaxFollowers());
         String queryVector = null;
         String queryText = String.join(" ",
@@ -88,7 +95,8 @@ public class CreatorDiscoveryService {
             if (stage == 2 && campaign.getFollowerMin() == null && campaign.getFollowerMax() == null) continue;
             boolean similar = stage == 3;
             var stageNiches = similar ? DiscoveryNiches.related(campaign.getNiches(), productNiches) : niches;
-            Long stageMin = stage < 2 ? min : maximum(similar ? null : widenedMin(campaign.getFollowerMin()), req.getMinFollowers());
+            Long stageMin = stage < 2 ? min : maximum(CreatorDiscoveryContract.DEFINITION.minFollowers(),
+                maximum(similar ? null : widenedMin(campaign.getFollowerMin()), req.getMinFollowers()));
             Long stageMax = stage < 2 ? max : minimum(similar ? null : widenedMax(campaign.getFollowerMax()), req.getMaxFollowers());
             if (stageMin != null && stageMax != null && stageMin > stageMax) continue;
             var stageRequest = req.toBuilder().similarityExpansion(similar).build();
@@ -98,7 +106,7 @@ public class CreatorDiscoveryService {
                 keyword, topic, queryVector, stageRequest,
                 stage == 0 && hasLocations, stage == 0 && hasLocations ? locations : List.of("__NONE__"),
                 hasText(req.getNiche()) ? DiscoveryNiches.expand(List.of(req.getNiche())) : List.of("__NONE__"),
-                similar && !stageNiches.isEmpty() ? stageNiches : productNiches.isEmpty() ? List.of("__NONE__") : productNiches,
+                productNiches.isEmpty() ? List.of("__NONE__") : productNiches,
                 PageRequest.of(0, 50));
             for (var row : pool.getContent()) {
                 String key = row.getMasterId() != null ? "MASTER:" + row.getMasterId()
@@ -151,7 +159,7 @@ public class CreatorDiscoveryService {
         return Math.max(a, b);
     }
     private static boolean validEmbedding(List<Float> vector) {
-        return vector != null && vector.size() == 768
+        return vector != null && vector.size() == CreatorDiscoveryContract.DEFINITION.embeddingDimensions()
             && vector.stream().allMatch(v -> v != null && Float.isFinite(v))
             && vector.stream().anyMatch(v -> v != 0.0f);
     }

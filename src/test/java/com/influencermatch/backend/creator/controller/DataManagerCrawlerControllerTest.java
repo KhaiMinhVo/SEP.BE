@@ -64,6 +64,38 @@ class DataManagerCrawlerControllerTest {
         .content("{\"profileUrl\":\"sample\"}")).andExpect(status().isForbidden());
     mvc().perform(post("/data/crawler/batch-crawl").contentType(MediaType.APPLICATION_JSON)
         .content("{}")).andExpect(status().isForbidden());
+    mvc().perform(post("/data/crawler/db-normalization/preview").contentType(MediaType.APPLICATION_JSON)
+        .content("{}")).andExpect(status().isForbidden());
+    mvc().perform(post("/data/crawler/db-normalization/apply").contentType(MediaType.APPLICATION_JSON)
+        .content("{\"planId\":\"normalize-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"))
+        .andExpect(status().isForbidden());
+  }
+
+  @Test @WithMockUser(roles = "DATA_MANAGER")
+  void managerCanPreviewNormalizationAndSeesUpstreamConflicts() throws Exception {
+    when(crawler.previewDatabaseNormalization(Map.of("limit", 20)))
+        .thenReturn(Optional.of(Map.of("status", "PREVIEW", "proposedChanges", 3)));
+    mvc().perform(post("/data/crawler/db-normalization/preview").contentType(MediaType.APPLICATION_JSON)
+        .content("{\"limit\":20}"))
+        .andExpect(status().isOk()).andExpect(jsonPath("$.proposedChanges").value(3));
+    String plan = "normalize-" + "a".repeat(32);
+    when(crawler.databaseNormalizationReport(plan)).thenReturn(Optional.of(Map.of("status", "error", "upstreamStatus", 404)));
+    mvc().perform(get("/data/crawler/db-normalization/reports/" + plan)).andExpect(status().isNotFound());
+  }
+
+  @Test void normalizationUsesTheAuthenticatedActorInsteadOfAClientSuppliedIdentity() {
+    var operator = com.influencermatch.backend.support.TestActors.user(com.influencermatch.backend.user.enums.Role.DATA_MANAGER);
+    com.influencermatch.backend.support.TestActors.authenticate(operator);
+    String plan = "normalize-" + "b".repeat(32);
+    try {
+      when(crawler.applyDatabaseNormalization(plan, operator.getId()))
+          .thenReturn(Optional.of(Map.of("status", "APPLIED")));
+      new DataManagerCrawlerController(crawler).applyDatabaseNormalization(Map.of(
+          "planId", plan, "actor_id", java.util.UUID.randomUUID().toString()));
+      verify(crawler).applyDatabaseNormalization(plan, operator.getId());
+    } finally {
+      org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
   }
 
   @Test @WithMockUser(roles = "DATA_MANAGER")
@@ -85,15 +117,29 @@ class DataManagerCrawlerControllerTest {
         .thenReturn(Optional.of(Map.of("status", "accepted")));
     mvc().perform(post("/data/crawler/batch-crawl").contentType(MediaType.APPLICATION_JSON)
         .content("{\"platform\":\"TIKTOK\",\"keywords\":[\"skincare\"],\"maxChannels\":5}"))
-        .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("accepted"));
+        .andExpect(status().isAccepted()).andExpect(jsonPath("$.status").value("accepted"));
     verify(crawler).batchCrawl("TIKTOK", null, List.of("skincare"), null, 5);
+  }
+
+  @Test @WithMockUser(roles = "DATA_MANAGER")
+  void managerCanPollBatchJobAndSeesUnavailableCrawler() throws Exception {
+    var taskId = java.util.UUID.randomUUID();
+    when(crawler.getBatchCrawlJob(taskId)).thenReturn(Optional.of(Map.of(
+        "status", "COMPLETED", "task_id", taskId.toString())));
+    mvc().perform(get("/data/crawler/batch-crawl/jobs/" + taskId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("COMPLETED"))
+        .andExpect(jsonPath("$.status_url").value("/api/v1/data/crawler/batch-crawl/jobs/" + taskId));
+    when(crawler.getBatchCrawlJob(taskId)).thenReturn(Optional.empty());
+    mvc().perform(get("/data/crawler/batch-crawl/jobs/" + taskId))
+        .andExpect(status().isServiceUnavailable());
   }
 
   @Test
   void transportPreservesKeywords() {
     RestClient.Builder builder = RestClient.builder().baseUrl("http://crawler.test");
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-    server.expect(requestTo("http://crawler.test/batch-crawl"))
+    server.expect(requestTo("http://crawler.test/batch-crawl/jobs"))
         .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.content().json("{\"keywords\":[\"skincare\"],\"max_channels\":5}"))
         .andRespond(withSuccess("{\"status\":\"accepted\"}", MediaType.APPLICATION_JSON));
     new CrawlerServiceClient(builder.build()).batchCrawl("TIKTOK", null, List.of("skincare"), null, 5);

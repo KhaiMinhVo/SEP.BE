@@ -21,6 +21,48 @@ public class DataManagerCrawlerController {
 
   private final CrawlerServiceClient crawlerServiceClient;
 
+  @PostMapping("/db-normalization/preview")
+  @Operation(summary = "Preview existing database normalization without recrawling or changing observations")
+  public ResponseEntity<Map<String, Object>> previewDatabaseNormalization(@RequestBody Map<String, Object> request) {
+    return normalizationResponse(crawlerServiceClient.previewDatabaseNormalization(request));
+  }
+
+  @PostMapping("/db-normalization/apply")
+  @Operation(summary = "Apply a saved normalization plan; stale snapshots conflict and each change is audited")
+  public ResponseEntity<Map<String, Object>> applyDatabaseNormalization(@RequestBody Map<String, String> request) {
+    String planId = request.getOrDefault("planId", request.get("plan_id"));
+    if (planId == null || !planId.matches("normalize-[0-9a-f]{32}"))
+      return ResponseEntity.badRequest().body(Map.of("status", "error", "message", "Invalid normalization plan ID"));
+    return normalizationResponse(crawlerServiceClient.applyDatabaseNormalization(planId,
+        com.influencermatch.backend.security.permission.Permissions.actor().getId()));
+  }
+
+  @PostMapping("/db-normalization/reclassify")
+  @Operation(summary = "Recheck stored captions for category proposals with verbatim evidence; never reingest stored data")
+  public ResponseEntity<Map<String, Object>> reclassifyStoredDatabaseContent(@RequestBody Map<String, Object> request) {
+    return normalizationResponse(crawlerServiceClient.reclassifyStoredDatabaseContent(request));
+  }
+
+  @GetMapping("/db-normalization/content-report")
+  public ResponseEntity<Map<String, Object>> latestDatabaseContentAudit() {
+    return normalizationResponse(crawlerServiceClient.latestDatabaseContentAudit());
+  }
+
+  @GetMapping("/db-normalization/reports/{planId}")
+  public ResponseEntity<Map<String, Object>> databaseNormalizationReport(@PathVariable String planId) {
+    if (!planId.matches("normalize-[0-9a-f]{32}"))
+      return ResponseEntity.badRequest().body(Map.of("status", "error", "message", "Invalid normalization plan ID"));
+    return normalizationResponse(crawlerServiceClient.databaseNormalizationReport(planId));
+  }
+
+  private ResponseEntity<Map<String, Object>> normalizationResponse(java.util.Optional<Map<String, Object>> response) {
+    return response.map(body -> {
+      int status = body.get("upstreamStatus") instanceof Number code ? code.intValue() : 200;
+      return ResponseEntity.status(status >= 400 && status <= 599 ? status : 200).body(body);
+    }).orElseGet(() -> ResponseEntity.status(503).body(Map.of(
+        "status", "error", "message", "Database normalization unavailable; check crawler database and service-key configuration")));
+  }
+
   @PostMapping("/test-scrape")
   @Operation(summary = "Cào thử nghiệm 1 KOC thời gian thực (Test Scrape)")
   public ResponseEntity<Map<String, Object>> testScrape(
@@ -52,10 +94,30 @@ public class DataManagerCrawlerController {
 
     var resultOpt = crawlerServiceClient.batchCrawl(platform, category, keywords, usernames, maxChannels);
     return resultOpt
-        .map(ResponseEntity::ok)
-        .orElseGet(() -> ResponseEntity.badRequest().body(Map.of(
+        .map(result -> {
+          var response = new HashMap<>(result);
+          if (result.get("task_id") != null) {
+            response.put("status_url", "/api/v1/data/crawler/batch-crawl/jobs/" + result.get("task_id"));
+          }
+          return ResponseEntity.accepted().body((Map<String, Object>) response);
+        })
+        .orElseGet(() -> ResponseEntity.status(503).body(Map.of(
             "status", "error",
-            "message", "Thực thi cào hàng loạt thất bại."
+            "message", "Crawler could not accept the batch request."
+        )));
+  }
+
+  @GetMapping("/batch-crawl/jobs/{taskId}")
+  public ResponseEntity<Map<String, Object>> getBatchCrawlJob(
+      @PathVariable java.util.UUID taskId) {
+    return crawlerServiceClient.getBatchCrawlJob(taskId)
+        .map(result -> {
+          var response = new HashMap<>(result);
+          response.put("status_url", "/api/v1/data/crawler/batch-crawl/jobs/" + taskId);
+          return ResponseEntity.ok((Map<String, Object>) response);
+        })
+        .orElseGet(() -> ResponseEntity.status(503).body(Map.of(
+            "status", "error", "message", "Crawler job status is unavailable."
         )));
   }
 

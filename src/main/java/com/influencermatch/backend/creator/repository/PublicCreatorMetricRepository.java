@@ -29,7 +29,11 @@ public interface PublicCreatorMetricRepository
       """, nativeQuery = true)
   List<String> findDistinctNicheNames();
 
-  Optional<PublicCreatorMetric> findByCreatorId(UUID creatorId);
+  @Query(value = """
+      SELECT * FROM public_creator_metric WHERE creator_id=:creatorId
+      ORDER BY collected_at DESC, id DESC LIMIT 1
+      """, nativeQuery = true)
+  Optional<PublicCreatorMetric> findByCreatorId(@Param("creatorId") UUID creatorId);
 
   boolean existsByCreatorIdAndCrawlRunId(UUID creatorId, String crawlRunId);
 
@@ -82,7 +86,7 @@ public interface PublicCreatorMetricRepository
           WHERE c.discovery_hidden = false
             AND m.creator_type IN ('KOL', 'KOC') AND m.freshness_status = 'FRESH'
             AND (m.quality_reviewed_at IS NOT NULL OR (
-              (m.data_confidence IS NULL OR m.data_confidence >= 0.7)
+              (m.data_confidence IS NULL OR m.data_confidence >= :#{#filters.minimumDataConfidence})
               AND ((NULLIF(BTRIM(m.niche), '') IS NOT NULL AND UPPER(BTRIM(m.niche)) <> 'UNKNOWN')
                 OR (NULLIF(BTRIM(m.category), '') IS NOT NULL AND UPPER(BTRIM(m.category)) NOT IN ('UNKNOWN', 'GENERAL')))))
             AND m.id = (SELECT latest.id FROM public_creator_metric latest
@@ -93,15 +97,16 @@ public interface PublicCreatorMetricRepository
                  OR UPPER(c.platform) = UPPER(BTRIM(CAST(:#{#filters.platform} AS text))))
             AND (:hasLocations = false OR LOWER(BTRIM(c.location)) IN (:locations))
             AND (:hasNiches = false OR LOWER(BTRIM(m.category)) IN (:niches)
-                 OR (:#{#filters.similarityExpansion} = true AND CAST(:queryVector AS text) IS NOT NULL
-                     AND c.embedding IS NOT NULL AND vector_norm(c.embedding) > 0
-                     AND 1.0 - (c.embedding <=> CAST(CAST(:queryVector AS text) AS vector)) >= 0.5)
                  OR EXISTS (SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part
                             WHERE LOWER(BTRIM(part)) IN (:niches)))
             AND (COALESCE(BTRIM(CAST(:#{#filters.niche} AS text)), '') = ''
                  OR LOWER(BTRIM(m.category)) IN (:uiNiches)
                  OR EXISTS (SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS part
                             WHERE LOWER(BTRIM(part)) IN (:uiNiches)))
+            AND (:#{#filters.taxonomyKeyword} = false
+                 OR LOWER(BTRIM(m.category)) IN (:#{#filters.keywordNiches})
+                 OR EXISTS (SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS keyword_part
+                            WHERE LOWER(BTRIM(keyword_part)) IN (:#{#filters.keywordNiches})))
             AND (CAST(:followerMin AS bigint) IS NULL OR m.followers >= :followerMin)
             AND (CAST(:followerMax AS bigint) IS NULL OR m.followers <= :followerMax)
             AND (COALESCE(BTRIM(CAST(:#{#filters.tier} AS text)), '') = ''
@@ -116,18 +121,17 @@ public interface PublicCreatorMetricRepository
                  OR :#{#filters.isClaimed} = (c.source_type = 'AUTHORIZED' OR c.authorized_at IS NOT NULL))
             AND (:topicQuery = ''
                  OR (:#{#filters.similarityExpansion} = true AND (
-                     (LOWER(BTRIM(m.category)) IN (:topicNiches)
+                     (LOWER(BTRIM(m.category)) IN (:niches)
                          AND (COALESCE(UPPER(BTRIM(m.niche)), 'UNKNOWN') IN ('', 'UNKNOWN', 'GENERAL')
                               OR LOWER(BTRIM(m.niche)) IN (:topicNiches)))
                      OR EXISTS (SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS related_part
-                                WHERE LOWER(BTRIM(related_part)) IN (:topicNiches))
-                     OR (CAST(:queryVector AS text) IS NOT NULL AND c.embedding IS NOT NULL AND vector_norm(c.embedding) > 0
-                         AND 1.0 - (c.embedding <=> CAST(CAST(:queryVector AS text) AS vector)) >= 0.5)))
+                                WHERE LOWER(BTRIM(related_part)) IN (:topicNiches))))
                  OR (COALESCE(m.search_vector, ''::tsvector) || post_evidence.search_vector) @@ websearch_to_tsquery('simple', :topicQuery)
                  OR LOWER(BTRIM(m.category)) IN (:topicNiches)
                  OR EXISTS (SELECT 1 FROM unnest(string_to_array(COALESCE(m.niche, ''), ',')) AS topic_part
                             WHERE LOWER(BTRIM(topic_part)) IN (:topicNiches)))
             AND (COALESCE(BTRIM(CAST(:#{#filters.keyword} AS text)), '') = ''
+                 OR :#{#filters.taxonomyKeyword} = true
                  OR (CAST(:queryVector AS text) IS NOT NULL AND c.embedding IS NOT NULL AND vector_norm(c.embedding) > 0
                      AND 1.0 - (c.embedding <=> CAST(CAST(:queryVector AS text) AS vector)) >= 0.5)
                  OR (COALESCE(m.search_vector, ''::tsvector) || post_evidence.search_vector || to_tsvector('simple', COALESCE(c.display_name, '') || ' ' || COALESCE(c.user_name, '')))
@@ -273,7 +277,7 @@ public interface PublicCreatorMetricRepository
             AND s.status != 'REMOVED'
             AND (m.id IS NULL OR (m.creator_type IN ('KOL', 'KOC') AND m.freshness_status = 'FRESH'))
             AND (m.id IS NULL OR m.quality_reviewed_at IS NOT NULL OR (
-              (m.data_confidence IS NULL OR m.data_confidence >= 0.7)
+              (m.data_confidence IS NULL OR m.data_confidence >= :#{T(com.influencermatch.backend.discovery.service.CreatorDiscoveryContract).DEFINITION.minDataConfidence()})
               AND NULLIF(BTRIM(m.niche), '') IS NOT NULL AND UPPER(BTRIM(m.niche)) <> 'UNKNOWN'))
             AND (:hasExcludedIds = false OR c.id NOT IN (:excludedIds))
           ORDER BY semanticScore DESC NULLS LAST, c.id

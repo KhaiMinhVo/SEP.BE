@@ -71,7 +71,7 @@ public class CreatorDiscoveryController {
             map.put("retrievalMethod", p.getRetrievalMethod());
             map.put("retrievalSimilarity", p.getSemanticScore());
             map.put("aiScoreAvailable", false);
-            map.put("discoveryPolicyVersion", "progressive-v3");
+            map.put("discoveryPolicyVersion", "progressive-v4");
             map.put("semanticScore", null);
             map.put("ftsScore", p.getFtsScore());
             map.put("hybridScore", null);

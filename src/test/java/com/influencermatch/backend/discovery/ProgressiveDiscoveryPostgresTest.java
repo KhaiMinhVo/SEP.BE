@@ -22,6 +22,10 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.transaction.annotation.Transactional;
 
 @Transactional
+@org.springframework.test.context.TestPropertySource(properties = {
+    "application.brand-embedding.enabled=false",
+    "application.campaign-embedding.enabled=false"
+})
 class ProgressiveDiscoveryPostgresTest extends PostgresApiTestSupport {
     @Autowired CreatorRepository creators;
     @Autowired PublicCreatorMetricRepository metrics;
@@ -116,15 +120,13 @@ class ProgressiveDiscoveryPostgresTest extends PostgresApiTestSupport {
         result.forEach(row -> assertThat(row.path("isSimilarFallback").asBoolean()).isFalse());
     }
 
-    @Test void vectorRetrievesDifferentLabelsButExcludesOppositeEmbeddings() throws Exception {
+    @Test void vectorSimilarityCannotBypassCampaignNiche() throws Exception {
         var similar = candidate("LIFESTYLE", "LIFESTYLE", "Trải nghiệm sản phẩm hằng ngày", null, 25000);
         var unrelated = candidate("PETS", "PETS", "Chăm sóc thú cưng", null, 25000);
         jdbc.update("update creator set embedding=cast(? as vector) where id=?", vector.toString(), similar.getId());
         var opposite = new ArrayList<>(vector); opposite.set(0, -1.0f);
         jdbc.update("update creator set embedding=cast(? as vector) where id=?", opposite.toString(), unrelated.getId());
         var result = rows(call(owner, get("/campaigns/" + campaign + "/discovery"), null, 200).path("data"));
-        assertThat(ids(result)).containsExactly(similar.getId().toString());
-        assertThat(result.get(0).path("retrievalSimilarity").asDouble()).isCloseTo(1.0, within(0.00001));
-        assertThat(result.get(0).path("isSimilarFallback").asBoolean()).isTrue();
+        assertThat(ids(result)).isEmpty();
     }
 }

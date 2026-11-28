@@ -75,7 +75,7 @@ class DataQualityServiceTest {
     var result=service.approve(m.getId(), new ApproveRequest(" Lifestyle, Tech "));
     assertThat(result.niche()).isEqualTo("Lifestyle, Technology");
     assertThat(m.getNiche()).isEqualTo("Lifestyle, Technology");
-    assertThat(m.getCategory()).isEqualTo("Lifestyle");
+    assertThat(m.getCategory()).isEqualTo("LIFESTYLE");
   }
   @ParameterizedTest @ValueSource(strings={"brand","nullConfidence","threshold","reviewed","stale"})
   void ineligibleSnapshotDoesNotChangeOrAudit(String kind){

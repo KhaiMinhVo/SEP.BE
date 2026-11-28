@@ -21,6 +21,10 @@ public class CrawlerServiceClient {
 
   private final RestClient restClient;
   private final RestClient monitorRestClient;
+  private final RestClient qualityRestClient;
+
+  @Value("${DB_NORMALIZATION_API_KEY:${CREATOR_INGESTION_API_KEY:}}")
+  private String normalizationApiKey;
 
   @org.springframework.beans.factory.annotation.Autowired(required = false)
   private org.springframework.jdbc.core.JdbcTemplate jdbc;
@@ -47,12 +51,81 @@ public class CrawlerServiceClient {
             .requestFactory(requestFactory)
             .build();
 
+    var qualityFactory = new SimpleClientHttpRequestFactory();
+    qualityFactory.setConnectTimeout(Duration.ofSeconds(5));
+    qualityFactory.setReadTimeout(Duration.ofSeconds(120));
+    this.qualityRestClient = RestClient.builder()
+        .baseUrl(crawlerServiceUrl.replaceFirst("/crawl/?$", "/quality"))
+        .requestFactory(qualityFactory).build();
+
     log.info("Initialized CrawlerServiceClient with endpoints: crawl={}, monitor={}", crawlerServiceUrl, monitorUrl);
   }
 
   public CrawlerServiceClient(RestClient restClient) {
     this.restClient = restClient;
     this.monitorRestClient = restClient;
+    this.qualityRestClient = restClient;
+  }
+
+  public Optional<Map<String, Object>> previewDatabaseNormalization(Map<String, Object> request) {
+    return normalizationPost("/db-normalization/preview", request);
+  }
+
+  public Optional<Map<String, Object>> applyDatabaseNormalization(String planId, UUID actorId) {
+    return normalizationPost("/db-normalization/apply", Map.of("plan_id", planId, "actor_id", actorId.toString()));
+  }
+
+  public Optional<Map<String, Object>> reclassifyStoredDatabaseContent(Map<String, Object> request) {
+    var body = new HashMap<>(request);
+    body.put("mode", "RECLASSIFY");
+    body.put("dry_run", true);
+    body.putIfAbsent("limit", 5);
+    return normalizationPost("/batch-reclassify", body);
+  }
+
+  @SuppressWarnings("unchecked")
+  public Optional<Map<String, Object>> latestDatabaseContentAudit() {
+    if (normalizationApiKey == null || normalizationApiKey.isBlank()) return Optional.empty();
+    try {
+      return Optional.ofNullable(qualityRestClient.get().uri("/audit-report")
+          .header("X-Service-Key", normalizationApiKey).retrieve().body(Map.class));
+    } catch (org.springframework.web.client.RestClientResponseException failure) {
+      return Optional.of(Map.of("status", "error", "upstreamStatus", failure.getStatusCode().value(),
+          "message", "Content audit report unavailable"));
+    } catch (Exception failure) {
+      return Optional.empty();
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private Optional<Map<String, Object>> normalizationPost(String path, Map<String, Object> request) {
+    if (normalizationApiKey == null || normalizationApiKey.isBlank()) return Optional.empty();
+    try {
+      return Optional.ofNullable(qualityRestClient.post().uri(path)
+          .header("X-Service-Key", normalizationApiKey).contentType(MediaType.APPLICATION_JSON)
+          .body(request).retrieve().body(Map.class));
+    } catch (org.springframework.web.client.RestClientResponseException failure) {
+      return Optional.of(Map.of("status", "error", "upstreamStatus", failure.getStatusCode().value(),
+          "message", "Normalization request rejected; preview the plan again or check service configuration"));
+    } catch (Exception failure) {
+      log.warn("Database normalization request failed: {}", failure.getClass().getSimpleName());
+      return Optional.empty();
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  public Optional<Map<String, Object>> databaseNormalizationReport(String planId) {
+    if (normalizationApiKey == null || normalizationApiKey.isBlank()) return Optional.empty();
+    try {
+      return Optional.ofNullable(qualityRestClient.get().uri("/db-normalization/reports/{planId}", planId)
+          .header("X-Service-Key", normalizationApiKey).retrieve().body(Map.class));
+    } catch (org.springframework.web.client.RestClientResponseException failure) {
+      return Optional.of(Map.of("status", "error", "upstreamStatus", failure.getStatusCode().value(),
+          "message", "Normalization report unavailable"));
+    } catch (Exception failure) {
+      log.warn("Database normalization report unavailable: {}", failure.getClass().getSimpleName());
+      return Optional.empty();
+    }
   }
 
   /** Synchronous transport only; the after-commit dispatcher supplies the bounded executor. */
@@ -171,7 +244,7 @@ public class CrawlerServiceClient {
 
       @SuppressWarnings("unchecked")
       Map<String, Object> result = restClient.post()
-          .uri("/batch-crawl")
+          .uri("/batch-crawl/jobs")
           .contentType(MediaType.APPLICATION_JSON)
           .body(body)
           .retrieve()
@@ -179,6 +252,20 @@ public class CrawlerServiceClient {
       return Optional.ofNullable(result);
     } catch (Exception e) {
       log.warn("Failed to execute batch crawl (cat={}, users={}): {}", category, usernames, e.getMessage());
+      return Optional.empty();
+    }
+  }
+
+  public Optional<Map<String, Object>> getBatchCrawlJob(UUID taskId) {
+    try {
+      @SuppressWarnings("unchecked")
+      Map<String, Object> result = restClient.get()
+          .uri("/batch-crawl/jobs/{taskId}", taskId)
+          .retrieve()
+          .body(Map.class);
+      return Optional.ofNullable(result);
+    } catch (Exception e) {
+      log.warn("Failed to fetch batch crawl job {}: {}", taskId, e.getMessage());
       return Optional.empty();
     }
   }

@@ -14,6 +14,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class TaxonomyController {
   private final PublicCreatorMetricRepository metrics;
 
+  @GetMapping("/creator-discovery-contract")
+  public ResponseEntity<com.influencermatch.backend.discovery.service.CreatorDiscoveryContract.Definition> getDiscoveryContract() {
+    return ResponseEntity.ok(com.influencermatch.backend.discovery.service.CreatorDiscoveryContract.DEFINITION);
+  }
+
   // Preserve the existing string[] contract for discovery clients.
   @GetMapping("/niches")
   public ResponseEntity<List<String>> getNiches() {

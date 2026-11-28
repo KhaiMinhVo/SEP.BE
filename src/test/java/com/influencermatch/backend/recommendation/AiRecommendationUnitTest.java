@@ -37,6 +37,7 @@ import com.influencermatch.backend.exception.CampaignEmbeddingPendingException;
 import com.influencermatch.backend.exception.ConflictException;
 import com.influencermatch.backend.exception.ErrorCode;
 import com.influencermatch.backend.exception.ValidationException;
+import com.influencermatch.backend.recommendation.dto.ExplainRequestDto;
 import com.influencermatch.backend.recommendation.dto.ExplainResponseDto;
 import com.influencermatch.backend.recommendation.dto.RecommendationResponseDto;
 import com.influencermatch.backend.recommendation.dto.ScoreBreakdownDto;
@@ -299,6 +300,9 @@ class AiRecommendationUnitTest {
     assertThat(res.getRecommendations()).hasSize(1);
     assertThat(res.getRecommendations().getFirst().getCreatorId()).isEqualTo(creatorId);
     verify(subscriptionService, times(1)).reserveRecommendationQuota(brandProfileId);
+    var explanation = org.mockito.ArgumentCaptor.forClass(ExplainRequestDto.class);
+    verify(aiServiceClient).getExplanation(explanation.capture());
+    assertThat(explanation.getValue().getEngagementRate()).isEqualTo(5.0);
   }
 
   @Test

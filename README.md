@@ -1147,3 +1147,15 @@ the list and visibility endpoints to render warnings and action buttons.
 
 The managed niche catalogue migration is V35__managed_niche_catalog.sql. Develop owns V33 (collaboration confirmation source) and V34 (creator fee/discovery keywords); their SQL is unchanged. Fresh databases apply each version once. If a database has already applied this branch's former V33__managed_niche_catalog.sql, reconcile its Flyway history with the deployment owner before upgrading; this source rename does not rewrite any existing database history.
 V36 adds the three nullable follower-growth columns already mapped by PublicCreatorMetric. Historical growth remains NULL; existing metric values are preserved.
+
+
+### Data Manager batch crawl jobs
+
+`POST /api/v1/data/crawler/batch-crawl` now queues work through the crawler's
+`/batch-crawl/jobs` endpoint and returns HTTP 202 with `task_id` and `status_url`.
+Clients must poll `GET /api/v1/data/crawler/batch-crawl/jobs/{taskId}` until the
+crawler reports a terminal state; acceptance does not mean data was collected or
+saved. The status response preserves the crawler result, including per-channel
+`database_synced`, `sync_error`, and discovery shortfall. A crawler transport
+failure returns HTTP 503. Keyword discovery also returns 503 on unavailable or
+rejected requests and does not update `lastCrawledAt` on enqueue acknowledgement.

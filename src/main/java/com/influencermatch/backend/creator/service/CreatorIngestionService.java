@@ -7,6 +7,8 @@ import com.influencermatch.backend.creator.enums.*;
 import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.repository.*;
 import com.influencermatch.backend.relationship.service.ShortlistNotificationService;
+import com.influencermatch.backend.discovery.service.CreatorDiscoveryContract;
+import com.influencermatch.backend.exception.BadRequestException;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
@@ -18,7 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class CreatorIngestionService {
 
-  public static final int MAX_RECENT_POSTS = 3;
+  public static final int MAX_RECENT_POSTS = CreatorDiscoveryContract.DEFINITION.maxRecentPosts();
 
   private final CreatorRepository creatorRepository;
   private final PublicCreatorMetricRepository metricRepository;
@@ -56,21 +58,14 @@ public class CreatorIngestionService {
   @Transactional
   @org.springframework.security.access.prepost.PreAuthorize(
       "hasAuthority('SERVICE_INGEST_CREATOR')")
-  public CreatorIngestionResponse ingestCreatorData(CreatorIngestionRequest request) {
+  public CreatorIngestionResponse ingestCreatorData(CreatorIngestionRequest originalRequest) {
+    var request = normalizeRequest(originalRequest);
     // 0. Data Quality Gatekeeper: Chỉ tiếp nhận KOL hoặc KOC
     String type = request.getCreatorType();
-    if (type == null || (!"KOL".equalsIgnoreCase(type) && !"KOC".equalsIgnoreCase(type))) {
+    if (type == null || !CreatorDiscoveryContract.DEFINITION.acceptedCreatorTypes().contains(type)) {
       return CreatorIngestionResponse.builder()
           .status("REJECTED")
           .message("Rejected: Only KOL or KOC accounts are accepted for market discovery.")
-          .build();
-    }
-
-    // Kiểm tra ngưỡng followers tối thiểu (5,000 followers)
-    if (request.getFollowers() != null && request.getFollowers() < 5000) {
-      return CreatorIngestionResponse.builder()
-          .status("REJECTED")
-          .message("Rejected: Minimum 5,000 followers required for market discovery.")
           .build();
     }
 
@@ -97,6 +92,14 @@ public class CreatorIngestionService {
                                 ? request.getIsStableExternalId()
                                 : true)
                         .build());
+
+    // Refresh existing records even after followers fall; discovery applies the same admission floor.
+    if (creator.getId() == null && (request.getFollowers() == null
+        || request.getFollowers() < CreatorDiscoveryContract.DEFINITION.minFollowers())) {
+      return CreatorIngestionResponse.builder().status("REJECTED")
+          .message(String.format(java.util.Locale.US, "Rejected: Minimum %,d followers required for market discovery.",
+              CreatorDiscoveryContract.DEFINITION.minFollowers())).build();
+    }
 
     if (creator.getId() != null) {
       entityManager.refresh(creator);
@@ -181,9 +184,10 @@ public class CreatorIngestionService {
     metric.setAvgShares(request.getAvgShares());
     metric.setEngagementRate(request.getEngagementRate());
     // A manager-approved niche takes precedence over subsequent crawler output.
-    if (metric.getQualityReviewedAt() == null && request.getNiche() != null
-        && !request.getNiche().isBlank() && !"UNKNOWN".equalsIgnoreCase(request.getNiche().trim())) {
-      metric.setNiche(request.getNiche());
+    if (metric.getQualityReviewedAt() == null) {
+      var classification = CreatorDiscoveryContract.classify(request.getCategory(), request.getNiche());
+      metric.setNiche(classification.niche());
+      metric.setCategory(classification.category());
     }
     metric.setContentSummary(request.getContentSummary());
     // Activity assessment compares crawler evidence in UTC, independent of the server timezone.
@@ -199,11 +203,6 @@ public class CreatorIngestionService {
     metric.setFreshnessStatus(status);
     metric.setDataConfidence(request.getDataConfidence());
     metric.setContact(request.getContact());
-    if (request.getCategory() != null && !request.getCategory().isBlank()
-        && !"UNKNOWN".equalsIgnoreCase(request.getCategory().trim())) {
-      metric.setCategory(request.getCategory());
-    }
-
     // Fee Benchmark (Declarative fallback if crawler didn't supply)
     if (request.getEstimatedFeeMin() != null && request.getEstimatedFeeMax() != null) {
       metric.setEstimatedFeeMin(request.getEstimatedFeeMin());
@@ -310,6 +309,55 @@ public class CreatorIngestionService {
         .message("REJECTED".equals(metric.getCreatorType()) || "BRAND".equals(metric.getCreatorType())
             ? "Creator remains excluded by manager review" : "Creator data ingested successfully")
         .build();
+  }
+
+  private CreatorIngestionRequest normalizeRequest(CreatorIngestionRequest request) {
+    if (request == null) throw new BadRequestException("Creator payload is required");
+    // Work on a copy: unit normalization must be idempotent for callers retrying the same object.
+    var normalized = request.toBuilder().build();
+    var contract = CreatorDiscoveryContract.DEFINITION;
+    if (normalized.getContractVersion() != null && !contract.version().equals(normalized.getContractVersion()))
+      throw new BadRequestException("Unsupported creator contract version");
+    String unit = normalized.getEngagementRateUnit();
+    if (unit != null && !"RATIO".equals(unit) && !"PERCENT".equals(unit))
+      throw new BadRequestException("engagementRateUnit must be RATIO or PERCENT");
+    if (normalized.getContractVersion() != null && unit == null)
+      throw new BadRequestException("engagementRateUnit is required for versioned payloads");
+    if (normalized.getContractVersion() != null && normalized.getRecentPosts() != null
+        && normalized.getRecentPosts().size() > contract.maxRecentPosts())
+      throw new BadRequestException("Versioned creator snapshots accept at most three recent posts");
+    if ("PERCENT".equals(unit) && normalized.getEngagementRate() != null)
+      normalized.setEngagementRate(normalized.getEngagementRate().movePointLeft(2));
+    if (normalized.getFollowers() != null && normalized.getFollowers() > 0
+        && normalized.getAvgLikes() != null && normalized.getAvgComments() != null && normalized.getAvgShares() != null) {
+      var observedRatio = normalized.getAvgLikes().add(normalized.getAvgComments()).add(normalized.getAvgShares())
+          .divide(java.math.BigDecimal.valueOf(normalized.getFollowers()), java.math.MathContext.DECIMAL128);
+      // Old workers omitted units. Recompute from counts instead of guessing by magnitude.
+      if (unit == null && normalized.getCrawlRunId() != null) normalized.setEngagementRate(observedRatio);
+      else if (normalized.getContractVersion() != null && normalized.getEngagementRate() != null
+          && normalized.getEngagementRate().subtract(observedRatio).abs().compareTo(new java.math.BigDecimal("0.0001")) > 0)
+        throw new BadRequestException("engagementRate does not match the declared unit and observed metrics");
+    }
+    if (normalized.getEngagementRate() != null && normalized.getEngagementRate().signum() < 0)
+      throw new BadRequestException("engagementRate cannot be negative");
+    if (normalized.getDataConfidence() != null && (normalized.getDataConfidence().signum() < 0
+        || normalized.getDataConfidence().compareTo(java.math.BigDecimal.ONE) > 0))
+      throw new BadRequestException("dataConfidence must be between 0 and 1");
+    var vector = normalized.getEmbedding();
+    if (vector != null && !vector.isEmpty() && (vector.size() != contract.embeddingDimensions()
+        || vector.stream().anyMatch(v -> v == null || !Float.isFinite(v))))
+      throw new BadRequestException("Creator embedding must contain 768 finite values");
+    if (normalized.getFreshnessStatus() != null) {
+      try {
+        normalized.setFreshnessStatus(MetricDataStatus.valueOf(
+            normalized.getFreshnessStatus().trim().toUpperCase(java.util.Locale.ROOT)).name());
+      } catch (IllegalArgumentException invalid) {
+        throw new BadRequestException("Unknown freshnessStatus");
+      }
+    }
+    if (normalized.getPlatform() != null) normalized.setPlatform(normalized.getPlatform().trim().toUpperCase(java.util.Locale.ROOT));
+    if (normalized.getCreatorType() != null) normalized.setCreatorType(normalized.getCreatorType().trim().toUpperCase(java.util.Locale.ROOT));
+    return normalized;
   }
 
   private void applyCreatorAvatar(Creator creator, String rawAvatarUrl) {

@@ -110,14 +110,16 @@ public class DiscoveryKeywordService {
     Optional<Map<String, Object>> resultOpt =
         crawlerServiceClient.triggerKeywordDiscovery(List.of(entity.getKeyword()), count);
 
-    entity.setLastCrawledAt(LocalDateTime.now());
-    keywordRepository.save(entity);
-
-    return resultOpt.orElse(Map.of(
-        "status", "QUEUED",
-        "message", "Đã gửi lệnh cào cho từ khóa: " + entity.getKeyword(),
-        "keyword", entity.getKeyword()
-    ));
+    Map<String, Object> result = resultOpt.orElseThrow(() -> new BusinessException(
+        ErrorCode.CRAWLER_UNAVAILABLE, "Crawler did not accept the keyword discovery request"));
+    String status = String.valueOf(result.getOrDefault("status", ""));
+    if (Boolean.FALSE.equals(result.get("success")) || result.containsKey("error")
+        || Set.of("error", "failed", "failure", "rejected").contains(status.toLowerCase(Locale.ROOT))) {
+      throw new BusinessException(ErrorCode.CRAWLER_UNAVAILABLE,
+          "Crawler rejected the keyword discovery request");
+    }
+    // Enqueue acknowledgement is not evidence that a crawl completed.
+    return result;
   }
 
   private DiscoveryKeywordDto mapToDto(DiscoveryKeyword entity) {

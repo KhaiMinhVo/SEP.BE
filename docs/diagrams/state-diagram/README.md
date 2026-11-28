@@ -76,7 +76,7 @@ Hai hình này là phương án theo phần màn hình, được tách riêng v�
 Từ thư mục gốc repository:
 
 ```powershell
-python docs/diagrams/state-diagram/generate_states.py
+python 'C:\Crawl data\scripts\backend_docs\generate_states.py' --backend-root .
 & docs/diagrams/render.ps1 -PlantUmlJar target/uml-tools/plantuml.jar -JavaExecutable 'C:\Program Files\Eclipse Adoptium\jdk-21.0.7.6-hotspot\bin\java.exe' -DiagramDirectory docs/diagrams/state-diagram
 ```
 

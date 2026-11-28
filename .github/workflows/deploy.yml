@@ -14,7 +14,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment:
-      name: production
+      name: Production
       url: https://api.influencermatch.site
 
     steps:

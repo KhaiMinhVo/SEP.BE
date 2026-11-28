@@ -1,0 +1,84 @@
+@startuml protected-request-rbac-sequence
+title Protected Request Authorization and RBAC | Campaign Discovery
+hide footbox
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+autonumber
+skinparam roundcorner 0
+skinparam ParticipantPadding 10
+skinparam SequenceLifeLineBorderColor #555555
+skinparam SequenceLifeLineBackgroundColor white
+skinparam SequenceParticipantBackgroundColor white
+skinparam SequenceGroupBackgroundColor white
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam noteBackgroundColor white
+
+actor Brand
+participant "Web Client" as Web
+participant "Spring Security\nfilter chain" as Security
+participant JwtAuthenticationFilter as Filter
+participant UserDetailsServiceImpl as Accounts
+participant JwtTokenProvider as Jwt
+participant AuthSessionStore as Sessions
+participant EffectivePermissionService as Permissions
+participant CreatorDiscoveryController as Controller
+participant CreatorDiscoveryService as Discovery
+participant CampaignRepository as Campaigns
+
+Brand -> Web : open Creator discovery for a campaign
+Web -> Security : GET /api/v1/campaigns/{campaignId}/discovery\nAuthorization: Bearer token
+activate Security
+Security -> Filter : doFilterInternal(request, response, filterChain)
+activate Filter
+opt <U+005B>bearer token present<U+005D>
+  Filter -> Jwt : extractUsername(jwt)
+  Jwt --> Filter : username or token error
+  opt <U+005B>username extracted<U+005D>
+    Filter -> Accounts : loadUserByUsername(username)
+    Accounts --> Filter : account or lookup error
+    opt <U+005B>email verified and account enabled and unlocked<U+005D>
+      Filter -> Jwt : isTokenValid(jwt, userDetails)
+      Jwt -> Sessions : valid(sessionId, user)
+      Sessions --> Jwt : session validity
+      Jwt --> Filter : token and session validity
+      opt <U+005B>valid token and session — BR-05<U+005D>
+        Filter -> Permissions : authorities(role, request)
+        Permissions --> Filter : effective authorities
+        Filter -> Filter : setAuthentication(authToken)
+      end
+    end
+  end
+end
+Filter -> Security : filterChain.doFilter(request, response)
+alt <U+005B>request remains unauthenticated<U+005D>
+  Security --> Web : 401 Unauthorized
+else <U+005B>authenticated but lacks SEARCH_CREATOR — BR-03<U+005D>
+  Security --> Web : 403 Forbidden
+else <U+005B>authenticated with SEARCH_CREATOR<U+005D>
+  Security -> Controller : discoverCreators(campaignId, searchRequest)
+  activate Controller
+  Controller -> Discovery : discoverCreators(campaignId, searchRequest)
+  activate Discovery
+  Discovery -> Campaigns : findById(campaignId)
+  Campaigns --> Discovery : campaign or empty
+  alt <U+005B>campaign missing<U+005D>
+    Discovery --> Controller : ResourceNotFoundException
+    Controller --> Web : 404 Not Found
+  else <U+005B>campaign belongs to another Brand — BR-04<U+005D>
+    Discovery --> Controller : ForbiddenException
+    Controller --> Web : 403 Forbidden
+  else <U+005B>campaign belongs to caller but is archived or closed<U+005D>
+    Discovery --> Controller : CAMPAIGN_CONTEXT_NOT_READY
+    Controller --> Web : 409 Conflict
+  else <U+005B>campaign belongs to caller and supports discovery<U+005D>
+    Discovery --> Controller : page of matching creators
+    Controller --> Web : 200 OK
+  end
+  deactivate Discovery
+  deactivate Controller
+end
+deactivate Filter
+deactivate Security
+@enduml

@@ -2,14 +2,15 @@ package com.influencermatch.backend.billing.controller;
 
 import com.influencermatch.backend.billing.dto.PaymentRequest;
 import com.influencermatch.backend.billing.dto.PaymentResponse;
+import com.influencermatch.backend.config.PayOsConfig;
 import com.influencermatch.backend.billing.service.PaymentService;
 import com.influencermatch.backend.brand.model.BrandProfile;
 import com.influencermatch.backend.brand.repository.BrandProfileRepository;
 import com.influencermatch.backend.common.dto.ApiResponse;
 import com.influencermatch.backend.security.permission.*;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import com.influencermatch.backend.config.VnPayConfig;
+import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -18,7 +19,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,12 +32,13 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 @RestController
 @RequestMapping("/billing")
 @RequiredArgsConstructor
-@Tag(name = "Billing & Payments", description = "VNPay payment gateway integration and subscription checkouts")
+@Tag(name = "Billing & Payments", description = "VNPay sandbox and PayOS QR subscription checkouts")
 public class PaymentController {
 
   private final PaymentService paymentService;
   private final BrandProfileRepository brandProfileRepository;
   private final VnPayConfig vnPayConfig;
+  private final PayOsConfig payOsConfig;
 
   @Operation(
       summary = "Create checkout payment URL for subscription plan",
@@ -47,9 +48,7 @@ public class PaymentController {
   @PostMapping("/subscribe")
   public ResponseEntity<ApiResponse<PaymentResponse>> subscribeToPlan(
       @Valid @RequestBody PaymentRequest request,
-      Authentication authentication,
-      HttpServletRequest httpServletRequest)
-      throws Exception {
+      HttpServletRequest httpServletRequest) throws Exception {
 
     Permissions.require(
         Permission.MANAGE_OWN_SUBSCRIPTION);
@@ -61,14 +60,31 @@ public class PaymentController {
                     new com.influencermatch.backend.exception.NotFoundException(
                         "Brand Profile not found"));
 
-    String ipAddress = httpServletRequest.getRemoteAddr();
-    if (ipAddress == null) {
-      ipAddress = httpServletRequest.getRemoteAddr();
-    }
-
     PaymentResponse checkout =
-        paymentService.createCheckout(request.getPlanId(), brandProfile, ipAddress);
+        paymentService.createCheckout(
+            request.getPlanId(), brandProfile, httpServletRequest.getRemoteAddr());
 
+    return ResponseEntity.ok(ApiResponse.ok(checkout));
+  }
+
+  @Operation(
+      summary = "Create PayOS QR checkout payment URL for subscription plan",
+      security = @SecurityRequirement(name = "BearerAuth"))
+  @org.springframework.security.access.prepost.PreAuthorize(
+      "hasAuthority('MANAGE_OWN_SUBSCRIPTION')")
+  @PostMapping("/subscribe/payos")
+  public ResponseEntity<ApiResponse<PaymentResponse>> subscribeToPlanWithPayOs(
+      @Valid @RequestBody PaymentRequest request) {
+    Permissions.require(Permission.MANAGE_OWN_SUBSCRIPTION);
+    BrandProfile brandProfile =
+        brandProfileRepository
+            .findByUserId(Permissions.actor().getId())
+            .orElseThrow(
+                () ->
+                    new com.influencermatch.backend.exception.NotFoundException(
+                        "Brand Profile not found"));
+    PaymentResponse checkout =
+        paymentService.createPayOsCheckout(request.getPlanId(), brandProfile);
     return ResponseEntity.ok(ApiResponse.ok(checkout));
   }
 
@@ -112,6 +128,35 @@ public class PaymentController {
     return new ResponseEntity<>(headers, HttpStatus.FOUND);
   }
 
+  @Operation(
+      summary = "PayOS browser return",
+      description = "Queries PayOS directly before redirecting the customer to the frontend",
+      security = {})
+  @GetMapping("/payos/return")
+  public ResponseEntity<Void> payOsReturn(
+      @org.springframework.web.bind.annotation.RequestParam(required = false) Map<String, String> params) {
+    String orderCode = params != null ? params.get("orderCode") : null;
+    var result = paymentService.processPayOsReturn(orderCode);
+    String payment = switch (result) {
+      case PAID -> "success";
+      case FAILED -> "cancelled";
+      case PENDING, NOT_FOUND -> "pending";
+    };
+    String target = payOsConfig.getFrontendReturnUrl();
+    String delimiter = target.contains("?") ? "&" : "?";
+    String redirectUrl =
+        target
+            + delimiter
+            + "payment="
+            + payment
+            + "&txnRef="
+            + java.net.URLEncoder.encode(
+                orderCode == null ? "" : orderCode, java.nio.charset.StandardCharsets.UTF_8);
+    HttpHeaders headers = new HttpHeaders();
+    headers.setLocation(URI.create(redirectUrl));
+    return new ResponseEntity<>(headers, HttpStatus.FOUND);
+  }
+
   @io.swagger.v3.oas.annotations.Operation(
       summary = "VNPay IPN",
       description = "Public gateway callback; verified signature and transaction required",
@@ -143,5 +188,20 @@ public class PaymentController {
       response.put("Message", result.name());
     }
     return ResponseEntity.ok(response);
+  }
+
+  @io.swagger.v3.oas.annotations.Operation(
+      summary = "PayOS payment webhook",
+      description = "Public webhook; raw payload signature and transaction are verified",
+      security = {})
+  @PostMapping("/payos/webhook")
+  public ResponseEntity<Map<String, Boolean>> payOsWebhook(
+      @RequestBody String rawBody) {
+    var result = paymentService.processPayOsWebhook(rawBody);
+    if (result == PaymentService.CallbackResult.ACCEPTED
+        || result == PaymentService.CallbackResult.PENDING) {
+      return ResponseEntity.ok(Map.of("success", true));
+    }
+    return ResponseEntity.badRequest().body(Map.of("success", false));
   }
 }

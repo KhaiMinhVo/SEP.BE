@@ -28,6 +28,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 @TestPropertySource(
     properties = {
       "application.tiktok.enabled=true",
+      "application.channel-oauth.tiktok-sandbox-enabled=true",
       "application.tiktok.client-key=sandbox-key",
       "application.tiktok.client-secret=private-secret",
       "application.tiktok.redirect-uri=https://test.example/api/v1/integrations/tiktok/callback",
@@ -47,12 +48,14 @@ abstract class TikTokTestSupport extends PostgresApiTestSupport {
   Instant now;
   User actor, other;
   Creator channel;
+  String providerAccountId;
 
   record Started(UUID id, String state, Cookie cookie) {}
 
   @BeforeEach
   void setup() {
     now = Instant.parse("2026-10-26T10:00:00Z");
+    providerAccountId = "app-scoped-id-" + UUID.randomUUID();
     when(clock.instant()).thenAnswer(i -> now);
     when(clock.getZone()).thenReturn(ZoneOffset.UTC);
     actor = account(Role.CREATOR);
@@ -68,17 +71,17 @@ abstract class TikTokTestSupport extends PostgresApiTestSupport {
                 .userName("crawler_name")
                 .isStableId(true)
                 .build());
-    when(crawler.resolveTikTokIdentity(anyString()))
+    when(crawler.resolveTikTokIdentity(anyString(), anyString()))
         .thenAnswer(
             i -> {
               assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-              return resolved("9" + channel.getExternalId(), i.getArgument(0));
+              return resolved(i.getArgument(1), i.getArgument(0));
             });
     when(provider.verify(anyString()))
         .thenAnswer(
             i -> {
               assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-              return new VerifiedAccount("app-scoped-id", "real_username", "Real name");
+              return new VerifiedAccount(providerAccountId, "real_username", "Real name");
             });
   }
 
@@ -91,8 +94,11 @@ abstract class TikTokTestSupport extends PostgresApiTestSupport {
     return com.influencermatch.backend.creator.dto.CrawlerResolveAuthorResponse.builder()
         .status("success")
         .platform("TIKTOK")
+        .inputUsername(username)
         .idType("TIKTOK_USER_ID")
         .authorId(id)
+        .expectedExternalId(id)
+        .isMatched(true)
         .resolvedUsername(username)
         .observedAt(now)
         .creatorInfo(info)
@@ -100,6 +106,16 @@ abstract class TikTokTestSupport extends PostgresApiTestSupport {
   }
 
   Started start(Map<String, Object> body) throws Exception {
+    var request = new HashMap<>(body);
+    request.putIfAbsent("creatorId", channel.getId());
+    return startRaw(request);
+  }
+
+  Started startWithoutTarget() throws Exception {
+    return startRaw(Map.of());
+  }
+
+  private Started startRaw(Map<String, Object> body) throws Exception {
     var response =
         mvc.perform(
                 post(START)

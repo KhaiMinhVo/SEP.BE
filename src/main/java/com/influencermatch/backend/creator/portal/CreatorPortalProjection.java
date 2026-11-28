@@ -103,6 +103,7 @@ public class CreatorPortalProjection {
         || ("META_OAUTH".equals(e.method)
             && Set.of("FACEBOOK", "INSTAGRAM").contains(c.get("platform")))
         || ("INSTAGRAM_OAUTH".equals(e.method) && "INSTAGRAM".equals(c.get("platform")))
+        || ("INSTAGRAM_UNIFIED_OAUTH".equals(e.method) && "INSTAGRAM".equals(c.get("platform")))
         || ("TIKTOK_OAUTH_SANDBOX".equals(e.method) && "TIKTOK".equals(c.get("platform")));
   }
 
@@ -341,5 +342,27 @@ and not exists(select 1 from cooperation_member mm join creator c on c.id=mm.cre
     return visible && value != null
         ? new SharedContact(value, "AVAILABLE", "CREATOR_DECLARED", false)
         : new SharedContact(null, "NOT_SHARED", null, false);
+  }
+
+  public List<RateCardItem> rateCards(UUID creatorId) {
+    var masters =
+        db.queryForList(
+            "select master_id from creator where id=? and master_id is not null", creatorId);
+    if (masters.isEmpty()) return List.of();
+    UUID masterId = (UUID) masters.getFirst().get("master_id");
+    var rows =
+        db.queryForList("select data from creator_portal_profile where master_id=?", masterId);
+    if (rows.isEmpty()) return List.of();
+    try {
+      var node = json.readTree(rows.getFirst().get("data").toString()).path("rateCards");
+      if (!node.isArray() || node.isEmpty()) return List.of();
+      List<RateCardItem> out = new ArrayList<>();
+      for (var item : node) {
+        out.add(json.treeToValue(item, RateCardItem.class));
+      }
+      return out;
+    } catch (Exception e) {
+      return List.of();
+    }
   }
 }

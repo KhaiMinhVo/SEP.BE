@@ -12,6 +12,7 @@ public class MetaOAuthService {
   private final MetaSessionStore store;
   private final MetaGraphClient graph;
   private final InstagramGraphClient instagram;
+  private final InstagramUnifiedGraphClient instagramUnified;
   private final MetaOwnershipService ownership;
 
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -26,6 +27,12 @@ public class MetaOAuthService {
     return callback(state, code, error, cookies, OAuthFlow.INSTAGRAM_LOGIN);
   }
 
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
+  public MetaDtos.Callback instagramUnifiedCallback(
+      String state, String code, String error, java.util.Map<String, String> cookies) {
+    return callback(state, code, error, cookies, OAuthFlow.INSTAGRAM_UNIFIED_LOGIN);
+  }
+
   private MetaDtos.Callback callback(
       String state,
       String code,
@@ -37,11 +44,13 @@ public class MetaOAuthService {
       if (error != null || code == null || code.isBlank())
         throw new BusinessException(
             ErrorCode.META_AUTHORIZATION_REJECTED, "Meta authorization was not completed");
-      return store.ready(
-          exchange.sessionId(),
-          flow == OAuthFlow.INSTAGRAM_LOGIN
-              ? instagram.exchange(code)
-              : graph.exchange(code, exchange.platform()));
+      var proof =
+          switch (flow) {
+            case INSTAGRAM_LOGIN -> instagram.exchange(code);
+            case INSTAGRAM_UNIFIED_LOGIN -> instagramUnified.exchange(code);
+            case FACEBOOK_LOGIN -> graph.exchange(code, exchange.platform());
+          };
+      return store.ready(exchange.sessionId(), proof);
     } catch (RuntimeException failure) {
       store.fail(exchange.sessionId());
       if (failure instanceof BusinessException business) throw business;
@@ -56,9 +65,11 @@ public class MetaOAuthService {
     MetaDtos.Proof fresh;
     try {
       fresh =
-          selected.oauthFlow() == OAuthFlow.INSTAGRAM_LOGIN
-              ? instagram.verify(selected.proof())
-              : graph.verify(selected.proof().token(), selected.platform());
+          switch (selected.oauthFlow()) {
+            case INSTAGRAM_LOGIN -> instagram.verify(selected.proof());
+            case INSTAGRAM_UNIFIED_LOGIN -> instagramUnified.verify(selected.proof());
+            case FACEBOOK_LOGIN -> graph.verify(selected.proof().token(), selected.platform());
+          };
     } catch (BusinessException failure) {
       if (failure.code() == ErrorCode.META_AUTHORIZATION_REJECTED) store.failReady(id);
       throw failure;

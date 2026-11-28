@@ -33,6 +33,8 @@ public interface UserRepository extends JpaRepository<User, UUID>, org.springfra
 
   long countByRoleAndStatus(Role role, com.influencermatch.backend.user.enums.UserStatus status);
 
+  java.util.List<User> findByRoleAndStatus(Role role, com.influencermatch.backend.user.enums.UserStatus status);
+
   @org.springframework.data.jpa.repository.Query(
       value = "SELECT id FROM rbac_guard WHERE id=1 FOR UPDATE",
       nativeQuery = true)

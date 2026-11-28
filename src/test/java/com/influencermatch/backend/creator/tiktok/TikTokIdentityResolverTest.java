@@ -23,12 +23,16 @@ class TikTokIdentityResolverTest {
   final TikTokIdentityResolver resolver =
       new TikTokIdentityResolver(crawler, Clock.fixed(now, ZoneOffset.UTC));
   final VerifiedAccount proof = new VerifiedAccount("app-subject", " @MiXi ", "Display");
+  final String expectedExternalId = "6631682124809076737";
 
   CrawlerResolveAuthorResponse response() {
     return CrawlerResolveAuthorResponse.builder()
         .status("success")
         .platform("TIKTOK")
-        .authorId("6631682124809076737")
+        .inputUsername("mixi")
+        .authorId(expectedExternalId)
+        .expectedExternalId(expectedExternalId)
+        .isMatched(true)
         .idType("TIKTOK_USER_ID")
         .resolvedUsername("mixi")
         .observedAt(now)
@@ -36,20 +40,35 @@ class TikTokIdentityResolverTest {
   }
 
   void reject(CrawlerResolveAuthorResponse result) {
-    when(crawler.resolveTikTokIdentity("mixi")).thenReturn(result);
-    assertThatThrownBy(() -> resolver.resolve(proof))
-        .isInstanceOfSatisfying(
-            BusinessException.class,
-            e -> assertThat(e.code()).isEqualTo(ErrorCode.TIKTOK_IDENTITY_RESOLUTION_FAILED));
+    when(crawler.resolveTikTokIdentity("mixi", expectedExternalId)).thenReturn(result);
+    assertThat(resolver.resolve(proof, expectedExternalId)).isEmpty();
   }
 
   @Test
-  void acceptsFreshCanonicalIdAndUsesOnlyOAuthUsername() {
-    when(crawler.resolveTikTokIdentity("mixi")).thenReturn(response());
-    var result = resolver.resolve(proof);
-    assertThat(result.authorId()).isEqualTo("6631682124809076737");
+  void acceptsOnlyFreshExplicitMatchForTheExpectedStableId() {
+    when(crawler.resolveTikTokIdentity("mixi", expectedExternalId)).thenReturn(response());
+    var result = resolver.resolve(proof, expectedExternalId).orElseThrow();
+    assertThat(result.authorId()).isEqualTo(expectedExternalId);
     assertThat(result.username()).isEqualTo("mixi");
-    verify(crawler).resolveTikTokIdentity("mixi");
+    verify(crawler).resolveTikTokIdentity("mixi", expectedExternalId);
+  }
+
+  @Test
+  void standaloneResolutionRequiresFreshCanonicalEvidence() {
+    var result = response();
+    result.setExpectedExternalId(null);
+    result.setIsMatched(null);
+    when(crawler.resolveTikTokIdentity("mixi", null)).thenReturn(result);
+    assertThat(resolver.resolve(proof, null)).get().extracting(TikTokIdentityResolver.Identity::authorId)
+        .isEqualTo(expectedExternalId);
+    result.setObservedAt(now.minusSeconds(91));
+    assertThat(resolver.resolve(proof, null)).isEmpty();
+    result.setObservedAt(now);
+    result.setResolvedUsername("another_channel");
+    assertThat(resolver.resolve(proof, null)).isEmpty();
+    result.setResolvedUsername("mixi");
+    result.setExpectedExternalId(expectedExternalId);
+    assertThat(resolver.resolve(proof, null)).isEmpty();
   }
 
   @ParameterizedTest
@@ -83,12 +102,25 @@ class TikTokIdentityResolverTest {
   }
 
   @ParameterizedTest
+  @ValueSource(strings = {"notMatched", "expected", "author", "inputUsername"})
+  void requiresCrawlerToConfirmTheExactExpectedChannel(String field) {
+    var r = response();
+    switch (field) {
+      case "notMatched" -> r.setIsMatched(false);
+      case "expected" -> r.setExpectedExternalId("123");
+      case "author" -> r.setAuthorId("123");
+      case "inputUsername" -> r.setInputUsername("other");
+    }
+    reject(r);
+  }
+
+  @ParameterizedTest
   @ValueSource(longs = {-90, 5})
   void freshnessBoundariesAreInclusive(long offset) {
     var r = response();
     r.setObservedAt(now.plusSeconds(offset));
-    when(crawler.resolveTikTokIdentity("mixi")).thenReturn(r);
-    assertThat(resolver.resolve(proof)).isNotNull();
+    when(crawler.resolveTikTokIdentity("mixi", expectedExternalId)).thenReturn(r);
+    assertThat(resolver.resolve(proof, expectedExternalId)).isPresent();
   }
 
   @Test
@@ -98,23 +130,32 @@ class TikTokIdentityResolverTest {
     info.setAvatarUrl("javascript:private-value");
     info.setDisplayName("x".repeat(256));
     r.setCreatorInfo(info);
-    when(crawler.resolveTikTokIdentity("mixi")).thenReturn(r);
-    var result = resolver.resolve(proof);
+    when(crawler.resolveTikTokIdentity("mixi", expectedExternalId)).thenReturn(r);
+    var result = resolver.resolve(proof, expectedExternalId).orElseThrow();
     assertThat(result.avatarUrl()).isNull();
     assertThat(result.displayName()).isNull();
   }
 
   @Test
-  void httpRequestNeverSendsExpectedIdAndNeverUpdatesStaging() {
+  void httpRequestSendsExpectedStableIdAndNeverUpdatesStaging() {
     var builder = RestClient.builder();
     var server = MockRestServiceServer.bindTo(builder).build();
     server
         .expect(requestTo("/tiktok/resolve-author"))
         .andExpect(method(HttpMethod.POST))
-        .andExpect(content().json("{\"username\":\"mixi\",\"auto_update_staging\":false}", true))
-        .andRespond(withSuccess("{\"author_id\":\"123\"}", MediaType.APPLICATION_JSON));
+        .andExpect(content().json(
+            "{\"username\":\"mixi\",\"expected_external_id\":\"123\",\"auto_update_staging\":false}",
+            true))
+        .andRespond(withSuccess(
+            "{\"status\":\"success\",\"platform\":\"TIKTOK\",\"input_username\":\"mixi\","
+                + "\"resolved_username\":\"mixi\",\"author_id\":\"123\","
+                + "\"id_type\":\"TIKTOK_USER_ID\",\"expected_external_id\":\"123\","
+                + "\"is_matched\":true}",
+            MediaType.APPLICATION_JSON));
     assertThat(
-            new CrawlerServiceClient(builder.build()).resolveTikTokIdentity("mixi").getAuthorId())
+            new CrawlerServiceClient(builder.build())
+                .resolveTikTokIdentity("mixi", "123")
+                .getAuthorId())
         .isEqualTo("123");
     server.verify();
   }
@@ -134,7 +175,7 @@ class TikTokIdentityResolverTest {
           expectation.andRespond(withSuccess("not-json-private", MediaType.APPLICATION_JSON));
     }
     assertThatThrownBy(
-            () -> new CrawlerServiceClient(builder.build()).resolveTikTokIdentity("mixi"))
+            () -> new CrawlerServiceClient(builder.build()).resolveTikTokIdentity("mixi", "123"))
         .isInstanceOfSatisfying(
             BusinessException.class,
             e -> assertThat(e.code()).isEqualTo(ErrorCode.TIKTOK_IDENTITY_RESOLUTION_FAILED))

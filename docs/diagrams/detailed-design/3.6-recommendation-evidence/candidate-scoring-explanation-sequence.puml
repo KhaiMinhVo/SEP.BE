@@ -1,0 +1,104 @@
+@startuml candidate-scoring-explanation-sequence
+title Shortlist Candidate Scoring and Explanation
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam noteBackgroundColor white
+skinparam maxMessageSize 240
+
+participant AiRecommendationService as Service
+participant Phase0Orchestrator as Phase0
+participant HistoricalEvidenceService as History
+participant M4ReviewHistory as Reviews
+participant FourMemoryTopsisEngine as Engine
+participant FourMemoryScorer as Memory
+participant CriticWeightCalculator as Critic
+participant DynamicWeightBlender as Blend
+participant TopsisRankingEngine as Topsis
+participant MmrReranker as MMR
+participant AiServiceClient as AI
+participant DeterministicReasoningGenerator as Reasoning
+
+activate Service
+Service -> Phase0 : execute(rawCandidates, campaign, excludedIds, postsByCreator)
+Phase0 --> Service : eligibility and normalized evidence
+Service -> Reviews : select(jdbc, brandProfileId, campaignId, scoringAsOf)
+Reviews --> Service : eligible reviews or read error
+note over Service, Reviews
+  BR-64: same Brand, completed collaborations from other campaigns,
+  valid Brand fit ratings from its owner, within the 24-month window.
+  If the read fails, the service continues with an empty review list.
+end note
+opt <U+005B>M1 gate is enforced<U+005D>
+  Service -> History : selectValidEvidenceAt(creatorId, masterId, scoringAsOf)
+  History --> Service : historical evidence for M1 readiness
+end
+note over Service
+  Phase 0 separates score-ready, provisional and excluded candidates.
+  Required M1 evidence: at least three distinct eligible collaborations
+  across two Brands within 24 months. Unavailable M1 goes to the
+  provisional pool when the gate is enforced.
+end note
+
+opt <U+005B>main score-ready pool is nonempty<U+005D>
+  Service -> Engine : evaluateAndRank(candidates, phase0Map, campaign, historyProvider, brandPatterns, priceStatusProvider, brandReviews, scoringAsOf)
+  activate Engine
+  loop <U+005B>each score-ready candidate<U+005D>
+    Engine -> History : selectValidEvidenceAt(creatorId, masterId, scoringAsOf) via historyProvider
+    History --> Engine : evidence available as of the run
+    Engine -> Memory : evaluate(candidate, phase0, campaign, past, brandPatterns, brandReviews, scoringAsOf)
+    activate Memory
+    note over Memory
+      M1: valid accepted outcome revisions and applicable R/T/K evidence.
+      M2: public performance. M3: semantic relevance to the saved brief.
+      M4 precedence: direct Creator/Master reviews (at least 3), then
+      platform+niche, then platform only (each at least 5 reviews
+      across 3 Masters). Use explicit affinity when no tier qualifies.
+    end note
+    Memory --> Engine : SM1 to SM4 and evidence details
+    deactivate Memory
+  end
+  Engine -> Critic : calculate(matrix)
+  Critic --> Engine : optional CRITIC weights
+  Engine -> Blend : blend(objective, criticWeightsOpt)
+  Blend --> Engine : blended weights or BUSINESS_FALLBACK
+  loop <U+005B>each evaluated candidate<U+005D>
+    Engine -> Topsis : compute(scores, weights)
+    Topsis --> Engine : fixed-ideal TOPSIS Match Score
+  end
+  Engine --> Service : evaluated candidates with scores and confidence
+  deactivate Engine
+end
+opt <U+005B>provisional candidates present<U+005D>
+  note over Service, Engine : Reuse main run weights or getFallbackWeights(objective) when main results are empty.
+  Service -> Engine : evaluateSingle(candidate, p0, campaign, past, brandPatterns, runWeights, priceStatus, brandReviews, scoringAsOf)
+  Engine --> Service : candidate scored for the separate provisional list
+end
+
+note over Service : Deduplicate the main ranking by Master, or by account when no Master exists.
+alt <U+005B>DIVERSIFIED_MATCH selected<U+005D>
+  Service -> MMR : rerank(relevanceSorted, effectiveLimit, DEFAULT_LAMBDA)
+  MMR --> Service : diversified ranking
+else <U+005B>BEST_MATCH or BUDGET_READY_FIRST selected<U+005D>
+  note over Service : Use DisplaySorter for Match Score, or budget readiness then Match Score.
+end
+
+loop <U+005B>each recommendation being presented<U+005D>
+  Service -> Engine : toScoreBreakdownDto(item)
+  Engine --> Service : score breakdown and confidence
+  Service -> Service : fetchReasoningCard(candidate, campaign, breakdown, confidence)
+  Service -> AI : getExplanation(explainReq)
+  AI --> Service : ExplainResponseDto or unavailable response
+  alt <U+005B>AI explanation available with a nonblank summary<U+005D>
+    note over Service : Use the summary and reasons with evidence warnings.
+  else <U+005B>AI explanation missing or request fails<U+005D>
+    Service -> Reasoning : generate(candidate, campaign, breakdown, confidence)
+    Reasoning --> Service : deterministic reasoning card
+  end
+end
+note over Service : Return to the run flow to persist the scoring snapshot (BR-46).
+deactivate Service
+@enduml

@@ -1,0 +1,88 @@
+@startuml campaign-context-class
+title Campaign, AI Brief and Context (M3) | Class Diagram
+hide circle
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam classAttributeIconSize 0
+skinparam classBackgroundColor white
+skinparam noteBackgroundColor white
+top to bottom direction
+
+class CampaignController <<controller>> {
+  - service : CampaignService
+  - autofillService : GeminiCampaignAutofillService
+  + autofill(request : CampaignAutofillRequest) : ApiResponse<CampaignAutofillResponse>
+}
+class GeminiCampaignAutofillService <<service>> {
+  + autofill(request : CampaignAutofillRequest) : CampaignAutofillResponse
+  - callGemini(prompt : String) : String
+}
+class CampaignService <<service>> {
+  - m3 : CampaignM3ContextService
+  + create(brandId : UUID, request : CampaignRequest, authentication : Authentication) : CampaignResponse
+  + changeStatus(id : UUID, request : CampaignStatusRequest, authentication : Authentication, revision : String) : CampaignResponse
+  - validateReady(c : Campaign) : void
+  - prepareReady(campaign : Campaign) : void
+}
+class CampaignM3ContextService <<service>> {
+  - contexts : CampaignContextRepository
+  - embeddings : CampaignEmbeddingStore
+  + latest(id : UUID) : CampaignContext
+  + create(c : Campaign, legacy : boolean) : CampaignContext
+}
+interface CampaignContextRepository <<repository>> {
+  + findByCampaignIdOrderByContextVersionDesc(campaignId : UUID) : List<CampaignContext>
+}
+class CampaignEmbeddingStore <<store>> {
+  + enqueue(context : UUID) : void
+}
+class Campaign <<entity>> {
+  - name : String
+  - brief : String
+  - campaignRevision : long
+  - status : CampaignStatus
+}
+class CampaignContext <<entity>> {
+  - campaign : Campaign
+  - contextVersion : int
+  - brandContextId : UUID
+  - embeddingSourceContextId : UUID
+  - contextData : JsonNode
+  - active : boolean
+  - archivedAt : LocalDateTime
+}
+class BrandContext <<entity>>
+enum CampaignStatus <<enumeration>> {
+  DRAFT
+  READY_FOR_DISCOVERY
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+  CLOSED
+  + requireEditable() : void
+  + requireTransitionTo(target : CampaignStatus) : void
+}
+
+CampaignController ..> GeminiCampaignAutofillService
+CampaignController ..> CampaignService
+CampaignService ..> Campaign
+CampaignService ..> CampaignM3ContextService
+CampaignM3ContextService ..> CampaignContextRepository
+CampaignM3ContextService ..> CampaignEmbeddingStore
+CampaignContextRepository ..> CampaignContext
+Campaign "1" -- "0..*" CampaignContext : context versions
+BrandContext "0..1" -- "0..*" CampaignContext : brandContextId
+Campaign --> CampaignStatus : status
+
+note left of GeminiCampaignAutofillService
+  BR-13   Return brief suggestions for Brand review.
+end note
+note left of CampaignService
+  BR-11   Validate required fields before Discovery.
+  BR-14   Full updates require DRAFT and current If-Match.
+end note
+note right of CampaignStatus : BR-12   Enforce allowed status transitions.
+note right of CampaignContext : M3 stores a versioned brief snapshot.
+@enduml

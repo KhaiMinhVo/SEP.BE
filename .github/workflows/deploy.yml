@@ -1,6 +1,7 @@
 name: Deploy Backend to VPS
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - develop
@@ -23,6 +24,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
+          command_timeout: 20m
           script: |
             set -eu
             cd ~/SEP.BE
@@ -61,5 +63,15 @@ jobs:
             done
             test "$(docker exec "$api_id" printenv CREATOR_INVITATION_FRONTEND_BASE_URL)" = "$CREATOR_INVITATION_FRONTEND_BASE_URL"
             command -v python3
-            contract=$(curl --fail --silent --show-error --max-time 20 "https://api.influencermatch.site/api/v1/api-docs?revision=$DEPLOY_COMMIT")
+            echo 'API container is healthy. Checking the public API contract.'
+            attempts=0
+            until contract=$(curl --fail --silent --show-error --connect-timeout 10 --max-time 40 "https://api.influencermatch.site/api/v1/api-docs?revision=$DEPLOY_COMMIT"); do
+              attempts=$((attempts + 1))
+              if [ "$attempts" -ge 4 ]; then
+                echo 'Public API contract is unreachable after 4 attempts. Container passed health checks; inspect DNS, HTTPS/reverse proxy and API docs response time.'
+                exit 1
+              fi
+              echo "Public API request failed; retrying ($attempts/4)."
+              sleep 5
+            done
             printf '%s' "$contract" | python3 -c 'import json,os,sys; spec=json.load(sys.stdin); assert spec.get("info",{}).get("x-build-commit") == os.environ["DEPLOY_COMMIT"], "Public API commit does not match the deployed release"; params={p["name"] for p in spec["paths"]["/campaigns/{campaignId}/discovery"]["get"]["parameters"]}; assert {"platform","sortBy","minEr","isClaimed"} <= params, "Public API is still serving the old discovery contract"; required={"/billing/payments", "/billing/payments/{reference}"}; assert required <= spec["paths"].keys(), "Public API is missing payment verification or history endpoints"'

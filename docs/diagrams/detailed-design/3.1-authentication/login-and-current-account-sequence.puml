@@ -1,0 +1,73 @@
+@startuml login-and-current-account-sequence
+title Login and Current Account
+hide footbox
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+autonumber
+skinparam roundcorner 0
+skinparam ParticipantPadding 10
+skinparam SequenceLifeLineBorderColor #555555
+skinparam SequenceLifeLineBackgroundColor white
+skinparam SequenceParticipantBackgroundColor white
+skinparam SequenceGroupBackgroundColor white
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam noteBackgroundColor white
+
+actor User
+participant "Web Client" as Web
+participant AuthController as Auth
+participant AuthServiceImpl as Service
+participant AuthenticationManager as Manager
+participant AuthSessionIssuer as Issuer
+participant AuthSessionStore as Sessions
+participant RefreshTokenService as Refresh
+
+User -> Web : enter email and password
+Web -> Auth : POST /api/v1/auth/login
+activate Auth
+Auth -> Service : login(request)
+activate Service
+Service -> Manager : authenticate(authentication)
+activate Manager
+Manager --> Service : authenticated principal or authentication error
+deactivate Manager
+
+alt <U+005B>credentials invalid or account unavailable — BR-02<U+005D>
+  Service --> Auth : authentication error
+  Auth --> Web : 401 Unauthorized
+else <U+005B>credentials valid but email unverified<U+005D>
+  Service --> Auth : EMAIL_NOT_VERIFIED
+  Auth --> Web : 403 Forbidden
+else <U+005B>credentials valid and email verified<U+005D>
+  Service -> Issuer : issue(user, "PASSWORD")
+  activate Issuer
+  Issuer -> Sessions : open(user, "PASSWORD")
+  Sessions --> Issuer : Session
+  Issuer -> Refresh : issue(user, sessionId)
+  Refresh --> Issuer : Issued
+  Issuer -> Issuer : response(user, sessionId, raw)
+  Issuer --> Service : LoginResponse
+  deactivate Issuer
+  Service --> Auth : LoginResponse
+  Auth --> Web : 200 OK, access token and IM_REFRESH cookie
+end
+deactivate Service
+deactivate Auth
+
+opt <U+005B>login succeeded<U+005D>
+  note over Web, Auth
+    See Protected Request Authorization and RBAC
+    for the security checks before controller dispatch.
+  end note
+  Web -> Auth : GET /api/v1/auth/me\nAuthorization: Bearer token
+  activate Auth
+  Auth -> Service : getProfile(currentUser)
+  activate Service
+  Service --> Auth : UserProfileResponse
+  deactivate Service
+  Auth --> Web : 200 OK, current profile and effective permissions
+  deactivate Auth
+end
+@enduml

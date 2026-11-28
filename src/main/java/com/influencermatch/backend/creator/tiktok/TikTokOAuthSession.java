@@ -46,6 +46,9 @@ public class TikTokOAuthSession extends BaseEntity {
   @JoinColumn(name = "invitation_id")
   private CreatorInvitation invitation;
 
+  @Column(name = "cooperation_invitation_id")
+  private java.util.UUID cooperationInvitationId;
+
   @Column(length = 255)
   private String openId;
 
@@ -57,6 +60,9 @@ public class TikTokOAuthSession extends BaseEntity {
 
   @Column(length = 24)
   private String matchStatus;
+
+  @Column(length = 64)
+  private String failureCode;
 
   private java.util.UUID linkedCreatorId;
   private java.util.UUID linkedMasterId;

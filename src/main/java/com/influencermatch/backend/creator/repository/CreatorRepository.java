@@ -23,6 +23,9 @@ public interface CreatorRepository extends JpaRepository<Creator, UUID> {
 
   List<Creator> findByMasterId(UUID masterId);
 
+  @Query("select c.id from Creator c where c.master.user.id = :userId and upper(c.platform) = upper(:platform)")
+  List<UUID> findChannelIdsByOwnerAndPlatform(@Param("userId") UUID userId, @Param("platform") String platform);
+
   @Query(value="select * from creator where platform='TIKTOK' and im_tiktok_username(user_name)=:username order by id",nativeQuery=true)
   List<Creator> findTikTokByNormalizedUsername(@Param("username") String username);
 
@@ -35,6 +38,8 @@ public interface CreatorRepository extends JpaRepository<Creator, UUID> {
   @Query("select c from Creator c where c.platform=:platform and c.externalId=:externalId")
   Optional<Creator> findLockedByPlatformAndExternalId(@Param("platform") String platform,@Param("externalId") String externalId);
   Optional<Creator> findByPlatformAndExternalId(String platform, String externalId);
+
+  boolean existsByPlatformAndExternalIdIgnoreCaseAndIsStableIdFalse(String platform, String externalId);
 
   @Query("""
       select c from Creator c

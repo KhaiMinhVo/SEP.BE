@@ -7,6 +7,9 @@ import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 
 public interface MetaOAuthSessionRepository extends JpaRepository<MetaOAuthSession, UUID> {
+  @Query("select s.cooperationInvitationId from MetaOAuthSession s where s.stateHash=:hash")
+  Optional<UUID> findCooperationInvitationByStateHash(@Param("hash") String hash);
+
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select s from MetaOAuthSession s where s.stateHash=:hash")
   Optional<MetaOAuthSession> lockByStateHash(@Param("hash") String hash);

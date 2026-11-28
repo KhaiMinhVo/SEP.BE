@@ -21,7 +21,10 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
 
-@org.springframework.test.context.TestPropertySource(properties="application.auth.email-verification.secret=test-email-secret-at-least-32-characters")
+@org.springframework.test.context.TestPropertySource(properties={
+    "application.auth.email-verification.secret=test-email-secret-at-least-32-characters",
+    "application.auth.creator-invitation.frontend-base-url=http://localhost:5173"
+})
 class ClaimInvitationPostgresIntegrationTest extends PostgresApiTestSupport {
   @MockBean VerificationEmailSender sender;
   @MockBean OAuthProofClient provider;
@@ -271,7 +274,7 @@ class ClaimInvitationPostgresIntegrationTest extends PostgresApiTestSupport {
     call(other,post("/creators/"+channel.getId()+"/claim"),evidence,403);
     var claim=call(creator,post("/creators/"+channel.getId()+"/claim"),evidence,201).path("data");
     assertThat(claim.path("status").asText()).isEqualTo("PENDING");
-    call(manager,patch("/data/creator-claims/"+claim.path("id").asText()+"/review"),Map.of("decision","APPROVED","reason","Evidence checked"),200);
+    call(manager,patch("/data/creator-claims/"+claim.path("id").asText()+"/review"),Map.of("decision","APPROVED","reason","Evidence checked", "reviewEvidenceType", "ACCOUNT_SETTINGS", "reviewVerificationNote", "Checked account settings"),200);
     assertThat(jdbc.queryForObject("select status from creator_invitation where target_creator_id=?",String.class,channel.getId())).isEqualTo("ACCEPTED");
     call(manager,post("/data/creator-claims/"+claim.path("id").asText()+"/revoke"),Map.of("reason","Withdrawn"),200);
     assertThat(jdbc.queryForObject("select source_type from creator where id=?",String.class,channel.getId())).isEqualTo("PUBLIC");

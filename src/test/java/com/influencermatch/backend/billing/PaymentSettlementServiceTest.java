@@ -11,6 +11,7 @@ import com.influencermatch.backend.brand.repository.BrandProfileRepository;
 import jakarta.persistence.EntityManager;
 import java.time.*;
 import java.util.*;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -54,6 +55,7 @@ class PaymentSettlementServiceTest {
     assertThat(p.getSubscription().getUsedCampaignQuota()).isEqualTo(2);
   }
   @ParameterizedTest @CsvSource({"PAID,true,true","PAID,false,false","FAILED,false,true","FAILED,true,false","REFUNDED,true,false","REFUNDED,false,false"})
+  @DisplayName("applyPaymentSettlement UTCID03/04 [N/A]: Already-paid payment is idempotent for success and failure")
   void terminalStatesNeverRewriteDatesOrQuota(PaymentStatus status,boolean success,boolean expected) {
     var p=payment();p.setStatus(status);var sub=p.getSubscription();var start=sub.getStartDate();
     assertThat(service.apply(p,success,"ignored")).isEqualTo(expected);

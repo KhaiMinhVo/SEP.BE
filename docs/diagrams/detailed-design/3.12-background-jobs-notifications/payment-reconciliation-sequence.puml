@@ -1,0 +1,61 @@
+@startuml payment-reconciliation-sequence
+title Payment Reconciliation
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 220
+
+participant "Spring Scheduler" as Scheduler
+participant "PaymentReconciliationJob /\nPayOsReconciliationJob" as Job
+participant PaymentRepository as Payments
+participant PaymentSettlementService as Settlement
+participant "VnPayQueryClient /\nPayOsPaymentClient" as Client
+participant "VNPay / PayOS" as Gateway
+
+Scheduler -> Job : reconcile() [scheduled; provider configured]
+activate Job
+Job -> Payments : findReconciliationCandidates(before, pageable)\nor findPayOsReconciliationCandidates(before, pageable)
+Payments --> Job : pending candidates
+loop <U+005B>each candidate<U+005D>
+  Job -> Settlement : lock(payment)
+  Settlement --> Job : current payment under lock
+  alt <U+005B>payment not pending or already claimed recently<U+005D>
+    note over Job : Skip this candidate.
+  else <U+005B>eligible PENDING payment<U+005D>
+    Job -> Payments : save(payment) with lastReconciledAt
+    note over Job, Payments : Commit the claim before calling the provider.
+    alt <U+005B>VNPay<U+005D>
+      Job -> Client : query(txnRef, gatewayDate)
+      Client -> Gateway : VNPay querydr
+      Gateway --> Client : signed query result
+      Client --> Job : verified response or error
+    else <U+005B>PayOS<U+005D>
+      Job -> Client : getPaymentLink(orderCode)
+      Client -> Gateway : read payment link
+      Gateway --> Client : link status and amounts
+      Client --> Job : link or error
+      opt <U+005B>matching link is still PENDING at the expiration cutoff<U+005D>
+        Job -> Client : cancelPaymentLink(orderCode)
+        Client -> Gateway : cancel payment link
+        Gateway --> Client : resulting link state
+        Client --> Job : link or error
+      end
+    end
+    alt <U+005B>verified final outcome with matching payment data (BR-66)<U+005D>
+      Job -> Settlement : lock(payment)
+      Job -> Settlement : apply(payment, success, failureReason)
+      activate Settlement
+      Settlement -> Payments : save(payment) if settlement is applied
+      note over Settlement : On an applied result, update Subscription in the same\ntransaction. A conflicting final status is protected (BR-67).
+      Settlement --> Job : applied, matching replay or conflict
+      deactivate Settlement
+    else <U+005B>provider error, mismatched data or outcome still pending<U+005D>
+      note over Job : Leave the stored outcome unchanged.
+    end
+  end
+end
+deactivate Job
+@enduml

@@ -238,4 +238,127 @@ class ShortlistCartPhase1Test {
     assertThat(result.getIsInShortlist()).isTrue();
     verify(shortlistItemRepository).save(removedItem);
   }
+
+  @Test
+  @DisplayName("addCreatorToShortlist UTCID02 [B]: Null priority and source default to MEDIUM and MANUAL_DISCOVERY")
+  void testAddCreatorToShortlist_nullPriorityAndSourceDefaults() {
+    when(shortlistItemRepository.findByCampaignIdAndCreatorId(campaignId, creatorId))
+        .thenReturn(Optional.empty());
+    when(creatorRepository.findById(creatorId)).thenReturn(Optional.of(creator));
+    when(shortlistItemRepository.countByCampaignIdAndStatusNot(campaignId, ShortlistStatus.REMOVED))
+        .thenReturn(1L);
+    when(shortlistItemRepository.save(any(ShortlistItem.class)))
+        .thenAnswer(inv -> {
+          ShortlistItem item = inv.getArgument(0);
+          item.setId(UUID.randomUUID());
+          return item;
+        });
+
+    AddShortlistItemRequest req = AddShortlistItemRequest.builder().creatorId(creatorId).build();
+    ShortlistItemDto result = shortlistService.addCreatorToShortlist(campaignId, req);
+
+    assertThat(result.getAction()).isEqualTo("ADDED");
+    assertThat(result.getPriority()).isEqualTo(ShortlistPriority.MEDIUM);
+    assertThat(result.getSource()).isEqualTo(ShortlistSource.MANUAL_DISCOVERY);
+  }
+
+  @Test
+  @DisplayName("addCreatorToShortlist UTCID05 [A]: Closed campaign throws ConflictException INVALID_CAMPAIGN_TRANSITION")
+  void testAddCreatorToShortlist_closedCampaignRejected() {
+    campaign.setStatus(com.influencermatch.backend.campaign.enums.CampaignStatus.CLOSED);
+    AddShortlistItemRequest req = AddShortlistItemRequest.builder().creatorId(creatorId).build();
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> shortlistService.addCreatorToShortlist(campaignId, req))
+        .isInstanceOfSatisfying(
+            com.influencermatch.backend.exception.ConflictException.class,
+            ex -> assertThat(ex.code())
+                .isEqualTo(com.influencermatch.backend.exception.ErrorCode.INVALID_CAMPAIGN_TRANSITION));
+    verify(shortlistItemRepository, never()).save(any());
+  }
+
+  @Test
+  @DisplayName("addCreatorToShortlist UTCID06 [A]: Differing creatorId and creatorAccountId aliases throw ValidationException")
+  void testAddCreatorToShortlist_creatorIdAliasesDifferThrowsValidation() {
+    AddShortlistItemRequest req = AddShortlistItemRequest.builder()
+        .creatorId(creatorId)
+        .creatorAccountId(UUID.randomUUID())
+        .build();
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> shortlistService.addCreatorToShortlist(campaignId, req))
+        .isInstanceOf(com.influencermatch.backend.exception.ValidationException.class);
+    verify(shortlistItemRepository, never()).save(any());
+  }
+
+  @Test
+  @DisplayName("removeCreatorFromShortlist UTCID02 [B]: Already REMOVED item keeps REMOVED status and saves")
+  void testRemoveCreatorFromShortlist_alreadyRemoved() {
+    UUID shortlistItemId = UUID.randomUUID();
+    ShortlistItem item = ShortlistItem.builder()
+        .id(shortlistItemId)
+        .campaign(campaign)
+        .creator(creator)
+        .user(brandUser)
+        .status(ShortlistStatus.REMOVED)
+        .addedAt(LocalDateTime.now())
+        .build();
+    when(shortlistItemRepository.findByIdAndCampaignId(shortlistItemId, campaignId))
+        .thenReturn(Optional.of(item));
+
+    shortlistService.removeCreatorFromShortlist(campaignId, shortlistItemId);
+
+    assertThat(item.getStatus()).isEqualTo(ShortlistStatus.REMOVED);
+    verify(shortlistItemRepository).save(item);
+  }
+
+  @Test
+  @DisplayName("removeCreatorFromShortlist UTCID03 [A]: Closed campaign throws INVALID_CAMPAIGN_TRANSITION without save")
+  void testRemoveCreatorFromShortlist_closedCampaignRejected() {
+    campaign.setStatus(com.influencermatch.backend.campaign.enums.CampaignStatus.CLOSED);
+    UUID shortlistItemId = UUID.randomUUID();
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> shortlistService.removeCreatorFromShortlist(campaignId, shortlistItemId))
+        .isInstanceOfSatisfying(
+            com.influencermatch.backend.exception.BusinessException.class,
+            ex -> assertThat(ex.code())
+                .isEqualTo(com.influencermatch.backend.exception.ErrorCode.INVALID_CAMPAIGN_TRANSITION));
+    verify(shortlistItemRepository, never()).save(any());
+  }
+
+  @Test
+  @DisplayName("removeCreatorFromShortlist UTCID04 [A]: Missing or foreign shortlist item throws RESOURCE_NOT_FOUND")
+  void testRemoveCreatorFromShortlist_missingOrForeignThrowsNotFound() {
+    UUID missingId = UUID.randomUUID();
+    when(shortlistItemRepository.findByIdAndCampaignId(missingId, campaignId))
+        .thenReturn(Optional.empty());
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> shortlistService.removeCreatorFromShortlist(campaignId, missingId))
+        .isInstanceOfSatisfying(
+            com.influencermatch.backend.exception.BusinessException.class,
+            ex -> assertThat(ex.code())
+                .isEqualTo(com.influencermatch.backend.exception.ErrorCode.RESOURCE_NOT_FOUND));
+
+    UUID foreignItemId = UUID.randomUUID();
+    User otherUser = TestActors.user(Role.BRAND);
+    ShortlistItem foreignItem = ShortlistItem.builder()
+        .id(foreignItemId)
+        .campaign(campaign)
+        .creator(creator)
+        .user(otherUser)
+        .status(ShortlistStatus.SAVED)
+        .build();
+    when(shortlistItemRepository.findByIdAndCampaignId(foreignItemId, campaignId))
+        .thenReturn(Optional.of(foreignItem));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> shortlistService.removeCreatorFromShortlist(campaignId, foreignItemId))
+        .isInstanceOfSatisfying(
+            com.influencermatch.backend.exception.BusinessException.class,
+            ex -> assertThat(ex.code())
+                .isEqualTo(com.influencermatch.backend.exception.ErrorCode.RESOURCE_NOT_FOUND));
+    verify(shortlistItemRepository, never()).save(any());
+  }
 }

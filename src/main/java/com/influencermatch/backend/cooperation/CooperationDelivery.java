@@ -140,16 +140,15 @@ public class CooperationDelivery {
         notificationService.createAndDispatch(
             owner,
             com.influencermatch.backend.notification.enums.NotificationType.COOPERATION_INVITATION,
-            "Cooperation invitation",
-            "A Brand has sent a cooperation proposal.",
+            "Lời mời hợp tác từ nhãn hàng",
+            "Nhãn hàng đã gửi cho bạn một đề xuất hợp tác chiến dịch.",
             "COOPERATION_DEAL",
             id);
       } else {
         store.db.update(
             "insert into"
                 + " notification(id,user_id,type,title,message,entity_type,entity_id,is_read,created_at)"
-                + " values(?,?,'COOPERATION_INVITATION','Cooperation invitation','A Brand has sent a"
-                + " cooperation proposal.','COOPERATION_DEAL',?,false,?)",
+                + " values(?,?,'COOPERATION_INVITATION','Lời mời hợp tác từ nhãn hàng','Nhãn hàng đã gửi cho bạn một đề xuất hợp tác chiến dịch.','COOPERATION_DEAL',?,false,?)",
             UUID.randomUUID(),
             owner,
             id,

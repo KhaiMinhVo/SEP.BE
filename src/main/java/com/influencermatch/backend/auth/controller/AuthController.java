@@ -23,6 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -166,5 +167,24 @@ public class AuthController {
       @AuthenticationPrincipal User currentUser) {
     return ResponseEntity.ok(
         ApiResponse.ok("Profile retrieved successfully.", authService.getProfile(currentUser)));
+  }
+
+  public record UpdateProfileRequest(
+      @jakarta.validation.constraints.NotBlank
+      @jakarta.validation.constraints.Size(max = 120)
+      String fullName) {}
+
+  @Operation(
+      summary = "Update the current authenticated user's full name",
+      security = @SecurityRequirement(name = "BearerAuth"))
+  @PatchMapping("/me")
+  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('VIEW_OWN_PROFILE')")
+  public ResponseEntity<ApiResponse<UserProfileResponse>> updateMe(
+      @AuthenticationPrincipal User currentUser,
+      @Valid @RequestBody UpdateProfileRequest request) {
+    return ResponseEntity.ok(
+        ApiResponse.ok(
+            "Profile updated successfully.",
+            authService.updateProfile(currentUser, request.fullName())));
   }
 }

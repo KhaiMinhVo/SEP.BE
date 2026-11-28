@@ -1,0 +1,130 @@
+@startuml channel-oauth-sequence
+title WF-04 | OAuth Channel Ownership Verification
+hide footbox
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+autonumber
+skinparam roundcorner 0
+skinparam ParticipantPadding 10
+skinparam SequenceLifeLineBorderColor #555555
+skinparam SequenceLifeLineBackgroundColor white
+skinparam SequenceParticipantBackgroundColor white
+skinparam SequenceGroupBackgroundColor white
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam noteBackgroundColor white
+skinparam maxMessageSize 260
+
+actor Creator
+participant "Web Client" as Web
+participant "Meta or Instagram" as Meta
+participant "MetaOAuthController / InstagramOAuthController /\nInstagramUnifiedOAuthController" as MetaApi
+participant MetaOAuthService as MetaService
+participant MetaSessionStore as MetaStore
+participant MetaOwnershipService as MetaOwnership
+participant "TikTok Sandbox" as TikTok
+participant TikTokOAuthController as TikTokApi
+participant TikTokOAuthService as TikTokService
+participant TikTokIdentityResolver as Resolver
+participant "Crawler & AI API" as Crawler
+participant TikTokOwnershipService as TikTokOwnership
+
+note over Web
+  Use the Creator's authenticated session for start, view and confirm.
+  A cooperation invitation binds verification to its eligible channel.
+end note
+alt <U+005B>Facebook Page or Instagram provider selected<U+005D>
+  Creator -> Web : start channel verification
+  Web -> MetaApi : POST /api/v1/creators/portal/accounts/connect/{meta | instagram | instagram-unified}/start
+  activate MetaApi
+  MetaApi --> Web : sessionId, authorization URL and browser cookie
+  deactivate MetaApi
+  Web -> Meta : open authorization URL
+  Meta --> Web : redirect browser with state and OAuth outcome
+  Web -> MetaApi : GET /api/v1/integrations/{meta | instagram | instagram-unified}/callback
+  activate MetaApi
+  MetaApi -> MetaService : callback(), instagramCallback() or instagramUnifiedCallback()
+  activate MetaService
+  MetaService -> MetaStore : reserve(state, cookies, flow)
+  alt <U+005B>session valid and authorization completed<U+005D>
+    note over MetaService : Provider client exchanges the code for channel proof.
+    MetaService -> MetaStore : ready(sessionId, proof)
+    MetaStore --> MetaService : READY
+    MetaService --> MetaApi : callback result
+    MetaApi --> Web : READY
+  else <U+005B>invalid session or authorization failed<U+005D>
+    MetaService --> MetaApi : callback error
+    MetaApi --> Web : verification incomplete
+  end
+  deactivate MetaService
+  deactivate MetaApi
+
+  opt <U+005B>callback returned READY<U+005D>
+    Web -> MetaApi : GET /api/v1/creators/portal/accounts/connect/meta/sessions/{id}
+    MetaApi -> MetaStore : view(id)
+    MetaStore --> MetaApi : sanitized account choices and match status
+    MetaApi --> Web : session and eligible choices
+    alt <U+005B>invited target has no matching eligible channel<U+005D>
+      note over Web : Show the mismatch. The invited channel still requires verification.
+    else <U+005B>eligible selected channel or exact invitation target<U+005D>
+      Web -> MetaApi : POST /api/v1/creators/portal/accounts/connect/meta/sessions/{id}/confirm
+      activate MetaApi
+      MetaApi -> MetaService : confirm(id, accountId)
+      activate MetaService
+      note over MetaService : Read selection and recheck channel proof with the provider before writing.
+      MetaService -> MetaOwnership : apply(id, accountId, fresh)
+      alt <U+005B>fresh proof and ownership checks pass — BR-23/25<U+005D>
+        note over MetaOwnership : Reuse the exact channel or create an eligible missing channel in a standalone session.
+        MetaOwnership --> MetaService : Connected
+        MetaService --> MetaApi : Connected
+        MetaApi --> Web : link confirmed
+      else <U+005B>channel belongs to another Creator — BR-24<U+005D>
+        MetaOwnership --> MetaService : CREATOR_ALREADY_LINKED
+        MetaService --> MetaApi : ownership conflict
+        MetaApi --> Web : 409 Conflict
+      else <U+005B>session, invitation or provider proof no longer eligible<U+005D>
+        MetaService --> MetaApi : confirmation error
+        MetaApi --> Web : confirmation failed
+      end
+      deactivate MetaService
+      deactivate MetaApi
+    end
+  end
+else <U+005B>TikTok Sandbox selected<U+005D>
+  Web -> TikTokApi : POST /api/v1/creators/portal/accounts/connect/tiktok/start
+  TikTokApi --> Web : sessionId, authorization URL and browser cookie
+  Web -> TikTok : open authorization URL
+  TikTok --> Web : redirect browser with state and OAuth outcome
+  Web -> TikTokApi : GET /api/v1/integrations/tiktok/callback
+  activate TikTokApi
+  TikTokApi -> TikTokService : callback(state, code, error, cookies)
+  activate TikTokService
+  alt <U+005B>session valid and provider proof available<U+005D>
+    opt <U+005B>standalone session or target has a known external ID<U+005D>
+      TikTokService -> Resolver : resolve(proof, expectedExternalId)
+      note over Resolver, Crawler : TikTokIdentityResolver calls CrawlerServiceClient.resolveTikTokIdentity().
+      Resolver -> Crawler : POST /api/v1/crawl/tiktok/resolve-author\nusername, expected_external_id, auto_update_staging=false
+      Crawler --> Resolver : author_id, id_type, resolved_username, observed_at
+      note over Resolver : Require TIKTOK_USER_ID, matching username and invited ID when supplied.\nObservation must be within 90 seconds old and at most 5 seconds ahead.
+      Resolver --> TikTokService : Optional<Identity>
+    end
+    alt <U+005B>stable channel ID resolved<U+005D>
+      TikTokService -> TikTokOwnership : apply(id, proof, identity)
+      TikTokOwnership --> TikTokService : AUTHORIZED or ownership error
+      TikTokService --> TikTokApi : callback outcome
+    else <U+005B>stable channel ID unresolved<U+005D>
+      TikTokService -> TikTokOwnership : manualResolution(id, proof)
+      TikTokOwnership --> TikTokService : READY, UNMATCHED
+      TikTokService --> TikTokApi : READY
+    end
+  else <U+005B>session invalid or provider proof unavailable<U+005D>
+    TikTokService --> TikTokApi : callback error
+  end
+  deactivate TikTokService
+  TikTokApi --> Web : OAuth callback outcome
+  deactivate TikTokApi
+  Web -> TikTokApi : GET /api/v1/creators/portal/accounts/connect/tiktok/sessions/{id}
+  TikTokApi --> Web : session and channel verification result
+end
+@enduml

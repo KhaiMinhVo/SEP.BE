@@ -1,0 +1,42 @@
+@startuml send-claim-invitation-sequence
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+title Figure 4.3.4.2.1 Send Claim Invitation Sequence Diagram
+hide footbox
+autonumber
+actor Brand
+participant "Web Client" as Web
+participant CreatorInvitationController as API
+participant CreatorInvitationService as Service
+participant CreatorInvitationRepository as Repo
+participant ClaimEmailOutboxService as Outbox
+participant ClaimEmailDispatch as Dispatch
+participant ClaimEmailWorker as Worker
+Brand -> Web : invite a Creator to claim a channel
+Web -> API : POST /api/v1/creators/{id}/invite
+activate API
+API -> Service : sendInvitation(creatorId, email, brandId, campaignId)
+activate Service
+alt <U+005B>Brand authority or campaign ownership check fails<U+005D>
+  Service --> API : authorization or lookup error
+else <U+005B>authorized Brand<U+005D>
+  alt <U+005B>channel already owned or live claim invitation exists<U+005D>
+    Service --> API : ownership or pending invitation conflict
+  else <U+005B>channel eligible and email delivery configured<U+005D>
+    Service -> Repo : save(invitation) with token hash and expiry
+    Service -> Outbox : enqueue(saved, claimUrl)
+    Outbox --> Service : email job persisted in current transaction
+    Service --> API : InvitationResponse with emailStatus QUEUED
+  else <U+005B>email delivery or claim URL configuration invalid<U+005D>
+    Service --> API : configuration error
+  end
+end
+deactivate Service
+API --> Web : invitation result or mapped error
+deactivate API
+opt <U+005B>invitation and email job transaction committed<U+005D>
+  Dispatch ->> Worker : sendAsync(jobId)
+end
+@enduml

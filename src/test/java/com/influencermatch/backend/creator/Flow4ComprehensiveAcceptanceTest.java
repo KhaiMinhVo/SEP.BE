@@ -594,6 +594,7 @@ class Flow4ComprehensiveAcceptanceTest {
             .build();
 
     when(userRepository.findById(creatorUser.getId())).thenReturn(Optional.of(creatorUser));
+    when(userRepository.findLockedById(creatorUser.getId())).thenReturn(Optional.of(creatorUser));
     when(creatorMasterRepository.findByUserId(creatorUser.getId()))
         .thenReturn(Optional.of(masterM1));
     when(creatorRepository.findLockedByPlatformAndExternalId("YOUTUBE", "UC_TRANG_DAO_VLOGS"))
@@ -665,6 +666,7 @@ class Flow4ComprehensiveAcceptanceTest {
             .build();
 
     when(userRepository.findById(creatorUser.getId())).thenReturn(Optional.of(creatorUser));
+    when(userRepository.findLockedById(creatorUser.getId())).thenReturn(Optional.of(creatorUser));
     when(creatorMasterRepository.findByUserId(creatorUser.getId()))
         .thenReturn(Optional.of(claimantMaster));
     when(creatorRepository.findLockedByPlatformAndExternalId("TIKTOK", "tt_contested_999"))

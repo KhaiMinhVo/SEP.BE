@@ -1,0 +1,55 @@
+@startuml collaboration-completion-sequence
+title WF-03 | Complete Accepted Collaboration
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+
+actor Brand
+participant "Web Client" as Web
+participant CollaborationExecutionController as Review
+participant FlexibleExecutionController as Complete
+participant CollaborationExecution as Execution
+participant FlexibleExecution as Flexible
+database PostgreSQL as DB
+
+Brand -> Web : choose completion after outcome acceptance
+note over Web : Both operations use expectedRevision, outcomeRevision and Idempotency-Key.
+alt <U+005B>complete with rating (BR-62)<U+005D>
+  Web -> Review : POST /api/v1/collaborations/{id}/review
+  activate Review
+  Review -> Execution : review(id, body, key)
+  activate Execution
+  alt <U+005B>AWAITING_REVIEW with matching active acceptance and execution revision<U+005D>
+    Execution -> DB : persist the accepted outcome, review and completion evidence
+    Execution -> DB : set COMPLETED and WITH_REVIEW
+    Execution --> Review : completed execution view
+    Review --> Web : 200 OK
+  else <U+005B>status, acceptance or revision conflicts<U+005D>
+    Execution --> Review : DEAL_STATE_CONFLICT
+    Review --> Web : 409 Conflict
+  end
+  deactivate Execution
+  deactivate Review
+else <U+005B>complete without rating (BR-60)<U+005D>
+  Web -> Complete : POST /api/v1/collaborations/{id}/complete-without-review
+  activate Complete
+  Complete -> Flexible : completeWithoutReview(id, body, key)
+  activate Flexible
+  alt <U+005B>AWAITING_REVIEW and latest outcome matches active acceptance and requested revision<U+005D>
+    Flexible -> Execution : persistAcceptedOutcome(id, outcomeRevision)
+    Execution --> Flexible : outcome ID
+    Flexible -> DB : set COMPLETED and WITHOUT_REVIEW
+    Flexible -> Execution : recordCompletionEvidence(id, outcomeId, outcomeRevision, null, null, acceptedAt)
+    Flexible --> Complete : completed execution view
+    Complete --> Web : 200 OK
+  else <U+005B>status, acceptance or revision conflicts<U+005D>
+    Flexible --> Complete : DEAL_STATE_CONFLICT
+    Complete --> Web : 409 Conflict
+  end
+  deactivate Flexible
+  deactivate Complete
+end
+@enduml

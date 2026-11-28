@@ -1,0 +1,144 @@
+' Report 7, section 3.1.1 Screens Flow.
+' UI codes identify boxes in these four dialog maps. Navigation labels describe the actions shown by each source branch.
+' Initial markers show entry points. Hidden links preserve visual order and do not represent navigation.
+
+@startuml screens-flow-brand
+' Source figure: word/media/image75.png
+!pragma layout smetana
+left to right direction
+hide empty description
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontColor #162A3F
+skinparam defaultFontSize 14
+skinparam ArrowColor #627892
+skinparam ArrowFontColor #334B61
+skinparam nodesep 15
+skinparam ranksep 40
+skinparam state {
+    BackgroundColor #FFFFFF
+    BorderColor #90ABC5
+    FontColor #162A3F
+    RoundCorner 12
+}
+
+title
+<size:22><b>Brand Screen</b></size>
+<size:13><color:#506581>InfluencerMatch AI | Screen navigation hierarchy</color></size>
+end title
+
+' LEVEL 1 · ENTRY
+state "<b>UI-BR-00 Brand Login</b>\n<size:12><color:#435972>Sign in, sign up, forgot password</color></size>\n<size:12><color:#435972>and Google OAuth</color></size>" as BR00 #FFF0DE
+state "<b>UI-BR-01 Brand Onboarding</b>\n<size:12><color:#435972>Initial profile setup</color></size>" as BR01 #FFF0DE
+
+' LEVEL 2 · LAYOUT
+state "<b>UI-BR-02 Brand Layout</b>\n<size:12><color:#435972>Sidebar, header and main content</color></size>" as BR02 #E3EFF9
+
+' LEVEL 3 · MAIN MENU
+state "<b>UI-BR-03 Account Menu</b>" as BR03 #EDF4FA
+state "<b>UI-BR-04 Notifications</b>" as BR04 #EDF4FA
+state "<b>UI-BR-05 Dashboard</b>\n<size:12><color:#435972>Brand Overview</color></size>" as BR05 #EDF4FA
+state "<b>UI-BR-06 Campaigns</b>\n<size:12><color:#435972>Campaign Management</color></size>" as BR06 #EDF4FA
+state "<b>UI-BR-07 Outreach & CRM</b>\n<size:12><color:#435972>Creator Outreach & Deals</color></size>" as BR07 #EDF4FA
+state "<b>UI-BR-08 Collaboration</b>\n<size:12><color:#435972>Execution Hub</color></size>" as BR08 #EDF4FA
+state "<b>UI-BR-09 Performance</b>\n<size:12><color:#435972>Analytics & History</color></size>" as BR09 #EDF4FA
+state "<b>UI-BR-10 Subscription</b>\n<size:12><color:#435972>Plans & Billing</color></size>" as BR10 #EDF4FA
+state "<b>UI-BR-11 Brand Profile</b>\n<size:12><color:#435972>Brand Identity & Context</color></size>" as BR11 #EDF4FA
+
+' LEVEL 4 · SCREENS / TABS / MODALS
+state "<b>UI-BR-12 Profile Shortcut & Logout</b>\n<size:12><color:#435972>Quick access to Brand Profile and sign out</color></size>" as BR12
+state "<b>UI-BR-13 Notification Drawer</b>\n<size:12><color:#435972>In-app real-time alerts</color></size>" as BR13
+state "<b>UI-BR-14 Executive Overview</b>\n<size:12><color:#435972>KPI summary and active Campaigns</color></size>" as BR14
+state "<b>UI-BR-15 Create / Edit Draft</b>\n<size:12><color:#435972>Campaign wizard, AI Brief and persistent drafts</color></size>" as BR15
+state "<b>UI-BR-16 Campaign Detail</b>\n<size:12><color:#435972>Brief review, activate, close and complete</color></size>" as BR16
+state "<b>UI-BR-17 Creator Discovery</b>\n<size:12><color:#435972>AI Brief filters, search and Creator profile</color></size>" as BR17
+state "<b>UI-BR-18 AI Recommendation</b>\n<size:12><color:#435972>Four-Memory Match Score, Confidence and explanations</color></size>" as BR18
+state "<b>UI-BR-19 Shortlist</b>\n<size:12><color:#435972>Saved Creators, notes, priority and metric comparison</color></size>" as BR19
+state "<b>UI-BR-20 Contact Readiness</b>\n<size:12><color:#435972>Portal, email outbox and social profile links</color></size>" as BR20
+state "<b>UI-BR-21 Cooperation Deals</b>\n<size:12><color:#435972>Send proposal, counteroffer and confirm Deal</color></size>" as BR21
+state "<b>UI-BR-22 Relationship CRM</b>\n<size:12><color:#435972>Pipeline stages and negotiation history</color></size>" as BR22
+state "<b>UI-BR-23 Collaboration Detail</b>\n<size:12><color:#435972>Deliverables, timeline and status tracking</color></size>" as BR23
+state "<b>UI-BR-24 Deliverable Review</b>\n<size:12><color:#435972>Draft and video review, revision and approval</color></size>" as BR24
+state "<b>UI-BR-25 Post Metrics & KPI</b>\n<size:12><color:#435972>Published URLs, collected metrics and outcome entry</color></size>" as BR25
+state "<b>UI-BR-26 Brand Final Review</b>\n<size:12><color:#435972>Overall rating, Brand Fit and completion</color></size>" as BR26
+state "<b>UI-BR-27 ROI / ROAS / CPM / CPE</b>\n<size:12><color:#435972>Validated cost and return analytics</color></size>" as BR27
+state "<b>UI-BR-28 Outcome Report</b>\n<size:12><color:#435972>Unavailable-metric safeguards and financial summary</color></size>" as BR28
+state "<b>UI-BR-29 Campaign History</b>\n<size:12><color:#435972>Completed Campaigns, evidence archive and duplicate</color></size>\n<size:12><color:#435972>Brief</color></size>" as BR29
+state "<b>UI-BR-30 Plans & Upgrade</b>\n<size:12><color:#435972>Plan selection, VNPAY and PayOS checkout</color></size>" as BR30
+state "<b>UI-BR-31 Usage Quotas</b>\n<size:12><color:#435972>Campaign and AI Recommendation quotas</color></size>" as BR31
+state "<b>UI-BR-32 Payment History</b>\n<size:12><color:#435972>Transaction ledger, receipt and refund request</color></size>" as BR32
+state "<b>UI-BR-33 Business Info</b>\n<size:12><color:#435972>Name, industry, target audience and location</color></size>" as BR33
+state "<b>UI-BR-34 Context M4 & Google Link</b>\n<size:12><color:#435972>Immutable Brand Context and Google account link</color></size>" as BR34
+
+' Navigation
+[*] --> BR00 : Open application
+BR00 --> BR02 : Sign in [Brand / SME]
+BR00 -right[dashed]-> BR01 : Continue [New Brand]
+BR01 -[dashed]-> BR02 : Finish profile setup [Brand / SME]
+BR02 --> BR03 : Open account menu
+BR02 --> BR04 : Open notifications
+BR02 --> BR05 : Open Dashboard
+BR02 --> BR06 : Open Campaigns
+BR02 --> BR07 : Open Outreach & CRM
+BR02 --> BR08 : Open Collaboration
+BR02 --> BR09 : Open Performance
+BR02 --> BR10 : Open Subscription
+BR02 --> BR11 : Open Brand Profile
+BR03 --> BR12 : Open profile or sign out
+BR04 --> BR13 : View alerts
+BR05 --> BR14 : View overview
+BR06 --> BR15 : Create or edit a draft
+BR06 --> BR16 : Open a campaign
+BR06 --> BR17 : Open Discovery
+BR06 --> BR18 : Open AI Recommendation
+BR06 --> BR19 : Open Shortlist
+BR07 --> BR20 : Check contact readiness
+BR07 --> BR21 : Open deals
+BR07 --> BR22 : View relationships
+BR08 --> BR23 : Open a collaboration
+BR08 --> BR24 : Review a deliverable
+BR08 --> BR25 : Open metrics
+BR08 --> BR26 : Open final review
+BR09 --> BR27 : View cost and return
+BR09 --> BR28 : View outcome report
+BR09 --> BR29 : Open campaign history
+BR10 --> BR30 : View plans or upgrade
+BR10 --> BR31 : View quota usage
+BR10 --> BR32 : View payments
+BR11 --> BR33 : Open business info
+BR11 --> BR34 : Open context and account link
+
+' Hidden layout links
+BR03 -right[hidden]-> BR04
+BR04 -right[hidden]-> BR05
+BR05 -right[hidden]-> BR06
+BR06 -right[hidden]-> BR07
+BR07 -right[hidden]-> BR08
+BR08 -right[hidden]-> BR09
+BR09 -right[hidden]-> BR10
+BR10 -right[hidden]-> BR11
+BR12 -right[hidden]-> BR13
+BR13 -right[hidden]-> BR14
+BR14 -right[hidden]-> BR15
+BR15 -right[hidden]-> BR16
+BR16 -right[hidden]-> BR17
+BR17 -right[hidden]-> BR18
+BR18 -right[hidden]-> BR19
+BR19 -right[hidden]-> BR20
+BR20 -right[hidden]-> BR21
+BR21 -right[hidden]-> BR22
+BR22 -right[hidden]-> BR23
+BR23 -right[hidden]-> BR24
+BR24 -right[hidden]-> BR25
+BR25 -right[hidden]-> BR26
+BR26 -right[hidden]-> BR27
+BR27 -right[hidden]-> BR28
+BR28 -right[hidden]-> BR29
+BR29 -right[hidden]-> BR30
+BR30 -right[hidden]-> BR31
+BR31 -right[hidden]-> BR32
+BR32 -right[hidden]-> BR33
+BR33 -right[hidden]-> BR34
+
+@enduml

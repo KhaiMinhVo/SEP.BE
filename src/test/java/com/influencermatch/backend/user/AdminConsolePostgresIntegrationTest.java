@@ -614,6 +614,9 @@ class AdminConsolePostgresIntegrationTest {
       req.header(
           "If-Match",
           com.influencermatch.backend.creator.portal.CreatorPortalProfiles.tag(actor.getId(), 0));
+    if (path.endsWith("/ai-recommendations"))
+      req.header("Idempotency-Key", "cap-test-" + UUID.randomUUID())
+         .header("If-Match", "\"campaign:00000000-0000-0000-0000-000000000000:r0\"");
     callToken(token, req, method.equals("GET") ? null : Map.of(), expected);
   }
 

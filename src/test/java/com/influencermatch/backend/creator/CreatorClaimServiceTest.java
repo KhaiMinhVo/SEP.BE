@@ -57,9 +57,11 @@ class CreatorClaimServiceTest {
     owner.setEmailVerified(true);
   }
   void locked() { when(creators.findLockedById(creator.getId())).thenReturn(Optional.of(creator)); }
-  ClaimRequest request() { return new ClaimRequest(List.of("https://example.test/proof"), "My channel"); }
+  ClaimRequest request() { return new ClaimRequest(List.of("https://example.test/proof"), "My channel", null); }
 
-  @Test void submissionStaysPublicAndAuditsWithoutEvidence() {
+  @Test
+  @DisplayName("claimCreatorProfile UTCID01 [N]: Valid claim remains pending and records audit")
+  void submissionWithValidEvidenceStaysPublicAndAudits() {
     verified(); locked();
     when(claims.saveAndFlush(any())).thenAnswer(i -> {
       CreatorClaim c = i.getArgument(0); c.setId(UUID.randomUUID()); return c;
@@ -72,11 +74,14 @@ class CreatorClaimServiceTest {
         eq(Map.of("status", "PENDING", "creatorId", creator.getId(), "claimantId", owner.getId())), anyString());
   }
 
-  @Test void unverifiedEmailCannotClaim() {
+  @Test
+  @DisplayName("claimCreatorProfile UTCID05 [A]: Unverified creator is forbidden without saving a claim")
+  void unverifiedEmailCannotClaim() {
     owner.setEmailVerified(false);
     when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
     assertThatThrownBy(() -> service.claim(creator.getId(), request())).isInstanceOf(ForbiddenException.class);
     verify(claims, never()).saveAndFlush(any());
+    verifyNoInteractions(audit);
   }
 
   @Test void inactiveCreatorCannotClaim() {
@@ -92,7 +97,8 @@ class CreatorClaimServiceTest {
     CreatorClaim competing = CreatorClaim.builder().id(UUID.randomUUID()).creator(creator).claimant(owner).status(CreatorClaimStatus.PENDING).build();
     when(claims.findById(claim.getId())).thenReturn(Optional.of(claim));
     when(claims.findByCreatorIdAndStatus(creator.getId(), CreatorClaimStatus.PENDING)).thenReturn(List.of(claim, competing));
-    service.review(claim.getId(), new ReviewRequest(Decision.APPROVED, "Checked ownership"));
+    service.review(claim.getId(), new ReviewRequest(
+        Decision.APPROVED, "Checked ownership", ReviewEvidenceType.SCREEN_SHARE, "Matched the channel ID"));
     assertThat(creator.getOwner()).isSameAs(owner);
     assertThat(creator.getSourceType()).isEqualTo(CreatorSourceType.AUTHORIZED);
     assertThat(creator.getAuthorizedAt()).isNotNull();
@@ -109,10 +115,24 @@ class CreatorClaimServiceTest {
     locked();
     CreatorClaim claim = CreatorClaim.builder().id(UUID.randomUUID()).creator(creator).claimant(owner).status(CreatorClaimStatus.PENDING).build();
     when(claims.findById(claim.getId())).thenReturn(Optional.of(claim));
-    assertThat(service.review(claim.getId(), new ReviewRequest(Decision.REJECTED, "Insufficient proof")).status())
+    assertThat(service.review(claim.getId(), new ReviewRequest(
+        Decision.REJECTED, "Insufficient proof", ReviewEvidenceType.NO_VALID_EVIDENCE,
+        "Could not establish management access")).status())
         .isEqualTo(CreatorClaimStatus.REJECTED);
     assertThat(creator.getSourceType()).isEqualTo(CreatorSourceType.PUBLIC);
     assertThat(creator.getOwner()).isNull();
+  }
+
+  @Test void roleChangeDoesNotAllowAClaimantToReviewTheirOwnClaim() {
+    owner.setRole(Role.DATA_MANAGER);
+    login(owner);
+    CreatorClaim claim = CreatorClaim.builder().id(UUID.randomUUID()).creator(creator)
+        .claimant(owner).status(CreatorClaimStatus.PENDING).build();
+    when(claims.findById(claim.getId())).thenReturn(Optional.of(claim));
+    assertThatThrownBy(() -> service.review(claim.getId(), new ReviewRequest(
+        Decision.REJECTED, "Reason", ReviewEvidenceType.NO_VALID_EVIDENCE, "Reviewed the submitted link")))
+        .isInstanceOf(ForbiddenException.class);
+    assertThat(claim.getStatus()).isEqualTo(CreatorClaimStatus.PENDING);
   }
 
 
@@ -134,6 +154,50 @@ class CreatorClaimServiceTest {
     login(User.builder().id(UUID.randomUUID()).role(Role.DATA_MANAGER).status(UserStatus.ACTIVE).build());
     assertThatThrownBy(()->service.detail(UUID.randomUUID())).isInstanceOf(NotFoundException.class);
     verifyNoInteractions(audit);verify(claims,never()).save(any());
+  }
+
+  @Test void claimWithoutApplicableInvitationSavesPendingClaimWithNullInvitation() {
+    verified();
+    locked();
+    when(claims.saveAndFlush(any())).thenAnswer(i -> {
+      CreatorClaim c = i.getArgument(0);
+      c.setId(UUID.randomUUID());
+      return c;
+    });
+
+    ClaimResponse response = service.claim(creator.getId(), request());
+
+    var captor = ArgumentCaptor.forClass(CreatorClaim.class);
+    verify(claims).saveAndFlush(captor.capture());
+    assertThat(captor.getValue().getInvitation()).isNull();
+    assertThat(response.status()).isEqualTo(CreatorClaimStatus.PENDING);
+  }
+
+  @Test void claimRejectsAlreadyAuthorizedOrLinkedChannel() {
+    verified();
+    creator.setSourceType(CreatorSourceType.AUTHORIZED);
+    creator.setMaster(CreatorMaster.builder().id(UUID.randomUUID()).build());
+    locked();
+
+    assertThatThrownBy(() -> service.claim(creator.getId(), request()))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            ex -> assertThat(ex.code()).isEqualTo(ErrorCode.CREATOR_ALREADY_LINKED));
+    verify(claims, never()).saveAndFlush(any());
+  }
+
+  @Test void claimRejectsDuplicatePendingClaimForSameClaimantAndChannel() {
+    verified();
+    locked();
+    when(claims.existsByCreatorIdAndClaimantIdAndStatus(
+            creator.getId(), owner.getId(), CreatorClaimStatus.PENDING))
+        .thenReturn(true);
+
+    assertThatThrownBy(() -> service.claim(creator.getId(), request()))
+        .isInstanceOfSatisfying(
+            ConflictException.class,
+            ex -> assertThat(ex.code()).isEqualTo(ErrorCode.CREATOR_CLAIM_CONFLICT));
+    verify(claims, never()).saveAndFlush(any());
   }
 
 }

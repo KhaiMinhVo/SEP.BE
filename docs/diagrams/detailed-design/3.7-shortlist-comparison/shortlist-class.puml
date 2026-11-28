@@ -1,0 +1,61 @@
+@startuml shortlist-class
+title WF-01 | Shortlist and Creator Comparison
+hide circle
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam classAttributeIconSize 0
+skinparam classBackgroundColor white
+skinparam noteBackgroundColor white
+top to bottom direction
+
+class ShortlistController <<controller>>
+interface ShortlistService <<interface>> {
+  + addCreatorToShortlist(campaignId : UUID, request : AddShortlistItemRequest) : ShortlistItemDto
+  + updateShortlistItem(campaignId : UUID, shortlistItemId : UUID, request : UpdateShortlistItemRequest) : ShortlistItemDto
+  + removeCreatorFromShortlist(campaignId : UUID, shortlistItemId : UUID) : void
+}
+class ShortlistServiceImpl <<service>>
+class ShortlistCompareService <<service>> {
+  + compare(campaignId : UUID, request : CompareDtos.Request) : CompareDtos.Response
+}
+interface ShortlistItemRepository <<repository>>
+interface PublicCreatorMetricRepository <<repository>> {
+  + latestForCreators(ids : Collection<UUID>) : List<PublicCreatorMetric>
+}
+class ShortlistItem <<entity>> {
+  - id : UUID
+  - priority : ShortlistPriority
+  - status : ShortlistStatus
+  - source : ShortlistSource
+  - recommendationRun : RecommendationRun
+  - note : String
+}
+class Campaign <<entity>>
+class Creator <<entity>>
+class RecommendationRun <<entity>>
+class PublicCreatorMetric <<entity>>
+
+ShortlistController ..> ShortlistService
+ShortlistController ..> ShortlistCompareService
+ShortlistServiceImpl ..|> ShortlistService
+ShortlistServiceImpl ..> ShortlistItemRepository
+ShortlistCompareService ..> ShortlistItemRepository
+ShortlistCompareService ..> PublicCreatorMetricRepository
+ShortlistItemRepository ..> ShortlistItem
+PublicCreatorMetricRepository ..> PublicCreatorMetric
+Campaign "1" -- "0..*" ShortlistItem : shortlist
+Creator "1" -- "0..*" ShortlistItem : saved channel
+RecommendationRun "0..1" -- "0..*" ShortlistItem : recommendation_run_id
+Creator "1" -- "0..*" PublicCreatorMetric : public snapshots
+
+note bottom of ShortlistItem
+  BR-50: UNIQUE (campaign_id, creator_id).
+  recommendation_run_id is nullable.
+end note
+note right of ShortlistCompareService
+  BR-49/51: compare 2-5 distinct channels
+  in the Brand's active Campaign Shortlist.
+end note
+@enduml

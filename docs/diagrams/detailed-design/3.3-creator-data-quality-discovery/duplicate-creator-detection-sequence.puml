@@ -1,0 +1,37 @@
+@startuml duplicate-creator-detection-sequence
+title Figure 4.3.3.2.4 Duplicate Creator Detection Sequence Diagram
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+hide footbox
+autonumber
+
+participant CreatorIngestionController as API
+participant CreatorIngestionService as Service
+participant CreatorRepository as Creators
+participant PublicCreatorMetricRepository as Metrics
+
+API -> Service : ingestCreatorData(request)
+activate Service
+Service -> Creators : acquireIdentityLock(platform + ":" + externalId)
+Service -> Creators : findLockedByPlatformAndExternalId(platform, externalId)
+Creators --> Service : matching Creator or empty
+alt <U+005B>same platform and external ID already exist<U+005D>
+  Service -> Service : reuse existing Creator; preserve ownership
+else <U+005B>no matching identity<U+005D>
+  Service -> Service : build PUBLIC Creator
+end
+Service -> Creators : save(creator)
+opt <U+005B>crawlRunId supplied<U+005D>
+  Service -> Metrics : existsByCreatorIdAndCrawlRunId(creatorId, crawlRunId)
+  Metrics --> Service : existing snapshot?
+end
+alt <U+005B>snapshot for this run already exists<U+005D>
+  Service --> API : SKIPPED; do not write the snapshot again
+else <U+005B>new run or no crawlRunId<U+005D>
+  ref over Service, Metrics : Continue metric ingestion in Figures 4.3.3.2.1–2
+  Service --> API : ingestion result
+end
+deactivate Service
+@enduml

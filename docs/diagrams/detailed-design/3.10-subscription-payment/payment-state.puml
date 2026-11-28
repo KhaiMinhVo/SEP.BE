@@ -1,0 +1,20 @@
+@startuml payment-state
+title WF-06 | PaymentStatus
+hide empty description
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+
+[*] --> PENDING : create paid checkout / persist payment
+PENDING --> PAID : apply [verified paid outcome, subscription pending (BR-66)]\n/ activate subscription
+PENDING --> FAILED : apply [verified final failure or checkout expired]\n/ cancel pending subscription
+PAID --> REFUNDED : complete [refund confirmed] / record refund
+FAILED --> [*]
+REFUNDED --> [*]
+
+note right of PAID
+  Matching callback replay returns the current result (BR-67).
+  The payment remains PAID while the refund is being reviewed or processed.
+end note
+@enduml

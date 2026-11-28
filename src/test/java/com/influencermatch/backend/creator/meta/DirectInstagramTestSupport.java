@@ -22,7 +22,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 @TestPropertySource(
     properties = {
       "application.meta.enabled=false",
-      "application.instagram.enabled=true",
+      "application.instagram-unified.enabled=false",
       "application.instagram.app-id=789",
       "application.instagram.app-secret=private-ig-secret",
       "application.instagram.graph-api-version=v26.0",

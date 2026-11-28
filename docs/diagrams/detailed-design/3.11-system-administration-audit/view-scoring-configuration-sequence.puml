@@ -1,0 +1,33 @@
+@startuml view-scoring-configuration-sequence
+title View Scoring Configuration
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 230
+
+actor "Data Manager" as DM
+participant "Web Client" as Web
+participant "Spring Security" as Security
+participant AdminRecommendationConfigController as API
+participant RecommendationConfigResponseDto as DTO
+
+DM -> Web : open scoring configuration
+Web -> Security : GET /api/v1/admin/recommendation-config
+activate Security
+alt <U+005B>unauthenticated, or missing DATA_MANAGER role or required authority<U+005D>
+  Security --> Web : 401 or 403
+else <U+005B>DATA_MANAGER and MANAGE_RECOMMENDATION_CONFIG (BR-70)<U+005D>
+  Security -> API : getConfiguration()
+  activate API
+  API -> DTO : createCurrent()
+  DTO --> API : active Four-Memory configuration
+  API --> Security : 200 OK and configuration DTO
+  deactivate API
+  Security --> Web : response
+  Web --> DM : display calibration and scoring parameters
+end
+deactivate Security
+@enduml

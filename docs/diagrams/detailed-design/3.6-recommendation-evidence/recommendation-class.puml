@@ -1,0 +1,79 @@
+@startuml recommendation-class
+title AI Recommendation and Evidence | Class Diagram
+hide circle
+skinparam monochrome true
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam classBackgroundColor white
+skinparam noteBackgroundColor white
+skinparam defaultFontName Arial
+top to bottom direction
+
+class AiRecommendationController <<controller>>
+class AiRecommendationService <<service>> {
+  - fourMemoryTopsisEngine : FourMemoryTopsisEngine
+  - mmrReranker : MmrReranker
+  + recommendKocs(id : UUID, limit : int, source : CandidateSource, mode : DisplayMode, creatorIds : List<UUID>, idempotencyKey : String, revision : String) : RecommendationResponseDto
+}
+class FourMemoryTopsisEngine {
+  - fourMemoryScorer : FourMemoryScorer
+  - criticCalculator : CriticWeightCalculator
+  - weightBlender : DynamicWeightBlender
+  - topsisEngine : TopsisRankingEngine
+  + toScoreBreakdownDto(evaluated : EvaluatedCandidate) : ScoreBreakdownDto
+}
+class Phase0Orchestrator
+class FourMemoryScorer
+class M1HistoricalScorer
+class LearnedM4Evaluator
+class CriticWeightCalculator {
+  + calculate(matrix : List<double[]>) : Optional<double[]>
+}
+class DynamicWeightBlender {
+  + blend(objective : String, criticWeightsOpt : Optional<double[]>) : EngineWeights
+}
+class TopsisRankingEngine {
+  + compute(scores : CandidateMemoryScores, weights : EngineWeights) : TopsisResult
+}
+class MmrReranker {
+  + rerank(candidates : List<T>, k : int, lambda : double) : List<T>
+}
+interface RecommendationRunRepository <<repository>>
+class RecommendationRun <<entity>> {
+  - campaignContextId : UUID
+  - brandContextId : UUID
+  - embeddingJobId : UUID
+  - candidateSource : String
+  - scoringPolicyVersion : String
+  - scoringSnapshot : JsonNode
+}
+class Campaign <<entity>>
+
+AiRecommendationController ..> AiRecommendationService
+AiRecommendationService ..> Phase0Orchestrator
+AiRecommendationService ..> FourMemoryTopsisEngine
+AiRecommendationService ..> MmrReranker
+AiRecommendationService ..> RecommendationRunRepository
+RecommendationRunRepository ..> RecommendationRun
+Campaign "1" -- "0..*" RecommendationRun
+FourMemoryTopsisEngine "1" *-- "1" FourMemoryScorer
+FourMemoryTopsisEngine "1" *-- "1" CriticWeightCalculator
+FourMemoryTopsisEngine "1" *-- "1" DynamicWeightBlender
+FourMemoryTopsisEngine "1" *-- "1" TopsisRankingEngine
+FourMemoryScorer ..> M1HistoricalScorer
+FourMemoryScorer ..> LearnedM4Evaluator
+
+note left of AiRecommendationService
+  BR-40: select eligible Campaign Shortlist entries.
+  BR-47/48/71: enforce quota and idempotency.
+end note
+note bottom of FourMemoryTopsisEngine
+  BR-41/42: score applicable memories and blend weights.
+  BR-44/45: expose separate Match Score, confidence and score breakdown.
+end note
+note right of RecommendationRun
+  BR-46: persist the scoring policy, provenance
+  and the snapshot used for the returned run.
+end note
+@enduml

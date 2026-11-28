@@ -98,6 +98,7 @@ class CreatorAccountLinkServiceTest {
         .build();
 
     when(userRepository.findById(userId)).thenReturn(Optional.of(mockUser));
+    when(userRepository.findLockedById(userId)).thenReturn(Optional.of(mockUser));
     when(creatorMasterRepository.findByUserId(userId)).thenReturn(Optional.of(mockMaster));
     when(tokenEncryptionService.encrypt(any())).thenReturn("enc_token");
   }

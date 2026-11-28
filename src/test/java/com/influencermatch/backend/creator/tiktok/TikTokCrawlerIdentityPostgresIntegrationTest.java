@@ -5,7 +5,6 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 
 import com.influencermatch.backend.creator.dto.CreatorIngestionRequest;
-import com.influencermatch.backend.creator.enums.CreatorSourceType;
 import com.influencermatch.backend.creator.model.*;
 import com.influencermatch.backend.creator.service.CreatorIngestionService;
 import com.influencermatch.backend.security.permission.*;
@@ -36,43 +35,69 @@ class TikTokCrawlerIdentityPostgresIntegrationTest extends TikTokTestSupport {
             });
   }
 
-  String newId() {
-    return "9" + channel.getExternalId();
+  @Test
+  void standaloneWithoutCrawlerProofKeepsAuthorizationSeparateFromOwnership() throws Exception {
+    String before = businessRows();
+    long bindingsBefore =
+        jdbc.queryForObject("select count(*) from tiktok_account_binding", Long.class);
+    var data = callback(startWithoutTarget(), 200).path("data");
+    assertThat(data.path("status").asText()).isEqualTo("READY");
+    assertThat(row(UUID.fromString(data.path("sessionId").asText())))
+        .contains("UNMATCHED", "real_username");
+    assertThat(businessRows()).isEqualTo(before);
+    verify(crawler).resolveTikTokIdentity("real_username", null);
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from tiktok_account_binding", Long.class))
+        .isEqualTo(bindingsBefore);
   }
 
-  @Test
-  void createsMinimalProfileAndLaterIngestionUpdatesSameUuid() throws Exception {
-    var data = callback(start(Map.of()), 200).path("data");
-    UUID id = UUID.fromString(data.path("creatorId").asText());
+  private String unusedAuthorId() {
+    return Long.toUnsignedString(UUID.randomUUID().getMostSignificantBits());
+  }
+
+  private com.influencermatch.backend.creator.dto.CrawlerResolveAuthorResponse discovered(
+      String authorId, String username) {
+    var result = resolved(authorId, username);
+    result.setExpectedExternalId(null);
+    result.setIsMatched(null);
+    return result;
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void standaloneCreatesOrReusesCanonicalChannelAndCanRefreshVerification(boolean exists)
+      throws Exception {
+    String authorId = exists ? channel.getExternalId() : unusedAuthorId();
+    when(crawler.resolveTikTokIdentity(eq("real_username"), isNull()))
+        .thenReturn(discovered(authorId, "real_username"));
+    var first = startWithoutTarget();
+    var data = callback(first, 200).path("data");
+    var linked = creators.findByPlatformAndExternalId("TIKTOK", authorId).orElseThrow();
     assertThat(data.path("status").asText()).isEqualTo("AUTHORIZED");
-    var created = creators.findById(id).orElseThrow();
-    assertThat(created.getExternalId()).isEqualTo(newId());
-    assertThat(created.getIsStableId()).isTrue();
-    assertThat(created.getProfileUrl()).isEqualTo("https://www.tiktok.com/@real_username");
-    assertThat(created.getSourceType()).isEqualTo(CreatorSourceType.AUTHORIZED);
-    assertThat(
-            jdbc.queryForObject(
-                "select count(*) from public_creator_metric where creator_id=?", Long.class, id))
-        .isZero();
-    assertThat(
-            jdbc.queryForObject(
-                "select embedding is null from creator where id=?", Boolean.class, id))
-        .isTrue();
-    var profile = call(actor, get("/creators/" + id), null, 200).path("data");
-    assertThat(profile.path("verifiedByInfluencerMatch").asBoolean()).isTrue();
-    assertThat(profile.path("followers").isNull() || profile.path("followers").isMissingNode())
-        .isTrue();
-    ingest(newId(), "renamed_creator");
-    assertThat(creators.findByPlatformAndExternalId("TIKTOK", newId()).orElseThrow().getId())
-        .isEqualTo(id);
-    assertThat(creators.findById(id).orElseThrow().getSourceType())
-        .isEqualTo(CreatorSourceType.AUTHORIZED);
-    assertThat(
-            jdbc.queryForObject(
-                "select count(*) from creator where platform='TIKTOK' and external_id=?",
-                Long.class,
-                newId()))
-        .isEqualTo(1);
+    assertThat(data.path("creatorId").asText()).isEqualTo(linked.getId().toString());
+    if (exists) assertThat(linked.getId()).isEqualTo(channel.getId());
+    assertThat(linked.getIsStableId()).isTrue();
+    assertThat(linked.getUserName()).isEqualTo("real_username");
+    assertThat(row(first.id())).contains("COMPLETED", "MATCHED").doesNotContain("real_username");
+    assertThat(call(actor, get("/creators/portal/accounts"), null, 200).path("data"))
+        .anySatisfy(account -> {
+          assertThat(account.path("id").asText()).isEqualTo(linked.getId().toString());
+          assertThat(account.path("verification").path("environment").asText()).isEqualTo("SANDBOX");
+        });
+    callback(first, 409);
+    assertThat(callback(startWithoutTarget(), 200).path("data").path("creatorId").asText())
+        .isEqualTo(linked.getId().toString());
+    assertThat(jdbc.queryForObject("select count(*) from tiktok_account_binding where creator_id=?",
+        Long.class, linked.getId())).isEqualTo(1);
+    assertThat(jdbc.queryForObject(
+        "select count(*) from creator_account_verification where creator_id=? and status='ACTIVE'",
+        Long.class, linked.getId())).isEqualTo(1);
+    String anotherId = unusedAuthorId();
+    when(crawler.resolveTikTokIdentity(eq("real_username"), isNull()))
+        .thenReturn(discovered(anotherId, "real_username"));
+    callback(startWithoutTarget(), 409);
+    assertThat(creators.findByPlatformAndExternalId("TIKTOK", anotherId)).isEmpty();
   }
 
   void ingest(String id, String name) {
@@ -96,8 +121,8 @@ class TikTokCrawlerIdentityPostgresIntegrationTest extends TikTokTestSupport {
 
   @Test
   void renamedChannelUsesAuthorIdRatherThanStoredUsername() throws Exception {
-    when(crawler.resolveTikTokIdentity(anyString()))
-        .thenAnswer(i -> resolved(channel.getExternalId(), i.getArgument(0)));
+    when(crawler.resolveTikTokIdentity(anyString(), anyString()))
+        .thenAnswer(i -> resolved(i.getArgument(1), i.getArgument(0)));
     var data = callback(start(Map.of()), 200).path("data");
     assertThat(data.path("creatorId").asText()).isEqualTo(channel.getId().toString());
     assertThat(creators.findById(channel.getId()).orElseThrow().getUserName())
@@ -107,31 +132,25 @@ class TikTokCrawlerIdentityPostgresIntegrationTest extends TikTokTestSupport {
   }
 
   @Test
-  void unstableStoredIdIsRejectedAndAudited() throws Exception {
+  void unstableStoredIdRequiresManualResolutionWithoutOwnershipChanges() throws Exception {
     channel.setIsStableId(false);
     creators.saveAndFlush(channel);
-    when(crawler.resolveTikTokIdentity(anyString()))
-        .thenAnswer(i -> resolved(channel.getExternalId(), i.getArgument(0)));
     String before = businessRows();
-    callback(start(Map.of()), 409);
+    var s = start(Map.of());
+    assertThat(callback(s, 200).path("data").path("status").asText()).isEqualTo("READY");
     assertThat(businessRows()).isEqualTo(before);
-    assertThat(
-            jdbc.queryForObject(
-                "select count(*) from audit_log where entity_id=? and user_id=? and"
-                    + " action='REJECT_CREATOR_INVITATION_OR_OWNERSHIP'",
-                Long.class,
-                channel.getId(),
-                actor.getId()))
-        .isEqualTo(1);
+    verifyNoInteractions(crawler);
   }
 
   @Test
   void invitationTargetMismatchCannotCreateAnotherChannel() throws Exception {
     var inv = invitation(actor.getEmail(), now.plusSeconds(600));
     String before = businessRows();
+    when(crawler.resolveTikTokIdentity(anyString(), anyString()))
+        .thenAnswer(i -> resolved("9" + i.getArgument(1), i.getArgument(0)));
     var s = start(Map.of("invitationToken", "invitation-" + inv.getId()));
     assertThat(callback(s, 200).path("data").path("status").asText()).isEqualTo("READY");
-    assertThat(row(s.id())).contains("TARGET_MISMATCH");
+    assertThat(row(s.id())).contains("UNMATCHED");
     assertThat(businessRows()).isEqualTo(before);
     assertThat(invitations.findById(inv.getId()).orElseThrow().getStatus()).isEqualTo("PENDING");
   }
@@ -141,11 +160,11 @@ class TikTokCrawlerIdentityPostgresIntegrationTest extends TikTokTestSupport {
   void resolverFailuresOrChangedSessionNeverCreateChannel(String change) throws Exception {
     var s = start(Map.of());
     String before = businessRows();
-    when(crawler.resolveTikTokIdentity(anyString()))
+    when(crawler.resolveTikTokIdentity(anyString(), anyString()))
         .thenAnswer(
             i -> {
               assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-              var result = resolved(newId(), i.getArgument(0));
+              var result = resolved(i.getArgument(1), i.getArgument(0));
               switch (change) {
                 case "null" -> {
                   return null;
@@ -169,15 +188,13 @@ class TikTokCrawlerIdentityPostgresIntegrationTest extends TikTokTestSupport {
               return result;
             });
     try {
-      int expected =
-          Set.of("permission", "version").contains(change)
-              ? 403
-              : change.equals("expired") ? 400 : 502;
+      int expected = Set.of("permission", "version").contains(change)
+          ? 403 : change.equals("expired") ? 400 : 200;
       callback(s, expected);
-      assertThat(creators.findByPlatformAndExternalId("TIKTOK", newId())).isEmpty();
+      assertThat(creators.findByPlatformAndExternalId("TIKTOK", "9" + channel.getExternalId())).isEmpty();
       if (!change.equals("version")) assertThat(businessRows()).isEqualTo(before);
       callback(s, change.equals("expired") ? 400 : 409);
-      verify(crawler, times(1)).resolveTikTokIdentity(anyString());
+      verify(crawler, times(1)).resolveTikTokIdentity(anyString(), anyString());
     } finally {
       jdbc.update(
           "delete from role_permission_override where role='CREATOR' and"
@@ -185,9 +202,13 @@ class TikTokCrawlerIdentityPostgresIntegrationTest extends TikTokTestSupport {
     }
   }
 
-  @Test
-  void auditFailureRollsBackNewChannelAndMaster() throws Exception {
-    var s = start(Map.of());
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void auditFailureRollsBackChannelOwnershipAndMaster(boolean standalone) throws Exception {
+    String authorId = standalone ? unusedAuthorId() : channel.getExternalId();
+    if (standalone) when(crawler.resolveTikTokIdentity(eq("real_username"), isNull()))
+        .thenReturn(discovered(authorId, "real_username"));
+    var s = standalone ? startWithoutTarget() : start(Map.of());
     String before = businessRows();
     String fn = "tt_new_fail_" + UUID.randomUUID().toString().replace("-", "");
     jdbc.execute(
@@ -205,7 +226,8 @@ class TikTokCrawlerIdentityPostgresIntegrationTest extends TikTokTestSupport {
     try {
       callback(s, 500);
       assertThat(businessRows()).isEqualTo(before);
-      assertThat(creators.findByPlatformAndExternalId("TIKTOK", newId())).isEmpty();
+      assertThat(creators.findById(channel.getId()).orElseThrow().getMaster()).isNull();
+      if (standalone) assertThat(creators.findByPlatformAndExternalId("TIKTOK", authorId)).isEmpty();
       assertThat(row(s.id())).contains("FAILED");
     } finally {
       jdbc.execute("drop trigger " + fn + " on creator_identity_audit");
@@ -214,13 +236,13 @@ class TikTokCrawlerIdentityPostgresIntegrationTest extends TikTokTestSupport {
   }
 
   @Test
-  void observationExpiringWhileWaitingForLocksCannotCreateChannel() throws Exception {
+  void observationExpiringWhileWaitingForLocksCannotGrantOwnership() throws Exception {
     var s = start(Map.of());
     var resolved = new java.util.concurrent.atomic.AtomicBoolean();
-    when(crawler.resolveTikTokIdentity(anyString()))
+    when(crawler.resolveTikTokIdentity(anyString(), anyString()))
         .thenAnswer(
             i -> {
-              var result = resolved(newId(), i.getArgument(0));
+              var result = resolved(i.getArgument(1), i.getArgument(0));
               resolved.set(true);
               return result;
             });
@@ -232,27 +254,30 @@ class TikTokCrawlerIdentityPostgresIntegrationTest extends TikTokTestSupport {
                     : now);
     assertThat(callback(s, 502).path("code").asText())
         .isEqualTo("TIKTOK_IDENTITY_RESOLUTION_FAILED");
-    assertThat(creators.findByPlatformAndExternalId("TIKTOK", newId())).isEmpty();
+    assertThat(creators.findById(channel.getId()).orElseThrow().getMaster()).isNull();
   }
 
-  @Test
-  void twoCreatorsRacingToCreateAbsentChannelHaveOnlyOneOwner() throws Exception {
-    var first = start(Map.of());
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void twoCreatorsRacingForOneChannelHaveOnlyOneOwner(boolean standalone) throws Exception {
+    String authorId = standalone ? unusedAuthorId() : channel.getExternalId();
+    var first = standalone ? startWithoutTarget() : start(Map.of());
     var original = actor;
     actor = other;
     Started second;
     try {
-      second = start(Map.of());
+      second = standalone ? startWithoutTarget() : start(Map.of());
     } finally {
       actor = original;
     }
     var both = new CountDownLatch(2);
-    when(crawler.resolveTikTokIdentity(anyString()))
+    when(crawler.resolveTikTokIdentity(anyString(), nullable(String.class)))
         .thenAnswer(
             i -> {
               both.countDown();
               assertThat(both.await(20, TimeUnit.SECONDS)).isTrue();
-              return resolved(newId(), i.getArgument(0));
+              return standalone ? discovered(authorId, i.getArgument(0))
+                  : resolved(i.getArgument(1), i.getArgument(0));
             });
     var pool = Executors.newFixedThreadPool(2);
     try {
@@ -280,7 +305,7 @@ class TikTokCrawlerIdentityPostgresIntegrationTest extends TikTokTestSupport {
                       .getStatus());
       assertThat(List.of(a.get(20, TimeUnit.SECONDS), b.get(20, TimeUnit.SECONDS)))
           .containsExactlyInAnyOrder(200, 409);
-      var created = creators.findByPlatformAndExternalId("TIKTOK", newId()).orElseThrow();
+      var created = creators.findByPlatformAndExternalId("TIKTOK", authorId).orElseThrow();
       assertThat(
               jdbc.queryForObject(
                   "select count(*) from tiktok_account_binding where creator_id=?",
@@ -299,24 +324,24 @@ class TikTokCrawlerIdentityPostgresIntegrationTest extends TikTokTestSupport {
   }
 
   @Test
-  void ingestionAndOauthRacingToCreateOneIdKeepSingleChannel() throws Exception {
+  void ingestionAndOauthRacingForOneIdKeepSingleChannel() throws Exception {
     var entered = new CountDownLatch(1);
     var release = new CountDownLatch(1);
-    when(crawler.resolveTikTokIdentity(anyString()))
+    when(crawler.resolveTikTokIdentity(anyString(), anyString()))
         .thenAnswer(
             i -> {
               assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
               entered.countDown();
               assertThat(release.await(20, TimeUnit.SECONDS)).isTrue();
-              return resolved(newId(), i.getArgument(0));
+              return resolved(i.getArgument(1), i.getArgument(0));
             });
     var s = start(Map.of());
     var pool = Executors.newSingleThreadExecutor();
     try {
       var oauth = pool.submit(() -> callback(s, 200));
       assertThat(entered.await(20, TimeUnit.SECONDS)).isTrue();
-      ingest(newId(), "from_crawler");
-      UUID id = creators.findByPlatformAndExternalId("TIKTOK", newId()).orElseThrow().getId();
+      ingest(channel.getExternalId(), "from_crawler");
+      UUID id = channel.getId();
       release.countDown();
       assertThat(oauth.get(20, TimeUnit.SECONDS).path("data").path("creatorId").asText())
           .isEqualTo(id.toString());
@@ -324,7 +349,7 @@ class TikTokCrawlerIdentityPostgresIntegrationTest extends TikTokTestSupport {
               jdbc.queryForObject(
                   "select count(*) from creator where platform='TIKTOK' and external_id=?",
                   Long.class,
-                  newId()))
+                  channel.getExternalId()))
           .isEqualTo(1);
       assertThat(
               jdbc.queryForObject(

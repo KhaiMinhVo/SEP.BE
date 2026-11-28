@@ -67,6 +67,12 @@ class ComparePaymentPostgresIntegrationTest {
       .productService("Product").objective(CampaignObjective.AWARENESS).status(CampaignStatus.DRAFT).build()); }
   void add(Campaign c,Creator creator,User u) { shortlist.saveAndFlush(ShortlistItem.builder().campaign(c).creator(creator)
       .user(u).priority(ShortlistPriority.HIGH).note("My note").addedAt(LocalDateTime.now()).build()); }
+  void evaluatedShortlist(Campaign c, User u, List<UUID> creatorIds) throws Exception {
+    for (UUID creatorId : creatorIds)
+      jdbc.update("insert into shortlist_item(id,campaign_id,creator_id,user_id,priority,added_at,status,source) values(gen_random_uuid(),?,?,?,'MEDIUM',now(),'SAVED','MANUAL_DISCOVERY') on conflict(campaign_id,creator_id) do update set status='SAVED'", c.getId(), creatorId, u.getId());
+    var snapshot = json.writeValueAsString(Map.of("candidates", creatorIds.stream().map(id -> Map.of("creatorId", id, "recommendationTier", "HISTORY_SUPPORTED")).toList()));
+    jdbc.update("insert into recommendation_run(id,campaign_id,brand_profile_id,context_version,status,candidates_count,created_at,scoring_snapshot) values(gen_random_uuid(),?,?,1,'COMPLETED',?,now(),?::jsonb)", c.getId(), c.getBrandProfile().getId(), creatorIds.size(), snapshot);
+  }
   JsonNode call(User u,MockHttpServletRequestBuilder req,Object body,int status) throws Exception {
     if(u!=null)req.header("Authorization","Bearer "+jwt.generateToken(u));
     if(body!=null)req.contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body));
@@ -112,6 +118,7 @@ class ComparePaymentPostgresIntegrationTest {
 
   @Test void anotherBrandCannotReadOrMutateShortlistAndRelationships() throws Exception {
     var owner=user(Role.BRAND);var attacker=user(Role.BRAND);var c=campaign(brand(owner));var a=creator();var b=creator();
+    evaluatedShortlist(c, owner, List.of(a.getId()));
     var shortItem=call(owner,post("/campaigns/"+c.getId()+"/shortlist"),Map.of("creatorId",a.getId(),"priority","HIGH"),200);
     var relationship=call(owner,post("/campaigns/"+c.getId()+"/relationships"),Map.of("creatorId",a.getId()),200);
     String base="/campaigns/"+c.getId();
@@ -134,6 +141,7 @@ class ComparePaymentPostgresIntegrationTest {
 
   @Test void owningBothCampaignsDoesNotPermitWrongNestedCampaignPath() throws Exception {
     var owner=user(Role.BRAND);var brand=brand(owner);var c=campaign(brand);var other=campaign(brand);var a=creator();
+    evaluatedShortlist(c, owner, List.of(a.getId()));
     var s=call(owner,post("/campaigns/"+c.getId()+"/shortlist"),Map.of("creatorId",a.getId(),"priority","HIGH"),200);
     var r=call(owner,post("/campaigns/"+c.getId()+"/relationships"),Map.of("creatorId",a.getId(),"shortlistItemId",s.path("id").asText()),200);
     String wrong="/campaigns/"+other.getId();
@@ -156,6 +164,8 @@ class ComparePaymentPostgresIntegrationTest {
   @Test void relationshipCannotAttachForeignOrMismatchedShortlistItem() throws Exception {
     var owner=user(Role.BRAND);var c=campaign(brand(owner));var a=creator();var b=creator();
     var other=user(Role.BRAND);var foreign=campaign(brand(other));
+    evaluatedShortlist(c, owner, List.of(a.getId(), b.getId()));
+    evaluatedShortlist(foreign, other, List.of(a.getId()));
     var s=call(owner,post("/campaigns/"+c.getId()+"/shortlist"),Map.of("creatorId",a.getId(),"priority","HIGH"),200);
     var f=call(other,post("/campaigns/"+foreign.getId()+"/shortlist"),Map.of("creatorId",a.getId(),"priority","HIGH"),200);
     String path="/campaigns/"+c.getId()+"/relationships";
@@ -169,6 +179,8 @@ class ComparePaymentPostgresIntegrationTest {
     var owner=user(Role.BRAND);var attacker=user(Role.BRAND);var c=campaign(brand(owner));var a=creator();
     var s=shortlist.saveAndFlush(ShortlistItem.builder().campaign(c).creator(a).user(attacker)
         .priority(ShortlistPriority.HIGH).addedAt(LocalDateTime.now()).build());
+    var snapshot = json.writeValueAsString(Map.of("candidates", List.of(Map.of("creatorId", a.getId(), "recommendationTier", "HISTORY_SUPPORTED"))));
+    jdbc.update("insert into recommendation_run(id,campaign_id,brand_profile_id,context_version,status,candidates_count,created_at,scoring_snapshot) values(gen_random_uuid(),?,?,1,'COMPLETED',1,now(),?::jsonb)", c.getId(), c.getBrandProfile().getId(), snapshot);
     String base="/campaigns/"+c.getId();
     call(attacker,delete(base+"/shortlist/"+s.getId()),null,404);
     assertThat(call(owner,get(base+"/shortlist"),null,200).path("content").size()).isZero();

@@ -202,4 +202,104 @@ class BrandServiceTest {
     assertThat(page.totalElements()).isEqualTo(1);
     verify(profiles, never()).findAll(any(org.springframework.data.domain.Pageable.class));
   }
+
+  private BrandProfile completeReadyProfile(String status) {
+    return BrandProfile.builder()
+        .id(UUID.randomUUID())
+        .user(owner)
+        .businessName("Acme Studio")
+        .phoneNumber("0901234567")
+        .industry("Beauty")
+        .brandTone("Friendly")
+        .productCategories(List.of("Skincare"))
+        .targetAudiences(List.of("Gen Z"))
+        .preferredPlatforms(List.of("TIKTOK"))
+        .onboardingStatus(status)
+        .profileRevision(2L)
+        .build();
+  }
+
+  @Test
+  @DisplayName("completeBrandProfile UTCID01 [N]: Valid incomplete profile becomes COMPLETED and increments revision")
+  void completeBrandProfile_validMarksCompletedAndIncrementsRevision() {
+    var p = completeReadyProfile("IN_PROGRESS");
+    var c = context(p);
+    when(profiles.findByUserId(owner.getId())).thenReturn(Optional.of(p));
+    when(profiles.findById(p.getId())).thenReturn(Optional.of(p));
+    when(contexts.findByBrandProfileId(p.getId())).thenReturn(Optional.of(c));
+
+    var res = service.complete(
+        auth, com.influencermatch.backend.brand.service.BrandRevision.tag(p.getId(), 2L));
+
+    assertThat(res.onboardingStatus()).isEqualTo("COMPLETED");
+    assertThat(res.profileRevision()).isEqualTo(3L);
+    assertThat(res.onboardingCompletedAt()).isNotNull();
+    verify(profiles).save(p);
+  }
+
+  @Test
+  @DisplayName("completeBrandProfile UTCID02 [B]: Boundary single item in each required list succeeds")
+  void completeBrandProfile_singleItemListsSucceed() {
+    var p = completeReadyProfile("DRAFT");
+    var c = context(p);
+    when(profiles.findByUserId(owner.getId())).thenReturn(Optional.of(p));
+    when(profiles.findById(p.getId())).thenReturn(Optional.of(p));
+    when(contexts.findByBrandProfileId(p.getId())).thenReturn(Optional.of(c));
+
+    var res = service.complete(
+        auth, com.influencermatch.backend.brand.service.BrandRevision.tag(p.getId(), 2L));
+
+    assertThat(res.onboardingStatus()).isEqualTo("COMPLETED");
+    assertThat(res.productCategories()).hasSize(1);
+    assertThat(res.targetAudiences()).hasSize(1);
+    assertThat(res.preferredPlatforms()).hasSize(1);
+  }
+
+  @Test
+  @DisplayName("completeBrandProfile UTCID03 [A]: Empty productCategories throws ProfileIncompleteException")
+  void completeBrandProfile_emptyProductCategoriesThrowsProfileIncomplete() {
+    var p = completeReadyProfile("IN_PROGRESS");
+    p.setProductCategories(List.of());
+    when(profiles.findByUserId(owner.getId())).thenReturn(Optional.of(p));
+    when(profiles.findById(p.getId())).thenReturn(Optional.of(p));
+
+    assertThatThrownBy(() -> service.complete(
+        auth, com.influencermatch.backend.brand.service.BrandRevision.tag(p.getId(), 2L)))
+        .isInstanceOfSatisfying(
+            ProfileIncompleteException.class,
+            ex -> assertThat(ex.fields()).containsKey("productCategories"));
+    verify(profiles, never()).save(any());
+  }
+
+  @Test
+  @DisplayName("completeBrandProfile UTCID04 [A]: Stale revision header throws BRAND_REVISION_CONFLICT")
+  void completeBrandProfile_staleRevisionThrowsConflict() {
+    var p = completeReadyProfile("IN_PROGRESS");
+    when(profiles.findByUserId(owner.getId())).thenReturn(Optional.of(p));
+    when(profiles.findById(p.getId())).thenReturn(Optional.of(p));
+
+    assertThatThrownBy(() -> service.complete(
+        auth, com.influencermatch.backend.brand.service.BrandRevision.tag(p.getId(), 1L)))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            ex -> assertThat(ex.code()).isEqualTo(ErrorCode.BRAND_REVISION_CONFLICT));
+    verify(profiles, never()).save(any());
+  }
+
+  @Test
+  @DisplayName("completeBrandProfile UTCID05 [N]: Already COMPLETED profile returns without revision increment or save")
+  void completeBrandProfile_alreadyCompletedIsIdempotent() {
+    var p = completeReadyProfile("COMPLETED");
+    var c = context(p);
+    when(profiles.findByUserId(owner.getId())).thenReturn(Optional.of(p));
+    when(profiles.findById(p.getId())).thenReturn(Optional.of(p));
+    when(contexts.findByBrandProfileId(p.getId())).thenReturn(Optional.of(c));
+
+    var res = service.complete(
+        auth, com.influencermatch.backend.brand.service.BrandRevision.tag(p.getId(), 2L));
+
+    assertThat(res.onboardingStatus()).isEqualTo("COMPLETED");
+    assertThat(res.profileRevision()).isEqualTo(2L);
+    verify(profiles, never()).save(any());
+  }
 }

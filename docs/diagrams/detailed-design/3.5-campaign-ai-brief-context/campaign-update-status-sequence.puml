@@ -1,0 +1,38 @@
+@startuml campaign-update-status-sequence
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+title Figure 4.3.5.2.2 Update Campaign and Change Status Sequence Diagram
+hide footbox
+autonumber
+actor Brand
+participant "Web Client" as Web
+participant CampaignController as API
+participant CampaignService as Service
+participant CampaignWriteLock as Lock
+participant CampaignRevision as Revision
+Brand -> Web : save campaign edits or request a status change
+alt <U+005B>edit campaign<U+005D>
+  Web -> API : PUT /api/v1/campaigns/{id} · If-Match
+  API -> Service : update(id, request, authentication, revision)
+else <U+005B>change campaign status<U+005D>
+  Web -> API : PATCH /api/v1/campaigns/{id}/status · If-Match
+  API -> Service : changeStatus(id, request, authentication, revision)
+end
+activate Service
+Service -> Lock : owned(id)
+Service -> Revision : require(revision, id, campaignRevision)
+alt <U+005B>permission or ownership fails, or revision missing/stale<U+005D>
+  Service --> API : authorization, lookup or precondition error
+else <U+005B>request is authorized and revision matches<U+005D>
+  alt <U+005B>allowed edit or valid status transition<U+005D>
+    Service -> Service : applyCampaign(campaign, request) or change campaign status
+    Service --> API : CampaignResponse
+  else <U+005B>invalid fields, transition or completion requirements<U+005D>
+    Service --> API : mapped validation or transition error
+  end
+end
+deactivate Service
+API --> Web : current campaign or mapped error
+@enduml

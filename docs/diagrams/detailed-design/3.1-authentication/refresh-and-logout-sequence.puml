@@ -1,0 +1,84 @@
+@startuml refresh-and-logout-sequence
+title Refresh Token Rotation and Logout
+hide footbox
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+autonumber
+skinparam roundcorner 0
+skinparam ParticipantPadding 10
+skinparam SequenceLifeLineBorderColor #555555
+skinparam SequenceLifeLineBackgroundColor white
+skinparam SequenceParticipantBackgroundColor white
+skinparam SequenceGroupBackgroundColor white
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam noteBackgroundColor white
+
+actor "Signed-in User" as User
+participant "Web Client" as Web
+participant AuthController as Auth
+participant AuthServiceImpl as Service
+participant RefreshTokenService as Tokens
+participant RefreshTokenRepository as Repository
+participant AuthSessionStore as Sessions
+participant AuthSessionIssuer as Issuer
+
+User -> Web : continue using the portal
+Web -> Auth : POST /api/v1/auth/refresh\nIM_REFRESH cookie + CSRF header
+activate Auth
+Auth -> Service : refresh(request)
+activate Service
+Service -> Tokens : rotate(raw)
+activate Tokens
+Tokens -> Repository : findByTokenHash(tokenHash)
+Repository --> Tokens : stored token or empty
+opt <U+005B>token found and account eligible<U+005D>
+  Tokens -> Sessions : read(sessionId, true)
+  Sessions --> Tokens : locked session
+  alt <U+005B>refresh presented with a previously revoked token<U+005D>
+    Tokens -> Sessions : revokeAll(userId)
+    Sessions --> Tokens : user sessions and tokens revoked
+    note over Tokens : Increment the user's authVersion and reject the refresh.
+  else <U+005B>token has not been revoked<U+005D>
+    Tokens -> Sessions : require(sessionId, user, false)
+    Sessions --> Tokens : validated session or error
+  end
+end
+alt <U+005B>token active and session valid; no replay detected<U+005D>
+  Tokens -> Repository : save(replacementToken)
+  Repository --> Tokens : saved token
+  note over Tokens, Sessions
+    BR-05  Revoke the old token and record its replacement.
+    The replacement keeps the session ID and expiration.
+  end note
+  Tokens --> Service : Rotated(user, refreshToken, sessionId)
+  Service -> Issuer : response(user, sessionId, refreshToken)
+  Issuer --> Service : LoginResponse
+  Service --> Auth : LoginResponse
+  Auth --> Web : 200 OK, access token and rotated cookie
+else <U+005B>refresh rejected by the authentication service<U+005D>
+  Tokens --> Service : authentication error
+  Service --> Auth : propagate error
+  Auth --> Web : 401 Unauthorized, clear refresh cookie
+end
+deactivate Tokens
+deactivate Service
+deactivate Auth
+
+opt <U+005B>user requests logout<U+005D>
+  User -> Web : sign out
+  Web -> Auth : POST /api/v1/auth/logout\nIM_REFRESH cookie + CSRF header
+  activate Auth
+  Auth -> Tokens : revoke(raw)
+  activate Tokens
+  opt <U+005B>cookie identifies a session<U+005D>
+    Tokens -> Sessions : revoke(sessionId)
+    Sessions --> Tokens : session and session tokens revoked
+  end
+  Tokens --> Auth : return
+  deactivate Tokens
+  Auth --> Web : 204 No Content, clear refresh cookie
+  deactivate Auth
+end
+@enduml

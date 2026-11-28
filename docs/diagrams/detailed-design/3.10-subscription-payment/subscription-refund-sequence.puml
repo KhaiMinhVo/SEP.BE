@@ -1,0 +1,107 @@
+@startuml subscription-refund-sequence
+title WF-06 | Request, Review and Complete a Refund
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 230
+
+actor Brand
+participant "Web Client" as Web
+participant BrandPaymentController as BrandAPI
+actor Admin
+participant AdminPaymentController as AdminAPI
+participant VnPayRefundService as GatewayRefund
+participant RefundService as Refund
+database PostgreSQL as DB
+participant VNPay
+
+Brand -> Web : request a refund
+Web -> BrandAPI : POST /api/v1/billing/payments/{id}/refund
+activate BrandAPI
+BrandAPI -> Refund : request(id, request)
+activate Refund
+Refund -> DB : lock and read payment and subscription
+DB --> Refund : payment and purchased entitlements
+alt <U+005B>eligible paid payment, within 24 h, active unused subscription<U+005D>
+  Refund -> DB : record REQUESTED
+  Refund --> BrandAPI : refund details
+else <U+005B>ownership or eligibility check fails<U+005D>
+  Refund --> BrandAPI : authorization or eligibility error
+end
+deactivate Refund
+BrandAPI --> Web : request result
+deactivate BrandAPI
+
+alt <U+005B>Admin rejects a REQUESTED refund<U+005D>
+  Admin -> AdminAPI : POST /api/v1/admin/payments/{id}/refund/reject
+  AdminAPI -> Refund : reject(id, request)
+  Refund -> DB : record REJECTED and audit decision
+  Refund --> AdminAPI : refund details
+  AdminAPI --> Admin : rejected
+else <U+005B>Admin approves an eligible request or exception<U+005D>
+  Admin -> AdminAPI : POST /api/v1/admin/payments/{id}/refund/approve
+  AdminAPI -> GatewayRefund : approve(id, request)
+  activate GatewayRefund
+  GatewayRefund -> Refund : approve(id, request)
+  Refund -> DB : record APPROVED, apply refund hold and audit decision
+  Refund --> GatewayRefund : refund details
+  opt <U+005B>VNPay automatic refund selected and configured<U+005D>
+    GatewayRefund -> GatewayRefund : submit(id)
+    ref over GatewayRefund, VNPay : Run VNPay submission below before replying.
+  end
+  GatewayRefund --> AdminAPI : approval result or automatic VNPay submission result
+  deactivate GatewayRefund
+  AdminAPI --> Admin : current refund details
+end
+
+opt <U+005B>VNPay refund submitted<U+005D>
+  alt <U+005B>automatic submission during approval<U+005D>
+    note over GatewayRefund : Invoked by approve(id, request).
+  else <U+005B>Admin explicitly submits an eligible APPROVED refund<U+005D>
+    Admin -> AdminAPI : POST /api/v1/admin/payments/{id}/refund/vnpay
+    AdminAPI -> GatewayRefund : submit(id)
+  end
+  activate GatewayRefund
+  GatewayRefund -> DB : commit PROCESSING and gateway request ID
+  GatewayRefund -> VNPay : VnPayRefundClient.refund(submission)
+  VNPay --> GatewayRefund : signed response, or timeout
+  opt <U+005B>refund outcome remains uncertain<U+005D>
+    note over GatewayRefund : Keep PROCESSING. A new submission is blocked.
+    alt <U+005B>Admin requests a status query<U+005D>
+      Admin -> AdminAPI : POST /api/v1/admin/payments/{id}/refund/vnpay/query
+      AdminAPI -> GatewayRefund : query(id)
+    else <U+005B>reconciliation job runs<U+005D>
+      GatewayRefund -> GatewayRefund : reconcile()
+    end
+    GatewayRefund -> GatewayRefund : reconcileOne(id, before)
+    GatewayRefund -> VNPay : VnPayQueryClient.queryRefund(txnRef, gatewayDate)
+    VNPay --> GatewayRefund : gateway refund status
+  end
+  alt <U+005B>verified successful full refund<U+005D>
+    GatewayRefund -> Refund : complete(payment, reference, actor)
+    Refund -> DB : atomically record COMPLETED, REFUNDED and CANCELLED
+  else <U+005B>verified gateway failure<U+005D>
+    GatewayRefund -> DB : record GATEWAY_FAILED
+  else <U+005B>still unconfirmed<U+005D>
+    note over GatewayRefund : Keep PROCESSING.
+  end
+  deactivate GatewayRefund
+end
+
+opt <U+005B>manual refund approved or gateway refund failed<U+005D>
+  Admin -> AdminAPI : POST /api/v1/admin/payments/{id}/refund/confirm
+  AdminAPI -> Refund : confirm(id, request)
+  activate Refund
+  alt <U+005B>APPROVED/GATEWAY_FAILED, held, full amount and unique transfer reference<U+005D>
+    Refund -> DB : atomically record COMPLETED, REFUNDED and CANCELLED
+    Refund --> AdminAPI : refund details
+  else <U+005B>confirmation checks fail<U+005D>
+    Refund --> AdminAPI : validation or state conflict
+  end
+  deactivate Refund
+  AdminAPI --> Admin : confirmation result
+end
+@enduml

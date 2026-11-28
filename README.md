@@ -192,13 +192,24 @@ Các API hiện có đã được bảo vệ:
 - Plan: Brand đọc gói đang hoạt động; Admin quản lý bằng `MANAGE_PLAN`.
 - `/subscriptions`: Brand quản lý subscription của mình; không tự kích hoạt gói trả phí.
 - `/admin/subscriptions`: Admin quản lý subscription với audit, không cho Brand/Data Manager gọi.
-- `/billing/subscribe`: Brand tạo checkout VNPay từ tài khoản trong JWT; callback xác minh chữ ký,
-  merchant, số tiền và giao dịch trước khi thay đổi dữ liệu. Callback lặp được xử lý idempotent.
+- `/billing/subscribe`: Brand tạo checkout VNPay sandbox như luồng test hiện tại.
+- `/billing/subscribe/payos`: Brand tạo checkout PayOS hosted page để test thanh toán QR; webhook
+  xác minh chữ ký, số tiền và giao dịch trước khi kích hoạt subscription. Callback, đối soát và
+  refund VNPay hiện tại vẫn được giữ độc lập.
 - `/admin/audit-logs`: Admin đọc audit có phân trang và lọc actor/action/entity/thời gian.
 - `/creators/ingest`: chỉ service key, không chấp nhận JWT của bất kỳ role nào thay key.
 
 Đường dẫn chuẩn là `/api/v1/plans`, `/api/v1/subscriptions` (context-path đã chứa `/api/v1`).
 Alias đường dẫn billing cũ có prefix lặp vẫn được giữ để tương thích.
+
+Checkout PayOS cần cấu hình `PAYOS_CLIENT_ID`, `PAYOS_API_KEY` và `PAYOS_CHECKSUM_KEY`.
+Đặt webhook của kênh thanh toán PayOS thành
+`https://<backend-host>/api/v1/billing/payos/webhook`. Đặt cả return/cancel URL của PayOS
+đến `https://<backend-host>/api/v1/billing/payos/return`; backend truy vấn trực tiếp trạng thái
+đơn hàng rồi mới chuyển về frontend. Có thể cấu hình callback bằng `PAYOS_CALLBACK_URL`,
+`PAYOS_CANCEL_CALLBACK_URL` và trang frontend bằng `PAYOS_FRONTEND_RETURN_URL`.
+Giao dịch chưa thanh toán sẽ bị hủy ở PayOS sau 15 phút; job đối soát mỗi phút sẽ ghi nhận
+thanh toán bị lỡ webhook trước khi cập nhật trạng thái hủy. Các khóa PayOS không được gửi xuống frontend.
 
 ### Cấp role và thu hồi token
 
@@ -244,7 +255,7 @@ Claim email uses durable outbox and async delivery, with status/retry APIs. Conf
 
 ## Facebook Page and Instagram Professional verification (Meta OAuth)
 
-This connects an already signed-in, ACTIVE, email-verified Creator to an existing database channel.
+This connects an already signed-in, ACTIVE, email-verified Creator to a Meta channel.
 It does not register/sign in a user. Manual Claim remains available. Facebook personal profiles,
 Instagram personal accounts, real TikTok/YouTube adapters and metrics collection are outside this feature.
 
@@ -314,7 +325,8 @@ only the User Access Token, does not request Page tokens, and follows pagination
    JSON with session ID and `READY` only; it does not expose account choices/tokens or grant ownership.
 5. In Bruno with the same Creator JWT, call
    `GET /creators/portal/accounts/connect/meta/sessions/{sessionId}`. Inspect sanitized choices:
-   `AVAILABLE`, `ALREADY_LINKED`, `UNMATCHED` or `UNAVAILABLE`. Other users receive 404.
+   `AVAILABLE`, `CAN_CREATE`, `ALREADY_LINKED`, `INSUFFICIENT_EVIDENCE`, `UNMATCHED` or
+   `UNAVAILABLE`. Other users receive 404.
 6. Confirm one account using `POST /creators/portal/accounts/connect/meta/sessions/{sessionId}/confirm`:
 
    ```json
@@ -323,8 +335,11 @@ only the User Access Token, does not request Page tokens, and follows pagination
 
    The backend rechecks Meta outside database locks, then validates current User/authVersion/permission,
    stable channel ID, invitation email/expiry and ownership under locks. Success returns `AUTHORIZED`,
-   reuses/creates the CreatorMaster, synchronizes relationships and records `META_OAUTH` evidence/audit.
-   An invitation never creates a User; general selection cannot bypass another email's active invitation.
+   reuses/creates the CreatorMaster, synchronizes relationships and records OAuth evidence and audit.
+   For `CAN_CREATE` in a standalone session, confirmation can create a minimal channel from the
+   verified provider ID and metadata. Facebook Page confirmation requires `MANAGE`. Targeted and
+   invitation sessions require the existing target channel. General selection cannot bypass another
+   email's active invitation.
 7. Repeat callback/confirm to check 409 replay protection. Another Master's channel returns 409 and
    durable rejection audit without transfer. Nonmatching IDs return `409 META_ACCOUNT_NOT_MATCHED`;
    use manual Claim instead. Changing permissions/status/authVersion before confirm blocks the operation.
@@ -411,16 +426,31 @@ in the backend deployment environment. For TikTok, register the callback in the 
 ```dotenv
 META_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/meta/callback
 INSTAGRAM_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/instagram/callback
+INSTAGRAM_UNIFIED_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/instagram-unified/callback
 TIKTOK_SANDBOX_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/tiktok/callback
 ```
 
-Deploy the backend Claim lookup first, then the frontend callback proxy. Check the three
-callbacks on the frontend origin before enabling or switching the corresponding provider settings.
+Deploy the backend with V55 and the frontend together because the Claim review request changes.
+Check the callback on the frontend origin for each selected method. Instagram shows three methods
+and enables each one with valid provider configuration. Facebook Page and TikTok Sandbox
+require their environment switches:
+
+```dotenv
+CHANNEL_OAUTH_FACEBOOK_PAGE_ENABLED=false
+CHANNEL_OAUTH_INSTAGRAM_MODE=ALL
+CHANNEL_OAUTH_TIKTOK_SANDBOX_ENABLED=false
+```
+
+Set the Instagram mode to `DIRECT`, `UNIFIED` or `VIA_FACEBOOK_PAGE` to limit the environment to one
+method. Set it to `OFF` to disable all Instagram methods. Older frontend versions use Direct Login
+in `ALL` mode. Provider eligibility and asset permissions are determined during consent.
 Open **Kênh liên kết** on that origin as an email-verified Creator. Facebook and Instagram
 show channel choices after consent. TikTok Sandbox reads the completed session and linked channels.
-The OAuth browser cookie belongs to the origin that started the flow. For manual claims, the portal first calls
-`GET /api/v1/creator-claims/channels/lookup?platform=FACEBOOK&q=<username-or-id>`, then
-submits evidence for the selected channel through the existing Claim endpoint.
+The OAuth browser cookie belongs to the origin that started the flow. Standalone Manual Claim uses
+the exact channel lookup. From a cooperation invitation, the portal submits the selected channel
+from the invitation with `cooperationInvitationToken` in `POST /creators/{id}/claim`.
+Approval rechecks the invitation. The reviewer submits `reviewEvidenceType`, `reviewVerificationNote`
+and `reason` for either decision in `PATCH /data/creator-claims/{id}/review`.
 
 ### API and browser test
 
@@ -440,8 +470,8 @@ submits evidence for the selected channel through the existing Claim endpoint.
    `GET /api/v1/creators/portal/accounts/connect/meta/sessions/{sessionId}`. It reports
    `oauthFlow=INSTAGRAM_LOGIN`, platform INSTAGRAM and one sanitized account with no `pageId`.
 6. Canonical ID is `user_id` from the authenticated Instagram account, independently of app-scoped
-   `id`/subject or username. Only exact stable IDs already in the database can match. `UNMATCHED`
-   requires manual Claim or an explicitly prepared local fixture, never auto-creation/ID rewriting.
+   `id`/subject or username. An exact stable ID matches a stored channel. A missing channel can
+   be created from verified provider evidence on confirmation of a standalone session.
 7. Confirm through the existing `POST .../sessions/{sessionId}/confirm` using
    `{"accountId":"<canonical Instagram ID>"}`. The adapter rechecks Instagram before the transaction
    locks and fresh permission/authVersion/invitation/owner checks. Success returns AUTHORIZED, stores
@@ -488,6 +518,7 @@ Configure your environment using `.env.example` (the actual `.env` is not modifi
 
 ```dotenv
 TIKTOK_SANDBOX_LOGIN_ENABLED=true
+CHANNEL_OAUTH_TIKTOK_SANDBOX_ENABLED=true
 TIKTOK_SANDBOX_CLIENT_KEY=<Sandbox client key>
 TIKTOK_SANDBOX_CLIENT_SECRET=<Sandbox client secret>
 TIKTOK_SANDBOX_REDIRECT_URI=https://www.influencermatch.site/api/v1/integrations/tiktok/callback
@@ -510,8 +541,11 @@ create a tunnel or restart the backend for you.
    pending, unexpired and match your email; it is consumed only on a successful ownership grant.
 3. Open `authorizationUrl` in the same browser and consent using the Sandbox target account.
 4. Public GET `/api/v1/integrations/tiktok/callback` validates state/cookie, exchanges code and
-   obtains TikTok User Info. It calls `POST {CRAWLER_SERVICE_URL}/tiktok/resolve-author` with
-   `{"username":"<OAuth username>","auto_update_staging":false}`, without an expected ID.
+   obtains TikTok User Info. For a standalone session it calls
+   `POST {CRAWLER_SERVICE_URL}/tiktok/resolve-author` with
+   `{"username":"<OAuth username>","auto_update_staging":false}`. A targeted session also passes its
+   expected stable ID and requires the crawler to confirm it explicitly. Use a trusted connection
+   from the backend to the crawler before testing this flow on a shared deployment.
    The crawler must return `status=success`, `platform=TIKTOK`, positive numeric `author_id` (1–20 digits),
    `id_type=TIKTOK_USER_ID`, actual `resolved_username` and UTC `observed_at`. Username normalization
    trims, removes one leading `@` and lowercases. Observations may be at most 90 seconds old or
@@ -529,8 +563,9 @@ create a tunnel or restart the backend for you.
 6. A specified channel/invitation must match the author ID. Otherwise callback returns `READY` and
    GET `/api/v1/creators/portal/accounts/connect/tiktok/sessions/{id}` reports `TARGET_MISMATCH`,
    without creating a channel or consuming the invitation. Completed sessions retain only linked IDs;
-   another user's session returns 404. Crawler HTTP/timeout/malformed/stale/mismatched results return
-   `502 TIKTOK_IDENTITY_RESOLUTION_FAILED`. There is no username-only fallback or automatic retry.
+   another user's session returns 404. When the crawler lookup cannot establish the identity, the
+   session returns `READY` so the Creator can try again or use manual verification for a known channel.
+   There is no username-only fallback or automatic retry.
 
 V23 adds bindings scoped by `(SANDBOX, client key, open_id)` and prevents rebinding the identity or
 channel within the same app. Legacy/mock identities are never imported as trusted bindings. Old
@@ -566,10 +601,10 @@ Google Login only supports BRAND. Enable `GOOGLE_LOGIN_ENABLED` and set `GOOGLE_
 Use the browser cookie and CSRF contract below for every Google POST:
 
 1. `POST /api/v1/auth/google/start` returns `sessionId`, `clientId`, `nonce`, `expiresAt` and sets a browser-binding HttpOnly cookie. Pass the nonce to `google.accounts.id.initialize` and obtain a GIS credential.
-2. `POST /api/v1/auth/google/login` accepts `{sessionId, credential}`. A previously linked, active verified Brand receives `status=AUTHENTICATED`, the access token/user response, and `IM_REFRESH` cookie.
+2. `POST /api/v1/auth/google/login` accepts `{sessionId, credential}`. A previously linked Brand, or an existing active verified Brand with the same verified Gmail or Workspace email, receives `status=AUTHENTICATED`, the access token/user response, and `IM_REFRESH` cookie.
 3. A new identity with an unused email receives `status=REGISTRATION_REQUIRED`, `sessionId`, verified email, suggested `fullName` and `expiresAt`. No User, profile, refresh token or login session exists yet. Preserve the original cookie.
 4. `POST /api/v1/auth/google/registration/complete` accepts `{sessionId, fullName, password, phoneNumber, policyAcceptance}`. The password must have at least eight characters and fit within 72 UTF-8 bytes. The backend stores its hash and atomically creates the verified Brand, a pending Profile/Context, consent, identity and login session. The response status is AUTHENTICATED. Enter the brand name during onboarding. The original challenge still expires within ten minutes, including time spent filling the form. Reuse or a concurrently registered email returns 409.
-5. If email already belongs to a password account, login returns 409 `GOOGLE_ACCOUNT_LINK_REQUIRED` (pending email OTP returns 403). Sign in with the password first. Then call `POST /auth/google/link/start` with `{password}` using Bearer JWT and CSRF, obtain a fresh GIS credential with its nonce, and call `POST /auth/google/link/confirm` with `{sessionId, credential}` from the same browser/login session. Google email must match. Linking never creates another User, bypasses OTP or changes role. Identity, challenge consumption and audit commit together.
+5. If the verified Google email is Gmail (`@gmail.com`) or Google Workspace (nonblank signed `hd` claim) and matches an existing active, email-verified Brand, login automatically links the Google subject and returns `AUTHENTICATED` for that same User. Third-party email addresses without `hd` still require explicit linking (`GOOGLE_ACCOUNT_LINK_REQUIRED`). No password re-entry or registration form is required for automatic linking; the existing password, profile and role remain unchanged. Pending email OTP still returns 403; non-Brand, locked and disabled accounts cannot auto-link. An existing different Google identity is never replaced (409). Identity, audit, session issuance and challenge consumption commit together. The explicit `/auth/google/link/start` and `/auth/google/link/confirm` endpoints remain available for clients that already use password-confirmed linking. Google Console client IDs, origins, scopes and token verification are unchanged.
 
 Creator invitation/password/OTP and platform verification remain independent. Existing Google-only Brands can still sign in with Google and may set their first password via the existing OTP setup endpoints. Successful OTP setup invalidates their sessions. Deploy the updated frontend and backend together so the registration payload matches.
 

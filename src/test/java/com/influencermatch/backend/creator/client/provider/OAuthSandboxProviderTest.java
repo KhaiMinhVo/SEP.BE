@@ -44,7 +44,8 @@ class OAuthSandboxProviderTest {
     assertThat(authUrl).contains("client_key=test_tiktok_client_key");
     assertThat(authUrl).contains("response_type=code");
     assertThat(authUrl).contains("state=token_12345");
-    assertThat(authUrl).contains("redirect_uri=https://example.test/api/v1/integrations/tiktok/callback");
+    assertThat(authUrl)
+        .contains("redirect_uri=https%3A%2F%2Fexample.test%2Fapi%2Fv1%2Fintegrations%2Ftiktok%2Fcallback");
   }
 
   @Test

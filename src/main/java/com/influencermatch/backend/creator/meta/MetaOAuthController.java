@@ -73,8 +73,8 @@ public class MetaOAuthController {
   @Operation(
       summary = "Read my sanitized Meta account choices",
       description =
-          "Other Creators get 404. UNMATCHED accounts require manual Claim; no username/email"
-              + " matching.")
+          "Other Creators get 404. CAN_CREATE identifies a verified Meta asset eligible for"
+              + " channel creation after confirmation in a standalone session.")
   public ApiResponse<MetaDtos.Session> session(@PathVariable UUID id) {
     return ApiResponse.ok(store.view(id));
   }
@@ -89,11 +89,12 @@ public class MetaOAuthController {
   @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
   @SecurityRequirement(name = "BearerAuth")
   @Operation(
-      summary = "Confirm one existing Meta channel",
+      summary = "Confirm an exact stable Meta channel identity",
       description =
           "Rechecks Meta outside DB locks, then checks User/permission, invitations and ownership"
-              + " under locks. Exact stable IDs only; 409 on conflict/replay; tokens discarded"
-              + " after success.")
+              + " under locks. Reuses an exact stable channel or creates a missing eligible"
+              + " channel in a standalone session. Facebook Pages require MANAGE. Returns 409 on"
+              + " conflict/replay; tokens discarded after success.")
   public ApiResponse<MetaDtos.Connected> confirm(
       @PathVariable UUID id, @Valid @RequestBody MetaDtos.Confirm request) {
     return ApiResponse.ok(oauth.confirm(id, request.accountId()));

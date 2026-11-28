@@ -1,0 +1,107 @@
+@startuml creator-registration-invitation-sequence
+title Creator Registration by Invitation
+hide footbox
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+autonumber
+skinparam roundcorner 0
+skinparam ParticipantPadding 10
+skinparam SequenceLifeLineBorderColor #555555
+skinparam SequenceLifeLineBackgroundColor white
+skinparam SequenceParticipantBackgroundColor white
+skinparam SequenceGroupBackgroundColor white
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam noteBackgroundColor white
+
+actor "Staff with INVITE_CREATOR" as Staff
+actor Creator
+participant "Web Client" as Web
+participant CreatorRegistrationController as Controller
+participant CreatorRegistrationInvitationService as Invitations
+participant UserRepository as Users
+participant CreatorMasterRepository as Masters
+participant EmailVerificationService as Verification
+participant SmtpVerificationEmailSender as Sender
+participant "Email Service" as Mail
+
+Staff -> Web : invite a Creator to register
+Web -> Controller : POST /api/v1/data/creator-invitations
+activate Controller
+Controller -> Invitations : invite(request)
+activate Invitations
+Invitations -> Sender : sendCreatorInvitation(email, link)
+activate Sender
+Sender -> Mail : submit invitation email (SMTP)
+Mail --> Sender : accepted
+Sender --> Invitations : return
+deactivate Sender
+Invitations --> Controller : InvitationResponse
+deactivate Invitations
+Controller --> Web : 201 Created
+deactivate Controller
+
+Creator -> Web : open registration link
+Web -> Controller : POST /api/v1/auth/creator-invitations/resolve
+activate Controller
+Controller -> Invitations : resolve(token)
+activate Invitations
+alt <U+005B>invitation valid, unused and unexpired<U+005D>
+  Invitations --> Controller : InvitationResponse
+  Controller --> Web : 200 OK, invited email
+else <U+005B>invitation invalid, expired or used<U+005D>
+  Invitations --> Controller : CREATOR_INVITATION_INVALID
+  Controller --> Web : 400 Bad Request
+end
+deactivate Invitations
+deactivate Controller
+
+opt <U+005B>invitation resolved<U+005D>
+  Creator -> Web : submit name, password and policy acceptance
+  Web -> Controller : POST /api/v1/auth/creator/register
+  activate Controller
+  Controller -> Invitations : register(request)
+  activate Invitations
+  note right of Invitations
+    BR-01 / BR-21
+    Recheck the invitation after locking its email.
+    Use the email from the invitation.
+  end note
+  alt <U+005B>invitation became invalid, expired or used<U+005D>
+    Invitations --> Controller : CREATOR_INVITATION_INVALID
+    Controller --> Web : 400 Bad Request
+  else <U+005B>email already has an account<U+005D>
+    Invitations --> Controller : EMAIL_ALREADY_EXISTS
+    Controller --> Web : 409 Conflict
+  else <U+005B>invitation valid and email available<U+005D>
+    Invitations -> Users : saveAndFlush(user)
+    Users --> Invitations : unverified Creator account
+    Invitations -> Masters : save(master)
+    Masters --> Invitations : CreatorMaster
+    Invitations -> Invitations : invitation.setConsumedAt(clock.instant())
+    Invitations -> Verification : sendInitial(user)
+    activate Verification
+    Verification -> Sender : send(email, otp)
+    Sender -> Mail : submit OTP email (SMTP)
+    Mail --> Sender : delivery result
+    Sender --> Verification : return or delivery error
+    Verification --> Invitations : return or delivery error
+    deactivate Verification
+    alt <U+005B>email accepted by SMTP<U+005D>
+      Invitations --> Controller : registration and invitation consumption committed
+      Controller --> Web : 201 Created
+    else <U+005B>SMTP delivery failed<U+005D>
+      Invitations --> Controller : EMAIL_DELIVERY_UNAVAILABLE; transaction rolls back
+      Controller --> Web : 503 Service Unavailable
+    end
+  end
+  deactivate Invitations
+  deactivate Controller
+end
+
+note over Web, Invitations
+  Verify the email via POST /api/v1/auth/verify-email after registration.
+  Cooperation invitations for a Deal or Proposal are covered in section 3.8.
+end note
+@enduml

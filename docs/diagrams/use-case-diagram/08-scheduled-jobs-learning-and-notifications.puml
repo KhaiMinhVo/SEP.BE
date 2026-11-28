@@ -1,0 +1,48 @@
+@startuml 08-scheduled-jobs-learning-and-notifications
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+skinparam ArrowColor #242424
+skinparam usecase {
+    BackgroundColor #F1F1F1
+    BorderColor #555555
+}
+
+title Scheduled Jobs, Post-Collaboration Learning and Notifications
+
+' Completion triggers evidence capture. Calendar triggers apply to collection, reconciliation and retraining.
+' UC-25 reads eligible evidence and derives Brand preferences when Brand requests recommendations.
+
+actor "Authenticated User" as Auth
+actor "Brand / SME" as Brand
+actor "Scheduler" as Scheduler <<time>>
+actor "Email Service" as Mail <<external system>>
+actor "VNPay" as VNPay <<external system>>
+actor "PayOS" as PayOS <<external system>>
+
+rectangle "Intelligent Influencer Discovery and Recommendation Platform\nBased on Historical and Contextual Data for SMEs" {
+    usecase "UC-102 Review Application Notifications" as UC102
+    usecase "UC-94 Deliver Event Notifications" as UC94
+    usecase "UC-83 Run Scheduled Creator Collection and\nRefresh" as UC83
+    usecase "UC-101 Reconcile Subscription Payments" as UC101
+    usecase "UC-104 Retrain Creator Classification Models" as UC104
+    usecase "UC-44 Complete Creator Collaborations" as UC44
+    usecase "UC-79 Record Collaboration Completion\nEvidence" as UC79
+    usecase "UC-25 Generate Four-Memory Creator\nRecommendations" as UC25
+}
+
+Auth -- UC102
+Auth -- UC94
+Brand -- UC44
+Brand -- UC25
+Scheduler -- UC83
+Scheduler -- UC101
+Scheduler -- UC104
+
+UC94 -- Mail
+UC101 -- VNPay
+UC101 -- PayOS
+
+UC44 ..> UC79 : <<include>>
+@enduml

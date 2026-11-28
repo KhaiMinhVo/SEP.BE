@@ -159,6 +159,7 @@ class CreatorPortalProfilePostgresIntegrationTest extends ExecutionScenarioSuppo
 
   @Test
   void publicProjectionNeedsRealEvidenceAndAppliesSharingOnNextRequest() throws Exception {
+    jdbc.update("delete from creator_account_verification where creator_id=?", channel);
     edit(
         owner,
         "{\"introduction\":\"Visible"
@@ -293,10 +294,16 @@ class CreatorPortalProfilePostgresIntegrationTest extends ExecutionScenarioSuppo
         .doesNotContain("TOP_PRIVATE_VALUE");
     var options =
         call(owner, get("/creators/portal/accounts/connection-options"), null, 200).path("data");
-    assertThat(options.size()).isEqualTo(5);
+    assertThat(options.size()).isEqualTo(3);
     assertThat(options.toString())
         .doesNotContain("appSecret", "clientSecret", "encryptionKey", "accessToken");
-    assertThat(options.get(4).path("supported").asBoolean()).isFalse();
+    assertThat(options).allSatisfy(option -> {
+      assertThat(option.path("available").asBoolean()).isFalse();
+      String reason = "INSTAGRAM".equals(option.path("platform").asText())
+          ? "NOT_CONFIGURED"
+          : "NOT_ENABLED_FOR_ENVIRONMENT";
+      assertThat(option.path("unavailableReason").asText()).isEqualTo(reason);
+    });
   }
 
   @Test
@@ -383,7 +390,7 @@ class CreatorPortalProfilePostgresIntegrationTest extends ExecutionScenarioSuppo
     call(
         reviewer,
         patch("/data/creator-claims/" + claim + "/review"),
-        Map.of("decision", "APPROVED", "reason", "Evidence reviewed"),
+        Map.of("decision", "APPROVED", "reason", "Evidence reviewed", "reviewEvidenceType", "ACCOUNT_SETTINGS", "reviewVerificationNote", "Checked account settings"),
         200);
     var approved = call(brand, get("/creators/" + publicChannel), null, 200).path("data");
     assertThat(approved.path("verifiedByInfluencerMatch").asBoolean()).isTrue();
@@ -420,8 +427,11 @@ class CreatorPortalProfilePostgresIntegrationTest extends ExecutionScenarioSuppo
               + schema
               + ".creator_master select m.* from public.creator_master m where m.user_id=?",
           owner.getId());
+      String creatorCols = jdbc.queryForObject(
+          "select string_agg(column_name, ',') from information_schema.columns where table_schema=? and table_name='creator' and is_generated='NEVER'",
+          String.class, schema);
       jdbc.update(
-          "insert into " + schema + ".creator select c.* from public.creator c where c.id=?",
+          "insert into " + schema + ".creator(" + creatorCols + ") select " + creatorCols + " from public.creator c where c.id=?",
           channel);
       var before =
           jdbc.queryForObject(

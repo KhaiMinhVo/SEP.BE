@@ -53,6 +53,12 @@ class AdminUserServiceTest {
     @Mock
     private BrandProfileRepository profiles;
 
+    @Mock
+    private com.influencermatch.backend.creator.repository.CreatorRepository creators;
+
+    @Mock
+    private com.influencermatch.backend.creator.repository.CreatorClaimRepository claims;
+
     @Mock private com.influencermatch.backend.user.service.AdminAccessGuard guard;
 
     @InjectMocks
@@ -146,7 +152,7 @@ class AdminUserServiceTest {
     }
 
     @Test
-    @DisplayName("changeStatus - Same Status, No Action")
+    @DisplayName("changeUserStatus UTCID05 [N]: Same status returns current response without side effects")
     void changeStatus_SameStatus() {
         UUID userId = UUID.randomUUID();
         User targetUser = User.builder().id(userId).role(Role.BRAND).status(UserStatus.ACTIVE).build();
@@ -177,7 +183,7 @@ class AdminUserServiceTest {
     }
 
     @Test
-    @DisplayName("changeRole - Success")
+    @DisplayName("changeUserRole UTCID01 [N]: Valid role change increments auth version, revokes tokens, and audits")
     void changeRole_Success() {
         UUID userId = UUID.randomUUID();
         User targetUser = User.builder().id(userId).role(Role.DATA_MANAGER).status(UserStatus.ACTIVE).authVersion(1L).build();
@@ -195,7 +201,7 @@ class AdminUserServiceTest {
     }
 
     @Test
-    @DisplayName("changeRole - Prevent Changing Brand if Profile Exists")
+    @DisplayName("changeUserRole UTCID04 [A]: Brand with profile cannot change to a non-BRAND role")
     void changeRole_PreventChangingBrandWithProfile() {
         UUID userId = UUID.randomUUID();
         User targetUser = User.builder().id(userId).role(Role.BRAND).status(UserStatus.ACTIVE).build();
@@ -205,7 +211,125 @@ class AdminUserServiceTest {
         when(profiles.existsByUserId(userId)).thenReturn(true);
         
         assertThatThrownBy(() -> adminUserService.changeRole(userId, request))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("Use a separate internal account");
+                .isInstanceOfSatisfying(BusinessException.class,
+                        ex -> assertThat(ex.code()).isEqualTo(
+                                com.influencermatch.backend.exception.ErrorCode.BRAND_ROLE_CHANGE_CONFLICT));
+    }
+
+    @Test
+    @DisplayName("changeUserStatus UTCID01 [N]: Active non-admin to DISABLED increments authVersion, revokes tokens, records audit")
+    void changeStatus_activeNonAdminToDisabled() {
+        UUID userId = UUID.randomUUID();
+        User targetUser = User.builder().id(userId).role(Role.BRAND).status(UserStatus.ACTIVE).authVersion(3L).build();
+        when(users.findById(userId)).thenReturn(Optional.of(targetUser));
+
+        AdminUserResponse response = adminUserService.changeStatus(
+                userId, new UpdateUserStatusRequest(UserStatus.DISABLED, "Account deactivated"));
+
+        assertThat(response.status()).isEqualTo(UserStatus.DISABLED);
+        assertThat(targetUser.getAuthVersion()).isEqualTo(4L);
+        verify(refreshTokens).revokeAll(userId);
+        verify(audit).recordAs(eq(adminPrincipal.getId()), eq("CHANGE_USER_STATUS"), eq("User"), eq(userId),
+                anyMap(), anyMap(), eq("Account deactivated"));
+    }
+
+    @Test
+    @DisplayName("changeUserStatus UTCID02 [B]: Reason with exact 500 characters succeeds")
+    void changeStatus_reason500CharsSucceeds() {
+        UUID userId = UUID.randomUUID();
+        User targetUser = User.builder().id(userId).role(Role.BRAND).status(UserStatus.ACTIVE).authVersion(1L).build();
+        when(users.findById(userId)).thenReturn(Optional.of(targetUser));
+        String reason500 = "r".repeat(500);
+
+        AdminUserResponse response = adminUserService.changeStatus(
+                userId, new UpdateUserStatusRequest(UserStatus.LOCKED, reason500));
+
+        assertThat(response.status()).isEqualTo(UserStatus.LOCKED);
+        verify(audit).recordAs(eq(adminPrincipal.getId()), eq("CHANGE_USER_STATUS"), eq("User"), eq(userId),
+                anyMap(), anyMap(), eq(reason500));
+    }
+
+    @Test
+    @DisplayName("changeUserStatus UTCID03 [A]: Reason 501 characters throws ValidationException")
+    void changeStatus_reason501CharsThrowsValidation() {
+        UUID userId = UUID.randomUUID();
+        assertThatThrownBy(() -> adminUserService.changeStatus(
+                userId, new UpdateUserStatusRequest(UserStatus.LOCKED, "r".repeat(501))))
+                .isInstanceOf(com.influencermatch.backend.exception.ValidationException.class);
+        verifyNoInteractions(refreshTokens, audit);
+    }
+
+    @Test
+    @DisplayName("changeUserStatus UTCID04 [A]: Last active admin to DISABLED throws LAST_ACTIVE_ADMIN")
+    void changeStatus_lastActiveAdminToDisabledThrows() {
+        UUID userId = UUID.randomUUID();
+        User targetUser = User.builder().id(userId).role(Role.ADMIN).status(UserStatus.ACTIVE).build();
+        when(users.findById(userId)).thenReturn(Optional.of(targetUser));
+        when(users.countByRoleAndStatus(Role.ADMIN, UserStatus.ACTIVE)).thenReturn(1L);
+
+        assertThatThrownBy(() -> adminUserService.changeStatus(
+                userId, new UpdateUserStatusRequest(UserStatus.DISABLED, "Retire")))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        ex -> assertThat(ex.code()).isEqualTo(com.influencermatch.backend.exception.ErrorCode.LAST_ACTIVE_ADMIN));
+        assertThat(targetUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("changeUserRole UTCID02 [B]: Reason with exact 1 character succeeds")
+    void changeRole_reasonOneCharSucceeds() {
+        UUID userId = UUID.randomUUID();
+        User targetUser = User.builder().id(userId).role(Role.DATA_MANAGER).status(UserStatus.ACTIVE).authVersion(1L).build();
+        when(users.findById(userId)).thenReturn(Optional.of(targetUser));
+
+        AdminUserResponse response = adminUserService.changeRole(
+                userId, new UpdateUserRoleRequest(Role.BRAND, "x"));
+
+        assertThat(response.role()).isEqualTo(Role.BRAND);
+        verify(audit).recordAs(eq(adminPrincipal.getId()), eq("ASSIGN_USER_ROLE"), eq("User"), eq(userId),
+                anyMap(), anyMap(), eq("x"));
+    }
+
+    @Test
+    @DisplayName("changeUserRole UTCID03 [A]: Creator with pending claim throws CREATOR_ROLE_CHANGE_CONFLICT")
+    void changeRole_creatorWithPendingClaimThrowsConflict() {
+        UUID userId = UUID.randomUUID();
+        User targetUser = User.builder().id(userId).role(Role.CREATOR).status(UserStatus.ACTIVE).build();
+        when(users.findById(userId)).thenReturn(Optional.of(targetUser));
+        when(claims.existsByClaimantIdAndStatus(userId, com.influencermatch.backend.creator.enums.CreatorClaimStatus.PENDING))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> adminUserService.changeRole(
+                userId, new UpdateUserRoleRequest(Role.BRAND, "Switch role")))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        ex -> assertThat(ex.code()).isEqualTo(com.influencermatch.backend.exception.ErrorCode.CREATOR_ROLE_CHANGE_CONFLICT));
+        verifyNoInteractions(refreshTokens, audit);
+    }
+
+    @Test
+    @DisplayName("changeUserRole UTCID05 [A]: Last active admin to non-ADMIN throws LAST_ACTIVE_ADMIN")
+    void changeRole_lastActiveAdminThrows() {
+        UUID userId = UUID.randomUUID();
+        User targetUser = User.builder().id(userId).role(Role.ADMIN).status(UserStatus.ACTIVE).build();
+        when(users.findById(userId)).thenReturn(Optional.of(targetUser));
+        when(users.countByRoleAndStatus(Role.ADMIN, UserStatus.ACTIVE)).thenReturn(1L);
+
+        assertThatThrownBy(() -> adminUserService.changeRole(
+                userId, new UpdateUserRoleRequest(Role.DATA_MANAGER, "Demote")))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        ex -> assertThat(ex.code()).isEqualTo(com.influencermatch.backend.exception.ErrorCode.LAST_ACTIVE_ADMIN));
+    }
+
+    @Test
+    @DisplayName("changeUserRole UTCID06 [N]: Same role returns current response without token revocation or audit")
+    void changeRole_sameRoleNoop() {
+        UUID userId = UUID.randomUUID();
+        User targetUser = User.builder().id(userId).role(Role.DATA_MANAGER).status(UserStatus.ACTIVE).build();
+        when(users.findById(userId)).thenReturn(Optional.of(targetUser));
+
+        AdminUserResponse response = adminUserService.changeRole(
+                userId, new UpdateUserRoleRequest(Role.DATA_MANAGER, "No change"));
+
+        assertThat(response.role()).isEqualTo(Role.DATA_MANAGER);
+        verifyNoInteractions(refreshTokens, audit);
     }
 }

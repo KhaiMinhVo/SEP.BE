@@ -4,6 +4,7 @@ import com.influencermatch.backend.audit.service.AuditService;
 import com.influencermatch.backend.auth.model.ExternalIdentityProvider;
 import com.influencermatch.backend.auth.repository.ExternalIdentityRepository;
 import com.influencermatch.backend.common.dto.PageResponse;
+import com.influencermatch.backend.cooperation.CooperationOnboarding;
 import com.influencermatch.backend.creator.dto.CreatorClaimDtos.*;
 import com.influencermatch.backend.creator.enums.*;
 import com.influencermatch.backend.creator.model.*;
@@ -37,6 +38,7 @@ public class CreatorClaimService {
 
   @org.springframework.beans.factory.annotation.Autowired private java.time.Clock clock;
   @org.springframework.beans.factory.annotation.Autowired private ManualClaimGuard guard;
+  @org.springframework.beans.factory.annotation.Autowired private CooperationOnboarding cooperation;
   @org.springframework.beans.factory.annotation.Autowired(required = false)
   private com.influencermatch.backend.notification.service.NotificationService notificationService;
   private final CreatorRepository creators;
@@ -77,8 +79,15 @@ public class CreatorClaimService {
     users.lockRoleChanges();
     guard.users(Permissions.actor().getId(), Permission.CLAIM_CREATOR_PROFILE);
     User claimant = verifiedCreator(Permissions.actor().getId());
+    UUID cooperationInvitationId = null;
+    if (request.cooperationInvitationToken() != null) {
+      cooperationInvitationId = cooperation.resolveVerificationInvitation(request.cooperationInvitationToken());
+      cooperation.lockVerificationCampaign(cooperationInvitationId);
+    }
     guard.identity(creatorId);
     Creator creator = lockedCreator(creatorId);
+    if (cooperationInvitationId != null)
+      cooperation.assertVerificationTarget(cooperationInvitationId, creatorId, creator.getPlatform(), claimant);
     if (creator.getMaster() != null || creator.getSourceType() == CreatorSourceType.AUTHORIZED)
       throw conflicts.reject(
           creatorId, null, ErrorCode.CREATOR_ALREADY_LINKED, "Channel already has an owner");
@@ -95,6 +104,7 @@ public class CreatorClaimService {
                 .evidenceUrls(List.copyOf(request.evidenceUrls()))
                 .note(request.note())
                 .invitation(applicable.isEmpty() ? null : applicable.getFirst())
+                .cooperationInvitationId(cooperationInvitationId)
                 .status(CreatorClaimStatus.PENDING)
                 .build());
     audit.record(
@@ -104,6 +114,22 @@ public class CreatorClaimService {
         null,
         Map.of("status", "PENDING", "creatorId", creatorId, "claimantId", claimant.getId()),
         "Creator nộp bằng chứng xác minh quyền sở hữu kênh");
+    if (notificationService != null) {
+      String channelLabel = creator.getDisplayName() != null && !creator.getDisplayName().isBlank()
+          ? creator.getDisplayName()
+          : (creator.getUserName() != null ? creator.getUserName() : creator.getExternalId());
+      for (User manager : users.findByRoleAndStatus(
+          com.influencermatch.backend.user.enums.Role.DATA_MANAGER,
+          com.influencermatch.backend.user.enums.UserStatus.ACTIVE)) {
+        notificationService.createAndDispatch(
+            manager.getId(),
+            com.influencermatch.backend.notification.enums.NotificationType.CLAIM_SUBMITTED,
+            "Có yêu cầu xác minh kênh thủ công mới",
+            "Creator vừa gửi bằng chứng xác minh cho kênh " + creator.getPlatform() + " · " + channelLabel + ".",
+            "CREATOR_CLAIM",
+            claim.getId());
+      }
+    }
     return response(claim);
   }
 
@@ -184,9 +210,18 @@ public class CreatorClaimService {
   public ClaimResponse review(UUID id, ReviewRequest request) {
     Permissions.require(Permission.REVIEW_CREATOR_CLAIM);
     validate(request);
+    if (request.decision() == Decision.APPROVED
+        && request.reviewEvidenceType() == ReviewEvidenceType.NO_VALID_EVIDENCE)
+      throw new ValidationException("Approval requires valid evidence");
     users.lockRoleChanges();
     CreatorClaim claim = findClaim(id);
     guard.users(claim.getClaimant().getId(), Permission.REVIEW_CREATOR_CLAIM);
+    User reviewer = Permissions.actor();
+    if (reviewer.getId().equals(claim.getClaimant().getId()))
+      throw new ForbiddenException("You cannot review your own claim");
+    UUID cooperationInvitationId = claim.getCooperationInvitationId();
+    if (request.decision() == Decision.APPROVED && cooperationInvitationId != null)
+      cooperation.lockVerificationCampaign(cooperationInvitationId);
     guard.identity(claim.getCreator().getId());
     Creator creator = lockedCreator(claim.getCreator().getId());
     em.refresh(claim);
@@ -205,9 +240,10 @@ public class CreatorClaimService {
     em.refresh(claim);
     if (claim.getStatus() != CreatorClaimStatus.PENDING)
       throw conflict("Only a PENDING claim can be reviewed");
-    User reviewer = Permissions.actor();
     if (request.decision() == Decision.APPROVED) {
       User claimant = verifiedCreator(claim.getClaimant().getId());
+      if (cooperationInvitationId != null)
+        cooperation.assertVerificationTarget(cooperationInvitationId, creator.getId(), creator.getPlatform(), claimant);
       if (creator.getMaster() != null || creator.getSourceType() == CreatorSourceType.AUTHORIZED)
         throw conflicts.reject(
             creator.getId(),
@@ -230,6 +266,7 @@ public class CreatorClaimService {
                               .build()));
       if (!"ACTIVE".equals(master.getStatus()))
         throw new ForbiddenException("Creator Master is not active");
+      ChannelPlatformLimit.requireSlot(creators, claimant.getId(), creator.getPlatform(), creator.getId());
       creator.setMaster(master);
       applicable.forEach(i -> i.setStatus("ACCEPTED"));
       creator.setSourceType(CreatorSourceType.AUTHORIZED);
@@ -267,6 +304,8 @@ public class CreatorClaimService {
       }
     } else claim.setStatus(CreatorClaimStatus.REJECTED);
     decide(claim, claim.getStatus(), reviewer, request.reason());
+    claim.setReviewEvidenceType(request.reviewEvidenceType());
+    claim.setReviewVerificationNote(request.reviewVerificationNote());
     if (notificationService != null && claim.getClaimant() != null) {
       if (claim.getStatus() == CreatorClaimStatus.APPROVED) {
         notificationService.createAndDispatch(
@@ -292,6 +331,9 @@ public class CreatorClaimService {
     reviewData.put("status", claim.getStatus().name());
     reviewData.put("creatorId", creator.getId());
     reviewData.put("claimantId", claim.getClaimant().getId());
+    reviewData.put("reviewEvidenceType", request.reviewEvidenceType().name());
+    reviewData.put("reviewVerificationNote", request.reviewVerificationNote());
+    if (cooperationInvitationId != null) reviewData.put("cooperationInvitationId", cooperationInvitationId);
     if (claim.getStatus() == CreatorClaimStatus.APPROVED)
       reviewData.put("masterId", creator.getMaster().getId());
     audit.record(
@@ -401,7 +443,8 @@ public class CreatorClaimService {
         channel.getUserName(), channel.getDisplayName(), channel.getPlatform(), channel.getAvatarUrl(),
         c.getClaimant().getFullName(), c.getClaimant().getEmail(),
         channel.getOwner() != null && channel.getOwner().getId().equals(c.getClaimant().getId()),
-        projected == null ? null : projected.verification());
+        projected == null ? null : projected.verification(), c.getCooperationInvitationId(),
+        c.getReviewEvidenceType(), c.getReviewVerificationNote());
   }
 
   private void validate(Object request) {

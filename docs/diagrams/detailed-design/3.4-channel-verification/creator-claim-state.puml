@@ -1,0 +1,34 @@
+@startuml creator-claim-state
+title WF-04 | Creator Claim State Machine
+hide empty description
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+top to bottom direction
+skinparam roundcorner 12
+skinparam state {
+  BackgroundColor white
+  BorderColor #333333
+}
+skinparam noteBackgroundColor white
+skinparam ranksep 40
+
+state PENDING
+state APPROVED
+state REJECTED
+state REVOKED
+
+[*] --> PENDING : / persist submitted evidence
+PENDING --> APPROVED : review(APPROVED)\n[authorized reviewer, valid claimant and invitation if applicable,\nchannel available (BR-23/24/27/70)]\n/ link Creator Master and audit the decision
+PENDING --> REJECTED : review(REJECTED)\n[authorized reviewer and valid review details (BR-70)]\n/ record rejection and audit
+PENDING --> REJECTED : review(APPROVED)\n[decision applies to another pending claim for the same channel (BR-27)]\n/ reject this competing claim and audit
+APPROVED --> REVOKED : revoke\n[authorized reviewer, reason supplied and claimant still owns channel (BR-70)]\n/ revoke manual evidence; clear ownership only if no valid proof remains
+REJECTED --> [*]
+REVOKED --> [*]
+
+note right of APPROVED
+  The claim can be revoked. An independent valid
+  verification may preserve the channel's ownership.
+end note
+@enduml

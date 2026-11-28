@@ -1,0 +1,80 @@
+@startuml deliverable-submission-sequence
+title WF-03 | Start Collaboration and Review a Deliverable
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 220
+
+actor Brand
+actor Creator
+participant "Web Client" as Web
+participant FlexibleExecutionController as Flexible
+participant DealController as Deal
+participant CollaborationExecutionController as Controller
+participant CollaborationExecution as Execution
+participant "Video Object Storage" as Storage
+
+note over Brand, Deal : Section 3.8 confirms the Deal and creates the PLANNED Collaboration.
+Brand -> Web : choose management mode while PLANNED
+Web -> Flexible : POST /api/v1/collaborations/{id}/management-mode
+note over Web, Flexible : execution expectedRevision and Idempotency-Key
+Flexible --> Web : current execution view
+Brand -> Web : start Collaboration
+Web -> Deal : POST /api/v1/campaigns/{campaignId}/deals/{dealId}/start
+activate Deal
+alt <U+005B>ACTIVE Campaign, confirmed Deal, current Deal revision, plan and required assignment ready<U+005D>
+  Deal --> Web : IN_PROGRESS
+else <U+005B>start guards fail<U+005D>
+  Deal --> Web : conflict; Collaboration remains PLANNED
+end
+deactivate Deal
+note over Brand, Deal : COLLABORATIVE requires a ready assignment. BRAND_MANAGED can start without it.
+
+opt <U+005B>Collaboration started<U+005D>
+  loop <U+005B>first submission or resubmission after requested changes<U+005D>
+    alt <U+005B>eligible Creator uploads an MP4<U+005D>
+      Creator -> Web : choose video
+      Web -> Controller : POST /api/v1/collaborations/{id}/deliverables/{d}/submission-uploads
+      Controller -> Execution : openVideo(id, deliverableId, body)
+      Execution --> Controller : UploadGrant
+      Controller --> Web : presigned URL, headers and uploadId
+      Web -> Storage : PUT presigned URL with MP4
+      Storage --> Web : upload result
+      opt <U+005B>upload succeeded<U+005D>
+        Web -> Controller : POST /api/v1/collaborations/{id}/deliverables/{d}/submissions
+        Controller -> Execution : submit(id, d, body, key)
+      end
+    else <U+005B>authorized Brand records a draft received externally<U+005D>
+      Brand -> Web : enter HTTPS link, source and non-future receivedAt
+      Web -> Flexible : POST /api/v1/collaborations/{id}/deliverables/{d}/external-submissions
+      Flexible -> Execution : submitExternal(id, d, body, key)
+    end
+    note over Controller, Execution : Submit uses deliverable expectedRevision and Idempotency-Key (BR-57/59).
+    opt <U+005B>submission request sent<U+005D>
+      alt <U+005B>new request conflicts with revision or an already pending submission<U+005D>
+        Execution --> Web : 409 Conflict via request controller
+      else <U+005B>submission and provenance valid<U+005D>
+        Execution --> Web : SUBMITTED with new submission revision via request controller
+        Brand -> Web : review current submission
+        Web -> Controller : POST /api/v1/collaborations/{id}/deliverables/{d}/review
+        activate Controller
+        Controller -> Execution : decide(id, d, body, key)
+        activate Execution
+        alt <U+005B>APPROVE and all required checklist entries satisfied (BR-58)<U+005D>
+          Execution --> Controller : APPROVED
+        else <U+005B>REQUEST_CHANGES with reason and rounds remaining (BR-58/59)<U+005D>
+          Execution --> Controller : CHANGES_REQUESTED
+        else <U+005B>review validation or revision check fails<U+005D>
+          Execution --> Controller : validation error or conflict
+        end
+        deactivate Execution
+        Controller --> Web : review result
+        deactivate Controller
+      end
+    end
+  end
+end
+@enduml

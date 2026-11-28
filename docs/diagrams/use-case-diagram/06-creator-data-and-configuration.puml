@@ -1,0 +1,43 @@
+@startuml 06-creator-data-and-configuration
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+skinparam ArrowColor #242424
+skinparam usecase {
+    BackgroundColor #F1F1F1
+    BorderColor #555555
+}
+
+title Creator Data, Taxonomy and Recommendation Configuration
+
+' Legacy requirements are shown for traceability to Report 3. Report 7 FE-14.11 grants Data Manager read-only access.
+
+actor "Data Manager" as Manager
+
+rectangle "Intelligent Influencer Discovery and Recommendation Platform\nBased on Historical and Contextual Data for SMEs" {
+    usecase "UC-50 Inspect Problematic Creator Records" as UC50
+    usecase "UC-57 Monitor Creator Data and Collection\nJobs" as UC57
+    usecase "UC-85 Review Creator Activity and Visibility" as UC85
+    usecase "UC-60 Request Manual Creator Collection" as UC60
+    usecase "UC-63 Review Creator Data Quality" as UC63
+    usecase "UC-64 Maintain Creator Taxonomy and Discovery\nKeywords" as UC64
+    usecase "UC-51 Inspect Recommendation Configuration" as UC51
+    usecase "UC-55 View Formula Versions" as UC55
+    usecase "UC-53 Update Recommendation Weights" as UC53 <<legacy requirement>>
+    usecase "UC-54 Restore Default Configuration" as UC54 <<legacy requirement>>
+    usecase "UC-56 Manage Formula Versions" as UC56 <<legacy requirement>>
+}
+
+Manager -- UC50
+Manager -- UC57
+Manager -- UC85
+Manager -- UC60
+Manager -- UC63
+Manager -- UC64
+Manager -- UC51
+Manager -- UC55
+Manager -- UC53
+Manager -- UC54
+Manager -- UC56
+@enduml

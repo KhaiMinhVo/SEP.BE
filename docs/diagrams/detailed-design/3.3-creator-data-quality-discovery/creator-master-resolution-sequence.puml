@@ -1,0 +1,30 @@
+@startuml creator-master-resolution-sequence
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+title Figure 4.3.3.2.3 Master Creator Resolution Sequence Diagram
+hide footbox
+autonumber
+participant CreatorClaimOAuthController as API
+participant CreatorClaimResolutionService as Service
+participant CreatorRepository as Creators
+participant CreatorMasterRepository as Masters
+API -> Service : resolveClaim(platform, code, state, actor)
+activate Service
+Service -> Creators : findLockedById(targetCreatorId)
+Creators --> Service : target Creator or lookup error
+alt <U+005B>verification or ownership check fails<U+005D>
+  note over Service : Follow the claim failure path in §3.4.
+else <U+005B>claim can be linked<U+005D>
+  Service -> Masters : findByUserId(claimantUser.id)
+  Masters --> Service : existing CreatorMaster or empty
+  opt <U+005B>no CreatorMaster for claimant<U+005D>
+    Service -> Masters : save(new CreatorMaster)
+    Masters --> Service : saved CreatorMaster
+  end
+  Service -> Creators : save(creator) with master and AUTHORIZED source
+end
+Service --> API : OAuthCallbackResponse or mapped error
+deactivate Service
+@enduml

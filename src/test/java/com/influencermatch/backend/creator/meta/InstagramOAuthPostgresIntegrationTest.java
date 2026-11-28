@@ -25,6 +25,20 @@ class InstagramOAuthPostgresIntegrationTest extends DirectInstagramTestSupport {
   }
   @Test
   void worksWithoutFacebookAndPurgesSecretsAfterGrantAndReplay() throws Exception {
+    var options =
+        call(creator, get("/creators/portal/accounts/connection-options"), null, 200).path("data");
+    assertThat(options).anySatisfy(option -> {
+      assertThat(option.path("platform").asText()).isEqualTo("INSTAGRAM");
+      assertThat(option.path("oauthFlow").asText()).isEqualTo("INSTAGRAM_LOGIN");
+      assertThat(option.path("available").asBoolean()).isTrue();
+      assertThat(option.path("methods")).hasSize(3);
+      assertThat(option.path("methods")).allSatisfy(method -> {
+        boolean direct = "INSTAGRAM_LOGIN".equals(method.path("oauthFlow").asText());
+        assertThat(method.path("available").asBoolean()).isEqualTo(direct);
+        if (!direct) assertThat(method.path("unavailableReason").asText()).isEqualTo("NOT_CONFIGURED");
+      });
+    });
+
     var s = readyDirect();
     var view = call(creator, get(path(s)), null, 200).path("data");
     assertThat(view.path("oauthFlow").asText()).isEqualTo("INSTAGRAM_LOGIN");
@@ -115,17 +129,34 @@ class InstagramOAuthPostgresIntegrationTest extends DirectInstagramTestSupport {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"unmatched", "unstable", "foreign_selection"})
+  @ValueSource(strings = {"unstable", "foreign_selection"})
   void onlyExactStableIdsCanBeConfirmed(String reason) throws Exception {
     var s = readyDirect();
     String expected = channel.getExternalId();
     long count = creators.count();
-    if (reason.equals("unmatched")) channel.setExternalId("changed" + expected);
     if (reason.equals("unstable")) channel.setIsStableId(false);
     creators.saveAndFlush(channel);
     confirm(s, reason.equals("foreign_selection") ? "111" : expected, 409);
     unowned();
     assertThat(creators.count()).isEqualTo(count);
+  }
+
+  @Test
+  void createsMissingChannelFromDirectLogin() throws Exception {
+    var s = readyDirect();
+    String externalId = channel.getExternalId();
+    var freshProof = directProof();
+    channel.setExternalId("old-" + externalId);
+    creators.saveAndFlush(channel);
+    when(instagram.verify(any())).thenReturn(freshProof);
+    var accounts = call(creator, get(path(s)), null, 200).path("data").path("accounts");
+    assertThat(accounts.get(0).path("matchStatus").asText()).isEqualTo("CAN_CREATE");
+    var connected = confirm(s, externalId, 200).path("data");
+    var added = creators.findByPlatformAndExternalId("INSTAGRAM", externalId).orElseThrow();
+    assertThat(connected.path("creatorId").asText()).isEqualTo(added.getId().toString());
+    assertThat(verifications.findByCreatorIdAndStatus(added.getId(), "ACTIVE"))
+        .singleElement().satisfies(v -> assertThat(v.getVerificationMethod()).isEqualTo("INSTAGRAM_OAUTH"));
+    unowned();
   }
 
   @ParameterizedTest

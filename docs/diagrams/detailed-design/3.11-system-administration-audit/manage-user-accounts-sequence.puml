@@ -1,0 +1,69 @@
+@startuml manage-user-accounts-sequence
+title Manage User Accounts and Enforce RBAC
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 230
+
+actor Admin
+participant "Web Client" as Web
+participant "Spring Security" as Security
+participant AdminUserController as API
+participant AdminUserService as Service
+participant AdminAccessGuard as Guard
+participant UserRepository as Users
+participant RefreshTokenService as Sessions
+participant AuditService as Audit
+
+Admin -> Web : open user accounts or submit an account change
+alt <U+005B>view accounts<U+005D>
+  Web -> Security : GET /api/v1/admin/users
+else <U+005B>change account role or status<U+005D>
+  Web -> Security : PATCH /api/v1/admin/users/{id}/role or /status
+end
+activate Security
+alt <U+005B>unauthenticated or missing Admin role / required authority (BR-69)<U+005D>
+  Security --> Web : 401 or 403
+else <U+005B>request authorized<U+005D>
+  Security -> API : list(...), role(id, request) or status(id, request)
+  activate API
+  alt <U+005B>list requested<U+005D>
+    API -> Service : list(role, status, q, page, size)
+    Service -> Guard : read(VIEW_USER)
+    alt <U+005B>Admin authorization still valid<U+005D>
+      Service -> Users : findAll(specification, pageable)
+      Users --> Service : matching account page
+      Service --> API : page of AdminUserResponse
+    else <U+005B>authorization changed<U+005D>
+      Service --> API : forbidden
+    end
+  else <U+005B>role or status update requested<U+005D>
+    API -> Service : changeRole(id, request) or changeStatus(id, request)
+    activate Service
+    Service -> Guard : lock(id, ASSIGN_USER_ROLE or CHANGE_USER_STATUS)
+    Guard --> Service : locked account or authorization / lookup error
+    alt <U+005B>authorization, lookup, validation or account-transition guard fails<U+005D>
+      Service --> API : mapped error
+    else <U+005B>requested value equals current value<U+005D>
+      Service --> API : current AdminUserResponse
+    else <U+005B>change is permitted<U+005D>
+      Service -> Service : update role or status and increment authVersion
+      Service -> Sessions : revokeAll(userId)
+      Service -> Audit : recordAs(actor, action, entityType, id, before, after, reason)
+      Service --> API : updated AdminUserResponse
+    end
+    deactivate Service
+  end
+  API --> Security : response or mapped error
+  deactivate API
+  Security --> Web : account data or error
+end
+deactivate Security
+note over Service, Guard
+  The last active Admin is protected. Brand-profile and Creator-claim
+  or ownership checks also constrain role changes.
+end note
+@enduml

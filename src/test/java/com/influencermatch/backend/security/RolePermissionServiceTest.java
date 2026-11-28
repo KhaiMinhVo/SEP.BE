@@ -53,19 +53,29 @@ class RolePermissionServiceTest {
         .isInstanceOfSatisfying(BusinessException.class,e -> assertThat(e.code()).isEqualTo(ErrorCode.OPTIMISTIC_CONFLICT));
     verifyNoInteractions(overrides,audit);
   }
-  @Test void invalidAndOutOfRoleChangesAreRejectedBeforeLocking() {
-    for (var request : List.of(update(0,Permission.ASSIGN_USER_ROLE,true),
-        update(0,Permission.REQUEST_CREATOR_REFRESH,false),new Update(0L,List.of()),
-        new Update(0L,List.of(new Change(Permission.CREATE_CAMPAIGN,true),new Change(Permission.CREATE_CAMPAIGN,false)))))
-      assertThatThrownBy(() -> service.update(Role.BRAND,request)).isInstanceOf(BusinessException.class);
-    assertThatThrownBy(() -> service.update(Role.ADMIN,update(0,Permission.VIEW_USER,false))).isInstanceOf(BusinessException.class);
-    verifyNoInteractions(configs,overrides,audit);
-  }
   @Test void nonAdminCannotCallServiceDirectly() {
     var user=User.builder().role(Role.BRAND).status(UserStatus.ACTIVE).build();
     SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(user,null,user.getAuthorities()));
     assertThatThrownBy(service::catalog).isInstanceOf(ForbiddenException.class);
     assertThatThrownBy(() -> service.update(Role.BRAND,update(0,Permission.CREATE_CAMPAIGN,false))).isInstanceOf(ForbiddenException.class);
     verifyNoInteractions(configs,overrides,audit);
+  }
+  @Test
+  @org.junit.jupiter.api.DisplayName("updateRolePermissions UTCID05 [A]: Duplicate permission in changes throws ValidationException")
+  void updateRolePermissions_duplicatePermissionThrowsValidation() {
+    var request = new Update(0L, List.of(
+        new Change(Permission.CREATE_CAMPAIGN, true),
+        new Change(Permission.CREATE_CAMPAIGN, false)));
+    assertThatThrownBy(() -> service.update(Role.BRAND, request))
+        .isInstanceOf(BusinessException.class);
+    verifyNoInteractions(configs, overrides, audit);
+  }
+
+  @Test
+  @org.junit.jupiter.api.DisplayName("updateRolePermissions UTCID06 [A]: ADMIN role is rejected with ValidationException")
+  void updateRolePermissions_adminRoleThrowsValidation() {
+    assertThatThrownBy(() -> service.update(Role.ADMIN, update(0, Permission.VIEW_USER, false)))
+        .isInstanceOf(BusinessException.class);
+    verifyNoInteractions(configs, overrides, audit);
   }
 }

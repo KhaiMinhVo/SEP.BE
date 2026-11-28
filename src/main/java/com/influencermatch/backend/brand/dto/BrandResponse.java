@@ -34,4 +34,6 @@ public record BrandResponse(
     String embeddingStatus,
     String embeddingModel,
     String embeddingModelVersion,
-    java.time.Instant embeddingReadyAt) {}
+    java.time.Instant embeddingReadyAt,
+    String logoUrl,
+    String coverImageUrl) {}

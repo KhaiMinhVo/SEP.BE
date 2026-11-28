@@ -1,0 +1,110 @@
+@startuml channel-verification-class
+title WF-04 | Channel Verification and Manual Claim
+hide circle
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+top to bottom direction
+skinparam roundcorner 0
+skinparam class {
+  BackgroundColor white
+  BorderColor #333333
+}
+skinparam noteBackgroundColor white
+skinparam nodesep 26
+skinparam ranksep 34
+
+class Creator {
+  - master : CreatorMaster
+  - sourceType : CreatorSourceType
+}
+class CreatorMaster <<entity>>
+class CreatorAccountVerification <<entity>> {
+  - creator : Creator
+  - verifiedByUser : User
+  - verificationMethod : String
+  - verifiedAt : LocalDateTime
+  - status : String
+}
+class MetaOAuthSession <<entity>> {
+  - targetCreator : Creator
+  - cooperationInvitationId : UUID
+  - oauthFlow : OAuthFlow
+  - status : String
+  - expiresAt : Instant
+}
+class TikTokOAuthSession <<entity>> {
+  - targetCreator : Creator
+  - cooperationInvitationId : UUID
+  - status : String
+  - matchStatus : String
+  - linkedCreatorId : UUID
+  - expiresAt : Instant
+}
+class CreatorClaim <<entity>> {
+  - creator : Creator
+  - claimant : User
+  - cooperationInvitationId : UUID
+  - evidenceUrls : List<String>
+  - note : String
+  - reviewEvidenceType : ReviewEvidenceType
+  - reviewVerificationNote : String
+  - status : CreatorClaimStatus
+  - revokedAt : LocalDateTime
+}
+enum CreatorClaimStatus <<enumeration>> {
+  PENDING
+  APPROVED
+  REJECTED
+  REVOKED
+}
+class CreatorClaimService <<service>> {
+  + claim(creatorId : UUID, request : ClaimRequest) : ClaimResponse
+  + review(id : UUID, request : ReviewRequest) : ClaimResponse
+  + revoke(id : UUID, request : RevokeRequest) : ClaimResponse
+}
+interface CreatorClaimRepository <<repository>> <<interface>> {
+  + existsByCreatorIdAndClaimantIdAndStatus(creatorId : UUID, claimantId : UUID, status : CreatorClaimStatus) : boolean
+}
+class MetaOwnershipService <<service>> {
+  + apply(sessionId : UUID, accountId : String, fresh : MetaDtos.Proof) : MetaDtos.Connected
+}
+class TikTokOwnershipService <<service>> {
+  + apply(id : UUID, proof : VerifiedAccount, identity : Identity) : TikTokSessionStore.Result<TikTokDtos.Callback>
+}
+class TikTokIdentityResolver <<service>> {
+  + resolve(proof : VerifiedAccount, expectedExternalId : String) : Optional<Identity>
+  + requireFresh(identity : Identity) : void
+}
+
+CreatorMaster "0..1" -- "0..*" Creator : groups channels
+Creator "1" -- "0..*" CreatorClaim : claim history
+Creator "1" -- "0..*" CreatorAccountVerification : OAuth evidence
+Creator "0..1" -- "0..*" MetaOAuthSession : targetCreator
+Creator "0..1" -- "0..*" TikTokOAuthSession : targetCreator
+CreatorClaim --> CreatorClaimStatus
+CreatorClaimService ..> CreatorClaimRepository
+CreatorClaimRepository ..> CreatorClaim
+MetaOwnershipService ..> MetaOAuthSession
+TikTokOwnershipService ..> TikTokOAuthSession
+MetaOwnershipService ..> CreatorAccountVerification
+TikTokOwnershipService ..> CreatorAccountVerification
+TikTokOwnershipService ..> TikTokIdentityResolver : checks freshness
+
+note left of CreatorClaimService
+  BR-23 / BR-24 / BR-27 / BR-28
+  Review and revoke manual evidence under locks.
+  Reject ownership conflicts and audit decisions.
+end note
+note right of TikTokIdentityResolver
+  BR-23  Match the OAuth username to
+  a fresh stable TikTok user ID from the crawler.
+end note
+' Layout only.
+CreatorClaimService -[hidden]right- MetaOwnershipService
+MetaOwnershipService -[hidden]right- TikTokOwnershipService
+TikTokOwnershipService -[hidden]down- TikTokIdentityResolver
+CreatorClaim -[hidden]down- CreatorClaimStatus
+@enduml

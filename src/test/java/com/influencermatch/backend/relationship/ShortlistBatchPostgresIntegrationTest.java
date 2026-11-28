@@ -461,6 +461,7 @@ class ShortlistBatchPostgresIntegrationTest extends PostgresApiTestSupport {
     assertThat(readiness.toString())
         .contains("new@example.test")
         .doesNotContain("old@example.test");
+    evaluatedShortlist(owner, campaign, List.of(c.getId()));
     var result =
         call(
                 owner,

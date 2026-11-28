@@ -1,0 +1,50 @@
+@startuml crm-relationship-sequence
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+title Figures 4.3.8.2.1–3 Manage CRM Relationship Sequence Diagram
+hide footbox
+autonumber
+actor Brand
+participant "Web Client" as Web
+participant RelationshipController as API
+participant RelationshipServiceImpl as Service
+participant CampaignWriteLock as Lock
+participant BrandCreatorRelationshipRepository as Repo
+participant AuditService as Audit
+Brand -> Web : open the CRM action
+alt <U+005B>create a relationship<U+005D>
+  Web -> API : POST /api/v1/campaigns/{campaignId}/relationships
+  API -> Service : createRelationship(campaignId, request)
+else <U+005B>update stage<U+005D>
+  Web -> API : PATCH /api/v1/campaigns/{campaignId}/relationships/{id}/stage
+  API -> Service : updateStage(campaignId, id, request)
+else <U+005B>update negotiation details<U+005D>
+  Web -> API : PATCH /api/v1/campaigns/{campaignId}/relationships/{id}/details
+  API -> Service : updateDetails(campaignId, id, request)
+end
+activate Service
+Service -> Lock : owned(campaignId)
+alt <U+005B>authorized creation<U+005D>
+  Service -> Repo : findByCampaignIdAndCreatorId(campaignId, creatorId)
+  Repo --> Service : existing relationship or empty
+  opt <U+005B>no relationship and Creator/shortlist/fee checks pass<U+005D>
+    Service -> Repo : save(relationship) with CONTACTED stage
+  end
+  Service --> API : existing or new relationship; mapped error if checks fail
+else <U+005B>authorized patch<U+005D>
+  Service -> Repo : findLockedById(id)
+  alt <U+005B>valid change permitted by CRM rules<U+005D>
+    Service -> Audit : record(...)
+    Service -> Repo : save(relationship)
+    Service --> API : updated relationship DTO
+  else <U+005B>grouped stage or offered fee, invalid transition or invalid details<U+005D>
+    Service --> API : mapped error; use Deal workflow where required
+  end
+else <U+005B>permission or campaign ownership denied<U+005D>
+  Service --> API : mapped error
+end
+deactivate Service
+API --> Web : result
+@enduml

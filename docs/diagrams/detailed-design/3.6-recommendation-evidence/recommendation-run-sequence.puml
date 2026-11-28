@@ -1,0 +1,103 @@
+@startuml recommendation-run-sequence
+title Run AI Recommendation from the Campaign Shortlist
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam noteBackgroundColor white
+skinparam maxMessageSize 230
+
+actor Brand
+participant "Web Client" as Web
+participant AiRecommendationController as Controller
+participant AiRecommendationService as Service
+participant RecommendationRequestStore as Requests
+participant CampaignService as Campaigns
+participant CampaignM3ContextService as M3
+participant CampaignEmbeddingStore as Embedding
+participant PublicCreatorMetricRepository as Metrics
+participant SubscriptionService as Billing
+participant RecommendationRunRepository as Runs
+
+note over Brand, Web : Discovery (3.3) supplies candidates for the Brand to save to its Campaign Shortlist.
+Brand -> Web : run recommendations for the shortlist
+Web -> Controller : POST /api/v1/campaigns/{campaignId}/ai-recommendations\nIdempotency-Key; If-Match when preparing a DRAFT
+activate Controller
+Controller -> Service : recommendKocs(campaignId, limit, source, displayMode, creatorIds, key, revision)
+activate Service
+note over Service : Validate RUN_RECOMMENDATION, campaign ownership and the request key.
+Service -> Requests : replay(campaignId, key, requestHash)
+Requests --> Service : stored response, no replay or conflict
+alt <U+005B>same key and request already completed (BR-71)<U+005D>
+  Service --> Controller : saved response
+  Controller --> Web : 200 OK
+else <U+005B>key reused with different request data<U+005D>
+  Service --> Controller : idempotency conflict
+  Controller --> Web : 409 Conflict
+else <U+005B>new request<U+005D>
+  alt <U+005B>source is DISCOVERY or selected channels are invalid (BR-40)<U+005D>
+    Service --> Controller : invalid source or candidate selection
+    Controller --> Web : 400 Bad Request
+  else <U+005B>shortlist selection accepted<U+005D>
+    Service -> Campaigns : prepareForRecommendation(campaignId, revision)
+    Campaigns --> Service : campaign preparation completed
+    alt <U+005B>no active shortlist entries<U+005D>
+      Service --> Controller : RECOMMENDATION_NO_CANDIDATES
+      Controller --> Web : 409 Conflict
+    else <U+005B>active shortlist entries exist<U+005D>
+      Service -> M3 : prepare(campaignId)
+      M3 --> Service : CampaignContext
+      Service -> Embedding : ready(embeddingSourceContextId)
+      Embedding --> Service : persisted embedding or empty
+      alt <U+005B>embedding is not ready<U+005D>
+        Service --> Controller : CAMPAIGN_EMBEDDING_NOT_READY
+        Controller --> Web : 409 Conflict with embedding status
+      else <U+005B>embedding is ready<U+005D>
+        Service -> Requests : replayOrClaim(campaignId, key, requestHash)
+        Requests --> Service : stored response or execution claim
+        alt <U+005B>response became available<U+005D>
+          Service --> Controller : saved response
+          Controller --> Web : 200 OK
+        else <U+005B>execution claimed<U+005D>
+          Service -> Metrics : findCandidatesByShortlist(campaignId, vector, hasExcluded, excludedIds)
+          Metrics --> Service : shortlist candidates
+          alt <U+005B>no eligible shortlist candidates after selection<U+005D>
+            Service --> Controller : RECOMMENDATION_NO_CANDIDATES
+            Controller --> Web : 409 Conflict
+          else <U+005B>shortlist candidate pool available<U+005D>
+            Service -> Billing : reserveRecommendationQuota(brandProfileId)
+            Billing --> Service : subscription ID or quota error
+            alt <U+005B>quota reservation denied<U+005D>
+              Service --> Controller : subscription or quota error
+              Controller --> Web : run rejected
+            else <U+005B>quota reserved<U+005D>
+              ref over Service : Shortlist Candidate Scoring and Explanation
+              alt <U+005B>scoring and snapshot persistence succeed<U+005D>
+                Service -> Runs : save(recommendationRun)
+                Runs --> Service : stored run with scoringSnapshot
+                Service -> Requests : complete(campaignId, key, responseJson)
+                Requests --> Service : receipt saved or persistence error
+                alt <U+005B>receipt saved<U+005D>
+                  Service --> Controller : RecommendationResponseDto
+                  Controller --> Web : 200 OK with recommendationRunId
+                else <U+005B>receipt persistence fails<U+005D>
+                  Service --> Controller : transaction rolls back
+                  Controller --> Web : run failed
+                end
+              else <U+005B>scoring or run persistence fails<U+005D>
+                Service -> Billing : releaseRecommendationQuota(subscriptionId)
+                Service --> Controller : recommendation error
+                Controller --> Web : run failed
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+deactivate Service
+deactivate Controller
+@enduml

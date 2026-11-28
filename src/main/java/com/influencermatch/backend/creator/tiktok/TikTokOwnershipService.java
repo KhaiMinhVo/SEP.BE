@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
 
 /** Fresh TikTok proof is applied here; no provider HTTP or token storage in this transaction. */
+@lombok.extern.slf4j.Slf4j
 @Service
 @RequiredArgsConstructor
 public class TikTokOwnershipService {
@@ -50,23 +51,24 @@ public class TikTokOwnershipService {
             .orElseThrow(() -> new ForbiddenException("Creator unavailable"));
     if (!user.getId().equals(initial.getUser().getId()))
       throw new ForbiddenException("Creator unavailable");
+    store.lockCooperationCampaign(initial);
     creators.acquireIdentityLock(TikTokUsernames.MATCH_LOCK);
     var identityKeys = new TreeSet<String>();
     identityKeys.add("TIKTOK:SANDBOX:" + initial.getClientKey() + ":" + proof.openId());
     identityKeys.add("TIKTOK:" + identity.authorId());
     identityKeys.forEach(creators::acquireIdentityLock);
     String username = identity.username();
-    Creator creator =
+    Creator existing =
         creators.findLockedByPlatformAndExternalId("TIKTOK", identity.authorId()).orElse(null);
-    if (creator != null) em.refresh(creator);
+    if (existing != null) em.refresh(existing);
     var lockedInvitations = new ArrayList<CreatorInvitation>();
     var invitationIds = new TreeSet<UUID>();
-    if (creator != null
+    if (existing != null
         && (initial.getTargetCreator() == null
-            || initial.getTargetCreator().getId().equals(creator.getId())))
+            || initial.getTargetCreator().getId().equals(existing.getId())))
       invitations
           .findByTargetCreatorIdAndStatusAndExpiresAtAfterOrderByIdAsc(
-              creator.getId(), "PENDING", localNow())
+              existing.getId(), "PENDING", localNow())
           .forEach(i -> invitationIds.add(i.getId()));
     if (initial.getInvitation() != null) invitationIds.add(initial.getInvitation().getId());
     for (var invitationId : invitationIds) {
@@ -91,91 +93,77 @@ public class TikTokOwnershipService {
     if (!"EXCHANGING".equals(session.getStatus()))
       throw new BusinessException(
           ErrorCode.TIKTOK_ALREADY_PROCESSED, "TikTok callback already processed");
-    String match =
-        session.getTargetCreator() != null
-                && (creator == null || !session.getTargetCreator().getId().equals(creator.getId()))
-            ? "TARGET_MISMATCH"
-            : "MATCHED";
+    boolean standalone = TikTokSessionStore.isStandalone(session);
+    boolean matchesTarget = standalone || (session.getTargetCreator() != null
+        && existing != null && session.getTargetCreator().getId().equals(existing.getId()));
     // Only guard failures are converted to committed failure results; mutation/audit errors roll
     // back.
     try {
       if (!session.getExpiresAt().isAfter(clock.instant()))
         throw new BusinessException(
             ErrorCode.TIKTOK_SESSION_EXPIRED, "TikTok session expired; start again");
-      resolver.requireFresh(identity);
       store.assertUser(user, session.getAuthVersion());
       store.assertSession(session);
+      resolver.requireFresh(identity);
       if (username.isEmpty())
         throw new BusinessException(ErrorCode.TIKTOK_PROVIDER_ERROR, "TikTok username is required");
       for (var invitation : lockedInvitations) store.checkInvitation(invitation, user);
-      if ("MATCHED".equals(match)
-          && creator != null
-          && creator.getMaster() != null
-          && !creator.getMaster().getUser().getId().equals(user.getId()))
-        throw rejection(user, creator, session, "Channel belongs to another Creator");
-      if ("MATCHED".equals(match)
-          && creator != null
-          && creator.getMaster() == null
-          && creator.getSourceType() == CreatorSourceType.AUTHORIZED)
-        throw rejection(user, creator, session, "Channel already has ownership");
-      if ("MATCHED".equals(match)
-          && creator != null
-          && !Boolean.TRUE.equals(creator.getIsStableId()))
-        throw rejection(user, creator, session, "Stored channel identity is not stable");
+      if (matchesTarget && existing != null) {
+        if (existing.getMaster() != null
+            && !existing.getMaster().getUser().getId().equals(user.getId()))
+          throw rejection(user, existing, session, "Channel belongs to another Creator");
+        if (existing.getMaster() == null && existing.getSourceType() == CreatorSourceType.AUTHORIZED)
+          throw rejection(user, existing, session, "Channel already has ownership");
+        if (!Boolean.TRUE.equals(existing.getIsStableId()))
+          throw rejection(user, existing, session, "Stored channel identity is not stable");
+      }
+      if (matchesTarget)
+        com.influencermatch.backend.creator.service.ChannelPlatformLimit.requireSlot(
+            creators, user.getId(), "TIKTOK", existing == null ? null : existing.getId());
     } catch (BusinessException ex) {
+      if (standalone && ex.code() == ErrorCode.TIKTOK_IDENTITY_RESOLUTION_FAILED)
+        return readyUnmatched(session, proof);
       session.setStatus(ex.code() == ErrorCode.TIKTOK_SESSION_EXPIRED ? "EXPIRED" : "FAILED");
       clearProfile(session);
+      if (ex.code() == ErrorCode.CHANNEL_PLATFORM_ALREADY_LINKED)
+        session.setFailureCode(ex.code().name());
       return new TikTokSessionStore.Result<>(null, ex);
     }
-    if (!"MATCHED".equals(match)) {
-      session.setStatus("READY");
-      session.setOpenId(proof.openId());
-      session.setUsername(proof.username());
-      session.setDisplayName(proof.displayName());
-      session.setMatchStatus(match);
-      return new TikTokSessionStore.Result<>(new TikTokDtos.Callback(id, "READY"), null);
-    }
+    if (!matchesTarget) return readyUnmatched(session, proof);
     var binding =
         bindings
             .findByEnvironmentAndClientKeyAndOpenId(
                 "SANDBOX", session.getClientKey(), proof.openId())
             .orElse(null);
     var existingChannelBinding =
-        creator == null
+        existing == null
             ? null
             : bindings
                 .findByEnvironmentAndClientKeyAndCreatorId(
-                    "SANDBOX", session.getClientKey(), creator.getId())
+                    "SANDBOX", session.getClientKey(), existing.getId())
                 .orElse(null);
     if (binding != null
-            && (creator == null || !binding.getCreator().getId().equals(creator.getId()))
+            && (existing == null || !binding.getCreator().getId().equals(existing.getId()))
         || existingChannelBinding != null
             && !existingChannelBinding.getOpenId().equals(proof.openId())) {
       var rejected =
           rejection(
               user,
-              creator != null ? creator : binding.getCreator(),
+              existing != null ? existing : binding.getCreator(),
               session,
               "TikTok identity is already linked");
       session.setStatus("FAILED");
       clearProfile(session);
       return new TikTokSessionStore.Result<>(null, rejected);
     }
-    if (creator == null) {
-      creator =
-          creators.saveAndFlush(
-              Creator.builder()
-                  .platform("TIKTOK")
-                  .externalId(identity.authorId())
-                  .userName(username)
-                  .isStableId(true)
-                  .sourceType(CreatorSourceType.PUBLIC)
-                  .build());
-    }
+    var creator = existing == null
+        ? Creator.builder().platform("TIKTOK").externalId(identity.authorId()).isStableId(true).build()
+        : existing;
     creator.setUserName(username);
     creator.setProfileUrl("https://www.tiktok.com/@" + username);
     if (identity.displayName() != null) creator.setDisplayName(identity.displayName());
-    if (identity.avatarUrl() != null) applyCreatorAvatar(creator, identity.avatarUrl(), username);
+    if (existing == null) creator.setAvatarUrl(identity.avatarUrl());
+    else if (identity.avatarUrl() != null) applyCreatorAvatar(creator, identity.avatarUrl(), username);
     boolean alreadyOwned = creator.getMaster() != null;
     var master = masters.findByUserId(user.getId()).orElse(null);
     if (master == null)
@@ -189,6 +177,7 @@ public class TikTokOwnershipService {
     creator.setMaster(master);
     creator.setSourceType(CreatorSourceType.AUTHORIZED);
     if (!alreadyOwned || creator.getAuthorizedAt() == null) creator.setAuthorizedAt(localNow());
+    if (existing == null) creators.save(creator);
     var verification =
         verifications
             .findFirstByCreatorIdAndStatusOrderByVerifiedAtDesc(creator.getId(), "ACTIVE")
@@ -229,7 +218,7 @@ public class TikTokOwnershipService {
             .details(
                 Map.of(
                     "matchMethod",
-                    "CRAWLER_AUTHOR_ID",
+                    standalone ? "CRAWLER_CANONICAL_ID_RESOLUTION" : "CRAWLER_EXPECTED_EXTERNAL_ID_MATCH",
                     "authorId",
                     identity.authorId(),
                     "observedAt",
@@ -249,6 +238,39 @@ public class TikTokOwnershipService {
     em.flush();
     return new TikTokSessionStore.Result<>(
         new TikTokDtos.Callback(id, "AUTHORIZED", creator.getId(), master.getId()), null);
+  }
+
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public TikTokSessionStore.Result<TikTokDtos.Callback> manualResolution(
+      UUID id, VerifiedAccount proof) {
+    var initial = sessions.findById(id).orElseThrow();
+    store.lockCooperationCampaign(initial);
+    var session = sessions.lockById(id).orElseThrow();
+    em.refresh(session);
+    if (!"EXCHANGING".equals(session.getStatus()))
+      throw new BusinessException(
+          ErrorCode.TIKTOK_ALREADY_PROCESSED, "TikTok callback already processed");
+    try {
+      if (!session.getExpiresAt().isAfter(clock.instant()))
+        throw new BusinessException(
+            ErrorCode.TIKTOK_SESSION_EXPIRED, "TikTok session expired; start again");
+      store.assertSession(session);
+    } catch (BusinessException ex) {
+      session.setStatus(ex.code() == ErrorCode.TIKTOK_SESSION_EXPIRED ? "EXPIRED" : "FAILED");
+      clearProfile(session);
+      return new TikTokSessionStore.Result<>(null, ex);
+    }
+    return readyUnmatched(session, proof);
+  }
+
+  private static TikTokSessionStore.Result<TikTokDtos.Callback> readyUnmatched(
+      TikTokOAuthSession session, VerifiedAccount proof) {
+    session.setStatus("READY");
+    session.setOpenId(proof.openId());
+    session.setUsername(proof.username());
+    session.setDisplayName(proof.displayName());
+    session.setMatchStatus("UNMATCHED");
+    return new TikTokSessionStore.Result<>(new TikTokDtos.Callback(session.getId(), "READY"), null);
   }
 
   private CreatorOwnershipConflictException rejection(
@@ -272,31 +294,43 @@ public class TikTokOwnershipService {
   }
 
   private void applyCreatorAvatar(Creator creator, String rawAvatarUrl, String username) {
-    if (rawAvatarUrl == null || rawAvatarUrl.isBlank()) {
+    if (rawAvatarUrl == null || rawAvatarUrl.isBlank()) return;
+    String candidate = rawAvatarUrl.trim();
+    try {
+      var uri = java.net.URI.create(candidate);
+      if (!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))
+          || uri.getHost() == null || uri.getUserInfo() != null || candidate.length() > 2048) return;
+    } catch (IllegalArgumentException invalid) {
       return;
     }
+    if (candidate.equals(creator.getAvatarUrl()) && creator.getAvatarStorageKey() != null) return;
     if (cloudinaryStorageService != null && cloudinaryStorageService.isConfigured()) {
-      if (rawAvatarUrl.contains("res.cloudinary.com")) {
-        creator.setAvatarUrl(rawAvatarUrl);
-        return;
+      try {
+        var uploaded = cloudinaryStorageService.uploadFromUrl(candidate,
+            com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CREATOR_AVATAR,
+            username != null ? username : "creator");
+        if (uploaded.isPresent()) {
+          var stored = uploaded.get();
+          creator.setAvatarUrl(stored.url());
+          creator.setAvatarStorageKey(stored.storageKey());
+          creator.setAvatarMimeType(stored.mimeType());
+          creator.setAvatarSizeBytes(stored.sizeBytes());
+          creator.setAvatarUpdatedAt(stored.updatedAt());
+          return;
+        }
+      } catch (Exception failure) {
+        log.warn("Avatar cloud sync failed; preserving the existing image for creator {}", creator.getId());
       }
-      var uploaded = cloudinaryStorageService.uploadFromUrl(
-          rawAvatarUrl,
-          com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CREATOR_AVATAR,
-          username != null ? username : "creator"
-      );
-      if (uploaded.isPresent()) {
-        var stored = uploaded.get();
-        creator.setAvatarUrl(stored.url());
-        creator.setAvatarStorageKey(stored.storageKey());
-        creator.setAvatarMimeType(stored.mimeType());
-        creator.setAvatarSizeBytes(stored.sizeBytes());
-        creator.setAvatarUpdatedAt(stored.updatedAt());
-      } else if (creator.getAvatarUrl() == null || creator.getAvatarUrl().isBlank()) {
-        creator.setAvatarUrl(rawAvatarUrl);
-      }
-    } else {
-      creator.setAvatarUrl(rawAvatarUrl);
     }
+    // Nếu creator đã có ảnh lưu trên cloud vĩnh viễn, không ghi đè bằng link TikTok tạm
+    if (creator.getAvatarStorageKey() != null && !creator.getAvatarStorageKey().isBlank()) {
+      return;
+    }
+    // Chưa có trên cloud -> luôn cập nhật link tươi mới từ TikTok như cũ
+    creator.setAvatarUrl(candidate);
+    creator.setAvatarStorageKey(null);
+    creator.setAvatarMimeType(null);
+    creator.setAvatarSizeBytes(null);
+    creator.setAvatarUpdatedAt(null);
   }
 }

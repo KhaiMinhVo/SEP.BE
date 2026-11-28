@@ -24,8 +24,8 @@ server:
 spring:
   servlet:
     multipart:
-      max-file-size: 5MB
-      max-request-size: 6MB
+      max-file-size: 10MB
+      max-request-size: 11MB
   mail:
     host: ${SMTP_HOST:}
     port: ${SMTP_PORT:587}
@@ -93,6 +93,10 @@ spring:
 #  JWT Security
 # ------------------------------------------------------------------------------------
 application:
+  channel-oauth:
+    facebook-page-enabled: ${CHANNEL_OAUTH_FACEBOOK_PAGE_ENABLED:false}
+    instagram-mode: ${CHANNEL_OAUTH_INSTAGRAM_MODE:ALL}
+    tiktok-sandbox-enabled: ${CHANNEL_OAUTH_TIKTOK_SANDBOX_ENABLED:false}
   campaign-embedding:
     enabled: ${CAMPAIGN_EMBEDDING_ENABLED:true}
     model: ${CAMPAIGN_EMBEDDING_MODEL:bkai-foundation-models/vietnamese-bi-encoder}
@@ -108,12 +112,20 @@ application:
     enabled: ${GOOGLE_LOGIN_ENABLED:false}
     client-id: ${GOOGLE_LOGIN_CLIENT_ID:}
   instagram:
-    enabled: ${INSTAGRAM_OAUTH_ENABLED:false}
+    enabled: ${INSTAGRAM_OAUTH_ENABLED:true}
     app-id: ${INSTAGRAM_APP_ID:}
     app-secret: ${INSTAGRAM_APP_SECRET:}
     graph-api-version: ${INSTAGRAM_GRAPH_API_VERSION:}
     redirect-uri: ${INSTAGRAM_REDIRECT_URI:}
     encryption-key: ${INSTAGRAM_OAUTH_ENCRYPTION_KEY:}
+  instagram-unified:
+    enabled: ${INSTAGRAM_UNIFIED_OAUTH_ENABLED:true}
+    app-id: ${INSTAGRAM_UNIFIED_APP_ID:976403021867954}
+    app-secret: ${INSTAGRAM_UNIFIED_APP_SECRET:02a1cef551f292a7fab79c89204a559e}
+    login-config-id: ${INSTAGRAM_UNIFIED_LOGIN_CONFIG_ID:1176260962020417}
+    graph-api-version: ${INSTAGRAM_UNIFIED_GRAPH_API_VERSION:v26.0}
+    redirect-uri: ${INSTAGRAM_UNIFIED_REDIRECT_URI:https://www.influencermatch.site/api/v1/integrations/instagram-unified/callback}
+    encryption-key: ${INSTAGRAM_UNIFIED_OAUTH_ENCRYPTION_KEY:dqFO4bnR7xkLtujtbD9krtmC1s0FV748MwJLVCu3Q7c=}
   tiktok:
     enabled: ${TIKTOK_SANDBOX_LOGIN_ENABLED:false}
     client-key: ${TIKTOK_SANDBOX_CLIENT_KEY:}
@@ -121,11 +133,12 @@ application:
     redirect-uri: ${TIKTOK_SANDBOX_REDIRECT_URI:}
     scope: ${TIKTOK_SANDBOX_SCOPE:user.info.basic,user.info.profile}
   meta:
-    enabled: ${META_OAUTH_ENABLED:false}
+    enabled: ${META_OAUTH_ENABLED:true}
     app-id: ${META_APP_ID:}
     app-secret: ${META_APP_SECRET:}
     login-config-id: ${META_LOGIN_CONFIG_ID:}
-    graph-api-version: ${META_GRAPH_API_VERSION:}
+    instagram-page-login-config-id: ${META_INSTAGRAM_PAGE_LOGIN_CONFIG_ID:}
+    graph-api-version: ${META_GRAPH_API_VERSION:v26.0}
     redirect-uri: ${META_REDIRECT_URI:https://www.influencermatch.site/api/v1/integrations/meta/callback}
     encryption-key: ${META_OAUTH_ENCRYPTION_KEY:}
     cleanup-enabled: true
@@ -191,6 +204,14 @@ application:
     refund-reconciliation-delay-ms: ${VNPAY_REFUND_RECONCILIATION_DELAY_MS:60000}
     reconciliation-enabled: ${VNPAY_RECONCILIATION_ENABLED:true}
     reconciliation-delay-ms: ${VNPAY_RECONCILIATION_DELAY_MS:60000}
+  payos:
+    client-id: ${PAYOS_CLIENT_ID:}
+    api-key: ${PAYOS_API_KEY:}
+    checksum-key: ${PAYOS_CHECKSUM_KEY:}
+    reconciliation-delay-ms: ${PAYOS_RECONCILIATION_DELAY_MS:60000}
+    return-url: ${PAYOS_CALLBACK_URL:https://api.influencermatch.site/api/v1/billing/payos/return}
+    cancel-url: ${PAYOS_CANCEL_CALLBACK_URL:https://api.influencermatch.site/api/v1/billing/payos/return}
+    frontend-return-url: ${PAYOS_FRONTEND_RETURN_URL:https://www.influencermatch.site/subscription}
 
 # ------------------------------------------------------------------------------------
 #  SpringDoc / OpenAPI (Swagger UI)
@@ -215,6 +236,15 @@ logging:
     org.hibernate.SQL: DEBUG
     org.hibernate.type.descriptor.sql.BasicBinder: INFO
 management:
+  endpoint:
+    health:
+      # Mail is optional locally, so the excluded contributor may not exist.
+      validate-group-membership: false
+      group:
+        deployment:
+          # SMTP failures remain visible on aggregate health, but must not block API deployment.
+          include: "*"
+          exclude: mail
   endpoints:
     web:
       exposure:

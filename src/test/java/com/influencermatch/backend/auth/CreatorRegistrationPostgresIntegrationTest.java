@@ -173,7 +173,7 @@ class CreatorRegistrationPostgresIntegrationTest extends PostgresApiTestSupport 
     call(
         account(Role.ADMIN),
         patch("/data/creator-claims/" + claim.path("id").asText() + "/review"),
-        Map.of("decision", "APPROVED", "reason", "Verified manually"),
+        Map.of("decision", "APPROVED", "reason", "Verified manually", "reviewEvidenceType", "ACCOUNT_SETTINGS", "reviewVerificationNote", "Checked account settings"),
         200);
     assertThat(
             jdbc.queryForObject(

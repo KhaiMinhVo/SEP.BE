@@ -194,8 +194,12 @@ class RolePermissionPostgresIntegrationTest {
           .andExpect(status().isForbidden());
     }
 
-    setPermission(Role.DATA_MANAGER, 0, Permission.MANAGE_RECOMMENDATION_CONFIG, false);
+    jdbc.update(
+        "insert into role_permission_override(id, role, permission, enabled) values (gen_random_uuid(), 'DATA_MANAGER', 'MANAGE_RECOMMENDATION_CONFIG', false)"
+            + " on conflict (role, permission) do update set enabled = false");
     call(token(dataManager), get("/admin/recommendation-config"), null, 403);
+    jdbc.update(
+        "delete from role_permission_override where role='DATA_MANAGER' and permission='MANAGE_RECOMMENDATION_CONFIG'");
     call(null, get("/admin/recommendation-config"), null, 401);
     call("not-a-valid-token", get("/admin/recommendation-config"), null, 401);
   }
@@ -547,7 +551,7 @@ class RolePermissionPostgresIntegrationTest {
             Permission.REVIEW_CREATOR_CLAIM,
             "PATCH",
             "/data/creator-claims/{id}/review",
-            Map.of("decision", "APPROVED", "reason", "Verified")),
+            Map.of("decision", "APPROVED", "reason", "Verified", "reviewEvidenceType", "ACCOUNT_SETTINGS", "reviewVerificationNote", "Checked account settings")),
         Arguments.of(
             Role.BRAND,
             Permission.MANAGE_OWN_SUBSCRIPTION,

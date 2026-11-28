@@ -1,0 +1,117 @@
+' Report 7, section 3.1.1 Screens Flow.
+' UI codes identify boxes in these four dialog maps. Navigation labels describe the actions shown by each source branch.
+' Initial markers show entry points. Hidden links preserve visual order and do not represent navigation.
+
+@startuml screens-flow-admin
+' Source figure: word/media/image18.png
+!pragma layout smetana
+left to right direction
+hide empty description
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontColor #162A3F
+skinparam defaultFontSize 14
+skinparam ArrowColor #627892
+skinparam ArrowFontColor #334B61
+skinparam nodesep 15
+skinparam ranksep 40
+skinparam state {
+    BackgroundColor #FFFFFF
+    BorderColor #90ABC5
+    FontColor #162A3F
+    RoundCorner 12
+}
+
+title
+<size:22><b>Admin Screen</b></size>
+<size:13><color:#506581>InfluencerMatch AI | Screen navigation hierarchy</color></size>
+end title
+
+' LEVEL 1 · ENTRY
+state "<b>UI-AD-00 Admin Login</b>\n<size:12><color:#435972>Email and password authentication</color></size>" as AD00 #FFF0DE
+
+' LEVEL 2 · LAYOUT
+state "<b>UI-AD-01 Admin Layout</b>\n<size:12><color:#435972>Sidebar, header and main content</color></size>" as AD01 #E3EFF9
+
+' LEVEL 3 · MAIN MENU
+state "<b>UI-AD-02 Account Menu</b>" as AD02 #EDF4FA
+state "<b>UI-AD-03 Notifications</b>" as AD03 #EDF4FA
+state "<b>UI-AD-04 Admin Dashboard</b>\n<size:12><color:#435972>System Overview</color></size>" as AD04 #EDF4FA
+state "<b>UI-AD-05 Account Management</b>\n<size:12><color:#435972>User & Role Administration</color></size>" as AD05 #EDF4FA
+state "<b>UI-AD-06 Subscription Plans</b>\n<size:12><color:#435972>Plan Catalogue Management</color></size>" as AD06 #EDF4FA
+state "<b>UI-AD-07 Payments & Revenue</b>\n<size:12><color:#435972>Billing & Refund Operations</color></size>" as AD07 #EDF4FA
+state "<b>UI-AD-08 Audit Log</b>\n<size:12><color:#435972>Compliance & Activity Tracking</color></size>" as AD08 #EDF4FA
+
+' LEVEL 4 · SCREENS / TABS / MODALS
+state "<b>UI-AD-09 Admin Profile & Logout</b>\n<size:12><color:#435972>Profile access and sign out</color></size>" as AD09
+state "<b>UI-AD-10 Notification Drawer</b>\n<size:12><color:#435972>In-app real-time alerts</color></size>" as AD10
+state "<b>UI-AD-11 Executive Metrics</b>\n<size:12><color:#435972>Platform KPIs, users and revenue summary</color></size>" as AD11
+state "<b>UI-AD-12 System Infrastructure</b>\n<size:12><color:#435972>Server load, uptime, database and connection pool</color></size>" as AD12
+state "<b>UI-AD-13 Account List & Filters</b>\n<size:12><color:#435972>Filter by role and account status</color></size>" as AD13
+state "<b>UI-AD-14 Account Detail & Roles</b>\n<size:12><color:#435972>Role assignment and security activity</color></size>" as AD14
+state "<b>UI-AD-15 Lock / Unlock Modal</b> <size:11>«dialog»</size>\n<size:12><color:#435972>Suspend or reactivate with audit reason</color></size>" as AD15 <<dialog>> #line.dashed
+state "<b>UI-AD-16 RBAC Matrix</b>\n<size:12><color:#435972>Role-permission overrides</color></size>" as AD16
+state "<b>UI-AD-17 Plan Tier Config</b>\n<size:12><color:#435972>Create and edit pricing, duration and quotas</color></size>" as AD17
+state "<b>UI-AD-18 Activate / Deactivate Toggle</b>\n<size:12><color:#435972>Manage plan availability</color></size>" as AD18
+state "<b>UI-AD-19 Transaction Ledger</b>\n<size:12><color:#435972>VNPAY and PayOS payment records</color></size>" as AD19
+state "<b>UI-AD-20 Revenue Analytics</b>\n<size:12><color:#435972>Revenue report and breakdown</color></size>" as AD20
+state "<b>UI-AD-21 Transaction Detail Modal</b> <size:11>«dialog»</size>\n<size:12><color:#435972>Gateway reference and settlement status</color></size>" as AD21 <<dialog>> #line.dashed
+state "<b>UI-AD-22 Refund Approval Modal</b> <size:11>«dialog»</size>\n<size:12><color:#435972>Approve, reject and execute refunds</color></size>" as AD22 <<dialog>> #line.dashed
+state "<b>UI-AD-23 System Activity Logs</b>\n<size:12><color:#435972>Filter by actor, action, entity and date</color></size>" as AD23
+state "<b>UI-AD-24 Audit Detail Drawer</b>\n<size:12><color:#435972>Metadata and change inspection</color></size>" as AD24
+state "<b>UI-AD-25 Audit Export</b>\n<size:12><color:#435972>CSV compliance export</color></size>" as AD25
+
+' Navigation
+[*] --> AD00 : Open application
+AD00 --> AD01 : Sign in [System Admin]
+AD01 --> AD02 : Open account menu
+AD01 --> AD03 : Open notifications
+AD01 --> AD04 : Open Dashboard
+AD01 --> AD05 : Open Account Management
+AD01 --> AD06 : Open Subscription Plans
+AD01 --> AD07 : Open Payments & Revenue
+AD01 --> AD08 : Open Audit Log
+AD02 --> AD09 : Open profile or sign out
+AD03 --> AD10 : View alerts
+AD04 --> AD11 : View executive metrics
+AD04 --> AD12 : View infrastructure
+AD05 --> AD13 : List or filter accounts
+AD05 --> AD14 : Open an account
+AD05 --> AD15 : Choose lock or unlock
+AD05 --> AD16 : Open RBAC matrix
+AD06 --> AD17 : Configure a plan tier
+AD06 --> AD18 : Toggle availability
+AD07 --> AD19 : Open transactions
+AD07 --> AD20 : View revenue
+AD07 --> AD21 : Open transaction details
+AD07 --> AD22 : Open refund approval
+AD08 --> AD23 : View or filter activity
+AD08 --> AD24 : Open an audit record
+AD08 --> AD25 : Export audit CSV
+
+' Hidden layout links
+AD02 -right[hidden]-> AD03
+AD03 -right[hidden]-> AD04
+AD04 -right[hidden]-> AD05
+AD05 -right[hidden]-> AD06
+AD06 -right[hidden]-> AD07
+AD07 -right[hidden]-> AD08
+AD09 -right[hidden]-> AD10
+AD10 -right[hidden]-> AD11
+AD11 -right[hidden]-> AD12
+AD12 -right[hidden]-> AD13
+AD13 -right[hidden]-> AD14
+AD14 -right[hidden]-> AD15
+AD15 -right[hidden]-> AD16
+AD16 -right[hidden]-> AD17
+AD17 -right[hidden]-> AD18
+AD18 -right[hidden]-> AD19
+AD19 -right[hidden]-> AD20
+AD20 -right[hidden]-> AD21
+AD21 -right[hidden]-> AD22
+AD22 -right[hidden]-> AD23
+AD23 -right[hidden]-> AD24
+AD24 -right[hidden]-> AD25
+
+@enduml

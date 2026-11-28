@@ -24,6 +24,17 @@ import org.hibernate.type.SqlTypes;
 @SuperBuilder
 public class BrandProfile extends BaseEntity {
 
+  @Column(length = 2048) private String logoUrl;
+  @Column(length = 500) private String logoStorageKey;
+  @Column(length = 100) private String logoMimeType;
+  @Column private Long logoSizeBytes;
+  @Column private java.time.LocalDateTime logoUpdatedAt;
+  @Column(length = 2048) private String coverImageUrl;
+  @Column(length = 500) private String coverImageStorageKey;
+  @Column(length = 100) private String coverImageMimeType;
+  @Column private Long coverImageSizeBytes;
+  @Column private java.time.LocalDateTime coverImageUpdatedAt;
+
   @OneToOne(fetch = FetchType.LAZY, optional = false)
   @JoinColumn(nullable = false, unique = true)
   private User user;

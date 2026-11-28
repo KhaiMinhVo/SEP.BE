@@ -1,0 +1,40 @@
+@startuml deal-lifecycle-state
+title WF-02 | Cooperation Deal Lifecycle
+hide empty description
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam stateBackgroundColor white
+skinparam noteBackgroundColor white
+skinparam defaultFontName Arial
+top to bottom direction
+
+state CONTACTED
+state NEGOTIATING
+state CONFIRMED
+state DECLINED
+state CANCELLED
+
+[*] --> CONTACTED : / create Deal and channel members
+CONTACTED --> NEGOTIATING : propose\n[eligible members and valid terms (BR-54/71)]\n/ append OFFER revision
+NEGOTIATING --> NEGOTIATING : propose or counter\n[valid terms and eligible actor (BR-54/71)]\n/ append revision; clear prior acceptance and invalidate invitation
+NEGOTIATING --> NEGOTIATING : accept\n[eligible Creator accepts current OFFER (BR-55)]\n/ record accepted revision
+NEGOTIATING --> CONFIRMED : confirm\n[current acceptance or valid external evidence;\nCampaign, channel and budget checks pass (BR-55/56/71)]\n/ atomically create PLANNED Collaboration
+NEGOTIATING --> DECLINED : decline\n[eligible Creator responds to current Deal]\n/ invalidate invitation and record decline
+
+CONTACTED --> CANCELLED : cancel\n[authorized Brand and current revision]\n/ deactivate members
+NEGOTIATING --> CANCELLED : cancel\n[authorized Brand and current revision]\n/ deactivate members and invalidate invitation
+CONFIRMED --> CANCELLED : cancel\n[authorized Brand, current revision and Collaboration PLANNED]\n/ cancel Collaboration and deactivate members
+DECLINED --> [*]
+CANCELLED --> [*]
+
+note right of CONFIRMED
+  Collaboration start changes Collaboration status.
+  The Deal stays CONFIRMED.
+end note
+note left of CONTACTED
+  Deal status is stored in cooperation_deal.status.
+  CRM stage belongs to the separate Relationship.
+  New Deal writes validate the expected revision.
+end note
+@enduml

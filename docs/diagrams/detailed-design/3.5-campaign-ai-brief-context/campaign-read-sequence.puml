@@ -1,0 +1,40 @@
+@startuml campaign-read-sequence
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+title Figure 4.3.5.2.3 Get Campaign List and Details Sequence Diagram
+hide footbox
+autonumber
+actor Brand
+participant "Web Client" as Web
+participant CampaignController as API
+participant CampaignService as Service
+participant BrandService as Brands
+participant CampaignRepository as Repo
+Brand -> Web : open campaign list or detail
+alt <U+005B>list requested<U+005D>
+  Web -> API : GET /api/v1/brands/{brandId}/campaigns
+  API -> Service : list(brandId, pageable, authentication)
+else <U+005B>detail requested<U+005D>
+  Web -> API : GET /api/v1/campaigns/{id}
+  API -> Service : get(id, authentication)
+end
+activate Service
+opt <U+005B>looking up detail<U+005D>
+  Service -> Repo : findById(id)
+  Repo --> Service : campaign or empty
+end
+Service -> Brands : requireAccessible(brandId, authentication)
+alt <U+005B>authorized and resource exists<U+005D>
+  opt <U+005B>listing campaigns<U+005D>
+    Service -> Repo : findByBrandProfileId(brandId, pageable)
+    Repo --> Service : campaign page
+  end
+  Service --> API : page or CampaignResponse
+else <U+005B>access or lookup fails<U+005D>
+  Service --> API : mapped error
+end
+deactivate Service
+API --> Web : result
+@enduml

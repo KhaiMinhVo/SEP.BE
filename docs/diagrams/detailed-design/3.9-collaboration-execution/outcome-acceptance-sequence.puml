@@ -1,0 +1,64 @@
+@startuml outcome-acceptance-sequence
+title WF-03 | Record Publication, KPI and Accept Outcome
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 225
+
+actor Creator
+actor Brand
+participant "Web Client" as Web
+participant CollaborationExecutionController as Controller
+participant FlexibleExecutionController as Flexible
+participant CollaborationExecution as Execution
+database PostgreSQL as DB
+
+note over Web, Execution : Writes use Idempotency-Key and the applicable expectedRevision.
+alt <U+005B>eligible Creator records results<U+005D>
+  Creator -> Web : enter post URL if needed, measurement period and KPI
+  Web -> Controller : POST /api/v1/collaborations/{id}/deliverables/{d}/outcome
+  Controller -> Execution : deliverableOutcome(id, d, body, key)
+else <U+005B>authorized Brand records external results<U+005D>
+  Brand -> Web : enter results, external source and receipt time
+  Web -> Flexible : POST /api/v1/collaborations/{id}/deliverables/{d}/external-outcome
+  Flexible -> Execution : deliverableOutcomeExternal(id, d, body, key)
+end
+activate Execution
+alt <U+005B>approved current submission and valid KPI and publication data (BR-61)<U+005D>
+  Execution -> DB : insert missing publication and append outcome revision in one transaction
+  DB --> Execution : persisted publication and outcome revision
+  Execution --> Web : 200 OK with current execution view via request controller
+else <U+005B>invalid KPI, provenance or HTTPS URL<U+005D>
+  Execution --> Web : 400 Bad Request via request controller
+else <U+005B>revision, status or existing publication conflicts<U+005D>
+  Execution --> Web : 409 Conflict via request controller
+end
+deactivate Execution
+
+opt <U+005B>Brand has results to accept<U+005D>
+  Brand -> Web : confirm actual costs
+  Web -> Controller : POST /api/v1/collaborations/{id}/outcome/finance\nexpectedRevision and Idempotency-Key
+  Controller -> Execution : finance(id, body, key)
+  Execution --> Controller : current execution view
+  Controller --> Web : updated outcome revision
+  Brand -> Web : accept the latest outcome
+  Web -> Controller : POST /api/v1/collaborations/{id}/outcome/accept\nexpectedRevision, outcomeRevision and Idempotency-Key
+  activate Controller
+  Controller -> Execution : accept(id, body, key)
+  activate Execution
+  alt <U+005B>latest outcome; approved deliverables, complete KPI, acknowledged exceptions, confirmed positive VND costs and no pending exit<U+005D>
+    Execution -> DB : record acceptance for exact revision and set AWAITING_REVIEW
+    DB --> Execution : acceptance saved
+    Execution --> Controller : current execution view
+    Controller --> Web : 200 OK
+  else <U+005B>revision or acceptance conditions fail<U+005D>
+    Execution --> Controller : DEAL_STATE_CONFLICT
+    Controller --> Web : 409 Conflict
+  end
+  deactivate Execution
+  deactivate Controller
+end
+@enduml

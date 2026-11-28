@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class BrandPaymentService {
   private final PaymentRepository payments;
+  private final PaymentService paymentService;
 
   public PageResponse<BrandPaymentResponse> history(Pageable pageable) {
     Permissions.require(Permission.MANAGE_OWN_SUBSCRIPTION);
@@ -27,11 +28,17 @@ public class BrandPaymentService {
         .map(this::response));
   }
 
+  @Transactional
   public BrandPaymentResponse status(String reference) {
     Permissions.require(Permission.MANAGE_OWN_SUBSCRIPTION);
     var payment = payments.findByTransactionCode(reference)
         .filter(p -> p.getBrandProfile().getUser().getId().equals(Permissions.actor().getId()))
         .orElseThrow(() -> new ResourceNotFoundException("Payment not found"));
+    if (payment.getStatus() == com.influencermatch.backend.billing.enums.PaymentStatus.PENDING
+        && "PAYOS".equals(payment.getPaymentGateway())) {
+      paymentService.processPayOsReturn(reference);
+      payment = payments.findByTransactionCode(reference).orElse(payment);
+    }
     return response(payment);
   }
 

@@ -1,0 +1,93 @@
+@startuml subscription-checkout-settlement-sequence
+title WF-06 | Checkout, Browser Return and Server Settlement
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 225
+
+actor Brand
+participant "Web Client / Browser" as Web
+participant PaymentController as Controller
+participant PaymentService as Payment
+participant "VNPay or PayOS" as Gateway
+participant PaymentSettlementService as Settlement
+database PostgreSQL as DB
+
+Brand -> Web : select a paid plan and gateway
+alt <U+005B>VNPay selected<U+005D>
+  Web -> Controller : POST /api/v1/billing/subscribe
+  Controller -> Payment : createCheckout(planId, brand, ipAddress)
+else <U+005B>PayOS selected<U+005D>
+  Web -> Controller : POST /api/v1/billing/subscribe/payos
+  Controller -> Payment : createPayOsCheckout(planId, brand)
+end
+activate Payment
+Payment -> DB : reuse eligible pending checkout or save PENDING payment and subscription
+note over Payment, DB : Snapshot plan limits at checkout. Purchased quotas become usable after activation.
+Payment --> Controller : PaymentResponse and checkout URL
+deactivate Payment
+Controller --> Web : checkout URL
+Web -> Gateway : open checkout
+
+group Browser return
+  alt <U+005B>browser returns from VNPay<U+005D>
+    Web -> Controller : GET /api/v1/billing/vnpay/return
+    Controller -> Payment : processVnPayCallback(fields)
+    Payment --> Controller : verified callback result
+  else <U+005B>browser returns from PayOS<U+005D>
+    Web -> Controller : GET /api/v1/billing/payos/return
+    Controller -> Payment : processPayOsReturn(orderCode)
+    opt <U+005B>matching PayOS payment still needs confirmation<U+005D>
+      Payment -> Gateway : getPaymentLink(orderCode)
+      Gateway --> Payment : server-queried order status and amounts
+    end
+    Payment --> Controller : result based on stored state or verified query
+  end
+  Controller --> Web : 302 redirect with payment and txnRef
+end
+
+group Server notification
+  alt <U+005B>VNPay IPN received<U+005D>
+    Gateway -> Controller : GET /api/v1/billing/vnpay/ipn
+    Controller -> Payment : processVnPayCallback(fields)
+    Payment --> Controller : CallbackResult
+    Controller --> Gateway : HTTP 200 and RspCode
+  else <U+005B>PayOS webhook received<U+005D>
+    Gateway -> Controller : POST /api/v1/billing/payos/webhook
+    Controller -> Payment : processPayOsWebhook(rawBody)
+    Payment --> Controller : CallbackResult
+    Controller --> Gateway : HTTP 200 for accepted/pending; otherwise HTTP 400
+  end
+end
+
+ref over Controller, DB
+  The settlement below runs inside the corresponding verified callback
+  or verified server query, before its response. Delivery order may vary.
+end ref
+group Shared server-side settlement (BR-66/67)
+  alt <U+005B>signature, gateway identity, transaction or amount checks fail<U+005D>
+    note over Payment : Reject the callback; leave stored state unchanged.
+  else <U+005B>provider outcome still unknown<U+005D>
+    note over Payment : Keep payment pending for reconciliation.
+  else <U+005B>final outcome verified<U+005D>
+    Payment -> Settlement : lock(existing)
+    Settlement -> DB : lock Brand and Payment
+    DB --> Settlement : current rows
+    Settlement --> Payment : locked Payment
+    Payment -> Settlement : apply(payment, success, failureReason)
+    activate Settlement
+    alt <U+005B>pending checkout and confirmed payment<U+005D>
+      Settlement -> DB : mark PAID; activate purchased subscription and cancel prior ACTIVE subscriptions
+    else <U+005B>pending checkout and confirmed failure<U+005D>
+      Settlement -> DB : mark FAILED; cancel pending subscription
+    else <U+005B>matching replay or conflicting final state<U+005D>
+      note over Settlement : Return the matching result or conflict without another state change.
+    end
+    Settlement --> Payment : applied or rejected
+    deactivate Settlement
+  end
+end
+@enduml

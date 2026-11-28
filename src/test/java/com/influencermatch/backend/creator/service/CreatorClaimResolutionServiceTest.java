@@ -170,6 +170,7 @@ class CreatorClaimResolutionServiceTest {
   }
 
   @Test
+  @org.junit.jupiter.api.DisplayName("resolveClaim UTCID01 [N]: Matching verified creator resolves pending invitation")
   void resolveClaim_success_flow() {
     String rawToken = "invitation_token_123";
     String tokenHash = CreatorInvitationService.hashToken(rawToken);
@@ -356,7 +357,9 @@ class CreatorClaimResolutionServiceTest {
         .isInstanceOf(com.influencermatch.backend.exception.ForbiddenException.class);
     verifyNoInteractions(userRepository,creatorInvitationRepository,oAuthProofClient);
   }
-  @Test void callbackCannotConsumeInvitationSentToAnotherEmail() {
+  @Test
+  @org.junit.jupiter.api.DisplayName("resolveClaim UTCID03 [A]: Invitation for another email is forbidden")
+  void callbackCannotConsumeInvitationSentToAnotherEmail() {
     var invitation=CreatorInvitation.builder().id(UUID.randomUUID()).invitedEmail("other@example.test")
         .status("PENDING").expiresAt(LocalDateTime.now().plusDays(1)).build();
     when(creatorInvitationRepository.findByTokenHash(anyString())).thenReturn(Optional.of(invitation));
@@ -405,6 +408,75 @@ class CreatorClaimResolutionServiceTest {
       order.verify(creatorRepository).findLockedById(channel.getId());order.verify(entityManager).refresh(channel);
       order.verify(creatorInvitationRepository).findLockedById(invitation.getId());order.verify(entityManager).refresh(invitation);
     }
+  }
+
+  @Test
+  void resolveClaim_invitationExpiresAtExactClockNow_throwsInvitationExpired() {
+    java.time.Instant fixedInstant = java.time.Instant.parse("2026-11-26T12:00:00Z");
+    java.time.Clock fixedClock = java.time.Clock.fixed(fixedInstant, java.time.ZoneOffset.UTC);
+    org.springframework.test.util.ReflectionTestUtils.setField(resolutionService, "clock", fixedClock);
+
+    String rawToken = "expiring_now_token";
+    String tokenHash = CreatorInvitationService.hashToken(rawToken);
+    UUID creatorId = UUID.randomUUID();
+    Creator creator = Creator.builder()
+        .id(creatorId).platform("YOUTUBE").externalId("UC_1").userName("ch_1")
+        .sourceType(CreatorSourceType.PUBLIC).build();
+    CreatorInvitation invitation = CreatorInvitation.builder()
+        .id(UUID.randomUUID()).targetCreator(creator)
+        .invitedEmail("koc@influencermatch.com").tokenHash(tokenHash)
+        .status("PENDING").expiresAt(LocalDateTime.now(fixedClock)).build();
+
+    when(creatorInvitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(invitation));
+    when(creatorInvitationRepository.findLockedById(invitation.getId())).thenReturn(Optional.of(invitation));
+    when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
+
+    assertThatThrownBy(() -> resolutionService.resolveClaim("YOUTUBE", "code", rawToken, actor()))
+        .isInstanceOfSatisfying(ConflictException.class,
+            ex -> assertThat(ex.code()).isEqualTo(ErrorCode.INVITATION_EXPIRED));
+    verifyNoInteractions(oAuthProofClient);
+  }
+
+  @Test
+  void resolveClaim_platformDiffersFromInvitation_throwsValidationException() {
+    String rawToken = "platform_mismatch_token";
+    String tokenHash = CreatorInvitationService.hashToken(rawToken);
+    Creator creator = Creator.builder()
+        .id(UUID.randomUUID()).platform("YOUTUBE").externalId("UC_2").userName("ch_2")
+        .sourceType(CreatorSourceType.PUBLIC).build();
+    CreatorInvitation invitation = CreatorInvitation.builder()
+        .id(UUID.randomUUID()).targetCreator(creator)
+        .invitedEmail("koc@influencermatch.com").tokenHash(tokenHash)
+        .status("PENDING").expiresAt(LocalDateTime.now().plusDays(1)).build();
+
+    when(creatorInvitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(invitation));
+
+    assertThatThrownBy(() -> resolutionService.resolveClaim("TIKTOK", "code", rawToken, actor()))
+        .isInstanceOf(com.influencermatch.backend.exception.ValidationException.class);
+    verifyNoInteractions(oAuthProofClient);
+  }
+
+  @Test
+  void resolveClaim_invitationAlreadyProcessed_throwsConflict() {
+    String rawToken = "processed_token";
+    String tokenHash = CreatorInvitationService.hashToken(rawToken);
+    UUID creatorId = UUID.randomUUID();
+    Creator creator = Creator.builder()
+        .id(creatorId).platform("YOUTUBE").externalId("UC_3").userName("ch_3")
+        .sourceType(CreatorSourceType.PUBLIC).build();
+    CreatorInvitation invitation = CreatorInvitation.builder()
+        .id(UUID.randomUUID()).targetCreator(creator)
+        .invitedEmail("koc@influencermatch.com").tokenHash(tokenHash)
+        .status("ACCEPTED").expiresAt(LocalDateTime.now().plusDays(1)).build();
+
+    when(creatorInvitationRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(invitation));
+    when(creatorInvitationRepository.findLockedById(invitation.getId())).thenReturn(Optional.of(invitation));
+    when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
+
+    assertThatThrownBy(() -> resolutionService.resolveClaim("YOUTUBE", "code", rawToken, actor()))
+        .isInstanceOfSatisfying(ConflictException.class,
+            ex -> assertThat(ex.code()).isEqualTo(ErrorCode.INVITATION_ALREADY_PROCESSED));
+    verifyNoInteractions(oAuthProofClient);
   }
 
 }

@@ -37,6 +37,7 @@ public class Campaign extends BaseEntity {
   @Column(length = 2048)
   private String imageUrl;
 
+
   @Column(name = "image_storage_key", length = 500)
   private String imageStorageKey;
 

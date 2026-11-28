@@ -18,9 +18,8 @@ public class CooperationOnboardingController {
   }
   @PostMapping("/registration")
   @ResponseStatus(org.springframework.http.HttpStatus.ACCEPTED)
-  public ApiResponse<Void> registration(@Valid @RequestBody Registration body) {
-    onboarding.requestRegistration(body.token(), body.email());
-    return ApiResponse.ok("If eligible, a registration email has been sent. Existing users should sign in.", null);
+  public ApiResponse<?> registration(@Valid @RequestBody Registration body) {
+    return ApiResponse.ok(onboarding.requestRegistration(body.token(), body.email()));
   }
   @PostMapping("/context") @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
   public ApiResponse<?> context(@Valid @RequestBody Token body) { return ApiResponse.ok(onboarding.context(body.token())); }

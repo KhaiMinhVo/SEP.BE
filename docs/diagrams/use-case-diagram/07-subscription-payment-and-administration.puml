@@ -1,0 +1,50 @@
+@startuml 07-subscription-payment-and-administration
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+skinparam ArrowColor #242424
+skinparam usecase {
+    BackgroundColor #F1F1F1
+    BorderColor #555555
+}
+
+title Subscriptions, Payments and System Administration
+
+actor "Brand / SME" as Brand
+actor "System Admin" as Admin
+actor "VNPay" as VNPay <<external system>>
+actor "PayOS" as PayOS <<external system>>
+
+rectangle "Intelligent Influencer Discovery and Recommendation Platform\nBased on Historical and Contextual Data for SMEs" {
+    usecase "UC-46 View Subscription Plans" as UC46
+    usecase "UC-47 Subscribe to a Service Plan" as UC47
+    usecase "UC-48 Manage Subscription and View Quotas" as UC48
+    usecase "UC-49 View Subscription Payment History" as UC49
+    usecase "UC-99 Request a Subscription Refund" as UC99
+    usecase "UC-100 Process Subscription Refunds" as UC100
+    usecase "UC-70 Manage Subscription Plans" as UC70
+    usecase "UC-71 Monitor Transactions and Revenue" as UC71
+    usecase "UC-69 Manage Roles and Permissions" as UC69
+    usecase "UC-73 Manage User Accounts" as UC73
+    usecase "UC-72 Monitor System Operations" as UC72
+    usecase "UC-75 Review System Audit Logs" as UC75
+}
+
+Brand -- UC46
+Brand -- UC47
+Brand -- UC48
+Brand -- UC49
+Brand -- UC99
+Admin -- UC100
+Admin -- UC70
+Admin -- UC71
+Admin -- UC69
+Admin -- UC73
+Admin -- UC72
+Admin -- UC75
+
+UC47 -- VNPay
+UC100 -- VNPay
+UC47 -- PayOS
+@enduml

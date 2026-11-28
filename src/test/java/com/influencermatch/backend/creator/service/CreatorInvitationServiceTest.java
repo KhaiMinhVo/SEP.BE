@@ -27,6 +27,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -78,8 +79,10 @@ class CreatorInvitationServiceTest {
   }
 
   @Test
+  @DisplayName("sendCreatorInvitation UTCID01 [N]: Owned campaign invitation is queued with seven-day expiry")
   void sendInvitation_success() {
     UUID creatorId = UUID.randomUUID();
+    UUID campaignId = UUID.randomUUID();
     Creator creator = Creator.builder()
         .id(creatorId)
         .platform("YOUTUBE")
@@ -89,9 +92,14 @@ class CreatorInvitationServiceTest {
         .build();
 
     when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
-    when(brandProfileRepository.findByUserId(mockBrandUser.getId())).thenReturn(Optional.of(
-        BrandProfile.builder().id(UUID.randomUUID()).user(mockBrandUser).businessName("Acme").build()
-    ));
+    BrandProfile brandProfile = BrandProfile.builder()
+        .id(UUID.randomUUID()).user(mockBrandUser).businessName("Acme").build();
+    when(brandProfileRepository.findByUserId(mockBrandUser.getId())).thenReturn(Optional.of(brandProfile));
+    var ownedCampaign = com.influencermatch.backend.campaign.model.Campaign.builder()
+        .id(campaignId)
+        .brandProfile(brandProfile)
+        .build();
+    when(campaignRepository.findById(campaignId)).thenReturn(Optional.of(ownedCampaign));
     when(creatorInvitationRepository.save(any())).thenAnswer(i -> {
       CreatorInvitation inv = i.getArgument(0);
       inv.setId(UUID.randomUUID());
@@ -99,7 +107,7 @@ class CreatorInvitationServiceTest {
     });
 
     InvitationResponse response = invitationService.sendInvitation(
-        creatorId, "koc@gmail.com", null, null);
+        creatorId, "koc@gmail.com", null, campaignId);
 
     assertThat(response.getCreatorId()).isEqualTo(creatorId);
     assertThat(response.getEmail()).isEqualTo("koc@gmail.com");
@@ -115,11 +123,13 @@ class CreatorInvitationServiceTest {
     verify(creatorInvitationRepository).save(captor.capture());
     CreatorInvitation saved = captor.getValue();
     assertThat(saved.getTargetCreator()).isEqualTo(creator);
+    assertThat(saved.getCampaign()).isEqualTo(ownedCampaign);
     assertThat(saved.getTokenHash()).isEqualTo(CreatorInvitationService.hashToken(rawToken));
     assertThat(saved.getExpiresAt()).isAfter(LocalDateTime.now().plusDays(6));
   }
 
   @Test
+  @DisplayName("sendCreatorInvitation UTCID04 [A]: Already-linked creator cannot be invited")
   void sendInvitation_alreadyClaimed_throwsConflict() {
     UUID creatorId = UUID.randomUUID();
     Creator creator = Creator.builder()
@@ -208,5 +218,95 @@ class CreatorInvitationServiceTest {
     assertThatThrownBy(() -> invitationService.verifyInvitationToken(rawToken))
         .isInstanceOf(ConflictException.class)
         .satisfies(e -> assertThat(((ConflictException) e).code()).isEqualTo(ErrorCode.INVITATION_ALREADY_PROCESSED));
+  }
+
+  @Test
+  void sendInvitation_previousExpiredAtNowPermittedWith7DayExpiry() {
+    java.time.Instant fixedInstant = java.time.Instant.parse("2026-11-26T10:00:00Z");
+    java.time.Clock fixedClock = java.time.Clock.fixed(fixedInstant, java.time.ZoneOffset.UTC);
+    org.springframework.test.util.ReflectionTestUtils.setField(invitationService, "clock", fixedClock);
+    LocalDateTime now = LocalDateTime.now(fixedClock);
+
+    UUID creatorId = UUID.randomUUID();
+    Creator creator = Creator.builder()
+        .id(creatorId).platform("TIKTOK").externalId("tt_1").userName("koc_1")
+        .sourceType(CreatorSourceType.PUBLIC).build();
+    when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
+    when(brandProfileRepository.findByUserId(mockBrandUser.getId())).thenReturn(Optional.of(
+        BrandProfile.builder().id(UUID.randomUUID()).user(mockBrandUser).businessName("Acme").build()));
+    when(creatorInvitationRepository.findFirstByTargetCreatorIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
+            creatorId, "PENDING", now)).thenReturn(Optional.empty());
+    when(creatorInvitationRepository.save(any())).thenAnswer(i -> {
+      CreatorInvitation inv = i.getArgument(0);
+      inv.setId(UUID.randomUUID());
+      return inv;
+    });
+
+    InvitationResponse response = invitationService.sendInvitation(creatorId, "koc@gmail.com", null, null);
+
+    assertThat(response.getExpiresAt()).isEqualTo(now.plusDays(7));
+    assertThat(response.getEmailStatus()).isEqualTo("QUEUED");
+  }
+
+  @Test
+  void sendInvitation_nullCampaignNormalizesEmail() {
+    UUID creatorId = UUID.randomUUID();
+    Creator creator = Creator.builder()
+        .id(creatorId).platform("YOUTUBE").externalId("UC99").userName("koc_yt")
+        .sourceType(CreatorSourceType.PUBLIC).build();
+    when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
+    when(brandProfileRepository.findByUserId(mockBrandUser.getId())).thenReturn(Optional.of(
+        BrandProfile.builder().id(UUID.randomUUID()).user(mockBrandUser).businessName("Acme").build()));
+    when(creatorInvitationRepository.save(any())).thenAnswer(i -> {
+      CreatorInvitation inv = i.getArgument(0);
+      inv.setId(UUID.randomUUID());
+      return inv;
+    });
+
+    InvitationResponse response = invitationService.sendInvitation(creatorId, "  KOC.Creator@GMAIL.COM  ", null, null);
+
+    assertThat(response.getEmail()).isEqualTo("koc.creator@gmail.com");
+    ArgumentCaptor<CreatorInvitation> captor = ArgumentCaptor.forClass(CreatorInvitation.class);
+    verify(creatorInvitationRepository).save(captor.capture());
+    assertThat(captor.getValue().getCampaign()).isNull();
+    assertThat(captor.getValue().getInvitedEmail()).isEqualTo("koc.creator@gmail.com");
+  }
+
+  @Test
+  void sendInvitation_unexpiredPendingInvitationExists_throwsConflict() {
+    UUID creatorId = UUID.randomUUID();
+    Creator creator = Creator.builder()
+        .id(creatorId).platform("YOUTUBE").externalId("UC77").userName("koc_77")
+        .sourceType(CreatorSourceType.PUBLIC).build();
+    CreatorInvitation existingPending = CreatorInvitation.builder()
+        .id(UUID.randomUUID()).targetCreator(creator).status("PENDING")
+        .expiresAt(LocalDateTime.now().plusDays(3)).build();
+    when(creatorRepository.findLockedById(creatorId)).thenReturn(Optional.of(creator));
+    when(brandProfileRepository.findByUserId(mockBrandUser.getId())).thenReturn(Optional.of(
+        BrandProfile.builder().id(UUID.randomUUID()).user(mockBrandUser).businessName("Acme").build()));
+    when(creatorInvitationRepository.findFirstByTargetCreatorIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
+            eq(creatorId), eq("PENDING"), any())).thenReturn(Optional.of(existingPending));
+
+    assertThatThrownBy(() -> invitationService.sendInvitation(creatorId, "koc@gmail.com", null, null))
+        .isInstanceOf(ConflictException.class)
+        .satisfies(e -> assertThat(((ConflictException) e).code()).isEqualTo(ErrorCode.CREATOR_INVITATION_PENDING));
+    verify(creatorInvitationRepository, never()).save(any());
+  }
+
+  @Test
+  void sendInvitation_foreignCampaignThrowsNotFound() {
+    UUID creatorId = UUID.randomUUID();
+    UUID campaignId = UUID.randomUUID();
+    BrandProfile myBrand = BrandProfile.builder().id(UUID.randomUUID()).user(mockBrandUser).build();
+    BrandProfile otherBrand = BrandProfile.builder().id(UUID.randomUUID()).user(User.builder().id(UUID.randomUUID()).build()).build();
+    com.influencermatch.backend.campaign.model.Campaign foreignCampaign =
+        com.influencermatch.backend.campaign.model.Campaign.builder().id(campaignId).brandProfile(otherBrand).build();
+
+    when(brandProfileRepository.findByUserId(mockBrandUser.getId())).thenReturn(Optional.of(myBrand));
+    when(campaignRepository.findById(campaignId)).thenReturn(Optional.of(foreignCampaign));
+
+    assertThatThrownBy(() -> invitationService.sendInvitation(creatorId, "koc@gmail.com", null, campaignId))
+        .isInstanceOf(com.influencermatch.backend.exception.NotFoundException.class);
+    verify(creatorInvitationRepository, never()).save(any());
   }
 }

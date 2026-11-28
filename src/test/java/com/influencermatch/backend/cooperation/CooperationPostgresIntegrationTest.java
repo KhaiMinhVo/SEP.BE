@@ -268,20 +268,110 @@ class CooperationPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
+  void manualClaimUsesTheInvitedChannelAndRechecksTheInvitationAtApproval() throws Exception {
+    var invited = channel(false);
+    var other = channel(false);
+    var fixture = onboardingInvitation(invited);
+    var claimant = account(Role.CREATOR);
+    var reviewer = account(Role.DATA_MANAGER);
+    jdbc.update("update cooperation_email_job set delivery_method='MANUAL_LINK' where invitation_id=?",
+        fixture.invitation());
+    var evidence = Map.of("cooperationInvitationToken", fixture.token(),
+        "evidenceUrls", List.of("https://evidence.example.test/settings"), "note", "I manage this channel");
+    call(claimant, post("/creators/" + other.getId() + "/claim"), evidence, 400);
+    var claim = call(claimant, post("/creators/" + invited.getId() + "/claim"), evidence, 201)
+        .path("data");
+    assertThat(claim.path("cooperationInvitationId").asText()).isEqualTo(fixture.invitation().toString());
+    assertThat(claim.path("status").asText()).isEqualTo("PENDING");
+    call(claimant, post("/creators/" + invited.getId() + "/claim"), evidence, 409);
+    call(claimant, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 403);
+
+    var path = "/data/creator-claims/" + claim.path("id").asText() + "/review";
+    call(reviewer, patch(path), Map.of("decision", "APPROVED", "reason", "Reviewed"), 400);
+    jdbc.update("update cooperation_invitation set status='REPLACED' where id=?", fixture.invitation());
+    call(reviewer, patch(path), Map.of("decision", "APPROVED", "reason", "Reviewed",
+        "reviewEvidenceType", "SCREEN_SHARE", "reviewVerificationNote", "Matched the management screen"), 409);
+    assertThat(jdbc.queryForObject("select master_id from creator where id=?", UUID.class, invited.getId())).isNull();
+    var rejected = call(reviewer, patch(path), Map.of("decision", "REJECTED", "reason", "Invitation replaced",
+        "reviewEvidenceType", "NO_VALID_EVIDENCE", "reviewVerificationNote", "Confirmed the original invitation was replaced"),
+        200).path("data");
+    assertThat(rejected.path("status").asText()).isEqualTo("REJECTED");
+    assertThat(rejected.path("reviewEvidenceType").asText()).isEqualTo("NO_VALID_EVIDENCE");
+    assertThat(rejected.path("reviewVerificationNote").asText()).contains("original invitation");
+  }
+
+  @Test
+  void approvedBoundManualClaimOpensProposalWithoutAccepting() throws Exception {
+    var invited = channel(false);
+    var fixture = onboardingInvitation(invited);
+    var claimant = account(Role.CREATOR);
+    jdbc.update("update cooperation_email_job set delivery_method='MANUAL_LINK' where invitation_id=?", fixture.invitation());
+    var claim = call(claimant, post("/creators/" + invited.getId() + "/claim"), Map.of(
+        "cooperationInvitationToken", fixture.token(), "evidenceUrls", List.of("https://evidence.example.test/page"),
+        "note", "I manage this channel"), 201).path("data");
+    var approved = call(account(Role.DATA_MANAGER),
+        patch("/data/creator-claims/" + claim.path("id").asText() + "/review"),
+        Map.of("decision", "APPROVED", "reason", "Valid evidence", "reviewEvidenceType", "ACCOUNT_SETTINGS",
+            "reviewVerificationNote", "Matched the channel ID and management access"), 200).path("data");
+    assertThat(approved.path("reviewEvidenceType").asText()).isEqualTo("ACCOUNT_SETTINGS");
+    assertThat(approved.path("reviewerId").asText()).isNotBlank();
+    assertThat(call(claimant, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 200)
+        .at("/data/dealId").asText()).isEqualTo(fixture.deal().toString());
+    assertThat(jdbc.queryForObject("select accepted_revision from cooperation_deal where id=?", Integer.class,
+        fixture.deal())).isNull();
+  }
+
+  @Test
   void registrationUsesDeliveredRecipientSnapshotAndRateLimitsRequests() throws Exception {
     var fixture = onboardingInvitation(channel(false));
     String email = UUID.randomUUID() + "@creator.test";
     jdbc.update("update cooperation_email_job set delivery_method='EMAIL_ONLY',payload=? where invitation_id=?",
         invitationCipher.encrypt(email, "https://example.test/cooperation-invitations?token=" + fixture.token()), fixture.invitation());
-    call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", "someoneelse@creator.test"), 202);
+    var mismatch = call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", "someoneelse@creator.test"), 202);
+    assertThat(mismatch.path("data").path("status").asText()).isEqualTo("RECIPIENT_EMAIL_MISMATCH");
+    assertThat(mismatch.toString()).doesNotContain(email);
     verify(sender, never()).sendCreatorInvitation(anyString(), anyString());
     assertThat(call(creator, post("/cooperation-invitations/context"), Map.of("token", fixture.token()), 200)
         .path("data").path("status").asText()).isEqualTo("ACCOUNT_MISMATCH");
     call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 202);
-    call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 429);
+    var limited = call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 429);
+    assertThat(limited.path("retryAfterSeconds").asLong()).isBetween(1L, 61L);
     verify(sender, times(1)).sendCreatorInvitation(eq(email), anyString());
     call(null, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 401);
     call(brand, post("/cooperation-invitations/continue"), Map.of("token", fixture.token()), 403);
+  }
+
+  @Test
+  void existingAccountsGetPrivateGuidanceWithoutExposingRoleOrCreatingNewAccount() throws Exception {
+    for (var user : List.of(creator, brand)) {
+      var fixture = onboardingInvitation(channel(false));
+      var result = call(null, post("/cooperation-invitations/registration"),
+          Map.of("token", fixture.token(), "email", user.getEmail()), 202);
+      assertThat(result.path("data").path("status").asText()).isEqualTo("EMAIL_SUBMITTED");
+      assertThat(result.toString()).doesNotContain(user.getRole().name(), user.getEmail());
+      var limited = call(null, post("/cooperation-invitations/registration"),
+          Map.of("token", fixture.token(), "email", user.getEmail()), 429);
+      assertThat(limited.path("retryAfterSeconds").asLong()).isBetween(1L, 61L);
+      verify(sender).sendCooperationAccountAccess(eq(user.getEmail()), contains("token=" + fixture.token()), eq(user.getRole() == Role.CREATOR));
+      assertThat(jdbc.queryForObject("select count(*) from creator_registration_invitation where email=?", Long.class, user.getEmail())).isZero();
+      assertThat(users.findByEmail(user.getEmail()).orElseThrow().getRole()).isEqualTo(user.getRole());
+    }
+    verify(sender, never()).sendCreatorInvitation(anyString(), anyString());
+  }
+
+  @Test
+  void registrationSmtpFailureIsNotReportedAsSubmittedAndCanBeRetried() throws Exception {
+    var fixture = onboardingInvitation(channel(false));
+    String email = UUID.randomUUID() + "@creator.test";
+    doThrow(new com.influencermatch.backend.exception.BusinessException(
+        com.influencermatch.backend.exception.ErrorCode.EMAIL_DELIVERY_UNAVAILABLE, "Cannot send email"))
+        .when(sender).sendCreatorInvitation(eq(email), anyString());
+    var failure = call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 503);
+    assertThat(failure.path("code").asText()).isEqualTo("EMAIL_DELIVERY_UNAVAILABLE");
+    assertThat(jdbc.queryForObject("select count(*) from audit_log where action='REQUEST_CREATOR_REGISTRATION' and entity_id=?", Long.class, fixture.invitation())).isZero();
+    doNothing().when(sender).sendCreatorInvitation(eq(email), anyString());
+    assertThat(call(null, post("/cooperation-invitations/registration"), Map.of("token", fixture.token(), "email", email), 202)
+        .path("data").path("status").asText()).isEqualTo("EMAIL_SUBMITTED");
   }
 
   @Test

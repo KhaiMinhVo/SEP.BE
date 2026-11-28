@@ -1,0 +1,28 @@
+@startuml subscription-state
+title WF-06 | SubscriptionStatus
+hide empty description
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+
+state " " as Creation <<choice>>
+[*] --> Creation : create subscription
+Creation --> PENDING : create [paid checkout] / snapshot purchased limits
+Creation --> ACTIVE : create [eligible free plan or authorized Admin creation]\n/ set dates and zero usage
+PENDING --> ACTIVE : apply [payment confirmed (BR-66)] / set dates and enable quotas
+PENDING --> CANCELLED : apply [payment failed or checkout expired]
+ACTIVE --> ACTIVE : cancelSubscription [expirationDate >= today]\n/ set cancelAtPeriodEnd
+ACTIVE --> EXPIRED : expire [expirationDate < today and no cancellation scheduled]
+ACTIVE --> CANCELLED : expire [expirationDate < today and cancellation scheduled]
+ACTIVE --> CANCELLED : cancelSubscription [expirationDate < today]
+ACTIVE --> CANCELLED : apply [a replacement subscription is activated]
+ACTIVE --> CANCELLED : complete [refund confirmed]
+EXPIRED --> CANCELLED : complete [refund confirmed after expiry]
+CANCELLED --> [*]
+
+note right of ACTIVE
+  Quota use requires an unexpired subscription,
+  available quota and no refund hold (BR-65).
+end note
+@enduml

@@ -1,0 +1,56 @@
+@startuml shortlist-update-sequence
+title WF-01 | Update a Shortlist Item
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 245
+
+actor Brand
+participant "Web Client" as Web
+participant ShortlistController as Controller
+participant ShortlistServiceImpl as Service
+participant CampaignOwnershipService as Ownership
+participant CampaignWriteLock as Lock
+participant ShortlistItemRepository as Items
+
+Brand -> Web : submit priority, note or status
+Web -> Controller : PATCH /api/v1/campaigns/{campaignId}/shortlist/items/{shortlistItemId}
+activate Controller
+Controller -> Service : updateShortlistItem(campaignId, shortlistItemId, request)
+activate Service
+note over Service : Require MANAGE_OWN_SHORTLIST (BR-49).
+Service -> Ownership : requireOwned(campaignId)
+Ownership --> Service : Campaign or access error
+alt <U+005B>Campaign inaccessible<U+005D>
+  Service --> Controller : ownership or lookup error
+  Controller --> Web : request rejected
+else <U+005B>Campaign belongs to caller<U+005D>
+  Service -> Lock : owned(campaignId)
+  Lock --> Service : locked Campaign
+  alt <U+005B>Campaign is CLOSED<U+005D>
+    Service --> Controller : INVALID_CAMPAIGN_TRANSITION
+    Controller --> Web : 409 Conflict
+  else <U+005B>Campaign is not CLOSED<U+005D>
+    Service -> Items : findLockedByIdAndCampaignId(shortlistItemId, campaignId)
+    Items --> Service : item or empty
+    alt <U+005B>item missing or does not belong to caller<U+005D>
+      Service --> Controller : RESOURCE_NOT_FOUND
+      Controller --> Web : 404 Not Found
+    else <U+005B>item REMOVED and requested status is not SAVED<U+005D>
+      Service --> Controller : INVALID_COLLABORATION_STATE
+      Controller --> Web : 409 Conflict
+    else <U+005B>active item or REMOVED item restored to SAVED<U+005D>
+      note over Service : Apply only non-null priority, note and status from the request.
+      Service -> Items : save(item)
+      Items --> Service : saved ShortlistItem
+      Service --> Controller : ShortlistItemDto
+      Controller --> Web : 200 OK with updated item
+    end
+  end
+end
+deactivate Service
+deactivate Controller
+@enduml

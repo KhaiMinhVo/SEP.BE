@@ -37,6 +37,7 @@ public class SecurityConfig {
   private static final String[] PUBLIC_ENDPOINTS = {
     "/integrations/meta/callback",
     "/integrations/instagram/callback",
+    "/integrations/instagram-unified/callback",
     "/integrations/tiktok/callback",
     "/cooperation-invitations/preview",
     "/cooperation-invitations/registration",
@@ -58,6 +59,7 @@ public class SecurityConfig {
     "/auth/password-reset/request",
     "/auth/password-reset/confirm",
     "/actuator/health",
+    "/actuator/health/deployment",
     "/v3/api-docs/**",
     "/api-docs/**",
     "/swagger-ui/**",
@@ -65,6 +67,8 @@ public class SecurityConfig {
     "/webjars/**",
     "/billing/vnpay/return",
     "/billing/vnpay/ipn",
+    "/billing/payos/return",
+    "/billing/payos/webhook",
     "/creators/claim/invitation/verify"
   };
 

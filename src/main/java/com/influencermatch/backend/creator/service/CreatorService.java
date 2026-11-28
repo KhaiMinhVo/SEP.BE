@@ -43,6 +43,7 @@ public class CreatorService {
             .platformPostId(p.getPlatformPostId())
             .postUrl(p.getPostUrl())
             .caption(p.getCaption())
+            .thumbnailUrl(p.getThumbnailUrl())
             .views(p.getViews())
             .likes(p.getLikes())
             .comments(p.getComments())

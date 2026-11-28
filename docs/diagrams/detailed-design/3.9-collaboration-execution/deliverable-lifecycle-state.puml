@@ -1,0 +1,32 @@
+@startuml deliverable-lifecycle-state
+title WF-03 | Deliverable Lifecycle
+hide empty description
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam stateBackgroundColor white
+skinparam defaultFontName Arial
+top to bottom direction
+
+state PENDING
+state SUBMITTED
+state CHANGES_REQUESTED
+state APPROVED
+
+[*] --> PENDING : / create deliverable from execution plan
+PENDING --> SUBMITTED : submit or submitExternal\n[authorized recorder and current revision (BR-57)] / append submission
+SUBMITTED --> CHANGES_REQUESTED : decide(REQUEST_CHANGES)\n[authorized Brand, current submission, reason and rounds remaining (BR-58/59)]\n/ store review and increment revision rounds
+CHANGES_REQUESTED --> SUBMITTED : submit or submitExternal\n[authorized recorder and current revision (BR-59)] / append replacement
+SUBMITTED --> APPROVED : decide(APPROVE)\n[authorized Brand, current submission and complete checklist (BR-58)]\n/ store approval
+APPROVED --> SUBMITTED : submit or submitExternal\n[Collaboration still IN_PROGRESS and other submission guards pass]\n/ append replacement
+
+note right of APPROVED
+  Publication and KPI are recorded against the current
+  submission revision. They do not change Deliverable status.
+end note
+note left of PENDING
+  An ACTIVE Campaign and IN_PROGRESS Collaboration
+  are required for submission and review. No terminal
+  Deliverable status exists in the schema.
+end note
+@enduml

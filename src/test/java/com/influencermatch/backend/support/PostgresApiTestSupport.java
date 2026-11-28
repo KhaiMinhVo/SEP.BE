@@ -154,6 +154,7 @@ public abstract class PostgresApiTestSupport {
         List.of(Map.of("platform", "TIKTOK", "contentType", "Review", "quantity", 1)));
     body.put("objective", "AWARENESS");
     body.put("platforms", List.of("TIKTOK"));
+    body.put("niches", List.of("Beauty"));
     return body;
   }
 

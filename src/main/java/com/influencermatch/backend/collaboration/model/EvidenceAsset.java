@@ -29,8 +29,13 @@ public class EvidenceAsset {
   @Column(nullable = false, length = 50)
   private String assetType;
 
-  @Column(nullable = false, length = 1000)
+  @Column(nullable = false, length = 2048)
   private String storageUrl;
+
+  @Column(length = 500) private String storageKey;
+  @Column(length = 100) private String mimeType;
+  private Long sizeBytes;
+  private LocalDateTime imageUpdatedAt;
 
   @Column(length = 100)
   private String source;

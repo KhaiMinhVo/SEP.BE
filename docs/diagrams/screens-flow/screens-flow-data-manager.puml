@@ -1,0 +1,123 @@
+' Report 7, section 3.1.1 Screens Flow.
+' UI codes identify boxes in these four dialog maps. Navigation labels describe the actions shown by each source branch.
+' Initial markers show entry points. Hidden links preserve visual order and do not represent navigation.
+
+@startuml screens-flow-data-manager
+' Source figure: word/media/image79.png
+!pragma layout smetana
+left to right direction
+hide empty description
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontColor #162A3F
+skinparam defaultFontSize 14
+skinparam ArrowColor #627892
+skinparam ArrowFontColor #334B61
+skinparam nodesep 15
+skinparam ranksep 40
+skinparam state {
+    BackgroundColor #FFFFFF
+    BorderColor #90ABC5
+    FontColor #162A3F
+    RoundCorner 12
+}
+
+title
+<size:22><b>Manager Screen (Data Manager)</b></size>
+<size:13><color:#506581>InfluencerMatch AI | Screen navigation hierarchy</color></size>
+end title
+
+' LEVEL 1 · ENTRY
+state "<b>UI-DM-00 Data Manager Login</b>\n<size:12><color:#435972>Email and password authentication</color></size>" as DM00 #FFF0DE
+
+' LEVEL 2 · LAYOUT
+state "<b>UI-DM-01 Data Manager Layout</b>\n<size:12><color:#435972>Sidebar, header and main content</color></size>" as DM01 #E3EFF9
+
+' LEVEL 3 · MAIN MENU
+state "<b>UI-DM-02 Account Menu</b>" as DM02 #EDF4FA
+state "<b>UI-DM-03 Notifications</b>" as DM03 #EDF4FA
+state "<b>UI-DM-04 Operations Dashboard</b>\n<size:12><color:#435972>Pipeline Health</color></size>" as DM04 #EDF4FA
+state "<b>UI-DM-05 Creator Catalog</b>\n<size:12><color:#435972>Master Identity Registry</color></size>" as DM05 #EDF4FA
+state "<b>UI-DM-06 Creator Claims</b>\n<size:12><color:#435972>Ownership Review Queue</color></size>" as DM06 #EDF4FA
+state "<b>UI-DM-07 Collection Jobs</b>\n<size:12><color:#435972>Crawler Operations</color></size>" as DM07 #EDF4FA
+state "<b>UI-DM-08 Data Quality</b>\n<size:12><color:#435972>Quality & Identity Review</color></size>" as DM08 #EDF4FA
+state "<b>UI-DM-09 Data Sources & Taxonomy</b>\n<size:12><color:#435972>Crawl Configuration</color></size>" as DM09 #EDF4FA
+state "<b>UI-DM-10 Scoring Config</b>\n<size:12><color:#435972>Recommendation Policy Inspector</color></size>" as DM10 #EDF4FA
+
+' LEVEL 4 · SCREENS / TABS / MODALS
+state "<b>UI-DM-11 Operator Account & Logout</b>\n<size:12><color:#435972>Account access and sign out</color></size>" as DM11
+state "<b>UI-DM-12 Notification Drawer</b>\n<size:12><color:#435972>Claim and collection alerts</color></size>" as DM12
+state "<b>UI-DM-13 Crawler Trends</b>\n<size:12><color:#435972>Pipeline throughput, rate limits and latency</color></size>" as DM13
+state "<b>UI-DM-14 Freshness & Queue</b>\n<size:12><color:#435972>Pending quality and claim review counts</color></size>" as DM14
+state "<b>UI-DM-15 CreatorMaster Search</b>\n<size:12><color:#435972>Filter Master identities and linked channels</color></size>" as DM15
+state "<b>UI-DM-16 Unclaimed & Identity Events</b>\n<size:12><color:#435972>Unclaimed accounts and audit history</color></size>" as DM16
+state "<b>UI-DM-17 Review Queue</b>\n<size:12><color:#435972>Pending ownership claims inspection</color></size>" as DM17
+state "<b>UI-DM-18 Manual Review & Revoke</b>\n<size:12><color:#435972>Approve with evidence, reject or revoke</color></size>" as DM18
+state "<b>UI-DM-19 Live Crawl & Batch Jobs</b>\n<size:12><color:#435972>Trigger test-scrape, batch crawl and post metrics</color></size>" as DM19
+state "<b>UI-DM-20 Job Monitor & Detail</b>\n<size:12><color:#435972>Execution status, failures and retry actions</color></size>" as DM20
+state "<b>UI-DM-21 Quality Review</b>\n<size:12><color:#435972>Approve or reject pending Creator records</color></size>" as DM21
+state "<b>UI-DM-22 Identity Conflicts</b>\n<size:12><color:#435972>Duplicate and conflict comparison</color></size>" as DM22
+state "<b>UI-DM-23 Batch Audit</b>\n<size:12><color:#435972>Reclassification audit report and evidence</color></size>" as DM23
+state "<b>UI-DM-24 Managed Niche Catalog</b>\n<size:12><color:#435972>Maintain crawl fields and official niches</color></size>" as DM24
+state "<b>UI-DM-25 Auto-Hunter Keywords</b>\n<size:12><color:#435972>Manage discovery keywords and trigger crawl</color></size>" as DM25
+state "<b>UI-DM-26 Four-Memory Overview</b>\n<size:12><color:#435972>Read-only policy and version overview</color></size>" as DM26
+state "<b>UI-DM-27 Config Parameters</b>\n<size:12><color:#435972>Weighting, calibration, sanity and reranking</color></size>" as DM27
+
+' Navigation
+[*] --> DM00 : Open application
+DM00 --> DM01 : Sign in [Data Manager]
+DM01 --> DM02 : Open account menu
+DM01 --> DM03 : Open notifications
+DM01 --> DM04 : Open Operations Dashboard
+DM01 --> DM05 : Open Creator Catalog
+DM01 --> DM06 : Open Creator Claims
+DM01 --> DM07 : Open Collection Jobs
+DM01 --> DM08 : Open Data Quality
+DM01 --> DM09 : Open Data Sources & Taxonomy
+DM01 --> DM10 : Open Scoring Config
+DM02 --> DM11 : Open account or sign out
+DM03 --> DM12 : View alerts
+DM04 --> DM13 : View crawler trends
+DM04 --> DM14 : View freshness and queue
+DM05 --> DM15 : Search Master identities
+DM05 --> DM16 : View accounts and events
+DM06 --> DM17 : Open the review queue
+DM06 --> DM18 : Review a claim
+DM07 --> DM19 : Open crawl controls
+DM07 --> DM20 : Inspect a job
+DM08 --> DM21 : Review records
+DM08 --> DM22 : Inspect identity conflicts
+DM08 --> DM23 : Open batch audit
+DM09 --> DM24 : Open niche catalog
+DM09 --> DM25 : Open discovery keywords
+DM10 --> DM26 : View Four-Memory policy
+DM10 --> DM27 : View configuration parameters
+
+' Hidden layout links
+DM02 -right[hidden]-> DM03
+DM03 -right[hidden]-> DM04
+DM04 -right[hidden]-> DM05
+DM05 -right[hidden]-> DM06
+DM06 -right[hidden]-> DM07
+DM07 -right[hidden]-> DM08
+DM08 -right[hidden]-> DM09
+DM09 -right[hidden]-> DM10
+DM11 -right[hidden]-> DM12
+DM12 -right[hidden]-> DM13
+DM13 -right[hidden]-> DM14
+DM14 -right[hidden]-> DM15
+DM15 -right[hidden]-> DM16
+DM16 -right[hidden]-> DM17
+DM17 -right[hidden]-> DM18
+DM18 -right[hidden]-> DM19
+DM19 -right[hidden]-> DM20
+DM20 -right[hidden]-> DM21
+DM21 -right[hidden]-> DM22
+DM22 -right[hidden]-> DM23
+DM23 -right[hidden]-> DM24
+DM24 -right[hidden]-> DM25
+DM25 -right[hidden]-> DM26
+DM26 -right[hidden]-> DM27
+
+@enduml

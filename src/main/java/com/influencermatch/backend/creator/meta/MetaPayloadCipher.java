@@ -14,19 +14,29 @@ import org.springframework.stereotype.Component;
 public class MetaPayloadCipher {
   private final MetaOAuthProperties properties;
   private final InstagramOAuthProperties instagram;
+  private final InstagramUnifiedOAuthProperties instagramUnified;
   private final ObjectMapper json;
   private final SecureRandom random = new SecureRandom();
 
   @Autowired
   public MetaPayloadCipher(
-      MetaOAuthProperties properties, InstagramOAuthProperties instagram, ObjectMapper json) {
+      MetaOAuthProperties properties,
+      InstagramOAuthProperties instagram,
+      InstagramUnifiedOAuthProperties instagramUnified,
+      ObjectMapper json) {
     this.properties = properties;
     this.instagram = instagram;
+    this.instagramUnified = instagramUnified;
     this.json = json;
   }
 
+  public MetaPayloadCipher(
+      MetaOAuthProperties properties, InstagramOAuthProperties instagram, ObjectMapper json) {
+    this(properties, instagram, null, json);
+  }
+
   public MetaPayloadCipher(MetaOAuthProperties properties, ObjectMapper json) {
-    this(properties, null, json);
+    this(properties, null, null, json);
   }
 
   private String key(OAuthFlow flow) {
@@ -35,7 +45,12 @@ public class MetaPayloadCipher {
       instagram.requireConfigured();
       return instagram.encryptionKey();
     }
-    properties.requireConfigured();
+    if (flow == OAuthFlow.INSTAGRAM_UNIFIED_LOGIN) {
+      if (instagramUnified == null) throw unavailable(flow);
+      instagramUnified.requireConfigured();
+      return instagramUnified.encryptionKey();
+    }
+    properties.requireApplicationConfigured();
     return properties.encryptionKey();
   }
 
@@ -85,7 +100,7 @@ public class MetaPayloadCipher {
 
   private BusinessException unavailable(OAuthFlow flow) {
     return new BusinessException(
-        flow == OAuthFlow.INSTAGRAM_LOGIN
+        flow == OAuthFlow.INSTAGRAM_LOGIN || flow == OAuthFlow.INSTAGRAM_UNIFIED_LOGIN
             ? ErrorCode.INSTAGRAM_OAUTH_UNAVAILABLE
             : ErrorCode.META_OAUTH_UNAVAILABLE,
         "OAuth verification data is unavailable");

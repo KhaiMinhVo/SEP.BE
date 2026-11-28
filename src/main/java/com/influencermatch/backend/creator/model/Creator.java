@@ -93,7 +93,7 @@ public class Creator {
   @Column(name = "display_name", length = 255)
   private String displayName;
 
-  @Column(name = "avatar_url", length = 1000)
+  @Column(name = "avatar_url", length = 2048)
   private String avatarUrl;
 
   @Column(name = "avatar_storage_key", length = 500)

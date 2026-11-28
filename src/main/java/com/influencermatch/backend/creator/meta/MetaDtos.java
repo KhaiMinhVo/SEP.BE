@@ -10,7 +10,12 @@ public final class MetaDtos {
   public record Start(
       @NotBlank @Pattern(regexp = "FACEBOOK|INSTAGRAM") String platform,
       UUID creatorId,
-      @Size(max = 512) String invitationToken) {
+      @Size(max = 512) String invitationToken,
+      @Size(max = 512) String cooperationInvitationToken) {
+    public Start(String platform, UUID creatorId, String invitationToken) {
+      this(platform, creatorId, invitationToken, null);
+    }
+
     @Override
     public String toString() {
       return "MetaStart[platform=" + platform + ", secrets redacted]";
@@ -24,7 +29,14 @@ public final class MetaDtos {
     }
   }
 
-  public record InstagramStart(UUID creatorId, @Size(max = 512) String invitationToken) {
+  public record InstagramStart(
+      UUID creatorId,
+      @Size(max = 512) String invitationToken,
+      @Size(max = 512) String cooperationInvitationToken) {
+    public InstagramStart(UUID creatorId, String invitationToken) {
+      this(creatorId, invitationToken, null);
+    }
+
     @Override
     public String toString() {
       return "InstagramStart[secrets redacted]";
@@ -41,7 +53,8 @@ public final class MetaDtos {
       String name,
       String username,
       UUID creatorId,
-      String matchStatus) {}
+      String matchStatus,
+      String matchReason) {}
 
   public record Session(
       UUID sessionId,
@@ -53,7 +66,11 @@ public final class MetaDtos {
 
   public record Connected(UUID sessionId, UUID creatorId, UUID masterId, String status) {}
 
-  public record Asset(String id, String pageId, String name, String username) {}
+  public record Asset(String id, String pageId, String name, String username, Set<String> tasks) {
+    public Asset(String id, String pageId, String name, String username) {
+      this(id, pageId, name, username, Set.of());
+    }
+  }
 
   public record Proof(
       String subject,

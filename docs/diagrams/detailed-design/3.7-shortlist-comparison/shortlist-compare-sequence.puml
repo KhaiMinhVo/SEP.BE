@@ -1,0 +1,58 @@
+@startuml shortlist-compare-sequence
+title WF-01 | Compare Shortlisted Creators
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 245
+
+actor Brand
+participant "Web Client" as Web
+participant ShortlistController as Controller
+participant ShortlistCompareService as Service
+participant CampaignRepository as Campaigns
+participant ShortlistItemRepository as Items
+participant PublicCreatorMetricRepository as Metrics
+
+Brand -> Web : choose channels for comparison
+Web -> Controller : POST /api/v1/campaigns/{campaignId}/shortlist/compare\ncreatorIds
+activate Controller
+alt <U+005B>request does not contain 2-5 non-null channel IDs (BR-51)<U+005D>
+  Controller --> Web : 400 Bad Request
+else <U+005B>request size and IDs pass validation<U+005D>
+  Controller -> Service : compare(campaignId, request)
+  activate Service
+  note over Service : Read-only REPEATABLE_READ transaction. MANAGE_OWN_SHORTLIST required.
+  Service -> Campaigns : findById(campaignId)
+  Campaigns --> Service : campaign or empty
+  alt <U+005B>campaign missing or owned by another Brand (BR-49)<U+005D>
+    Service --> Controller : NotFoundException
+    Controller --> Web : 404 Not Found
+  else <U+005B>owned campaign found but IDs repeat<U+005D>
+    Service --> Controller : ValidationException
+    Controller --> Web : 400 Bad Request
+  else <U+005B>owned campaign and distinct channel IDs<U+005D>
+    Service -> Items : findByCampaignIdAndCreatorIdIn(campaignId, ids)
+    Items --> Service : matching shortlist items
+    alt <U+005B>any channel absent, removed or belongs to another user<U+005D>
+      Service --> Controller : ValidationException
+      Controller --> Web : 400 Bad Request
+    else <U+005B>all channels in the caller's active shortlist<U+005D>
+      Service -> Metrics : latestForCreators(ids)
+      Metrics --> Service : latest public metric snapshot per available channel
+      note over Service, Metrics
+        Order snapshots by collected_at DESC, then ID DESC.
+        Return metric ID, collection time and freshness when present.
+        If a channel has no snapshot, return metrics = null.
+        Preserve the input order of channels for comparison.
+      end note
+      Service --> Controller : CompareDtos.Response
+      Controller --> Web : 200 OK with comparison data
+    end
+  end
+  deactivate Service
+end
+deactivate Controller
+@enduml

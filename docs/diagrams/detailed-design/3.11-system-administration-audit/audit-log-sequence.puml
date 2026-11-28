@@ -1,0 +1,58 @@
+@startuml audit-log-sequence
+title View and Export Audit Logs
+hide footbox
+autonumber
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam maxMessageSize 230
+
+actor Admin
+participant "Web Client" as Web
+participant "Spring Security" as Security
+participant AuditLogController as API
+participant AuditLogQueryService as Service
+participant AuditLogRepository as Repo
+
+Admin -> Web : set audit filters, then view or export
+alt <U+005B>view page<U+005D>
+  Web -> Security : GET /api/v1/admin/audit-logs
+else <U+005B>download CSV<U+005D>
+  Web -> Security : GET /api/v1/admin/audit-logs/export
+end
+activate Security
+alt <U+005B>unauthenticated or missing VIEW_AUDIT_LOG (BR-69)<U+005D>
+  Security --> Web : 401 or 403
+else <U+005B>VIEW_AUDIT_LOG granted<U+005D>
+  Security -> API : list(...) or export(...)
+  activate API
+  API -> API : validateDateRange(from, to)
+  alt <U+005B>invalid date range<U+005D>
+    API --> Security : validation error
+  else <U+005B>valid date range<U+005D>
+    API -> Service : list(filters, page, size) or export(filters, limit)
+    activate Service
+    note over API, Service : Filters include actorId, action, entityType,\nentityId, from, to and keyword.
+    alt <U+005B>keyword exceeds 200 characters<U+005D>
+      Service --> API : validation error
+    else <U+005B>page requested with valid filters<U+005D>
+      Service -> Repo : findAll(specification, pageable)
+      Repo --> Service : matching page
+      Service --> API : PageResponse<AuditLogResponseDto>
+    else <U+005B>CSV requested with valid filters<U+005D>
+      Service -> Repo : findAll(specification, first page with capped limit)
+      Repo --> Service : matching rows, newest first
+      Service --> API : CsvExport(content, rowCount, limit)
+    end
+    deactivate Service
+    API --> Security : page, validation error or 200 OK\ntext/csv · audit-logs.csv attachment
+  end
+  deactivate API
+  Security --> Web : page, file or validation error
+end
+deactivate Security
+note over Service, Repo
+  CSV exports up to 10,000 rows and includes event metadata only.
+end note
+@enduml

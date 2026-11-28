@@ -1,0 +1,18 @@
+@startuml creator-channel-ownership-state
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+title Figure 4.3.3.3.1 Creator Channel Source State Diagram
+hide empty description
+state " " as Entry <<choice>>
+[*] --> Entry : create channel
+Entry --> PUBLIC : ingestCreatorData [new crawled identity] / save without master
+Entry --> AUTHORIZED : confirm OAuth [verified new channel] / create and link owner
+PUBLIC --> AUTHORIZED : link channel [verified OAuth or approved claim] / set master
+AUTHORIZED --> PUBLIC : revoke claim [last ownership proof removed] / clear ownership
+note bottom of AUTHORIZED
+  Public ingestion preserves ownership. The chart models Creator.sourceType.
+  Channel records can remain in either state indefinitely.
+end note
+@enduml

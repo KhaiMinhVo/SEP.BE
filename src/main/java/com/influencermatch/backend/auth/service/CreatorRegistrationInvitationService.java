@@ -83,7 +83,14 @@ public class CreatorRegistrationInvitationService {
   /** Called only after a live cooperation invitation and its recipient have been checked. */
   @Transactional
   public void inviteFromCooperation(String email, UUID sponsor, String cooperationToken) {
-    if (users.existsByEmail(email)) return; // Public response must not enumerate accounts.
+    users.lockRegistrationEmail(email);
+    var existing = users.findByEmail(email);
+    if (existing.isPresent()) {
+      String link = UriComponentsBuilder.fromUriString(frontend + "/cooperation-invitations")
+          .queryParam("token", cooperationToken).build().encode().toUriString();
+      sender.sendCooperationAccountAccess(email, link, existing.get().getRole() == Role.CREATOR);
+      return;
+    }
     issue(email, sponsor, cooperationToken);
   }
 
@@ -99,8 +106,9 @@ public class CreatorRegistrationInvitationService {
     if ((invitation.getLastSentAt() != null
             && now.isBefore(invitation.getLastSentAt().plusSeconds(60)))
         || deliveries.countByEmailAndSentAtAfter(email, now.minusSeconds(3600)) >= 5)
-      throw new BusinessException(
-          ErrorCode.EMAIL_OTP_RATE_LIMITED, "Please wait before sending another invitation");
+      throw new EmailRequestRateLimitedException(
+          deliveries.countByEmailAndSentAtAfter(email, now.minusSeconds(3600)) >= 5 ? 3600
+              : java.time.Duration.between(now, invitation.getLastSentAt().plusSeconds(60)).getSeconds() + 1);
     byte[] bytes = new byte[32];
     random.nextBytes(bytes);
     String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);

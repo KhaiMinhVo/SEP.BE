@@ -86,7 +86,8 @@ class CreatorPortalReachPhase5Test {
             publicCreatorMetricRepository);
 
     analyticsController = new CreatorPortalAnalyticsController(accountLinkService);
-    accountController = new CreatorPortalAccountController(accountLinkService, oAuthProofClient);
+    accountController = new CreatorPortalAccountController(
+        accountLinkService, mock(CreatorChannelUnlinkService.class), oAuthProofClient);
 
     creatorUser = TestActors.user(Role.CREATOR);
     userId = creatorUser.getId();

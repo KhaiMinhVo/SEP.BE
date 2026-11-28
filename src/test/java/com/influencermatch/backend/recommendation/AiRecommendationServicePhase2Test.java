@@ -177,6 +177,61 @@ class AiRecommendationServicePhase2Test {
     SecurityContextHolder.clearContext();
   }
 
+  static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> i03Denominators() {
+    return java.util.stream.Stream.of(
+        org.junit.jupiter.params.provider.Arguments.of(0L, true),
+        org.junit.jupiter.params.provider.Arguments.of(null, true),
+        org.junit.jupiter.params.provider.Arguments.of(0L, false),
+        org.junit.jupiter.params.provider.Arguments.of(null, false));
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.MethodSource("i03Denominators")
+  void i03UnavailableVrIsExcludedWithoutNonFiniteResponseOrSnapshot(
+      Long followers, boolean withPosts) throws Exception {
+    UUID validId = UUID.randomUUID();
+    UUID unavailableId = UUID.randomUUID();
+    var valid = mockCandidate(validId, null, "TIKTOK", "Valid denominator", 20_000L,
+        BigDecimal.valueOf(10_000), BigDecimal.valueOf(500), BigDecimal.valueOf(0.05),
+        "Beauty", "Cosmetics", 0.8);
+    var unavailable = mockCandidate(unavailableId, null, "TIKTOK", "Unavailable denominator",
+        followers, BigDecimal.valueOf(10_000), BigDecimal.valueOf(500),
+        BigDecimal.valueOf(0.05), "Beauty", "Cosmetics", 0.8);
+    var posts = new ArrayList<com.influencermatch.backend.creator.model.Post>();
+    for (UUID id : withPosts ? List.of(validId, unavailableId) : List.of(validId)) {
+      var creator = com.influencermatch.backend.creator.model.Creator.builder().id(id).build();
+      for (int index = 1; index <= 2; index++) {
+        posts.add(com.influencermatch.backend.creator.model.Post.builder()
+            .creator(creator).platformPostId(id + ":" + index)
+            .views(10_000L * index).likes(500L * index)
+            .postedAt("2026-11-01T00:00:00Z").build());
+      }
+    }
+    var postRepo = mock(com.influencermatch.backend.creator.repository.PostRepository.class);
+    when(postRepo.findByCreatorIdIn(any())).thenReturn(posts);
+    service.setPostRepository(postRepo);
+    when(publicCreatorMetricRepository.findCandidatesByShortlist(
+        any(), anyString(), anyBoolean(), any())).thenReturn(List.of(valid, unavailable));
+
+    var response = service.recommendKocs(campaignId, 10);
+    assertThat(response.getRecommendations()).extracting(item -> item.getCreatorId())
+        .containsExactly(validId);
+    assertThat(response.getProvisionalRecommendations()).isEmpty();
+    assertThat(response.getExcludedCandidates()).hasSize(1);
+    var excluded = response.getExcludedCandidates().getFirst();
+    assertThat(excluded.getCreatorId()).isEqualTo(unavailableId);
+    assertThat(excluded.getExclusionType()).isEqualTo("NOT_SCORABLE");
+    assertThat(excluded.getReasons())
+        .anyMatch(reason -> reason.startsWith("VR_UNAVAILABLE_MISSING_FOLLOWER_DENOMINATOR"));
+
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+    assertThat(mapper.writeValueAsString(response)).doesNotContain("NaN", "Infinity");
+    var saved = org.mockito.ArgumentCaptor.forClass(RecommendationRun.class);
+    verify(recommendationRunRepository).save(saved.capture());
+    assertThat(mapper.writeValueAsString(saved.getValue().getScoringSnapshot()))
+        .doesNotContain("NaN", "Infinity", unavailableId.toString());
+  }
+
   @Test
   @DisplayName(
       "TEST-04: Master-aware Grouping - KOC có nhiều kênh (TikTok & IG) chỉ hiển thị 1 kênh điểm"

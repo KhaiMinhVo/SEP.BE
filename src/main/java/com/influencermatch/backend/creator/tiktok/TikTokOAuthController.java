@@ -27,7 +27,7 @@ public class TikTokOAuthController {
   @PreAuthorize("hasRole('CREATOR') and hasAuthority('CLAIM_CREATOR_PROFILE')")
   @SecurityRequirement(name = "BearerAuth")
   @Operation(
-      summary = "Start TikTok Sandbox OAuth; crawler author ID identifies or creates the channel")
+      summary = "Start TikTok Sandbox OAuth for a Creator-selected target channel")
   public ApiResponse<TikTokDtos.Started> start(
       @Valid @RequestBody TikTokDtos.Start request, HttpServletResponse response) {
     byte[] bytes = new byte[32];
@@ -50,7 +50,7 @@ public class TikTokOAuthController {
   @GetMapping("/integrations/tiktok/callback")
   @Operation(
       summary =
-          "TikTok callback: resolve crawler ID and authorize; READY indicates target mismatch",
+          "TikTok callback: authorize account; READY indicates manual resolution is still required",
       security = {})
   public ApiResponse<TikTokDtos.Callback> callback(
       @RequestParam(required = false) String state,

@@ -1,0 +1,104 @@
+@startuml outreach-deals-class
+title WF-02 | Outreach CRM, Deals and Invitations
+hide circle
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam classBackgroundColor white
+skinparam noteBackgroundColor white
+skinparam classAttributeIconSize 0
+skinparam defaultFontName Arial
+top to bottom direction
+
+class RelationshipController <<controller>>
+interface RelationshipService <<interface>> {
+  + updateStage(campaignId : UUID, relationshipId : UUID, request : UpdateRelationshipStageRequest) : RelationshipDto
+  + updateDetails(campaignId : UUID, relationshipId : UUID, request : UpdateRelationshipDetailsRequest) : RelationshipDto
+}
+class RelationshipServiceImpl <<service>>
+class BrandCreatorRelationship <<entity>> {
+  - stage : RelationshipStage
+  - contactMethod : String
+  - lastContactAt : LocalDateTime
+  - notes : String
+  - nextAction : String
+}
+class DealController <<controller>>
+class DealService <<service>> {
+  + propose(campaign : UUID, id : UUID, request : CooperationDtos.Proposal, key : String) : JsonNode
+  + send(campaign : UUID, id : UUID, request : CooperationDtos.Send, key : String) : JsonNode
+  + respond(id : UUID, action : String, request : CooperationDtos.Revision) : Object
+  + confirm(campaign : UUID, id : UUID, request : CooperationDtos.Confirm, key : String) : JsonNode
+}
+class DealStore <<JDBC>> {
+  + deal(id : UUID) : Map<String, Object>
+  + members(id : UUID) : List<Map<String, Object>>
+  + latest(deal : UUID) : Map<String, Object>
+}
+class CooperationDelivery <<service>>
+class ExecutionSnapshot <<service>>
+class Collaboration <<entity>> {
+  - status : CollaborationStatus
+}
+
+class cooperation_deal <<SQL row>> {
+  id : UUID
+  status : varchar(32)
+  revision : bigint
+  accepted_revision : bigint
+  collaboration_id : UUID
+}
+class cooperation_member <<SQL row>> {
+  relationship_id : UUID
+  creator_id : UUID
+  active : boolean
+}
+class cooperation_proposal <<SQL row>> {
+  revision : bigint
+  kind : varchar(20)
+  fee : numeric(19,2)
+  deliverables : jsonb
+  terms : text
+}
+class cooperation_invitation <<SQL row>> {
+  proposal_revision : bigint
+  status : varchar(20)
+  expires_at : timestamptz
+}
+class cooperation_history <<SQL row>> {
+  action : varchar(50)
+  revision : bigint
+  metadata : jsonb
+  created_at : timestamptz
+}
+
+RelationshipController ..> RelationshipService
+RelationshipServiceImpl ..|> RelationshipService
+RelationshipServiceImpl ..> BrandCreatorRelationship
+DealController ..> DealService
+DealService ..> DealStore
+DealService ..> CooperationDelivery
+DealService ..> ExecutionSnapshot
+DealStore ..> cooperation_deal : JDBC
+BrandCreatorRelationship "1" -- "0..*" cooperation_member : relationship_id
+cooperation_deal "1" -- "1..*" cooperation_member : channel members
+cooperation_deal "1" -- "0..*" cooperation_proposal : revisions
+cooperation_deal "1" -- "0..*" cooperation_invitation : invitations
+cooperation_deal "1" -- "0..*" cooperation_history : events
+cooperation_deal "0..1" -- "0..1" Collaboration : collaboration_id
+cooperation_invitation ..> cooperation_proposal : lookup by deal_id and revision
+
+note left of RelationshipServiceImpl
+  BR-52/53/54: check ownership, permission
+  and the CRM transition.
+end note
+note right of DealService
+  BR-55/56/71: confirm accepted or evidenced terms
+  with revision, idempotency and budget checks.
+end note
+note bottom of cooperation_proposal
+  JDBC records are shown with their table names.
+  Proposal revisions are appended, not overwritten.
+  UNIQUE (deal_id, revision).
+end note
+@enduml

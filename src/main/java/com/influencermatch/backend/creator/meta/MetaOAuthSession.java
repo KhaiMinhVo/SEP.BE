@@ -51,6 +51,9 @@ public class MetaOAuthSession extends BaseEntity {
   @JoinColumn(name = "invitation_id")
   private CreatorInvitation invitation;
 
+  @Column(name = "cooperation_invitation_id")
+  private java.util.UUID cooperationInvitationId;
+
   @Column(columnDefinition = "text")
   private String payloadCiphertext;
 

@@ -1,0 +1,273 @@
+@startuml influencermatch-logical-erd
+
+' Report 4 section 2.2. Reproduces the corresponding report figure.
+
+top to bottom direction
+hide circle
+hide empty members
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam titleFontSize 20
+skinparam shadowing false
+skinparam roundcorner 5
+skinparam packageStyle rectangle
+skinparam packageBorderColor #8198B0
+skinparam packageBackgroundColor #F9FBFE
+skinparam packageFontColor #173A58
+skinparam classBackgroundColor #FFFFFF
+skinparam classBorderColor #52708D
+skinparam classFontColor #18354E
+skinparam ArrowColor #405872
+skinparam nodesep 21
+skinparam ranksep 38
+
+package "2.2  Logical model · PostgreSQL 16" as Logic {
+  entity "user" as L_user #EAF2FC {
+    * id : uuid <<PK>>
+    --
+    * email : varchar(255) <<UQ>>
+    * role : varchar(20)
+  }
+  entity "auth_session" as L_auth_session #EAF2FC {
+    * id : uuid <<PK>>
+    --
+    * user_id : uuid <<FK>>
+  }
+  entity "refresh_token" as L_refresh_token #EAF2FC {
+    * id : uuid <<PK>>
+    --
+    session_id : uuid <<FK>>
+  }
+  entity "brand_profile" as L_brand_profile #EAF2FC {
+    * id : uuid <<PK>>
+    --
+    * user_id : uuid <<FK, UQ>>
+  }
+  entity "creator_master" as L_creator_master #EAF2FC {
+    * id : uuid <<PK>>
+    --
+    * user_id : uuid <<FK, UQ>>
+  }
+  entity "creator" as L_creator #EAF2FC {
+    * id : uuid <<PK>>
+    --
+    master_id : uuid <<FK>>
+    * platform : varchar(50)
+    * external_id : varchar(255)
+    {field} UQ (platform, external_id)
+  }
+  entity "creator_claim" as L_creator_claim #EAF2FC {
+    * id : uuid <<PK>>
+    --
+    * creator_id : uuid <<FK>>
+    cooperation_invitation_id : uuid <<FK>>
+    * status : varchar(16)
+  }
+  entity "post" as L_post #EAF2FC {
+    * id : uuid <<PK>>
+    --
+    * creator_id : uuid <<FK>>
+  }
+  entity "public_creator_metric" as L_public_creator_metric #EAF2FC {
+    * id : uuid <<PK>>
+    --
+    * creator_id : uuid <<FK>>
+    observed_at : timestamp
+  }
+  entity "campaign" as L_campaign #E9F5F1 {
+    * id : uuid <<PK>>
+    --
+    * brand_profile_id : uuid <<FK>>
+    * status : varchar(32)
+  }
+  entity "brand_context" as L_brand_context #E9F5F1 {
+    * id : uuid <<PK>>
+    --
+    * brand_profile_id : uuid <<FK>>
+    * context_version : integer
+    * learned_patterns : jsonb
+    {field} UQ (brand_profile_id, context_version)
+  }
+  entity "brand_pattern" as L_brand_pattern #E9F5F1 {
+    * id : uuid <<PK>>
+    --
+    * brand_profile_id : uuid <<FK>>
+  }
+  entity "campaign_context" as L_campaign_context #E9F5F1 {
+    * id : uuid <<PK>>
+    --
+    * campaign_id : uuid <<FK>>
+    brand_context_id : uuid <<FK>>
+    * context_version : integer
+  }
+  entity "recommendation_run" as L_recommendation_run #E9F5F1 {
+    * id : uuid <<PK>>
+    --
+    * campaign_id : uuid <<FK>>
+    brand_context_id : uuid <<FK>>
+    campaign_context_id : uuid <<FK>>
+    scoring_policy_version : varchar(100)
+    scoring_snapshot : jsonb
+  }
+  entity "shortlist_item" as L_shortlist_item #E9F5F1 {
+    * id : uuid <<PK>>
+    --
+    * campaign_id : uuid <<FK>>
+    * creator_id : uuid <<FK>>
+    recommendation_run_id : uuid <<FK>>
+    {field} UQ (campaign_id, creator_id)
+  }
+  entity "relationship" as L_relationship #E9F5F1 {
+    * id : uuid <<PK>>
+    --
+    * campaign_id : uuid <<FK>>
+    * creator_id : uuid <<FK>>
+    shortlist_item_id : uuid <<FK>>
+  }
+  entity "cooperation_deal" as L_cooperation_deal #F3EFF9 {
+    * id : uuid <<PK>>
+    --
+    * campaign_id : uuid <<FK>>
+    collaboration_id : uuid <<FK, UQ>>
+    * status : varchar(32)
+  }
+  entity "cooperation_proposal" as L_cooperation_proposal #F3EFF9 {
+    * id : uuid <<PK>>
+    --
+    * deal_id : uuid <<FK>>
+    * revision : bigint
+    {field} UQ (deal_id, revision)
+  }
+  entity "cooperation_invitation" as L_cooperation_invitation #F3EFF9 {
+    * id : uuid <<PK>>
+    --
+    * deal_id : uuid <<FK>>
+    * proposal_revision : bigint
+  }
+  entity "collaboration" as L_collaboration #F3EFF9 {
+    * id : uuid <<PK>>
+    --
+    * campaign_id : uuid <<FK>>
+    * relationship_id : uuid <<FK>>
+    * status : varchar(32)
+  }
+  entity "collaboration_channel" as L_collaboration_channel #F3EFF9 {
+    * collaboration_id : uuid <<PK, FK>>
+    * creator_id : uuid <<PK, FK>>
+  }
+  entity "collaboration_deliverable" as L_collaboration_deliverable #F3EFF9 {
+    * id : uuid <<PK>>
+    --
+    * collaboration_id : uuid <<FK>>
+    * creator_id : uuid <<FK>>
+    * status : varchar(30)
+  }
+  entity "collaboration_submission" as L_collaboration_submission #F3EFF9 {
+    * id : uuid <<PK>>
+    --
+    * deliverable_id : uuid <<FK>>
+    * revision : bigint
+    {field} UQ (deliverable_id, revision)
+  }
+  entity "collaboration_publication" as L_collaboration_publication #F3EFF9 {
+    * id : uuid <<PK>>
+    --
+    * deliverable_id : uuid <<FK>>
+    * submission_revision : bigint <<FK>>
+    {field} UQ (deliverable_id, submission_revision)
+  }
+  entity "collaboration_outcome_revision" as L_collaboration_outcome_revision #F3EFF9 {
+    * id : uuid <<PK>>
+    --
+    * collaboration_id : uuid <<FK>>
+    * revision : bigint
+    {field} UQ (collaboration_id, revision)
+  }
+  entity "collaboration_outcome_acceptance" as L_collaboration_outcome_acceptance #F3EFF9 {
+    * id : uuid <<PK>>
+    --
+    * collaboration_id : uuid <<FK>>
+    * outcome_revision : bigint <<FK>>
+    reopened_at : timestamptz
+  }
+  entity "campaign_outcome" as L_campaign_outcome #F3EFF9 {
+    * id : uuid <<PK>>
+    --
+    * collaboration_id : uuid <<FK, UQ>>
+  }
+  entity "creator_review" as L_creator_review #F3EFF9 {
+    * id : uuid <<PK>>
+    --
+    * outcome_id : uuid <<FK, UQ>>
+    * collaboration_id : uuid <<FK, UQ>>
+    accepted_outcome_revision : bigint <<FK>>
+  }
+  entity "historical_campaign" as L_historical_campaign #F3EFF9 {
+    * id : uuid <<PK>>
+    --
+    collaboration_id : uuid <<FK>>
+    outcome_id : uuid <<FK>>
+    * evidence_root_id : uuid
+    * revision_number : bigint
+    {field} UQ (evidence_root_id, revision_number)
+  }
+  entity "plan" as L_plan #FCF4E6 {
+    * id : uuid <<PK>>
+    --
+    * plan_name : varchar(100) <<UQ>>
+  }
+  entity "subscription" as L_subscription #FCF4E6 {
+    * id : uuid <<PK>>
+    --
+    * brand_profile_id : uuid <<FK>>
+    * plan_id : uuid <<FK>>
+    * status : varchar(32)
+  }
+  entity "payment" as L_payment #FCF4E6 {
+    * id : uuid <<PK>>
+    --
+    * subscription_id : uuid <<FK>>
+    * status : varchar(32)
+  }
+}
+
+L_user ||--o{ L_auth_session
+L_auth_session |o--o{ L_refresh_token
+L_user ||--o| L_brand_profile
+L_user ||--o| L_creator_master
+L_creator_master |o--o{ L_creator
+L_creator ||--o{ L_creator_claim
+L_cooperation_invitation |o-[norank]-o{ L_creator_claim
+L_creator ||--o{ L_post
+L_creator ||--o{ L_public_creator_metric
+L_brand_profile ||--o{ L_campaign
+L_brand_profile ||--o{ L_brand_context
+L_brand_profile ||--o{ L_brand_pattern
+L_campaign ||--o{ L_campaign_context
+L_campaign_context |o--o{ L_recommendation_run
+L_brand_context |o-[norank]-o{ L_recommendation_run
+L_campaign ||--o{ L_shortlist_item
+L_creator ||-[norank]-o{ L_shortlist_item
+L_recommendation_run |o--o{ L_shortlist_item
+L_shortlist_item |o--o{ L_relationship
+L_campaign ||--o{ L_cooperation_deal
+L_cooperation_deal ||--o{ L_cooperation_proposal
+L_cooperation_deal ||--o{ L_cooperation_invitation
+L_cooperation_deal |o--o| L_collaboration : collaboration_id
+L_collaboration ||--o{ L_collaboration_channel
+L_creator ||-[norank]-o{ L_collaboration_channel
+L_collaboration_channel ||--o{ L_collaboration_deliverable : collaboration_id, creator_id
+L_collaboration_deliverable ||--o{ L_collaboration_submission
+L_collaboration_submission ||--o| L_collaboration_publication : deliverable_id, submission_revision
+L_collaboration ||--o{ L_collaboration_outcome_revision
+L_collaboration_outcome_revision ||--o{ L_collaboration_outcome_acceptance : collaboration_id, outcome_revision
+L_collaboration ||--o| L_campaign_outcome
+L_collaboration_outcome_revision |o--o| L_creator_review : collaboration_id, accepted_outcome_revision
+L_campaign_outcome ||--o| L_creator_review
+L_campaign_outcome |o--o{ L_historical_campaign
+L_brand_profile ||--o{ L_subscription
+L_plan ||--o{ L_subscription
+L_subscription ||--o{ L_payment
+
+@enduml

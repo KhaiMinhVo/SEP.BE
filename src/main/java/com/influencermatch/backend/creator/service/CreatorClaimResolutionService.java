@@ -159,6 +159,7 @@ public class CreatorClaimResolutionService {
     }
 
     // 5. Find or create CreatorMaster M1 for claimantUser
+    ChannelPlatformLimit.requireSlot(creatorRepository, claimantUser.getId(), creator.getPlatform(), creator.getId());
     User finalClaimant = claimantUser;
     CreatorMaster master = creatorMasterRepository.findByUserId(claimantUser.getId())
         .orElseGet(() -> {
@@ -257,33 +258,43 @@ public class CreatorClaimResolutionService {
   }
 
   private void applyCreatorAvatar(Creator creator, String rawAvatarUrl) {
-    if (rawAvatarUrl == null || rawAvatarUrl.isBlank()) {
+    if (rawAvatarUrl == null || rawAvatarUrl.isBlank()) return;
+    String candidate = rawAvatarUrl.trim();
+    try {
+      var uri = java.net.URI.create(candidate);
+      if (!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))
+          || uri.getHost() == null || uri.getUserInfo() != null || candidate.length() > 2048) return;
+    } catch (IllegalArgumentException invalid) {
       return;
     }
+    if (candidate.equals(creator.getAvatarUrl()) && creator.getAvatarStorageKey() != null) return;
     if (cloudinaryStorageService != null && cloudinaryStorageService.isConfigured()) {
-      if (rawAvatarUrl.contains("res.cloudinary.com")) {
-        creator.setAvatarUrl(rawAvatarUrl);
-        return;
+      try {
+        var uploaded = cloudinaryStorageService.uploadFromUrl(candidate,
+            com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CREATOR_AVATAR,
+            creator.getUserName() != null ? creator.getUserName() : "creator");
+        if (uploaded.isPresent()) {
+          var stored = uploaded.get();
+          creator.setAvatarUrl(stored.url());
+          creator.setAvatarStorageKey(stored.storageKey());
+          creator.setAvatarMimeType(stored.mimeType());
+          creator.setAvatarSizeBytes(stored.sizeBytes());
+          creator.setAvatarUpdatedAt(stored.updatedAt());
+          return;
+        }
+      } catch (Exception failure) {
+        log.warn("Avatar cloud sync failed; preserving the existing image for creator {}", creator.getId());
       }
-      var uploaded = cloudinaryStorageService.uploadFromUrl(
-          rawAvatarUrl,
-          com.influencermatch.backend.storage.CloudinaryStorageService.FOLDER_CREATOR_AVATAR,
-          creator.getUserName() != null ? creator.getUserName() : "creator"
-      );
-      if (uploaded.isPresent()) {
-        var stored = uploaded.get();
-        creator.setAvatarUrl(stored.url());
-        creator.setAvatarStorageKey(stored.storageKey());
-        creator.setAvatarMimeType(stored.mimeType());
-        creator.setAvatarSizeBytes(stored.sizeBytes());
-        creator.setAvatarUpdatedAt(stored.updatedAt());
-      } else if (creator.getAvatarUrl() == null || creator.getAvatarUrl().isBlank()) {
-        creator.setAvatarUrl(rawAvatarUrl);
-      } else {
-        log.info("Keeping existing avatar for creator '{}' because cloud upload failed/skipped", creator.getUserName());
-      }
-    } else {
-      creator.setAvatarUrl(rawAvatarUrl);
     }
+    // Nếu creator đã có ảnh lưu trên cloud vĩnh viễn, không ghi đè bằng link TikTok tạm
+    if (creator.getAvatarStorageKey() != null && !creator.getAvatarStorageKey().isBlank()) {
+      return;
+    }
+    // Chưa có trên cloud -> luôn cập nhật link tươi mới từ crawler như cũ
+    creator.setAvatarUrl(candidate);
+    creator.setAvatarStorageKey(null);
+    creator.setAvatarMimeType(null);
+    creator.setAvatarSizeBytes(null);
+    creator.setAvatarUpdatedAt(null);
   }
 }

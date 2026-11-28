@@ -1,0 +1,161 @@
+@startuml authentication-class
+title Authentication, Authorization and Onboarding | Class Diagram
+hide circle
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam monochrome true
+skinparam backgroundColor white
+top to bottom direction
+skinparam roundcorner 0
+skinparam class {
+  BackgroundColor white
+  BorderColor #333333
+}
+skinparam noteBackgroundColor white
+skinparam nodesep 26
+skinparam ranksep 34
+
+class AuthController <<controller>> {
+  - authService : AuthService
+  - verification : EmailVerificationService
+  - refreshTokens : RefreshTokenService
+  + register(request : RegisterRequest) : ResponseEntity<ApiResponse<Void>>
+  + verifyEmail(request : VerifyEmailRequest) : ApiResponse<Void>
+}
+interface AuthService <<interface>> {
+  + register(request : RegisterRequest) : void
+  + login(request : LoginRequest) : LoginResponse
+  + refresh(request : RefreshTokenRequest) : LoginResponse
+}
+class AuthServiceImpl <<service>> {
+  - issuer : AuthSessionIssuer
+  - verification : EmailVerificationService
+  - refreshTokenService : RefreshTokenService
+  + register(request : RegisterRequest) : void
+  + login(request : LoginRequest) : LoginResponse
+  + refresh(request : RefreshTokenRequest) : LoginResponse
+}
+class AuthSessionIssuer <<service>> {
+  + issue(user : User, method : String) : LoginResponse
+  + response(user : User, sid : UUID, raw : String) : LoginResponse
+}
+class AuthSessionStore <<store>> {
+  + open(user : User, method : String) : Session
+  + read(id : UUID, lock : boolean) : Session
+  + require(id : UUID, user : User, lock : boolean) : Session
+  + revoke(id : UUID) : void
+  + revokeAll(user : UUID) : void
+}
+class "AuthSessionStore.Session" as Session <<record>> {
+  - id : UUID
+  - userId : UUID
+  - version : long
+  - expiresAt : Instant
+  - revoked : boolean
+}
+class RefreshTokenService <<service>> {
+  + issue(user : User, sid : UUID) : Issued
+  + rotate(raw : String) : Rotated
+  + revoke(raw : String) : void
+}
+interface RefreshTokenRepository <<repository>> <<interface>> {
+  + findByTokenHash(tokenHash : String) : Optional<RefreshToken>
+}
+class RefreshToken <<entity>> {
+  - id : UUID
+  - userId : UUID
+  - sessionId : UUID
+  - tokenHash : String
+  - expiresAt : Instant
+  - revokedAt : Instant
+  - replacedByTokenId : UUID
+  + active(now : Instant) : boolean
+}
+class User <<entity>> {
+  - id : UUID
+  - email : String
+  - role : Role
+  - status : UserStatus
+  - emailVerified : boolean
+}
+class EmailVerificationService <<service>> {
+  + sendInitial(user : User) : void
+  + verify(email : String, code : String) : void
+}
+class EmailVerificationOtp <<entity>> {
+  - userId : UUID
+  - codeHash : String
+  - expiresAt : Instant
+  - attempts : int
+  - consumedAt : Instant
+}
+class CreatorRegistrationController <<controller>> {
+  - invitations : CreatorRegistrationInvitationService
+  + invite(request : InvitationRequest) : ResponseEntity<ApiResponse<InvitationResponse>>
+  + resolve(request : ResolveRequest) : ApiResponse<InvitationResponse>
+  + register(request : RegisterCreatorRequest) : ResponseEntity<ApiResponse<Void>>
+}
+class CreatorRegistrationInvitationService <<service>> {
+  + invite(request : InvitationRequest) : InvitationResponse
+  + resolve(token : String) : InvitationResponse
+  + register(request : RegisterCreatorRequest) : void
+}
+class CreatorRegistrationInvitation <<entity>> {
+  - id : UUID
+  - email : String
+  - tokenHash : String
+  - expiresAt : Instant
+  - consumedAt : Instant
+}
+
+AuthController ..> AuthService
+AuthController ..> EmailVerificationService
+AuthController ..> RefreshTokenService
+AuthServiceImpl ..|> AuthService
+AuthServiceImpl ..> AuthSessionIssuer
+AuthServiceImpl ..> EmailVerificationService
+AuthServiceImpl ..> RefreshTokenService
+AuthSessionIssuer ..> AuthSessionStore
+AuthSessionIssuer ..> RefreshTokenService
+AuthSessionStore ..> Session : reads and returns
+RefreshTokenService ..> AuthSessionStore
+RefreshTokenService ..> RefreshTokenRepository
+RefreshTokenRepository ..> RefreshToken
+User "1" -- "0..*" Session : userId
+Session "0..1" -- "0..*" RefreshToken : sessionId
+User "1" *-- "0..1" EmailVerificationOtp : verification challenge
+EmailVerificationService ..> EmailVerificationOtp
+CreatorRegistrationController ..> CreatorRegistrationInvitationService
+CreatorRegistrationInvitationService ..> CreatorRegistrationInvitation
+CreatorRegistrationInvitationService ..> EmailVerificationService
+
+note left of AuthServiceImpl
+  BR-01  Public registration creates a Brand account.
+  BR-02  Login requires valid credentials, an active
+  account and verified email.
+end note
+note right of CreatorRegistrationInvitationService
+  BR-01 / BR-21  Creator registration uses an unused,
+  unexpired invitation and the invited email.
+end note
+note left of RefreshTokenService
+  BR-05  Rotate within the existing session.
+  Logout revokes the current session.
+end note
+note bottom of AuthSessionStore
+  BR-05  Require a valid session and matching
+  account auth version. Revocation also updates its tokens.
+end note
+note bottom of Session
+  JDBC projection of auth_session.
+  refresh_token.session_id is nullable.
+end note
+note bottom of EmailVerificationOtp
+  The user ID is both the primary key and the
+  foreign key. Removing the user deletes the challenge.
+end note
+' Layout only.
+AuthController -[hidden]right- CreatorRegistrationController
+CreatorRegistrationController -[hidden]down- CreatorRegistrationInvitationService
+@enduml

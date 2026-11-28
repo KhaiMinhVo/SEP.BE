@@ -133,4 +133,21 @@ public class AuthServiceImpl implements AuthService {
     }
     return result;
   }
+
+  @Override
+  @org.springframework.transaction.annotation.Transactional
+  public UserProfileResponse updateProfile(User currentUser, String fullName) {
+    Permissions.require(Permission.VIEW_OWN_PROFILE);
+    String normalized = fullName == null ? "" : fullName.trim();
+    if (normalized.isEmpty() || normalized.length() > 120) {
+      throw new com.influencermatch.backend.exception.ValidationException(
+          "Full name must be between 1 and 120 characters.");
+    }
+    User user = userRepository
+        .findById(currentUser.getId())
+        .orElseThrow(() -> new com.influencermatch.backend.exception.NotFoundException("User not found"));
+    user.setFullName(normalized);
+    User saved = userRepository.save(user);
+    return getProfile(saved);
+  }
 }

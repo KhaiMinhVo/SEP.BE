@@ -23,7 +23,7 @@ Registration returns 201 with no tokens. Correct password before verification re
 
 ## SMTP configuration
 
-Configure deployment environment from `.env.example`; the application does not automatically load `.env` unless the launcher imports it.
+Configure deployment environment from `.env.example`. Docker Compose injects `.env`, and Spring also imports an optional `.env` from its working directory. The deploy workflow links each release to `~/SEP.BE/.env` on the VPS; it does not copy SMTP credentials from GitHub Secrets.
 
 ```dotenv
 EMAIL_VERIFICATION_ENABLED=true
@@ -40,6 +40,10 @@ CREATOR_INVITATION_FRONTEND_BASE_URL=http://localhost:5173
 ```
 
 Use an app password for Gmail SMTP. Connection/read/write timeouts are five seconds. Keep secrets outside Git. Real `.env` is not modified. Registration invitations and OTP remain synchronous; the separate Brand claim invitation flow now uses an [encrypted outbox and async worker](claim-email-outbox.md).
+
+Docker checks `/api/v1/actuator/health/deployment`, which includes all configured health indicators except mail. Database failures still block deployment. Aggregate `/api/v1/actuator/health` retains the SMTP check and reports DOWN when SMTP authentication fails; a successful deployment alone does not verify email delivery.
+
+If logs show `jakarta.mail.AuthenticationFailedException`, verify `SMTP_USERNAME` and `SMTP_PASSWORD` in the VPS `.env`. For Gmail, use a current App Password belonging to that username, with 2-Step Verification enabled; changing the Google account password revokes existing App Passwords. Recreate the API container after changing its environment (`docker compose up -d --force-recreate api`, using the active release/project settings); a plain restart retains the old environment. Confirm SMTP authentication through aggregate health, then test delivery to a QA inbox. Do not print credentials or raw mail payloads into deploy logs.
 
 ## Legacy accounts and channel claims
 

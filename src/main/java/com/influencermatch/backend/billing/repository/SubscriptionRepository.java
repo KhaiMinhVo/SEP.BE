@@ -52,4 +52,17 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
       "UPDATE Subscription s SET s.usedRecommendationQuota = s.usedRecommendationQuota - 1 " +
       "WHERE s.id = :id AND s.usedRecommendationQuota > 0")
   int releaseQuotaReservation(@org.springframework.data.repository.query.Param("id") UUID subscriptionId);
+
+  @org.springframework.data.jpa.repository.Modifying
+  @org.springframework.data.jpa.repository.Query("UPDATE Subscription s SET s.usedRefreshQuota=s.usedRefreshQuota+1 "
+      + "WHERE s.id=:id AND s.status=com.influencermatch.backend.billing.enums.SubscriptionStatus.ACTIVE "
+      + "AND s.refundHold=false AND s.startDate<=:today AND s.expirationDate>=:today "
+      + "AND s.usedRefreshQuota<s.purchasedRefreshQuota")
+  int reserveRefreshQuotaAtomically(@org.springframework.data.repository.query.Param("id") UUID id,
+      @org.springframework.data.repository.query.Param("today") java.time.LocalDate today);
+
+  @org.springframework.data.jpa.repository.Modifying
+  @org.springframework.data.jpa.repository.Query("UPDATE Subscription s SET s.usedRefreshQuota=s.usedRefreshQuota-1 "
+      + "WHERE s.id=:id AND s.usedRefreshQuota>0")
+  int releaseRefreshQuota(@org.springframework.data.repository.query.Param("id") UUID id);
 }

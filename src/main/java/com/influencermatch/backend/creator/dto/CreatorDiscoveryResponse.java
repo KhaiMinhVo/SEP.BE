@@ -27,5 +27,8 @@ public record CreatorDiscoveryResponse(
     Boolean isSimilarFallback,
     java.util.List<String> expansionReasons,
     String reason,
+    String freshnessStatus,
+    java.time.LocalDateTime collectedAt,
+    java.time.LocalDateTime observedAt,
     java.util.List<PostDto> recentPosts
 ) {}

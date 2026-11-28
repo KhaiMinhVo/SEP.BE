@@ -86,6 +86,9 @@ public class CreatorController {
             map.put("category", m.getCategory());
             map.put("engagementRate", m.getEngagementRate());
             map.put("contentSummary", m.getContentSummary());
+            map.put("freshnessStatus", m.getFreshnessStatus());
+            map.put("collectedAt", m.getCollectedAt());
+            map.put("observedAt", m.getObservedAt());
             
             if (m.getCreator() != null) {
                 map.put("creatorId", m.getCreator().getId());

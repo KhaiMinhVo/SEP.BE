@@ -51,6 +51,8 @@ public interface PublicCreatorMetricRepository
                  c.platform, c.location, c.user_name AS userName, c.avatar_url AS avatarUrl,
                  c.profile_url AS profileUrl, m.followers, m.avg_views AS avgViews,
                  m.avg_likes AS avgLikes, m.niche, m.category,
+                 m.freshness_status AS freshnessStatus, m.collected_at AS collectedAt,
+                 m.observed_at AS observedAt,
                  m.engagement_rate AS engagementRate, m.content_summary AS contentSummary,
                  to_tsvector('simple', COALESCE(m.content_summary, '') || ' ' || COALESCE(m.niche, ''))
                      || post_evidence.search_vector AS contentVector,
@@ -84,7 +86,7 @@ public interface PublicCreatorMetricRepository
               FROM post p WHERE p.creator_id = c.id
           ) post_evidence ON true
           WHERE c.discovery_hidden = false
-            AND m.creator_type IN ('KOL', 'KOC') AND m.freshness_status = 'FRESH'
+            AND m.creator_type IN ('KOL', 'KOC') AND m.freshness_status IN ('FRESH', 'STALE')
             AND (m.quality_reviewed_at IS NOT NULL OR (
               (m.data_confidence IS NULL OR m.data_confidence >= :#{#filters.minimumDataConfidence})
               AND ((NULLIF(BTRIM(m.niche), '') IS NOT NULL AND UPPER(BTRIM(m.niche)) <> 'UNKNOWN')

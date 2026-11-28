@@ -65,6 +65,9 @@ public class CreatorDiscoveryController {
             map.put("category", p.getCategory());
             map.put("engagementRate", p.getEngagementRate());
             map.put("contentSummary", p.getContentSummary());
+            map.put("freshnessStatus", p.getFreshnessStatus());
+            map.put("collectedAt", p.getCollectedAt());
+            map.put("observedAt", p.getObservedAt());
             
             // Điểm số xếp hạng Hybrid
             map.put("searchRank", p.getHybridScore());

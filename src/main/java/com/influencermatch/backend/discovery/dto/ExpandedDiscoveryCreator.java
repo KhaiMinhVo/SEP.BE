@@ -29,6 +29,9 @@ public record ExpandedDiscoveryCreator(HybridDiscoveryCreatorProjection source,
     public Double getHybridScore() { return source.getHybridScore(); }
     public String getRetrievalMethod() { return source.getRetrievalMethod(); }
     public String getLocation() { return source.getLocation(); }
+    public String getFreshnessStatus() { return source.getFreshnessStatus(); }
+    public java.time.LocalDateTime getCollectedAt() { return source.getCollectedAt(); }
+    public java.time.LocalDateTime getObservedAt() { return source.getObservedAt(); }
     public List<String> getExpansionReasons() { return reasons; }
     public static String describe(List<String> reasons) {
         if (reasons == null || reasons.isEmpty()) return "";

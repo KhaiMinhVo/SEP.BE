@@ -162,6 +162,8 @@ public class CampaignService {
 
       responses.add(
           CreatorDiscoveryResponse.builder()
+              .freshnessStatus(metric.getFreshnessStatus() == null ? null : metric.getFreshnessStatus().name())
+              .collectedAt(metric.getCollectedAt()).observedAt(metric.getObservedAt())
               .creatorId(metric.getCreator().getId())
               .platform(metric.getCreator().getPlatform())
               .userName(metric.getCreator().getUserName())

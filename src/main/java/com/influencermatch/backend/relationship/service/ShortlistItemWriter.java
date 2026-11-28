@@ -114,16 +114,7 @@ public class ShortlistItemWriter {
                 + " to Shortlist");
     dto.setTotalShortlistCount(
         items.countByCampaignIdAndStatusNot(campaignId, ShortlistStatus.REMOVED));
-    if (!action.equals("ALREADY_EXISTS")) {
-      events.publishEvent(
-          new ShortlistRefreshEvents.Requested(
-              campaignId,
-              id,
-              creator.getPlatform(),
-              creator.getUserName(),
-              creator.getDisplayName()));
-      dto.setRefreshRequestStatus("PENDING_DISPATCH");
-    }
+    // Saving a selection uses stored data. Only explicit, quota-checked requests may crawl.
     return dto;
   }
 }

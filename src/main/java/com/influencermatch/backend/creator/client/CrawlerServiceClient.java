@@ -91,7 +91,9 @@ public class CrawlerServiceClient {
           .header("X-Service-Key", normalizationApiKey).retrieve().body(Map.class));
     } catch (org.springframework.web.client.RestClientResponseException failure) {
       return Optional.of(Map.of("status", "error", "upstreamStatus", failure.getStatusCode().value(),
-          "message", "Content audit report unavailable"));
+          "message", failure.getStatusCode().value() == 403
+              ? "Khóa kết nối backend và crawler chưa khớp. Kiểm tra DB_NORMALIZATION_API_KEY ở hai dịch vụ."
+              : "Chưa tải được báo cáo kiểm tra dữ liệu từ crawler."));
     } catch (Exception failure) {
       return Optional.empty();
     }
@@ -106,7 +108,9 @@ public class CrawlerServiceClient {
           .body(request).retrieve().body(Map.class));
     } catch (org.springframework.web.client.RestClientResponseException failure) {
       return Optional.of(Map.of("status", "error", "upstreamStatus", failure.getStatusCode().value(),
-          "message", "Normalization request rejected; preview the plan again or check service configuration"));
+          "message", failure.getStatusCode().value() == 403
+              ? "Khóa kết nối backend và crawler chưa khớp. Kiểm tra DB_NORMALIZATION_API_KEY ở hai dịch vụ."
+              : "Crawler từ chối yêu cầu kiểm tra dữ liệu. Kiểm tra kế hoạch và cấu hình dịch vụ."));
     } catch (Exception failure) {
       log.warn("Database normalization request failed: {}", failure.getClass().getSimpleName());
       return Optional.empty();
@@ -135,6 +139,10 @@ public class CrawlerServiceClient {
         restClient
             .post()
             .uri("/shortlist-trigger")
+            .headers(headers -> {
+              if (normalizationApiKey != null && !normalizationApiKey.isBlank())
+                headers.set("X-Service-Key", normalizationApiKey);
+            })
             .contentType(MediaType.APPLICATION_JSON)
             .body(
                 Map.of(

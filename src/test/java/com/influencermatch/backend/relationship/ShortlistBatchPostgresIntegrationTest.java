@@ -373,36 +373,14 @@ class ShortlistBatchPostgresIntegrationTest extends PostgresApiTestSupport {
   }
 
   @Test
-  void crawlAcceptanceAndFailureNeverRollBackSavedShortlist() throws Exception {
+  void savingShortlistNeverTriggersAnAutomaticCrawl() throws Exception {
     var c = channel();
-    var gate = new CountDownLatch(1);
-    doAnswer(
-            i -> {
-              var event = (ShortlistCrawlEvent) i.getArgument(1);
-              if (c.getId().equals(event.getCreatorId())) {
-                assertThat(event.getEventType()).isEqualTo("CRAWL_REQUEST_FAILED");
-                assertThat(event.getMessage()).doesNotContain("SECRET");
-                gate.countDown();
-              }
-              return null;
-            })
-        .when(notifications)
-        .broadcast(any(), any());
-    doThrow(new IllegalStateException("SECRET provider body"))
-        .when(crawler)
-        .requestShortlistCrawl(anyString(), anyString(), eq(c.getId()), any());
-    var added =
-        call(
-                owner,
-                post("/campaigns/" + campaign + "/shortlist"),
-                Map.of("creatorId", c.getId()),
-                200)
-            .path("data");
-    assertThat(added.path("refreshRequestStatus").asText()).isEqualTo("PENDING_DISPATCH");
-    assertThat(gate.await(10, TimeUnit.SECONDS)).isTrue();
+    var added = call(owner, post("/campaigns/" + campaign + "/shortlist"),
+        Map.of("creatorId", c.getId()), 200).path("data");
+    assertThat(added.path("refreshRequestStatus").asText()).isEqualTo("NOT_REQUESTED");
     assertThat(count()).isEqualTo(1);
     call(owner, post("/campaigns/" + campaign + "/shortlist"), Map.of("creatorId", c.getId()), 200);
-    verify(crawler, times(1)).requestShortlistCrawl(anyString(), anyString(), eq(c.getId()), any());
+    verify(crawler, after(200).never()).requestShortlistCrawl(anyString(), anyString(), eq(c.getId()), any());
   }
 
   @Test

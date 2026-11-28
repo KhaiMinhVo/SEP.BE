@@ -561,7 +561,7 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
     }
   }
 
-  @Test void newestRejectedOrStaleSnapshotCannotResurrectOldAcceptedProfile() throws Exception {
+  @Test void latestStaleSnapshotRemainsDiscoverableAndRejectedSnapshotCannotResurrectOldProfile() throws Exception {
     var accepted = creator("Accepted", "BEAUTY", topic, "KOC");
     var rejected = creator("Rejected", "BEAUTY", topic, "KOC");
     snapshot(rejected, "BEAUTY", topic, "REJECTED", LocalDateTime.now().plusMinutes(1), MetricDataStatus.FRESH);
@@ -569,7 +569,12 @@ class DiscoveryPostgresIntegrationTest extends PostgresApiTestSupport {
     snapshot(stale, "BEAUTY", topic, "KOC", LocalDateTime.now().plusMinutes(1), MetricDataStatus.STALE);
     for (var route : List.of("discover", "discovery")) {
       var data = call(owner, get("/campaigns/" + campaign + "/" + route), null, 200).path("data");
-      assertThat(ids(data)).as(route).containsExactly(accepted.getId().toString());
+      assertThat(ids(data)).as(route).containsExactlyInAnyOrder(accepted.getId().toString(), stale.getId().toString());
+      var rows = data.has("content") ? data.path("content") : data.path("items");
+      for (var row : rows) if (row.path("creatorId").asText().equals(stale.getId().toString())) {
+        assertThat(row.path("freshnessStatus").asText()).isEqualTo("STALE");
+        assertThat(row.path("collectedAt").isTextual()).isTrue();
+      }
     }
   }
 
